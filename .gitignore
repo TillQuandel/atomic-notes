@@ -23,3 +23,10 @@ foss/.cache/
 test-output/
 output/
 *.jsonl
+
+# Agent cache + worktrees
+agent/.cache/
+agent/.worktrees/
+agent/**/__pycache__/
+agent/calibration/labels-active/
+agent/calibration/labels-active-blind/

@@ -1,0 +1,12 @@
+.cache/
+*.pyc
+__pycache__/
+.env
+.vscode/
+.idea/
+.pytest_cache/
+.coverage
+calibration/labels-active/
+calibration/labels-active-blind/
+
+.pytest-tmp/

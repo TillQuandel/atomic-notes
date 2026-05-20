@@ -1,0 +1,21 @@
+# Tag-Registry — autoritative Liste approved Tags für atomic-agent Pipeline.
+#
+# Zweck: Bootstrap für neue Domains. Tags hier sind sofort in der Whitelist
+# verfügbar, auch ohne min_count≥2 im Vault. Wird zur Vault-Frequenz-basierten
+# Whitelist via Union gemergt — bestehende organisch gewachsene Tags bleiben
+# automatisch zugelassen.
+#
+# Pflege-Workflow:
+# 1. Pipeline schreibt bei neuer Domain `proposed-tags:` ins Frontmatter
+# 2. User reviewed beim Inbox-Triage, entscheidet ob Tag ins Registry kommt
+# 3. Tag hier eintragen → ab nächstem Run regulärer Whitelist-Tag
+#
+# Konvention (vgl. Schema-Base): lowercase, kebab-case, hierarchisch via "/",
+# keine Umlaute, keine Großbuchstaben.
+
+approved:
+  # Domain-Anchors. Initial leer — User pflegt nach Review.
+  # Beispiele die nach erstem User-Approval kommen könnten:
+  # - change-management
+  # - change-management/adkar
+  # - data-engineering

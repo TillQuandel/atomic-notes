@@ -1,0 +1,196 @@
+"""Gemeinsame LLM-Hilfe für alle Agenten.
+
+Dispatch: BACKEND=subscription (claude CLI) | litellm (API-basiert).
+Cache + Trace liegen hier; der eigentliche LLM-Call liegt im Backend.
+Response-Cache: ``.cache/llm/<sha256(prompt+model)[:16]>.json``
+Trace-Hook: jeder Call schreibt eine Zeile nach ``.cache/runs/<run-id>.jsonl``
+"""
+from __future__ import annotations
+import hashlib
+import json
+import threading
+import time
+from dataclasses import dataclass
+from pathlib import Path
+from typing import Optional
+
+from config import MODEL_OPUS, CACHE_DIR, BACKEND
+
+# Re-Export für Backwards-Compat — Agenten importieren aus agents.base
+from agents.tracing import trace_event, trace_run_start, set_tracing_backend, flush_tracing  # noqa: F401
+from agents.tracing import _RUN_ID  # single source of truth for run ID
+
+# Backend-Dispatch
+if BACKEND == "litellm":
+    from agents._litellm_backend import call_full as _backend_call_full
+    from agents._litellm_backend import call_full_async as _backend_call_full_async
+else:
+    from agents._subscription_backend import call_full as _backend_call_full
+    from agents._subscription_backend import call_full_async as _backend_call_full_async
+
+
+@dataclass
+class CallResult:
+    text: str
+    input_tokens: int = 0
+    output_tokens: int = 0
+    cache_read_tokens: int = 0
+    cache_creation_tokens: int = 0
+    duration_ms: int = 0
+    cached: bool = False
+
+
+_LLM_CACHE_DIR = CACHE_DIR / "llm"
+_RUN_DIR = CACHE_DIR / "runs"
+_TRACE_FILE: Optional[Path] = None
+_TRACE_LOCK = threading.Lock()
+
+# Run-Namespace für --fresh-run: leerer String = normaler Cache (shared across runs).
+# Gesetzt via set_cache_namespace(salt) aus orchestrator.py bei --fresh-run.
+_CACHE_NAMESPACE: str = ""
+
+
+def set_cache_namespace(salt: str) -> None:
+    """Setzt einen Run-spezifischen Salt für den Cache-Key.
+    Leerer String = normales Caching (Wiederverwendung über Runs).
+    Nicht-leerer String = frischer Cache-Namespace (kein Hit aus alten Runs).
+    Typischer Aufruf: set_cache_namespace(_RUN_ID) bei --fresh-run.
+    """
+    global _CACHE_NAMESPACE
+    _CACHE_NAMESPACE = salt
+
+
+def _ensure_dirs() -> None:
+    _LLM_CACHE_DIR.mkdir(parents=True, exist_ok=True)
+    _RUN_DIR.mkdir(parents=True, exist_ok=True)
+
+
+def _cache_key(prompt: str, model: str, agent: str = "") -> str:
+    h = hashlib.sha256()
+    h.update((_CACHE_NAMESPACE or "").encode("utf-8"))
+    h.update(b"\0")
+    h.update((model or "").encode("utf-8"))
+    h.update(b"\0")
+    h.update((agent or "").encode("utf-8"))
+    h.update(b"\0")
+    h.update((prompt or "").encode("utf-8"))
+    return h.hexdigest()[:16]
+
+
+def _cache_get(key: str) -> Optional[CallResult]:
+    p = _LLM_CACHE_DIR / f"{key}.json"
+    if not p.exists():
+        return None
+    try:
+        d = json.loads(p.read_text(encoding="utf-8"))
+        return CallResult(
+            text=d["text"],
+            input_tokens=d.get("input_tokens", 0),
+            output_tokens=d.get("output_tokens", 0),
+            cache_read_tokens=d.get("cache_read_tokens", 0),
+            cache_creation_tokens=d.get("cache_creation_tokens", 0),
+            duration_ms=d.get("duration_ms", 0),
+            cached=True,
+        )
+    except (json.JSONDecodeError, KeyError, OSError):
+        return None
+
+
+def _cache_put(key: str, result: CallResult) -> None:
+    _ensure_dirs()
+    p = _LLM_CACHE_DIR / f"{key}.json"
+    p.write_text(json.dumps({
+        "text": result.text,
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+        "cache_read_tokens": result.cache_read_tokens,
+        "cache_creation_tokens": result.cache_creation_tokens,
+        "duration_ms": result.duration_ms,
+    }, ensure_ascii=False), encoding="utf-8")
+
+
+def _trace(agent: str, prompt: str, model: str, result: CallResult,
+           error: Optional[str] = None) -> None:
+    global _TRACE_FILE
+    entry = {
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+        "agent": agent,
+        "model": model,
+        "prompt_hash": _cache_key(prompt, model),
+        "input_tokens": result.input_tokens,
+        "output_tokens": result.output_tokens,
+        "cache_read_tokens": result.cache_read_tokens,
+        "cache_creation_tokens": result.cache_creation_tokens,
+        "duration_ms": result.duration_ms,
+        "cached": result.cached,
+        "error": error,
+    }
+    with _TRACE_LOCK:
+        if _TRACE_FILE is None:
+            _ensure_dirs()
+            _TRACE_FILE = _RUN_DIR / f"{_RUN_ID}.jsonl"
+        with _TRACE_FILE.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    from agents.tracing import _backend as _tracing_backend
+    _tracing_backend.write(entry)
+
+
+def call_claude(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
+                use_cache: bool = True) -> str:
+    """Synchroner Aufruf. Gibt nur den Text zurück (Backwards-Compat)."""
+    return call_claude_full(prompt, model=model, agent=agent, use_cache=use_cache).text
+
+
+def call_claude_full(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
+                     use_cache: bool = True) -> CallResult:
+    """Synchroner Aufruf mit vollem CallResult (text + usage)."""
+    key = _cache_key(prompt, model, agent)
+    if use_cache:
+        cached = _cache_get(key)
+        if cached is not None:
+            _trace(agent, prompt, model, cached)
+            return cached
+
+    try:
+        result = _backend_call_full(prompt, model=model, agent=agent)
+    except RuntimeError as e:
+        result = CallResult(text="")
+        _trace(agent, prompt, model, result, error=str(e))
+        raise
+
+    if use_cache:
+        _cache_put(key, result)
+    _trace(agent, prompt, model, result)
+    return result
+
+
+async def call_claude_async(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
+                            use_cache: bool = True) -> str:
+    return (await call_claude_full_async(prompt, model=model, agent=agent, use_cache=use_cache)).text
+
+
+async def call_claude_full_async(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
+                                 use_cache: bool = True) -> CallResult:
+    key = _cache_key(prompt, model, agent)
+    if use_cache:
+        cached = _cache_get(key)
+        if cached is not None:
+            _trace(agent, prompt, model, cached)
+            return cached
+
+    try:
+        result = await _backend_call_full_async(prompt, model=model, agent=agent)
+    except RuntimeError as e:
+        result = CallResult(text="")
+        _trace(agent, prompt, model, result, error=str(e))
+        raise
+
+    if use_cache:
+        _cache_put(key, result)
+    _trace(agent, prompt, model, result)
+    return result
+
+
+# Provider-agnostische Aliase für Backend-Abstraktion
+call_llm_full = call_claude_full
+call_llm_full_async = call_claude_full_async
