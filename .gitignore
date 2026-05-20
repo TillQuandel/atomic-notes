@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+*.egg-info/
+dist/
+build/
+.venv/
+venv/
+
+# Test fixtures — large PDFs not committed
+tests/fixtures/*.pdf
+
+# Cache
+foss/.cache/
+.cache/
+
+# Env
+.env
