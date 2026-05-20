@@ -1,0 +1,88 @@
+# foss/orchestrator.py
+from __future__ import annotations
+import argparse
+import sys
+from datetime import datetime
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+from foss.pipeline.pdf_chunker import extract_chunks, extract_fulltext, detect_language
+from foss.pipeline.gliner_planner import plan_concepts
+from foss.pipeline.sentence_extractor import extract_body_for_concept, add_page_anchors
+from foss.pipeline.adapter import write_note
+from foss.eval.foss_eval import save_eval_result
+from shared.schemas.atomic_note_foss import AtomicNoteFoss
+
+FOSS_VERSION = "v0.1.0"
+
+
+def main():
+    ap = argparse.ArgumentParser(description="foss-atomic: PDF -> Atomic Notes (kein API)")
+    ap.add_argument("--source", required=True, help="Pfad zur PDF-Datei")
+    ap.add_argument("--output", default="obsidian", choices=["obsidian", "md", "json"])
+    ap.add_argument("--out-dir", default="./output", help="Ausgabe-Verzeichnis")
+    ap.add_argument("--eval-jsonl", default=None, help="JSONL-Eval-Output")
+    ap.add_argument("--device", default="cpu")
+    args = ap.parse_args()
+
+    source = Path(args.source)
+    out_dir = Path(args.out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    print(f"\n=== foss-atomic {FOSS_VERSION} ===\n")
+
+    print("[1] PDF extrahieren...")
+    chunks = extract_chunks(source)
+    fulltext = extract_fulltext(source)
+    word_count = sum(len(c.text.split()) for c in chunks)
+    print(f"    {len(chunks)} Chunks, {word_count} Woerter")
+
+    lang = detect_language(fulltext[:500])
+    if lang != "en":
+        print(f"    WARNUNG: Sprache erkannt = '{lang}' (v1 = Englisch only)")
+
+    print("[2] Konzepte extrahieren (GLiNER)...")
+    concepts = plan_concepts(chunks)
+    print(f"    {len(concepts)} Konzepte")
+
+    print("[3] Saetze extrahieren (LexRank)...")
+    notes = []
+    for c in concepts:
+        body = add_page_anchors(
+            extract_body_for_concept(c["name"], fulltext),
+            [c.get("page", 1)]
+        )
+        note = AtomicNoteFoss(
+            title=c["name"],
+            concept_type=c["type"],
+            extracted_body=body,
+            source_anchors=[{"page": c.get("page", 1), "quote": body[0][:80] if body else "", "score": 1.0}],
+            source_file=source.name,
+            created=datetime.now().strftime("%Y-%m-%d"),
+        )
+        notes.append(note)
+
+    print(f"[4] {len(notes)} Notes schreiben -> {out_dir}/")
+    for note in notes:
+        p = write_note(note, out_dir, args.output)
+        print(f"    -> {p.name}")
+
+    if args.eval_jsonl:
+        print("[5] Eval...")
+        for note in notes:
+            save_eval_result(
+                note_title=note.title,
+                sentences=note.extracted_body,
+                fulltext=fulltext,
+                source_file=source.name,
+                pipeline_version=FOSS_VERSION,
+                out_jsonl=Path(args.eval_jsonl),
+            )
+
+    total = sum(len(n.extracted_body) for n in notes)
+    print(f"\n=== Fertig: {len(notes)} Notes, {total} Saetze ===")
+
+
+if __name__ == "__main__":
+    main()
