@@ -1,0 +1,53 @@
+from __future__ import annotations
+from functools import lru_cache
+from rapidfuzz import fuzz
+
+CONCEPT_TYPES = ["Theory", "Concept", "Method", "Metric", "Model", "Framework", "Phenomenon"]
+_MODEL_NAME = "urchade/gliner_medium-v2.1"
+
+
+@lru_cache(maxsize=1)
+def _get_model():
+    from gliner import GLiNER
+    return GLiNER.from_pretrained(_MODEL_NAME)
+
+
+def extract_concepts(text: str, pages=None, threshold: float = 0.4) -> list[dict]:
+    model = _get_model()
+    entities = model.predict_entities(text, CONCEPT_TYPES, threshold=threshold)
+    page = pages[0] if pages else 1
+    return [
+        {"name": e["text"].strip(), "type": e["label"], "page": page, "score": e["score"]}
+        for e in entities if len(e["text"].strip()) >= 3
+    ]
+
+
+def deduplicate_concepts(concepts: list[dict], threshold: int = 90) -> list[dict]:
+    seen: list[dict] = []
+    for c in sorted(concepts, key=lambda x: -x.get("score", 0)):
+        name = c["name"].lower()
+        if not any(fuzz.ratio(name, s["name"].lower()) >= threshold for s in seen):
+            seen.append(c)
+    return seen
+
+
+def plan_concepts(chunks, min_concepts: int = 3) -> list[dict]:
+    all_concepts: list[dict] = []
+    for chunk in chunks:
+        all_concepts.extend(extract_concepts(chunk.text, pages=[chunk.page]))
+    result = deduplicate_concepts(all_concepts)
+    if len(result) < min_concepts:
+        result = _keybert_fallback(chunks, result)
+    return result
+
+
+def _keybert_fallback(chunks, existing: list[dict]) -> list[dict]:
+    try:
+        from keybert import KeyBERT
+    except ImportError:
+        return existing
+    model = KeyBERT()
+    fulltext = " ".join(c.text for c in chunks)
+    keywords = model.extract_keywords(fulltext, top_n=8, stop_words="english")
+    new = [{"name": kw, "type": "Concept", "page": 1, "score": score} for kw, score in keywords]
+    return deduplicate_concepts(existing + new)
