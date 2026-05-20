@@ -18,3 +18,8 @@ foss/.cache/
 
 # Env
 .env
+
+# Run output
+test-output/
+output/
+*.jsonl
