@@ -24,9 +24,12 @@ def main():
     ap.add_argument("--out-dir", default="./output", help="Ausgabe-Verzeichnis")
     ap.add_argument("--eval-jsonl", default=None, help="JSONL-Eval-Output")
     ap.add_argument("--device", default="cpu")
+    ap.add_argument("--dry-run", action="store_true", help="Keine Dateien schreiben, nur Eval")
     args = ap.parse_args()
 
     source = Path(args.source)
+    if not source.exists():
+        sys.exit(f"Fehler: PDF nicht gefunden: {source}")
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
@@ -63,10 +66,11 @@ def main():
         )
         notes.append(note)
 
-    print(f"[4] {len(notes)} Notes schreiben -> {out_dir}/")
-    for note in notes:
-        p = write_note(note, out_dir, args.output)
-        print(f"    -> {p.name}")
+    print(f"[4] {len(notes)} Notes {'(dry-run, kein Schreiben)' if args.dry_run else f'-> {out_dir}/'}...")
+    if not args.dry_run:
+        for note in notes:
+            p = write_note(note, out_dir, args.output)
+            print(f"    -> {p.name}")
 
     if args.eval_jsonl:
         print("[5] Eval...")

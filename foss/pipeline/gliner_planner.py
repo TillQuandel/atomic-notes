@@ -1,6 +1,13 @@
 from __future__ import annotations
 from functools import lru_cache
 from rapidfuzz import fuzz
+import re as _re
+
+_ANCHOR_RE_PLAN = _re.compile(r"\s*\(S\.\s*\d+(?:-\d+)?\)")
+
+
+def _strip_name(text: str) -> str:
+    return _ANCHOR_RE_PLAN.sub("", text).strip().lower()
 
 CONCEPT_TYPES = ["Theory", "Concept", "Method", "Metric", "Model", "Framework", "Phenomenon"]
 _MODEL_NAME = "urchade/gliner_medium-v2.1"
@@ -25,8 +32,8 @@ def extract_concepts(text: str, pages=None, threshold: float = 0.4) -> list[dict
 def deduplicate_concepts(concepts: list[dict], threshold: int = 90) -> list[dict]:
     seen: list[dict] = []
     for c in sorted(concepts, key=lambda x: -x.get("score", 0)):
-        name = c["name"].lower()
-        if not any(fuzz.ratio(name, s["name"].lower()) >= threshold for s in seen):
+        name = _strip_name(c["name"])
+        if not any(fuzz.ratio(name, _strip_name(s["name"])) >= threshold for s in seen):
             seen.append(c)
     return seen
 

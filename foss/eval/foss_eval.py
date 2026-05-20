@@ -19,7 +19,7 @@ def compute_anchor_rate(sentences: list[str]) -> float:
 
 def compute_hallucination_rate(sentences: list[str], fulltext: str, threshold: int = 75) -> float:
     """Anteil Saetze die NICHT im PDF-Volltext auffindbar sind (rapidfuzz).
-    Saetze < 10 Zeichen werden uebersprungen (zu kurz fuer sinnvollen Match).
+    Saetze < 12 Zeichen werden uebersprungen (zu kurz fuer sinnvollen Match).
     Anker werden vor dem Vergleich entfernt.
     """
     if not sentences:
