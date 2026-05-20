@@ -3,21 +3,22 @@ title: "{{ note.title }}"
 type: atomic
 tags: {{ note.tags | tojson }}
 source-file: "{{ note.source_file }}"
-pipeline: {{ note.pipeline }}
+pipeline: foss-atomic
 created: {{ note.created }}
 ---
 # {{ note.title }}
 
-{% for sentence in note.extracted_body %}
+{% for sentence in body_converted %}
 {{ sentence }}
 {% endfor %}
 {% if note.related %}
 
-## Related
+## Verwandte Konzepte
 {% for rel in note.related %}
 - {{ rel }}
 {% endfor %}
 {% endif %}
 
 ## Quellen
-*Extrahiert aus: {{ note.source_file }}*
+
+{{ footnote_defs }}

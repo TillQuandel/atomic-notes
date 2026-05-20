@@ -17,6 +17,8 @@ from sumy.summarizers.lex_rank import LexRankSummarizer
 _ANCHOR_RE = re.compile(r"\s*\(S\.\s*\d+(?:-\d+)?\)")
 _CITATION_FRAG_RE = re.compile(r"^[;,\s]*[A-Z][a-z]+,?\s+[A-Z]\..*?\(S\.\s*\d+\)\s*$")
 _MERGED_WORDS_RE = re.compile(r"([a-z])([A-Z])")
+_BIBREF_RE = re.compile(r"\[\d+(?:,\s*\d+)*\]")  # [21] [66] [21,22] strippen
+_HYPHEN_BREAK_RE = re.compile(r"(\w+)-\s*\n?\s*(\w+)")  # "interac- tion" -> "interaction"
 
 
 def strip_anchors(text: str) -> str:
@@ -25,8 +27,10 @@ def strip_anchors(text: str) -> str:
 
 def clean_sentence(text: str) -> str:
     """Bereinigt PDF-Extraktions-Artefakte."""
-    # Zusammengeflossene Woerter: "seekingbehavior" -> "seeking behavior"
-    text = _MERGED_WORDS_RE.sub(r"\1 \2", text)
+    # Silbentrennung zusammenfuehren: "interac- tion" -> "interaction"
+    text = _HYPHEN_BREAK_RE.sub(r"\1\2", text)
+    # Bibliografische Referenz-Nummern entfernen: [21], [66], [21,22]
+    text = _BIBREF_RE.sub("", text)
     # Zitationsfragmente wie "; Allard, S.L. (S. 8)" entfernen
     if _CITATION_FRAG_RE.match(text.strip()):
         return ""
