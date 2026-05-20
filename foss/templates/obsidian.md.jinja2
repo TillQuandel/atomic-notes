@@ -1,0 +1,23 @@
+---
+title: "{{ note.title }}"
+type: atomic
+tags: {{ note.tags | tojson }}
+source-file: "{{ note.source_file }}"
+pipeline: {{ note.pipeline }}
+created: {{ note.created }}
+---
+# {{ note.title }}
+
+{% for sentence in note.extracted_body %}
+{{ sentence }}
+{% endfor %}
+{% if note.related %}
+
+## Related
+{% for rel in note.related %}
+- {{ rel }}
+{% endfor %}
+{% endif %}
+
+## Quellen
+*Extrahiert aus: {{ note.source_file }}*

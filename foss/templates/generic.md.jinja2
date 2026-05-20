@@ -1,0 +1,6 @@
+# {{ note.title }}
+
+{{ note.extracted_body | join("\n\n") }}
+
+---
+*Source: {{ note.source_file }} | {{ note.pipeline }}*
