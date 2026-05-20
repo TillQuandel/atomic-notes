@@ -19,7 +19,7 @@ def _get_model():
     return GLiNER.from_pretrained(_MODEL_NAME)
 
 
-def extract_concepts(text: str, pages=None, threshold: float = 0.4) -> list[dict]:
+def extract_concepts(text: str, pages=None, threshold: float = 0.55) -> list[dict]:
     model = _get_model()
     entities = model.predict_entities(text, CONCEPT_TYPES, threshold=threshold)
     page = pages[0] if pages else 1
@@ -38,11 +38,23 @@ def deduplicate_concepts(concepts: list[dict], threshold: int = 90) -> list[dict
     return seen
 
 
-def plan_concepts(chunks, min_concepts: int = 3) -> list[dict]:
+def plan_concepts(chunks, min_concepts: int = 3, min_chunk_count: int = 2) -> list[dict]:
+    """Extrahiert Konzepte. Filtert Konzepte die nur in 1 Chunk vorkommen (zu spezifisch)."""
+    from collections import Counter
     all_concepts: list[dict] = []
     for chunk in chunks:
         all_concepts.extend(extract_concepts(chunk.text, pages=[chunk.page]))
-    result = deduplicate_concepts(all_concepts)
+
+    # Prominenz-Filter: Konzept muss in >= min_chunk_count Chunks vorkommen
+    # (verhindert Einzel-Chunk-Artefakte wie "avoidance", "blunting")
+    name_counts: Counter = Counter()
+    for c in all_concepts:
+        name_counts[_strip_name(c["name"])] += 1
+    prominent = [c for c in all_concepts if name_counts[_strip_name(c["name"])] >= min_chunk_count]
+
+    # Fallback auf alle wenn zu wenige prominent
+    source = prominent if len(prominent) >= min_concepts else all_concepts
+    result = deduplicate_concepts(source)
     if len(result) < min_concepts:
         result = _keybert_fallback(chunks, result)
     return result

@@ -6,6 +6,12 @@ from pathlib import Path
 import pdfplumber
 
 try:
+    import fitz as _fitz  # PyMuPDF — bessere Spacing-Erkennung als pdfplumber
+    _HAS_PYMUPDF = True
+except ImportError:
+    _HAS_PYMUPDF = False
+
+try:
     from langdetect import detect as _detect
     def detect_language(text: str) -> str:
         try:
@@ -42,20 +48,30 @@ def extract_chunks(pdf_path, max_words: int = 3000) -> list[Chunk]:
         sizes = [float(w["size"]) for p in pdf.pages
                  for w in (p.extract_words(extra_attrs=["size"]) or []) if w.get("size")]
         avg = sum(sizes) / len(sizes) if sizes else 10.0
-        for page in pdf.pages:
-            for w in (page.extract_words(extra_attrs=["size"]) or []):
-                t = w.get("text", "").strip()
+
+        page_texts = _page_text_clean(pdf_path)
+        for idx, page in enumerate(pdf.pages):
+            page_text = page_texts[idx] if idx < len(page_texts) else ""
+            # extract_words() nur fuer Font-Size-basierte Header-Erkennung
+            header_words = {
+                w["text"].strip()
+                for w in (page.extract_words(extra_attrs=["size"]) or [])
+                if w.get("size") and _is_header(w["text"].strip(), float(w["size"]), avg)
+            }
+
+            for line in page_text.splitlines():
+                t = line.strip()
                 if not t:
                     continue
-                sz = float(w.get("size", avg))
-                if _is_header(t, sz, avg):
+                if t in header_words:
                     if current and word_count > 50:
                         chunks.append(Chunk(" ".join(current), current_page, current_header))
                         current, word_count = [], 0
                     current_header, current_page = t, page.page_number
                 else:
-                    current.append(t)
-                    word_count += 1
+                    words = t.split()
+                    current.extend(words)
+                    word_count += len(words)
                     if word_count >= max_words:
                         chunks.append(Chunk(" ".join(current), current_page, current_header))
                         current, word_count, current_page = [], 0, page.page_number
@@ -64,7 +80,15 @@ def extract_chunks(pdf_path, max_words: int = 3000) -> list[Chunk]:
     return chunks
 
 
+def _page_text_clean(pdf_path) -> list[str]:
+    """Pro-Seite sauberer Text. PyMuPDF bevorzugt (besseres Spacing), Fallback pdfplumber."""
+    if _HAS_PYMUPDF:
+        doc = _fitz.open(str(pdf_path))
+        return [doc[i].get_text() for i in range(len(doc))]
+    with pdfplumber.open(str(pdf_path)) as pdf:
+        return [p.extract_text() or "" for p in pdf.pages]
+
+
 def extract_fulltext(pdf_path) -> str:
     """Volltext fuer Ankerpruefung (rapidfuzz)."""
-    with pdfplumber.open(str(pdf_path)) as pdf:
-        return "\n".join(p.extract_text() or "" for p in pdf.pages)
+    return "\n".join(_page_text_clean(pdf_path))

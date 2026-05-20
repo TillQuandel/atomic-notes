@@ -15,16 +15,31 @@ from sumy.nlp.tokenizers import Tokenizer
 from sumy.summarizers.lex_rank import LexRankSummarizer
 
 _ANCHOR_RE = re.compile(r"\s*\(S\.\s*\d+(?:-\d+)?\)")
+_CITATION_FRAG_RE = re.compile(r"^[;,\s]*[A-Z][a-z]+,?\s+[A-Z]\..*?\(S\.\s*\d+\)\s*$")
+_MERGED_WORDS_RE = re.compile(r"([a-z])([A-Z])")
 
 
 def strip_anchors(text: str) -> str:
     return _ANCHOR_RE.sub("", text).strip()
 
 
+def clean_sentence(text: str) -> str:
+    """Bereinigt PDF-Extraktions-Artefakte."""
+    # Zusammengeflossene Woerter: "seekingbehavior" -> "seeking behavior"
+    text = _MERGED_WORDS_RE.sub(r"\1 \2", text)
+    # Zitationsfragmente wie "; Allard, S.L. (S. 8)" entfernen
+    if _CITATION_FRAG_RE.match(text.strip()):
+        return ""
+    # Sehr kurze Fragmente (< 20 Zeichen ohne Anker) skippen
+    if len(strip_anchors(text).strip()) < 20:
+        return ""
+    return text.strip()
+
+
 def find_concept_sentences(
     concept: str, text: str, context: int = 1, threshold: int = 70
 ) -> list[str]:
-    """Findet Saetze mit Konzept-Erwaehnung + Kontext-Fenster."""
+    """Findet Saetze mit Konzept-Erwaehnung + Kontext-Fenster. Bereinigt Artefakte."""
     sentences = sent_tokenize(text)
     result, seen = [], set()
     for i, sent in enumerate(sentences):
@@ -32,7 +47,9 @@ def find_concept_sentences(
             for j in range(max(0, i - context), min(len(sentences), i + context + 1)):
                 if j not in seen:
                     seen.add(j)
-                    result.append(sentences[j])
+                    cleaned = clean_sentence(sentences[j])
+                    if cleaned:
+                        result.append(cleaned)
     return result
 
 
