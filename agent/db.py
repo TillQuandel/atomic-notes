@@ -58,6 +58,7 @@ CREATE TABLE IF NOT EXISTS note_evals (
     hallucination_rate  REAL,
     coverage_factual    REAL,
     coverage_rate       REAL,
+    anchor_rate         REAL,
     tokens_total        INT,
     tokens_input        INT,
     tokens_output       INT,
@@ -113,6 +114,10 @@ def init_db(path: Path = DB_PATH) -> None:
         pass
     try:
         conn.execute("ALTER TABLE pipeline_runs ADD COLUMN cost_usd REAL DEFAULT 0.0")
+    except sqlite3.OperationalError:
+        pass
+    try:
+        conn.execute("ALTER TABLE note_evals ADD COLUMN anchor_rate REAL")
     except sqlite3.OperationalError:
         pass
     conn.commit()
@@ -199,12 +204,12 @@ def insert_eval(conn: sqlite3.Connection, data: dict) -> None:
     conn.execute("""
         INSERT OR REPLACE INTO note_evals
           (eval_id, run_id, note_path, acceptance_status,
-           hallucination_rate, coverage_factual, coverage_rate,
+           hallucination_rate, coverage_factual, coverage_rate, anchor_rate,
            tokens_total, tokens_input, tokens_output, tokens_cache_read,
            wall_time_s, pipeline_version, pdf, language, eval_version, timestamp)
         VALUES
           (:eval_id, :run_id, :note_path, :acceptance_status,
-           :hallucination_rate, :coverage_factual, :coverage_rate,
+           :hallucination_rate, :coverage_factual, :coverage_rate, :anchor_rate,
            :tokens_total, :tokens_input, :tokens_output, :tokens_cache_read,
            :wall_time_s, :pipeline_version, :pdf, :language, :eval_version, :timestamp)
     """, {
@@ -215,6 +220,7 @@ def insert_eval(conn: sqlite3.Connection, data: dict) -> None:
         "hallucination_rate":data.get("hallucination_rate"),
         "coverage_factual":  data.get("coverage_factual"),
         "coverage_rate":     data.get("coverage_rate"),
+        "anchor_rate":       data.get("anchor_rate"),
         "tokens_total":      data.get("tokens_total"),
         "tokens_input":      data.get("tokens_input"),
         "tokens_output":     data.get("tokens_output"),
