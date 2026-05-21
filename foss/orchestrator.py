@@ -16,7 +16,7 @@ from foss.pipeline.adapter import write_note
 from foss.eval.foss_eval import insert_foss_run
 from shared.schemas.atomic_note_foss import AtomicNoteFoss
 
-FOSS_VERSION = "foss-v0.1.1"
+FOSS_VERSION = "foss-v0.2.0"
 
 
 def main():
