@@ -84,7 +84,7 @@ def insert_foss_run(
             Path(pdf_source).stem,
             n_generated,
             n_generated,  # foss schreibt alles nach output-dir (kein vault-routing)
-            "gliner+keybert",
+            "foss",
             duration_s,
             "foss-1.0",
         ))
