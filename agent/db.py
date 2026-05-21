@@ -15,6 +15,7 @@ Verwendung:
 """
 from __future__ import annotations
 
+import os
 import sqlite3
 import sys
 from contextlib import contextmanager
@@ -24,7 +25,8 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from shared.db_schema import SCHEMA_SQL as _SCHEMA
 
-DB_PATH = Path(__file__).parent / ".cache" / "atomic_analytics.db"
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+DB_PATH = Path(os.environ.get("ATOMIC_DB_PATH", _REPO_ROOT / ".cache" / "atomic_analytics.db"))
 
 
 def init_db(path: Path = DB_PATH) -> None:
