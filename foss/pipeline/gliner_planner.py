@@ -138,12 +138,14 @@ def plan_concepts(
     source = prominent if len(prominent) >= min_concepts else all_concepts
     result = deduplicate_concepts(source)
     if len(result) < min_concepts:
-        result = _keybert_fallback(chunks, result)
+        result = _keybert_fallback(chunks, result, main_language=main_language)
     result = sorted(result, key=lambda x: -x.get("score", 0))[:max_concepts]
     return result
 
 
-def _keybert_fallback(chunks, existing: list[dict]) -> list[dict]:
+def _keybert_fallback(
+    chunks, existing: list[dict], main_language: str = "en"
+) -> list[dict]:
     try:
         from keybert import KeyBERT
     except ImportError:
@@ -151,5 +153,9 @@ def _keybert_fallback(chunks, existing: list[dict]) -> list[dict]:
     model = KeyBERT()
     fulltext = " ".join(c.text for c in chunks)
     keywords = model.extract_keywords(fulltext, top_n=8, stop_words="english")
-    new = [{"name": kw, "type": "Concept", "page": 1, "score": score} for kw, score in keywords]
+    new = [
+        {"name": kw, "type": "Concept", "page": 1, "score": score}
+        for kw, score in keywords
+        if _is_specific_concept(kw) and _matches_language(kw, main_language)
+    ]
     return deduplicate_concepts(existing + new)

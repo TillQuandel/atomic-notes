@@ -57,3 +57,16 @@ def test_extract_concepts_filters_language():
         ]
         result = extract_concepts("some english text", main_language="en")
     assert len(result) == 0
+
+
+def test_keybert_fallback_filtered():
+    from foss.pipeline.gliner_planner import _keybert_fallback
+    chunks = [MagicMock(text="change management process", page=1)]
+    with patch("keybert.KeyBERT") as mock_kb:
+        mock_kb.return_value.extract_keywords.return_value = [
+            ("management", 0.9), ("information literacy framework", 0.8)
+        ]
+        result = _keybert_fallback(chunks, [], main_language="en")
+    names = [r["name"] for r in result]
+    assert "management" not in names
+    assert "information literacy framework" in names
