@@ -19,7 +19,7 @@ def _get_model():
     return GLiNER.from_pretrained(_MODEL_NAME)
 
 
-def extract_concepts(text: str, pages=None, threshold: float = 0.55) -> list[dict]:
+def extract_concepts(text: str, pages=None, threshold: float = 0.75) -> list[dict]:
     model = _get_model()
     entities = model.predict_entities(text, CONCEPT_TYPES, threshold=threshold)
     page = pages[0] if pages else 1
@@ -38,7 +38,7 @@ def deduplicate_concepts(concepts: list[dict], threshold: int = 90) -> list[dict
     return seen
 
 
-def plan_concepts(chunks, min_concepts: int = 3, min_chunk_count: int = 2) -> list[dict]:
+def plan_concepts(chunks, min_concepts: int = 3, min_chunk_count: int = 2, max_concepts: int = 20) -> list[dict]:
     """Extrahiert Konzepte. Filtert Konzepte die nur in 1 Chunk vorkommen (zu spezifisch)."""
     from collections import Counter
     all_concepts: list[dict] = []
@@ -57,6 +57,7 @@ def plan_concepts(chunks, min_concepts: int = 3, min_chunk_count: int = 2) -> li
     result = deduplicate_concepts(source)
     if len(result) < min_concepts:
         result = _keybert_fallback(chunks, result)
+    result = sorted(result, key=lambda x: -x.get("score", 0))[:max_concepts]
     return result
 
 
