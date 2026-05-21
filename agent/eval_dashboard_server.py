@@ -54,9 +54,11 @@ def _read_agent_stats(allowed_run_ids: set | None = None) -> dict:
         import db as _db_ag
         db_runs = _db_ag.query_pipeline_runs()
         if db_runs:
+            import re as _re
             latest_ver = sorted(
-                {r["pipeline_version"] for r in db_runs if r.get("pipeline_version")},
-                key=lambda v: [int(x) for x in v.lstrip("v").split(".") if x.isdigit()]
+                {r["pipeline_version"] for r in db_runs if r.get("pipeline_version")
+                 and not r["pipeline_version"].startswith("foss-")},
+                key=lambda v: [int(x) for x in _re.findall(r"\d+", v)]
             )[-1]
             allowed_ids = {r["run_id"] for r in db_runs if r.get("pipeline_version") == latest_ver}
         else:
@@ -343,7 +345,7 @@ def build_data(eval_version: str | None = None,
     # ── all_log_runs Dropdown-Optionen VOR all_log_runs-Filtern ──────
     _all_pdfs_opts  = sorted({r["label"] for r in all_log_runs if r.get("label")})
     _all_pvers_opts = sorted({r["ver"]   for r in all_log_runs if r.get("ver")},
-                              key=lambda v: [int(x) for x in v.lstrip("v").split(".") if x.isdigit()])
+                              key=lambda v: [int(x) for x in __import__("re").findall(r"\d+", v)])
 
     # PDF + Language + Version + Model-Filter auf all_log_runs (nach DB-Fallback)
     if model:
