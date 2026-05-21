@@ -16,82 +16,15 @@ Verwendung:
 from __future__ import annotations
 
 import sqlite3
+import sys
 from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+from shared.db_schema import SCHEMA_SQL as _SCHEMA
+
 DB_PATH = Path(__file__).parent / ".cache" / "atomic_analytics.db"
-
-_SCHEMA = """
-PRAGMA journal_mode=WAL;
-PRAGMA foreign_keys=ON;
-
-CREATE TABLE IF NOT EXISTS pipeline_runs (
-    run_id            TEXT PRIMARY KEY,
-    timestamp         TEXT NOT NULL,
-    pipeline_version  TEXT,
-    pdf_source        TEXT,
-    pdf_key           TEXT,   -- normaliserter Schlüssel z.B. "bates"
-    pdf_label         TEXT,   -- lesbarer Name z.B. "Bates"
-    n_generated       INT  DEFAULT 0,
-    n_vault           INT  DEFAULT 0,
-    n_inbox           INT  DEFAULT 0,
-    n_merge           INT  DEFAULT 0,
-    n_dropped         INT  DEFAULT 0,
-    n_words           INT  DEFAULT 0,
-    model             TEXT DEFAULT '',
-    cost_usd          REAL DEFAULT 0.0,
-    tokens_total      INT  DEFAULT 0,
-    tokens_input      INT  DEFAULT 0,
-    tokens_output     INT  DEFAULT 0,
-    tokens_cache_read INT  DEFAULT 0,
-    duration_s        REAL DEFAULT 0,
-    eval_version      TEXT,
-    fully_cached      INT  DEFAULT 0   -- 1 wenn alle Agent-Calls aus lokalem Cache
-);
-
-CREATE TABLE IF NOT EXISTS note_evals (
-    eval_id             TEXT PRIMARY KEY,
-    run_id              TEXT REFERENCES pipeline_runs(run_id),
-    note_path           TEXT,
-    acceptance_status   TEXT,
-    hallucination_rate  REAL,
-    coverage_factual    REAL,
-    coverage_rate       REAL,
-    anchor_rate         REAL,
-    tokens_total        INT,
-    tokens_input        INT,
-    tokens_output       INT,
-    tokens_cache_read   INT,
-    wall_time_s         REAL,
-    pipeline_version    TEXT,
-    pdf                 TEXT,
-    language            TEXT,
-    eval_version        TEXT,
-    timestamp           TEXT
-);
-
-CREATE INDEX IF NOT EXISTS idx_runs_version   ON pipeline_runs(pipeline_version);
-CREATE INDEX IF NOT EXISTS idx_runs_pdf       ON pipeline_runs(pdf_source);
-CREATE INDEX IF NOT EXISTS idx_evals_run      ON note_evals(run_id);
-CREATE INDEX IF NOT EXISTS idx_evals_version  ON note_evals(pipeline_version);
-CREATE INDEX IF NOT EXISTS idx_evals_ev       ON note_evals(eval_version);
-
--- Kalibrierungs-Labels (manuell, pro Note aggregiert)
-CREATE TABLE IF NOT EXISTS calibration_labels (
-    note_path           TEXT NOT NULL,
-    eval_version        TEXT NOT NULL DEFAULT '4.1',  -- gegen welche LLM-Version verglichen
-    labeled_at          TEXT,
-    n_claims            INT  DEFAULT 0,
-    n_supported         INT  DEFAULT 0,   -- human: s
-    n_hallucinated      INT  DEFAULT 0,   -- human: h
-    n_uncertain         INT  DEFAULT 0,   -- human: ?
-    human_hall_rate     REAL,             -- n_hallucinated / (n_supported + n_hallucinated)
-    llm_hall_rate       REAL,             -- aus note_evals (automatisch)
-    agreement_rate      REAL,             -- % identische Claim-Labels (TODO: ersetzen durch Cohen's Kappa)
-    PRIMARY KEY (note_path, eval_version) -- Composite PK: mehrere LLM-Versionen vergleichbar
-);
-"""
 
 
 def init_db(path: Path = DB_PATH) -> None:

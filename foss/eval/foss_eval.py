@@ -5,57 +5,14 @@ from datetime import datetime
 from pathlib import Path
 from rapidfuzz import fuzz
 
-_ANCHOR_RE = __import__("re").compile(r"\s*\(S\.\s*\d+(?:-\d+)?\)")
+import re
+import sys
+from pathlib import Path
 
-_SCHEMA_MIGRATION = """
-PRAGMA journal_mode=WAL;
-PRAGMA foreign_keys=ON;
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from shared.db_schema import SCHEMA_SQL as _SCHEMA_MIGRATION
 
-CREATE TABLE IF NOT EXISTS pipeline_runs (
-    run_id            TEXT PRIMARY KEY,
-    timestamp         TEXT NOT NULL,
-    pipeline_version  TEXT,
-    pdf_source        TEXT,
-    pdf_key           TEXT,
-    pdf_label         TEXT,
-    n_generated       INT  DEFAULT 0,
-    n_vault           INT  DEFAULT 0,
-    n_inbox           INT  DEFAULT 0,
-    n_merge           INT  DEFAULT 0,
-    n_dropped         INT  DEFAULT 0,
-    n_words           INT  DEFAULT 0,
-    model             TEXT DEFAULT '',
-    cost_usd          REAL DEFAULT 0.0,
-    tokens_total      INT  DEFAULT 0,
-    tokens_input      INT  DEFAULT 0,
-    tokens_output     INT  DEFAULT 0,
-    tokens_cache_read INT  DEFAULT 0,
-    duration_s        REAL DEFAULT 0,
-    eval_version      TEXT,
-    fully_cached      INT  DEFAULT 0
-);
-
-CREATE TABLE IF NOT EXISTS note_evals (
-    eval_id             TEXT PRIMARY KEY,
-    run_id              TEXT REFERENCES pipeline_runs(run_id),
-    note_path           TEXT,
-    acceptance_status   TEXT,
-    hallucination_rate  REAL,
-    coverage_factual    REAL,
-    coverage_rate       REAL,
-    anchor_rate         REAL,
-    tokens_total        INT,
-    tokens_input        INT,
-    tokens_output       INT,
-    tokens_cache_read   INT,
-    wall_time_s         REAL,
-    pipeline_version    TEXT,
-    pdf                 TEXT,
-    language            TEXT,
-    eval_version        TEXT,
-    timestamp           TEXT
-);
-"""
+_ANCHOR_RE = re.compile(r"\s*\(S\.\s*\d+(?:-\d+)?\)")
 
 
 def _connect(db_path: Path) -> sqlite3.Connection:
