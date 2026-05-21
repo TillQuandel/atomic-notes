@@ -51,7 +51,7 @@ def main():
         print(f"    WARNUNG: Sprache erkannt = '{lang}' (v1 = Englisch only)")
 
     print("[2] Konzepte extrahieren (GLiNER)...")
-    concepts = plan_concepts(chunks)
+    concepts = plan_concepts(chunks, main_language=lang)
     print(f"    {len(concepts)} Konzepte")
 
     print("[3] Saetze extrahieren (LexRank)...")

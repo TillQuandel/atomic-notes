@@ -53,20 +53,53 @@ def _is_specific_concept(name: str) -> bool:
     return True
 
 
+_GERMANIC_NON_ENGLISH = frozenset({"de", "da", "nl", "af", "sv", "no", "lb", "fy"})
+
+
+def _matches_language(text: str, main_language: str) -> bool:
+    """Prueft ob Konzept-Text in der Hauptsprache ist. Bei Unsicherheit: True (behalten).
+
+    Besonderheit: langdetect verwechselt verwandte germanische Sprachen (de/da/nl).
+    - main_language='en': alle germanischen Erkennungen werden gefiltert (nicht englisch)
+    - main_language='de': germanische Erkennungen (de/da/nl) zaehlen als Match
+      (langdetect erkennt deutsche Komposita manchmal als 'da')
+    """
+    if len(text.split()) < 2 and len(text) < 10:
+        return True
+    try:
+        from langdetect import detect
+        detected = detect(text)
+        if detected == main_language:
+            return True
+        if main_language == "en":
+            # Germanische Erkennungen sind definitiv nicht-englisch → filtern
+            return detected not in _GERMANIC_NON_ENGLISH
+        if main_language == "de":
+            # Germanische Verwechslungen (da/nl) fuer deutsche Komposita tolerieren
+            return detected in _GERMANIC_NON_ENGLISH
+        return False
+    except Exception:
+        return True
+
+
 @lru_cache(maxsize=1)
 def _get_model():
     from gliner import GLiNER
     return GLiNER.from_pretrained(_MODEL_NAME)
 
 
-def extract_concepts(text: str, pages=None, threshold: float = 0.75) -> list[dict]:
+def extract_concepts(
+    text: str, pages=None, threshold: float = 0.75, main_language: str = "en"
+) -> list[dict]:
     model = _get_model()
     entities = model.predict_entities(text, CONCEPT_TYPES, threshold=threshold)
     page = pages[0] if pages else 1
     return [
         {"name": e["text"].strip(), "type": e["label"], "page": page, "score": e["score"]}
         for e in entities
-        if len(e["text"].strip()) >= 3 and _is_specific_concept(e["text"].strip())
+        if len(e["text"].strip()) >= 3
+        and _is_specific_concept(e["text"].strip())
+        and _matches_language(e["text"].strip(), main_language)
     ]
 
 
@@ -79,14 +112,20 @@ def deduplicate_concepts(concepts: list[dict], threshold: int = 90) -> list[dict
     return seen
 
 
-def plan_concepts(chunks, min_concepts: int = 3, min_chunk_count: int = 2, max_concepts: int = 20) -> list[dict]:
+def plan_concepts(
+    chunks,
+    min_concepts: int = 3,
+    min_chunk_count: int = 2,
+    max_concepts: int = 20,
+    main_language: str = "en",
+) -> list[dict]:
     """Extrahiert Konzepte. Filtert Konzepte die nur in 1 Chunk vorkommen (zu spezifisch)."""
     # Sicherstellen dass max_concepts nicht kleiner als min_concepts ist
     max_concepts = max(max_concepts, min_concepts)
     from collections import Counter
     all_concepts: list[dict] = []
     for chunk in chunks:
-        all_concepts.extend(extract_concepts(chunk.text, pages=[chunk.page]))
+        all_concepts.extend(extract_concepts(chunk.text, pages=[chunk.page], main_language=main_language))
 
     # Prominenz-Filter: Konzept muss in >= min_chunk_count Chunks vorkommen
     # (verhindert Einzel-Chunk-Artefakte wie "avoidance", "blunting")

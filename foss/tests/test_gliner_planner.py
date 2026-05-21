@@ -39,3 +39,21 @@ def test_specific_concepts_pass():
     assert _is_specific_concept("ADKAR model") is True
     assert _is_specific_concept("LexRank") is True
     assert _is_specific_concept("constructivism") is True
+
+
+def test_language_drift_filtered():
+    from foss.pipeline.gliner_planner import _matches_language
+    assert _matches_language("bekanntheitsgrad", "en") is False
+    assert _matches_language("datenschutz", "en") is False
+    assert _matches_language("information literacy", "en") is True
+    assert _matches_language("informationskompetenz", "de") is True
+
+def test_extract_concepts_filters_language():
+    from foss.pipeline.gliner_planner import extract_concepts
+    from unittest.mock import patch
+    with patch("foss.pipeline.gliner_planner._get_model") as mock_model:
+        mock_model.return_value.predict_entities.return_value = [
+            {"text": "bekanntheitsgrad", "label": "Concept", "score": 0.9}
+        ]
+        result = extract_concepts("some english text", main_language="en")
+    assert len(result) == 0
