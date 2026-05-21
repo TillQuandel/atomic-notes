@@ -289,6 +289,30 @@ def build_data(eval_version: str | None = None,
     except Exception:
         pass
 
+    # DB-only Runs (z.B. foss — kein JSONL) zu token_runs hinzufuegen
+    try:
+        import db as _db_only
+        _jsonl_run_ids = {tr.get("run_id") for tr in token_runs}
+        _run_lang_safe = _run_lang if "_run_lang" in dir() else {}
+        for r in _db_only.query_pipeline_runs():
+            if r["run_id"] not in _jsonl_run_ids and r.get("model"):
+                token_runs.append({
+                    "run_id":       r["run_id"],
+                    "model":        r.get("model", ""),
+                    "ver":          r.get("pipeline_version", ""),
+                    "pdf_label":    r.get("pdf_label") or r.get("pdf_source", ""),
+                    "language":     _run_lang_safe.get(r["run_id"], ""),
+                    "cost_usd":     r.get("cost_usd", 0.0) or 0.0,
+                    "tokens_in":    0,
+                    "tokens_out":   0,
+                    "tokens_cache": 0,
+                    "duration_min": round((r.get("duration_s") or 0.0) / 60, 1),
+                    "calls":        0,
+                    "date":         "",
+                })
+    except Exception as _e:
+        import sys as _sys; print(f"[db-only-runs] Fehler: {_e}", file=_sys.stderr)
+
     # ── Dropdown-Optionen VOR allen Filtern snapshotten ──────────────
     _all_models_opts = sorted({tr.get("model","") for tr in token_runs if tr.get("model")})
 
