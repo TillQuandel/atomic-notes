@@ -60,8 +60,12 @@ def find_concept_sentences(
 def extract_body_for_concept(
     concept: str, text: str, n: int = 4, language: str = "english"
 ) -> list[str]:
-    """LexRank ueber Konzept-Sentence-Cluster -> Top-n Saetze."""
-    sentences = find_concept_sentences(concept, text) or sent_tokenize(text)
+    """LexRank ueber Konzept-Sentence-Cluster -> Top-n Saetze.
+    Gibt leere Liste zurueck wenn kein Satz das Konzept erwaehnt (kein Fallback auf Volltext).
+    """
+    sentences = find_concept_sentences(concept, text)
+    if not sentences:
+        return []
     if len(sentences) <= n:
         return sentences
     cluster = " ".join(sentences)

@@ -61,6 +61,8 @@ def main():
             extract_body_for_concept(c["name"], fulltext),
             [c.get("page", 1)]
         )
+        if not body:
+            continue
         note = AtomicNoteFoss(
             title=c["name"],
             concept_type=c["type"],
