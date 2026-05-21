@@ -89,17 +89,17 @@ def _get_model():
 
 
 def extract_concepts(
-    text: str, pages=None, threshold: float = 0.75, main_language: str = "en"
+    text: str, page: int = 1, threshold: float = 0.75, main_language: str = "en"
 ) -> list[dict]:
     model = _get_model()
     entities = model.predict_entities(text, CONCEPT_TYPES, threshold=threshold)
-    page = pages[0] if pages else 1
     return [
-        {"name": e["text"].strip(), "type": e["label"], "page": page, "score": e["score"]}
+        {"name": name, "type": e["label"], "page": page, "score": e["score"]}
         for e in entities
-        if len(e["text"].strip()) >= 3
-        and _is_specific_concept(e["text"].strip())
-        and _matches_language(e["text"].strip(), main_language)
+        if (name := e["text"].strip())
+        and len(name) >= 3
+        and _is_specific_concept(name)
+        and _matches_language(name, main_language)
     ]
 
 
@@ -125,7 +125,7 @@ def plan_concepts(
     from collections import Counter
     all_concepts: list[dict] = []
     for chunk in chunks:
-        all_concepts.extend(extract_concepts(chunk.text, pages=[chunk.page], main_language=main_language))
+        all_concepts.extend(extract_concepts(chunk.text, page=chunk.page, main_language=main_language))
 
     # Prominenz-Filter: Konzept muss in >= min_chunk_count Chunks vorkommen
     # (verhindert Einzel-Chunk-Artefakte wie "avoidance", "blunting")
@@ -152,7 +152,8 @@ def _keybert_fallback(
         return existing
     model = KeyBERT()
     fulltext = " ".join(c.text for c in chunks)
-    keywords = model.extract_keywords(fulltext, top_n=8, stop_words="english")
+    stop_words = "english" if main_language == "en" else None
+    keywords = model.extract_keywords(fulltext, top_n=8, stop_words=stop_words)
     new = [
         {"name": kw, "type": "Concept", "page": 1, "score": score}
         for kw, score in keywords
