@@ -40,6 +40,8 @@ def deduplicate_concepts(concepts: list[dict], threshold: int = 90) -> list[dict
 
 def plan_concepts(chunks, min_concepts: int = 3, min_chunk_count: int = 2, max_concepts: int = 20) -> list[dict]:
     """Extrahiert Konzepte. Filtert Konzepte die nur in 1 Chunk vorkommen (zu spezifisch)."""
+    # Sicherstellen dass max_concepts nicht kleiner als min_concepts ist
+    max_concepts = max(max_concepts, min_concepts)
     from collections import Counter
     all_concepts: list[dict] = []
     for chunk in chunks:

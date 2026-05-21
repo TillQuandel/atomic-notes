@@ -3,11 +3,11 @@ from unittest.mock import patch, MagicMock
 
 
 def test_extract_concepts_default_threshold_is_higher():
-    """Threshold muss >= 0.7 sein."""
+    """Threshold muss 0.75 sein."""
     import inspect
     from foss.pipeline.gliner_planner import extract_concepts
     sig = inspect.signature(extract_concepts)
-    assert sig.parameters["threshold"].default >= 0.7
+    assert sig.parameters["threshold"].default == 0.75
 
 
 def test_plan_concepts_respects_max_cap():
