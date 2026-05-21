@@ -21,3 +21,21 @@ def test_plan_concepts_respects_max_cap():
         ]
         result = plan_concepts(chunks, max_concepts=10)
     assert len(result) <= 10
+
+
+def test_generic_concepts_filtered():
+    from foss.pipeline.gliner_planner import _is_specific_concept
+    assert _is_specific_concept("mean") is False
+    assert _is_specific_concept("management") is False
+    assert _is_specific_concept("advantage") is False
+    assert _is_specific_concept("information") is False
+    assert _is_specific_concept("methods") is False
+    assert _is_specific_concept("surveys") is False
+
+
+def test_specific_concepts_pass():
+    from foss.pipeline.gliner_planner import _is_specific_concept
+    assert _is_specific_concept("information literacy framework") is True
+    assert _is_specific_concept("ADKAR model") is True
+    assert _is_specific_concept("LexRank") is True
+    assert _is_specific_concept("constructivism") is True

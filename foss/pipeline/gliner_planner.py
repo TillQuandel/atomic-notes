@@ -12,6 +12,46 @@ def _strip_name(text: str) -> str:
 CONCEPT_TYPES = ["Theory", "Concept", "Method", "Metric", "Model", "Framework", "Phenomenon"]
 _MODEL_NAME = "urchade/gliner_medium-v2.1"
 
+_GENERIC_BLACKLIST = frozenset({
+    # Abstrakte Generika
+    "information", "system", "process", "method", "model", "data", "analysis",
+    "management", "mean", "average", "advantage", "result", "approach", "aspect",
+    "concept", "theory", "issue", "factor", "element", "component", "feature",
+    "problem", "solution", "area", "level", "type", "form", "role",
+    "ability", "use", "need", "way", "part", "point", "case", "end", "set",
+    # Plural-Generika
+    "methods", "models", "surveys", "rubrics", "metrics", "factors", "systems",
+    "concepts", "aspects", "results", "studies", "issues", "elements",
+    # Fachfremde Einzelbegriffe
+    "tinnitus",
+})
+
+
+def _is_specific_concept(name: str) -> bool:
+    """Prueft ob ein Konzept spezifisch genug ist (Blacklist + Subword-Proxy).
+
+    Regeln (in dieser Reihenfolge):
+    1. Blacklist-Treffer → False
+    2. Mehrwort-Begriff → True
+    3. Einwort mit Grossbuchstabe (Eigenname/Akronym) → True
+    4. Einwort < 8 Zeichen (rein lowercase) → False
+    5. Sonst → True
+    """
+    stripped = name.strip()
+    normalized = stripped.lower()
+    if normalized in _GENERIC_BLACKLIST:
+        return False
+    words = stripped.split()
+    if len(words) >= 2:
+        return True
+    # Einwort: Eigenname/Akronym (mind. ein Grossbuchstabe) ist spezifisch
+    if any(c.isupper() for c in stripped):
+        return True
+    # Kurze rein-lowercase Einzelwoerter sind zu generisch
+    if len(normalized) < 8:
+        return False
+    return True
+
 
 @lru_cache(maxsize=1)
 def _get_model():
@@ -25,7 +65,8 @@ def extract_concepts(text: str, pages=None, threshold: float = 0.75) -> list[dic
     page = pages[0] if pages else 1
     return [
         {"name": e["text"].strip(), "type": e["label"], "page": page, "score": e["score"]}
-        for e in entities if len(e["text"].strip()) >= 3
+        for e in entities
+        if len(e["text"].strip()) >= 3 and _is_specific_concept(e["text"].strip())
     ]
 
 
