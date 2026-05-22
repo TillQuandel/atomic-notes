@@ -103,15 +103,19 @@ def _retrieve_claim_contexts(claims: list[str], chunks: list[Chunk]) -> list[Ret
             key=lambda item: item[1],
             reverse=True,
         )
-        # Adaptives TOP_K (Gemini-Review 2026-05-18): bei hohem top-Cosine genuegt
-        # weniger Kontext; bei schlechtem Retrieval mehr. Spart 20-40% Input-Tokens.
+        # Margin-basiertes adaptives TOP_K (Gemini-Review 2026-05-22):
+        # Dichte Score-Cluster (≤0.05 Abstand) → k groß halten (Retriever unsicher).
+        # Starker Score-Abfall → k=2 aggressiv (eindeutiger Treffer, Tokens sparen).
+        # Löst False-Negatives bei paraphrase-multilingual-MiniLM wo Scores dicht clustern.
         top_score = all_ranked[0][1] if all_ranked else 0.0
-        if top_score >= EVAL_ADAPTIVE_K_HIGH:
-            adaptive_k = 2
-        elif top_score >= EVAL_ADAPTIVE_K_MID:
-            adaptive_k = 3
-        else:
-            adaptive_k = TOP_K  # 5 — Netz weit auswerfen
+        margin_threshold = top_score - 0.05
+        adaptive_k = 2  # Absolutes Minimum
+        for _idx, (_, _score) in enumerate(all_ranked):
+            if _score >= margin_threshold:
+                adaptive_k = max(adaptive_k, _idx + 1)
+            else:
+                break
+        adaptive_k = min(adaptive_k, TOP_K)  # Obergrenze bei 5
         ranked = all_ranked[:adaptive_k]
         contexts: list[dict[str, Any]] = []
         for rank, (chunk_idx, score) in enumerate(ranked, start=1):

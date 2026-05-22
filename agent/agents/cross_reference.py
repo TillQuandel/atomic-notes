@@ -285,10 +285,28 @@ def run(draft: AtomicNoteDraft, existing_concepts: dict[str, str],
         )
         return draft
 
-    # no-LLM-Modus: BM25+RRF Top-3 direkt als related-Links, NLI für Widersprüche.
+    # no-LLM-Modus: BM25+RRF Top-N direkt als related-Links, NLI für Widersprüche.
     if not _config.ENABLE_LLM:
-        top3 = vault_candidates[:3]
-        draft.related = [f"[[{Path(p).stem}]]" for _, p in top3]
+        # Bug #9: deterministischer Duplicate-Check via Token-Overlap
+        draft_tokens = _tokens(draft.title)
+        for _, cand_path in vault_candidates[:3]:
+            cand_title = Path(cand_path).stem
+            cand_tokens = _tokens(cand_title)
+            if not draft_tokens or not cand_tokens:
+                continue
+            overlap = len(draft_tokens & cand_tokens) / max(len(draft_tokens), len(cand_tokens))
+            if overlap >= 0.7:  # ≥70% Token-Überlap → wahrscheinliches Duplikat (0.8 war zu hoch: "Konzept (Autor)"-Pattern ergibt nur 75%)
+                draft.action = "extend"
+                draft.extend_path = str(VAULT / cand_path)
+                draft.quality_flags.append(f"⚠️ Duplikat-Risiko (no-LLM, overlap={overlap:.0%}) — prüfe: {cand_title}")
+                break
+
+        related = []
+        for _, p in vault_candidates:
+            related.append(f"[[{Path(p).stem}]]")
+        for sib_title, _ in sibling_candidates:
+            related.append(f"[[{sib_title}]]")
+        draft.related = related[:MAX_RELATED]
         if len(draft.related) < MIN_RELATED:
             draft.quality_flags.append(
                 f"⚠️ Nur {len(draft.related)} related-Links (no-LLM-Modus) — manuell prüfen"
@@ -298,7 +316,7 @@ def run(draft: AtomicNoteDraft, existing_concepts: dict[str, str],
             nli_confirmed = _nli_validate_contradictions(draft.body, vault_excerpts_for_nli)
             if nli_confirmed:
                 draft.quality_flags.append("⚠️ Möglicher Widerspruch (NLI, no-LLM-Modus)")
-        draft.quality_flags.append("ℹ️ CrossRef: no-LLM-Modus (BM25+RRF Top-3)")
+        draft.quality_flags.append("ℹ️ CrossRef: no-LLM-Modus (BM25+RRF Top-N)")
         return draft
 
     # Hebel #2: Header OHNE `[[...]]`-Brackets, damit das LLM nicht

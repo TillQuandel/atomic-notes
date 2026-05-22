@@ -235,6 +235,10 @@ def _run_inner(draft: AtomicNoteDraft, chunk_text: str) -> AtomicNoteDraft:
             f"{len(unresolved)} Anker unverifiziert (no-LLM-Modus)",
             file=sys.stderr,
         )
+        unresolved = [
+            TextAnchor(quote=anc.quote, page=None, fuzzy_page=None)
+            for anc in unresolved
+        ]
         draft.source_anchors = pre_resolved + unresolved
         draft.quality_flags.append(
             f"ℹ️ Verifier: {len(unresolved)} Anker unverifiziert (no-LLM-Modus)"

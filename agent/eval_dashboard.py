@@ -935,7 +935,7 @@ table.cmp td.num {{ text-align: right; }}
   appearance: none; -webkit-appearance: none;
   background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='%2364748b'/%3E%3C/svg%3E");
   background-repeat: no-repeat; background-position: right 8px center;
-  padding-right: 24px; min-width: 130px;
+  padding-right: 24px; min-width: 130px; max-width: 220px;
 }}
 .global-filter-bar select:focus {{ outline: none; border-color: rgba(232,181,59,0.5); }}
 .global-filter-bar .reset-btn {{

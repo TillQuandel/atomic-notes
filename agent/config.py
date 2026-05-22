@@ -71,7 +71,7 @@ CALL_TIMEOUT_SEC = int(os.getenv("ATOMIC_AGENT_CALL_TIMEOUT", "180"))
 STRICT_QUALITY = True
 
 # Pipeline-Version für agent-version Frontmatter
-AGENT_VERSION = "v0.3.62"  # Window-Builder Option D: Sliding-Window Co-Occurrence Ranking statt ±cluster-expansion
+AGENT_VERSION = "v0.3.66"  # Window-Builder Option D: Sliding-Window Co-Occurrence Ranking statt ±cluster-expansion
 
 # Background-Extractor (Stage-0.5): Trainingswissen pro Konzept vor Extractor abfragen.
 # Deaktivierbar via ENV ENABLE_BACKGROUND_EXTRACTOR=0 — z.B. für Baseline-Eval-Tests

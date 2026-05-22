@@ -3,6 +3,19 @@ from __future__ import annotations
 
 import re
 
+# Generika-Blacklist (portiert aus foss/gliner_planner.py, angepasst für LLM-Output).
+# Fängt seltene LLM-"Ausrutscher" ab wenn trotz Prompt-Vorgabe abstrakte Einzel-Konzepte
+# geplant werden. Normalisierung auf lowercase Pflicht (LLM gibt Title-Case aus).
+_GENERIC_BLACKLIST: frozenset[str] = frozenset({
+    "information", "system", "process", "method", "model", "data", "analysis",
+    "management", "result", "approach", "aspect", "concept", "theory", "issue",
+    "factor", "element", "component", "feature", "problem", "solution", "area",
+    "level", "type", "form", "role", "ability", "use", "need", "way", "part",
+    "point", "case", "end", "set",
+    "methods", "models", "metrics", "factors", "systems", "concepts", "aspects",
+    "results", "studies", "issues", "elements",
+})
+
 from agents.base import call_claude
 from agents.cross_reference import _tokens  # Stoppwort-gefilterte Content-Tokens
 from agents.structured_output import parse_planner_output
@@ -16,6 +29,8 @@ Analysiere den untenstehenden Quellentext (Anfang + Ende eines Dokuments) und er
 Welche Konzepte sollen als eigenständige Atomic Notes angelegt werden?
 
 Bewerte ausschließlich aus dem Quellentext heraus, welche Konzepte substantiell behandelt werden — kein externer Themen-Bias. Jedes Buch/Paper bestimmt seine Konzepte selbst.
+
+Sprache: Extrahiere Konzepte in der Hauptsprache des Dokuments. Etablierte englische Fachbegriffe in deutschen Texten (z.B. "Prompt Engineering", "Transfer Learning") sind erlaubt wenn sie im Text substantiell behandelt werden. Vermeide rein generische Begriffe wie "Method", "Model", "System" ohne spezifisches Qualifikator.
 
 ## Dein Scan-Prozess (zwei Pässe — Fix 1, Category-aware Planner)
 
@@ -226,6 +241,11 @@ def filter_hallucinated(plan: ConceptPlan, full_text: str,
             continue
         coverage = len(title_tokens & text_tokens) / len(title_tokens)
         if coverage < min_coverage:
+            rejected.append(c.title)
+            continue
+        # Blacklist-Check: generische Einzel-Konzepte verwerfen (portiert aus foss).
+        # Normalisierung auf lowercase nötig da LLM Title-Case ausgibt.
+        if c.title.strip().lower() in _GENERIC_BLACKLIST:
             rejected.append(c.title)
             continue
         kept.append(c)

@@ -41,6 +41,7 @@ class AtomicNoteDraft:
                                                             # tag_registry.yml und wird beim
                                                             # nächsten Run regulär nutzbar.
     tag_review_status: Optional[str] = None  # "needs-review" wenn proposed_tags nicht leer
+    refine_key: Optional[str] = None         # concept plan title für concept_map-Lookup nach ER (Bug #5)
 
 
 @dataclass

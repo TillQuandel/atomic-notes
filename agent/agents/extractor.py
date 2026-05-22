@@ -311,7 +311,8 @@ async def run_per_concept(concept, concept_text: str,
                           revision_hint: str | None = None,
                           tag_whitelist: list[str] | None = None,
                           background_context: list[str] | None = None,
-                          related_mentions: list[str] | None = None) -> AtomicNoteDraft | None:
+                          related_mentions: list[str] | None = None,
+                          current_draft_body: str | None = None) -> AtomicNoteDraft | None:
     """Extrahiere genau eine Note für ein konkretes Konzept aus den relevanten
     Textstellen (gesammelt via pdf_chunker.concept_text_window).
 
@@ -332,7 +333,24 @@ async def run_per_concept(concept, concept_text: str,
     concepts_str = f"- {concept.title} (Priorität: {concept.priority}, action: {concept.action})"
 
     refine_block = ""
-    if revision_hint:
+    if revision_hint and current_draft_body:
+        # Bug #1: gezieltes Überarbeiten statt Neugenerierung — alter Body + Quellentext + Hint
+        refine_block = (
+            "## Gezielte Überarbeitung (höchste Priorität — kein Neuschreiben)\n\n"
+            "Bestehende Note (Ausgangspunkt — behalte alles Korrekte):\n"
+            "---\n"
+            f"{current_draft_body}\n"
+            "---\n\n"
+            "Critic-Feedback (nur diese Punkte ändern):\n"
+            f"{revision_hint}\n\n"
+            "Regeln:\n"
+            "- Ändere MINIMAL: nur was der Critic bemängelt\n"
+            "- Behalte alle korrekten Aussagen, Zitate, Anker, Aliases, Tags\n"
+            "- Füge nichts hinzu das nicht im Quellentext unten steht\n"
+            "- Prüfe jeden behaltenen Satz gegen den Quellentext\n"
+            "- Wenn eine Aussage im alten Body keine Entsprechung im Quellentext hat und der Critic sie nicht bemängelt hat: trotzdem entfernen\n\n"
+        )
+    elif revision_hint:
         refine_block = (
             "## Revision-Hinweis (Self-Refine — vom Critic, höchste Priorität)\n"
             f"{revision_hint}\n"

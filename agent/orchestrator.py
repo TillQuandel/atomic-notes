@@ -19,8 +19,23 @@ Ablauf:
 from __future__ import annotations
 import argparse
 import asyncio
+import contextlib
 import sys
 from pathlib import Path
+
+_TRACER = None  # gesetzt von _setup_phoenix_tracing wenn Phoenix läuft
+
+
+@contextlib.contextmanager
+def _span(name: str, **attrs):
+    """OTel-Span wenn Phoenix aktiv, sonst no-op."""
+    if _TRACER is None:
+        yield
+        return
+    with _TRACER.start_as_current_span(name) as span:
+        for k, v in attrs.items():
+            span.set_attribute(k, str(v))
+        yield span
 
 # Pfad damit relative Imports funktionieren
 sys.path.insert(0, str(Path(__file__).parent))
@@ -152,8 +167,10 @@ async def run_extractors_per_concept(full_text: str, concept_plan: ConceptPlan,
         elif r is None:
             pass  # bereits von run_per_concept als [extractor-empty] geloggt
         else:
+            r.refine_key = contexts[i][0].title  # plan title als stabiler Fallback-Key (Bug #5)
             drafts.append(r)
             concept_map[r.title] = contexts[i]
+            concept_map[contexts[i][0].title] = contexts[i]  # plan title als zusätzlicher Key
     dropped = len(tasks) - len(drafts)
     if dropped:
         print(f"      [extractor-empty] {dropped}/{len(tasks)} Konzepte stumm weggefallen", file=sys.stderr)
@@ -406,6 +423,7 @@ async def entity_resolution(drafts: list[AtomicNoteDraft]) -> list[AtomicNoteDra
         if isinstance(merged, Exception):
             print(f"      [er-stage4] Merge fehlgeschlagen: {merged} — Repräsentant behalten", file=sys.stderr)
             merged = drafts[members[0]]
+        merged.refine_key = drafts[members[0]].refine_key  # plan title für concept_map-Lookup erhalten (Bug #5)
         cluster_idx_to_merged[members[0]] = merged
         consumed.update(members[1:])  # nicht-Repräsentanten verwerfen
         print(f"      [er-stage4] '{merged.title}' ← {[drafts[k].title for k in members]}", file=sys.stderr)
@@ -518,9 +536,11 @@ def _run_note_pipeline(
             and "critic_improvement_hint" not in (draft.quality_flags or [])):
         draft.quality_flags.append(f"critic_improvement_hint: {draft.revision_hint[:120]}")
 
+    # Bug #5: concept_map-Lookup mit refine_key-Fallback (nach ER kann draft.title abweichen)
+    _refine_map_key = draft.title if draft.title in concept_map else draft.refine_key
     if ((refine_trigger_a or refine_trigger_b)
             and (draft.revision_hint or synthesized_hint)
-            and draft.title in concept_map):
+            and _refine_map_key in concept_map):
         base_hint = draft.revision_hint or synthesized_hint
         augmented_hint = (
             base_hint
@@ -531,10 +551,10 @@ def _run_note_pipeline(
         hint_source = "Critic-Hint" if draft.revision_hint else "synth"
         print(f"      [refine] Score {draft.critic_score} + {hint_source} — 1 Retry"
               + (f" + {len(fs_violations)} Regex-Violations" if fs_violations else ""))
-        concept_obj, ctext = concept_map[draft.title]
+        concept_obj, ctext = concept_map[_refine_map_key]
         try:
             # asyncio.run() ist in Threads (kein Event-Loop) erlaubt
-            _bg = (background_map or {}).get(draft.title)
+            _bg = (background_map or {}).get(concept_obj.title) or (background_map or {}).get(draft.title)  # Bug #6: plan title bevorzugen
             refined = asyncio.run(extractor.run_per_concept(
                 concept=concept_obj, concept_text=ctext,
                 existing_concepts=existing_concepts,
@@ -542,6 +562,8 @@ def _run_note_pipeline(
                 revision_hint=augmented_hint,
                 tag_whitelist=tag_whitelist,
                 background_context=_bg,
+                related_mentions=related_mentions,   # Bug #7: beim Retry übergeben
+                current_draft_body=draft.body,       # Bug #1: gezieltes Überarbeiten statt Neugenerierung
             ))
         except Exception as e:
             print(f"      [refine] Retry fehlgeschlagen: {e}")
@@ -568,7 +590,9 @@ def _run_note_pipeline(
             )
             refined = critic.run(refined, existing_concepts=hub_concepts, concept_links=run_concept_links)
             better = False
-            if refine_trigger_a and refined.critic_score > draft.critic_score:
+            # Bug #2: Trigger-A muss hard_gates_pass verlangen — sonst wird Note mit höherem
+            # Score aber weiterhin failing Gates fälschlich als Verbesserung akzeptiert
+            if refine_trigger_a and refined.hard_gates_pass and refined.critic_score >= CRITIC_AUTO_THRESHOLD:
                 better = True
             elif refine_trigger_b and refined.hard_gates_pass and refined.critic_score >= CRITIC_AUTO_THRESHOLD:
                 better = True
@@ -786,6 +810,28 @@ def _auto_version_bump() -> None:
     state_file.write_text(_json.dumps(state, indent=2))
 
 
+def _setup_phoenix_tracing() -> None:
+    """Sendet OTel-Traces an laufenden Phoenix-Server (http://localhost:6006).
+    Kein Fehler wenn Phoenix nicht läuft — Pipeline startet normal."""
+    global _TRACER
+    try:
+        from opentelemetry import trace
+        from opentelemetry.sdk.trace import TracerProvider
+        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+        from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
+        from openinference.instrumentation.litellm import LiteLLMInstrumentor
+
+        exporter = OTLPSpanExporter(endpoint="http://localhost:6006/v1/traces")
+        provider = TracerProvider()
+        provider.add_span_processor(BatchSpanProcessor(exporter))
+        trace.set_tracer_provider(provider)
+        LiteLLMInstrumentor().instrument()
+        _TRACER = trace.get_tracer("atomic-agent")
+        print("[phoenix] Tracing aktiv → http://localhost:6006")
+    except Exception as e:
+        print(f"[phoenix] Tracing nicht verfügbar ({e}) — Pipeline läuft ohne Traces")
+
+
 def main():
     ap = argparse.ArgumentParser(description="Atomic Note Multi-Agent Pipeline")
     ap.add_argument("--source", required=True, help="Pfad zur PDF-Datei")
@@ -812,6 +858,7 @@ def main():
                          "bleiben gecacht.")
     args = ap.parse_args()
 
+    _setup_phoenix_tracing()
     _auto_start_dashboard()
     _auto_version_bump()
 
@@ -971,9 +1018,10 @@ def main():
         # --- Schritt 4: Planner + Halluzinations-Filter ---
         print("[4/7] Planner: Konzept-Plan erstellen…")
         primary_authors = _extract_primary_authors(pdf_meta)
-        concept_plan = planner.run(overview, relevance_profile,
-                                   primary_authors=primary_authors)
-        concept_plan, hallucinated = planner.filter_hallucinated(concept_plan, text)
+        with _span("Planner", pdf=source_path.name, n_chunks=len(chunks)):
+            concept_plan = planner.run(overview, relevance_profile,
+                                       primary_authors=primary_authors)
+            concept_plan, hallucinated = planner.filter_hallucinated(concept_plan, text)
         if hallucinated:
             print(f"      {len(hallucinated)} halluzinierte Konzepte verworfen: {', '.join(hallucinated[:3])}{'…' if len(hallucinated)>3 else ''}")
 
@@ -997,7 +1045,8 @@ def main():
         # Deaktivierbar via ENABLE_BACKGROUND_EXTRACTOR=0 (z.B. für Baseline-Eval-Vergleiche).
         if ENABLE_BACKGROUND_EXTRACTOR:
             print("[4.5/7] Background-Extractor: Trainingswissen pro Konzept…")
-            background_map = background_extractor.run(concept_plan)
+            with _span("BackgroundExtractor", pdf=source_path.name):
+                background_map = background_extractor.run(concept_plan)
         else:
             print("[4.5/7] Background-Extractor: deaktiviert (ENABLE_BACKGROUND_EXTRACTOR=0)")
 
@@ -1005,13 +1054,14 @@ def main():
         actionable_count = sum(1 for c in concept_plan.concepts
                                if c.action != "skip" and c.origin != "secondary_mention")
         print(f"\n[5/7] Extractor: {actionable_count} Konzepte parallel verarbeiten…")
-        drafts, concept_map, dropped_total = asyncio.run(run_extractors_per_concept(
-            text, concept_plan, existing_concepts,
-            source_meta=pdf_meta, source_file=source_path.name,
-            tag_whitelist=tag_whitelist,
-            background_map=background_map,
-            related_mentions=related_mentions,
-        ))
+        with _span("Extractor", pdf=source_path.name, n_concepts=actionable_count):
+            drafts, concept_map, dropped_total = asyncio.run(run_extractors_per_concept(
+                text, concept_plan, existing_concepts,
+                source_meta=pdf_meta, source_file=source_path.name,
+                tag_whitelist=tag_whitelist,
+                background_map=background_map,
+                related_mentions=related_mentions,
+            ))
         print(f"      {len(drafts)} Draft-Notes extrahiert")
 
     if not drafts:
@@ -1056,14 +1106,15 @@ def main():
 
     chunk_map = {c.title: c.text for c in chunks}
 
-    drafts = asyncio.run(process_all_notes_async(
-        drafts, existing_concepts, concept_links,
-        chunk_map, full_text=text,
-        acronym_dict=acronym_dict, concept_map=concept_map,
-        quality_report=quality_report, pdf_meta=pdf_meta,
-        source_path=source_path, tag_whitelist=tag_whitelist,
-        background_map=background_map,
-    ))
+    with _span("Stage6-Verifier-CrossRef-Critic", pdf=source_path.name, n_drafts=len(drafts)):
+        drafts = asyncio.run(process_all_notes_async(
+            drafts, existing_concepts, concept_links,
+            chunk_map, full_text=text,
+            acronym_dict=acronym_dict, concept_map=concept_map,
+            quality_report=quality_report, pdf_meta=pdf_meta,
+            source_path=source_path, tag_whitelist=tag_whitelist,
+            background_map=background_map,
+        ))
 
     # --- Hebel #5: Boilerplate-Dedup zwischen Hub-Drafts und Sub-Konzept-Drafts ---
     drafts, stripped = boilerplate_dedup.dedup_hub_subconcepts(drafts)
@@ -1092,10 +1143,11 @@ def main():
 
     print(f"\n[7/7] Vault-Writer…")
     written = 0
-    for draft in drafts:
-        vault_writer.write_note(draft, source_file=source_path.name,
-                                dry_run=args.dry_run, source_meta=enriched_meta,
-                                existing_concepts=existing_concepts)
+    with _span("VaultWriter", pdf=source_path.name, n_drafts=len(drafts), dry_run=args.dry_run):
+        for draft in drafts:
+            vault_writer.write_note(draft, source_file=source_path.name,
+                                    dry_run=args.dry_run, source_meta=enriched_meta,
+                                    existing_concepts=existing_concepts)
         will_vault, _ = vault_writer.auto_write_decision(draft)
         _trace_event("orchestrator", "note_outcome", {
             "title": draft.title,

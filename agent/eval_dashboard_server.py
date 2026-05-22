@@ -871,13 +871,11 @@ class Handler(BaseHTTPRequestHandler):
 # HTML-Template (ohne eingebettete Daten -- laedt per fetch)
 # ---------------------------------------------------------------------------
 
-_HTML_TEMPLATE_PATH = Path(__file__).parent.parent.parent.parent.parent / "tmp" / "dashboard-demo" / "variant-h-final.html"
-# Absoluter Pfad als Fallback (Windows)
-_HTML_TEMPLATE_PATH_ABS = Path(r"C:/tmp/dashboard-demo/variant-h-final.html")
+_HTML_TEMPLATE_PATH = Path(__file__).parent.parent / "dashboard" / "eval_dashboard.html"
 
 
 def _build_live_html() -> str:
-    src_path = _HTML_TEMPLATE_PATH_ABS if _HTML_TEMPLATE_PATH_ABS.exists() else _HTML_TEMPLATE_PATH
+    src_path = _HTML_TEMPLATE_PATH
     html = src_path.read_text(encoding="utf-8")
 
     # 1) <script src="data.js"></script> entfernen

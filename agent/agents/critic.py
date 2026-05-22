@@ -397,7 +397,7 @@ def run(draft: AtomicNoteDraft,
             quellen_pass = _sentence_anchor_coverage(draft.body) >= ANCHOR_COVERAGE_OVERRIDE
             glance_pass = True  # nicht deterministisch prüfbar ohne LLM
             passes = sum([future_self_pass, quellen_pass])
-            draft.hard_gates_pass = glance_pass and future_self_pass and quellen_pass
+            draft.hard_gates_pass = False
             if body_truncated:
                 draft.hard_gates_pass = False
             draft.critic_score = min(5, passes + 2)  # 2-4/5 ohne LLM
