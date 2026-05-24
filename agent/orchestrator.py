@@ -20,6 +20,8 @@ from __future__ import annotations
 import argparse
 import asyncio
 import contextlib
+import dataclasses
+import json
 import sys
 from pathlib import Path
 
@@ -832,57 +834,16 @@ def _setup_phoenix_tracing() -> None:
         print(f"[phoenix] Tracing nicht verfügbar ({e}) — Pipeline läuft ohne Traces")
 
 
-def main():
-    ap = argparse.ArgumentParser(description="Atomic Note Multi-Agent Pipeline")
-    ap.add_argument("--source", required=True, help="Pfad zur PDF-Datei")
-    ap.add_argument("--doi", default=None, help="DOI für Qualitäts-Check (optional)")
-    ap.add_argument("--dry-run", action="store_true", help="Kein Schreiben in Vault")
-    ap.add_argument("--by-chapter", action="store_true",
-                    help="Planner und Extractor kapitelweise ausführen (für große Bücher)")
-    ap.add_argument("--no-llm", action="store_true",
-                    help="Stage-6-Agents (Verifier/CrossRef/Critic) ohne LLM — "
-                         "FOSS-Alternativen (BM25, Embeddings, Regex). "
-                         "Extractor + Planner laufen weiterhin mit LLM.")
-    ap.add_argument("--target-tag", default=None,
-                    help="Tag-Hint für Auto-Note-Mover-Routing aus 00-inbox/. "
-                         "Wird allen Notes zusätzlich zu inferierten Tags angehängt. "
-                         "Mapping in CLAUDE.md (z.B. 'job', 'bike', 'private/fitness', "
-                         "'bachelorarbeit'). Ohne --target-tag bleiben Notes in Inbox "
-                         "wenn Tag-Inferenz keinen Routing-Tag liefert.")
-    ap.add_argument("--llm-fallback", action="store_true",
-                    help="LLM (Haiku) für PDF-Enrichment nutzen wenn CrossRef nichts findet")
-    ap.add_argument("--fresh-run", action="store_true",
-                    help="LLM-Cache-Namespace auf aktuelle Run-ID setzen — "
-                         "kein Cache-Hit aus früheren Runs. Nötig für Modell-Vergleiche "
-                         "und echte Qualitäts-Messungen. Retries innerhalb des Runs "
-                         "bleiben gecacht.")
-    args = ap.parse_args()
+def _run_extraction_stages(args, source_path: Path):
+    """Stages 0–5: PDF extract → planning → extraction.
 
-    _setup_phoenix_tracing()
-    _auto_start_dashboard()
-    _auto_version_bump()
-
-    if getattr(args, "fresh_run", False):
-        from agents.base import set_cache_namespace
-        from agents.tracing import _RUN_ID
-        set_cache_namespace(_RUN_ID)
-        print(f"  [cache] --fresh-run: Namespace={_RUN_ID} (kein Hit aus alten Runs)")
-
-    if getattr(args, "no_llm", False):
-        import config as _cfg
-        _cfg.ENABLE_LLM = False  # Modul-Attribut mutieren — sichtbar für alle Agents
-        print("[no-llm] Stage-6-Agents im FOSS-Modus (Verifier/CrossRef/Critic ohne LLM)")
-
-    source_path = Path(args.source)
-    if not source_path.exists():
-        sys.exit(f"Datei nicht gefunden: {source_path}")
-
-    import time as _time
-    _run_start = _time.time()
-
-    print(f"\n=== Atomic Agent: {source_path.name} ===\n")
-
-    from agents.base import trace_run_start as _trace_run_start, trace_event as _trace_event
+    Returns:
+        (drafts, concept_map, existing_concepts, concept_links,
+         text, chunks, acronym_dict, quality_report, pdf_meta,
+         source_path, tag_whitelist, background_map, fb_year,
+         dropped_total, word_count)
+    """
+    from agents.base import trace_run_start as _trace_run_start
     from config import MODEL_CONFIG as _MODEL_CONFIG
     _trace_run_start(_MODEL_CONFIG)
 
@@ -892,10 +853,7 @@ def main():
     word_count = len(text.split())
     print(f"      {word_count} Wörter")
     chunks = pdf_chunker.split_by_chapters(text)
-    # Chunk-Cap für kurze Dokumente: Review-Artikel haben viele Section-Header
-    # aber sind kein Buch — Chapter-Split erzeugt sonst 28+ Chunks bei 12-Seiten-Papern.
-    # Fallback auf Word-Count-Splitting wenn Cap überschritten.
-    source_pages = int(source_meta.get("Pages") or 0) if "source_meta" in dir() else 0
+    source_pages = 0  # source_meta war in main() nie definiert → immer 0; bleibt so
     if (len(chunks) > MAX_CHUNKS_SHORT_DOC
             and source_pages <= MAX_PAGES_SHORT_DOC
             and not getattr(args, "by_chapter", False)):
@@ -905,8 +863,6 @@ def main():
     print(f"      {len(chunks)} Chunks")
     if len(chunks) > LARGE_DOC_THRESHOLD and not getattr(args, "by_chapter", False):
         print(f"      [WARN] {len(chunks)} Chunks - großes Dokument. Erwäge --by-chapter für Bücher.")
-    # Schwartz-Hearst: Akronyme aus dem Quell-PDF extrahieren (sprachagnostisch,
-    # keine Whitelist). Siehe [[Akronym-Erkennung]] im Wissenspool.
     acronym_dict = acronym_fix.extract_acronym_pairs(text)
     if acronym_dict:
         print(f"      [schwartz-hearst] {len(acronym_dict)} Akronyme aus Quelle: "
@@ -915,7 +871,9 @@ def main():
     overview = pdf_chunker.extract_overview(text)
     pdf_meta = pdf_chunker.pdf_metadata(source_path)
     if pdf_meta:
-        meta_line = f"{pdf_meta.get('Title', '?')[:60]} | {pdf_meta.get('Author', '?')[:40]} | {pdf_meta.get('Year', '?')} | {pdf_meta.get('Pages', '?')} S."
+        meta_line = (f"{pdf_meta.get('Title', '?')[:60]} | "
+                     f"{pdf_meta.get('Author', '?')[:40]} | "
+                     f"{pdf_meta.get('Year', '?')} | {pdf_meta.get('Pages', '?')} S.")
         print(f"      Metadata: {meta_line}")
 
     # --- Stage 0: PDF-Enrichment bei fehlenden Metadaten ---
@@ -927,7 +885,6 @@ def main():
             from tools.pdf_enrich import enrich as _enrich, build_filename as _build_fn
             _enrich_meta = _enrich(source_path, dry_run=args.dry_run,
                                    llm_fallback=getattr(args, "llm_fallback", False))
-            # PDF wurde umbenannt — source_path aktualisieren damit Eval korrekt läuft
             if _enrich_meta and not source_path.exists():
                 _new_path = source_path.parent / _build_fn(_enrich_meta)
                 if _new_path.exists():
@@ -935,7 +892,7 @@ def main():
         except Exception as _e:
             print(f"  [warn] PDF-Enrichment fehlgeschlagen: {_e}", file=sys.stderr)
 
-    # --- Schritt 2+3: Context-Builder + Quality-Agent (parallel in Threads) ---
+    # --- Schritt 2+3: Context-Builder + Quality-Agent ---
     print("[2/7] Context-Builder: Vault scannen…")
     relevance_profile = context_builder.build_relevance_profile()
     existing_concepts = relevance_profile["existing_concepts"]
@@ -943,16 +900,10 @@ def main():
     concept_links = context_builder.build_concept_links(existing_concepts)
 
     print("[3/7] Quality-Agent: Quellen-Qualität prüfen…")
-    # Filename-Fallback (F4) auch fürs DOI-Lookup nutzen, damit Pre-Print-PDFs
-    # mit unbrauchbarem pdf_metadata-Title trotzdem CrossRef-Treffer bekommen.
     fb = vault_writer._parse_filename_fallback(source_path.name)
     q_title = pdf_meta.get("Title")
     if not q_title or vault_writer._TITLE_LOOKS_BAD.match(q_title or ""):
         q_title = fb.get("Title") or q_title
-    # v28: Filename-Year hat Vorrang vor PDF-internem Year. PDF-Metadaten enthalten
-    # bei Neuauflagen oft das Erscheinungsjahr der jüngsten Edition (Hiatt-Bug:
-    # PDF sagt 2023, Filename 2006). Filename ist user-set und entspricht der
-    # vorliegenden Edition — autoritativ für Quellen-Angabe und Block-Quote-Header.
     if fb.get("Year"):
         pdf_meta["Year"] = fb["Year"]
     quality_report = quality.check_quality(
@@ -990,7 +941,8 @@ def main():
                                        primary_authors=primary_authors)
             chapter_plan, hallucinated = planner.filter_hallucinated(chapter_plan, chunk.text)
             if hallucinated:
-                print(f"      {len(hallucinated)} halluzinierte Konzepte verworfen: {', '.join(hallucinated[:3])}{'...' if len(hallucinated)>3 else ''}")
+                print(f"      {len(hallucinated)} halluzinierte Konzepte verworfen: "
+                      f"{', '.join(hallucinated[:3])}{'...' if len(hallucinated)>3 else ''}")
             ch_related = [c.title for c in chapter_plan.concepts
                           if c.origin == "secondary_mention"]
             actionable = [c for c in chapter_plan.concepts
@@ -998,7 +950,8 @@ def main():
             if not actionable:
                 print("      Keine Konzepte fuer dieses Kapitel")
                 continue
-            print(f"      {len(actionable)} Konzepte: {', '.join(c.title for c in actionable[:4])}{'...' if len(actionable)>4 else ''}")
+            print(f"      {len(actionable)} Konzepte: "
+                  f"{', '.join(c.title for c in actionable[:4])}{'...' if len(actionable)>4 else ''}")
 
             ch_drafts, ch_map, ch_dropped = asyncio.run(run_extractors_per_concept(
                 chunk.text, chapter_plan, existing_concepts,
@@ -1023,7 +976,8 @@ def main():
                                        primary_authors=primary_authors)
             concept_plan, hallucinated = planner.filter_hallucinated(concept_plan, text)
         if hallucinated:
-            print(f"      {len(hallucinated)} halluzinierte Konzepte verworfen: {', '.join(hallucinated[:3])}{'…' if len(hallucinated)>3 else ''}")
+            print(f"      {len(hallucinated)} halluzinierte Konzepte verworfen: "
+                  f"{', '.join(hallucinated[:3])}{'…' if len(hallucinated)>3 else ''}")
 
         related_mentions = [c.title for c in concept_plan.concepts
                             if c.origin == "secondary_mention"]
@@ -1037,12 +991,7 @@ def main():
         for c in actionable:
             print(f"      [{c.priority:6s}] {c.action:6s} — {c.title}")
 
-        # --- Schritt 4.5: Background-Extractor (Stage-0.5) ---
-        # Trainingswissen pro Konzept vor dem Extractor abfragen — ohne Quellentext-Kontext.
-        # Strukturell sauber: was hier rauskommt ist immer Training, nie Quelltext.
-        # Rationale: [[LLM-Metacognition-Trust]] Discriminative Gap — Modell kann
-        # nicht nativ diskriminieren; wir erzwingen es strukturell via separaten Stage.
-        # Deaktivierbar via ENABLE_BACKGROUND_EXTRACTOR=0 (z.B. für Baseline-Eval-Vergleiche).
+        # --- Schritt 4.5: Background-Extractor ---
         if ENABLE_BACKGROUND_EXTRACTOR:
             print("[4.5/7] Background-Extractor: Trainingswissen pro Konzept…")
             with _span("BackgroundExtractor", pdf=source_path.name):
@@ -1050,7 +999,7 @@ def main():
         else:
             print("[4.5/7] Background-Extractor: deaktiviert (ENABLE_BACKGROUND_EXTRACTOR=0)")
 
-        # --- Schritt 5: Extractor (konzeptzentriert, pro Konzept ein Call) ---
+        # --- Schritt 5: Extractor ---
         actionable_count = sum(1 for c in concept_plan.concepts
                                if c.action != "skip" and c.origin != "secondary_mention")
         print(f"\n[5/7] Extractor: {actionable_count} Konzepte parallel verarbeiten…")
@@ -1063,6 +1012,144 @@ def main():
                 related_mentions=related_mentions,
             ))
         print(f"      {len(drafts)} Draft-Notes extrahiert")
+
+    return (drafts, concept_map, existing_concepts, concept_links,
+            text, chunks, acronym_dict, quality_report, pdf_meta,
+            source_path, tag_whitelist, background_map, fb.get("Year"),
+            dropped_total, word_count)
+
+
+def _save_draft_state(path: str, *, drafts: list, concept_map: dict,
+                      existing_concepts: dict, concept_links: dict,
+                      text: str, chunks: list, acronym_dict: dict,
+                      quality_report, pdf_meta: dict, source_name: str,
+                      tag_whitelist: list, background_map: dict,
+                      filename_year: str | None) -> None:
+    state = {
+        "drafts": [dataclasses.asdict(d) for d in drafts],
+        "concept_map": {k: [dataclasses.asdict(v[0]), v[1]] for k, v in concept_map.items()},
+        "existing_concepts": existing_concepts,
+        "concept_links": {k: list(v) for k, v in concept_links.items()},
+        "text": text,
+        "chunks": [dataclasses.asdict(c) for c in chunks],
+        "acronym_dict": acronym_dict,
+        "quality_report": dataclasses.asdict(quality_report),
+        "pdf_meta": pdf_meta,
+        "source_name": source_name,
+        "tag_whitelist": tag_whitelist,
+        "background_map": background_map or {},
+        "filename_year": filename_year,
+    }
+    Path(path).write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
+    print(f"  [save-drafts] {len(drafts)} Drafts → {path}")
+
+
+def _load_draft_state(path: str):
+    from schemas.atomic_note import AtomicNoteDraft, TextAnchor, QualityReport, ConceptItem
+    from pipeline.pdf_chunker import Chunk
+    state = json.loads(Path(path).read_text(encoding="utf-8"))
+
+    def _to_draft(d: dict) -> AtomicNoteDraft:
+        d["source_anchors"] = [TextAnchor(**a) for a in d["source_anchors"]]
+        return AtomicNoteDraft(**d)
+
+    drafts = [_to_draft(d) for d in state["drafts"]]
+    concept_map = {k: (ConceptItem(**v[0]), v[1]) for k, v in state["concept_map"].items()}
+    concept_links = {k: set(v) for k, v in state["concept_links"].items()}
+    quality_report = QualityReport(**state["quality_report"])
+    chunks = [Chunk(**c) for c in state["chunks"]]
+    return (
+        drafts, concept_map,
+        state["existing_concepts"], concept_links,
+        state["text"], chunks,
+        state["acronym_dict"], quality_report,
+        state["pdf_meta"], state["source_name"],
+        state["tag_whitelist"], state.get("background_map") or {},
+        state.get("filename_year"),
+    )
+
+
+def main():
+    ap = argparse.ArgumentParser(description="Atomic Note Multi-Agent Pipeline")
+    ap.add_argument("--source", default=None, help="Pfad zur PDF-Datei")
+    ap.add_argument("--doi", default=None, help="DOI für Qualitäts-Check (optional)")
+    ap.add_argument("--dry-run", action="store_true", help="Kein Schreiben in Vault")
+    ap.add_argument("--by-chapter", action="store_true",
+                    help="Planner und Extractor kapitelweise ausführen (für große Bücher)")
+    ap.add_argument("--no-llm", action="store_true",
+                    help="Stage-6-Agents (Verifier/CrossRef/Critic) ohne LLM — "
+                         "FOSS-Alternativen (BM25, Embeddings, Regex). "
+                         "Extractor + Planner laufen weiterhin mit LLM.")
+    ap.add_argument("--target-tag", default=None,
+                    help="Tag-Hint für Auto-Note-Mover-Routing aus 00-inbox/. "
+                         "Wird allen Notes zusätzlich zu inferierten Tags angehängt. "
+                         "Mapping in CLAUDE.md (z.B. 'job', 'bike', 'private/fitness', "
+                         "'bachelorarbeit'). Ohne --target-tag bleiben Notes in Inbox "
+                         "wenn Tag-Inferenz keinen Routing-Tag liefert.")
+    ap.add_argument("--llm-fallback", action="store_true",
+                    help="LLM (Haiku) für PDF-Enrichment nutzen wenn CrossRef nichts findet")
+    ap.add_argument("--fresh-run", action="store_true",
+                    help="LLM-Cache-Namespace auf aktuelle Run-ID setzen — "
+                         "kein Cache-Hit aus früheren Runs. Nötig für Modell-Vergleiche "
+                         "und echte Qualitäts-Messungen. Retries innerhalb des Runs "
+                         "bleiben gecacht.")
+    ap.add_argument("--save-drafts", default=None, metavar="PATH",
+                    help="Drafts nach Stage 5 (Extractor) als JSON speichern — "
+                         "für A/B-Vergleich LLM vs. no-LLM in Stage 6.")
+    ap.add_argument("--load-drafts", default=None, metavar="PATH",
+                    help="Drafts aus --save-drafts laden und Stage 1–5 überspringen. "
+                         "--source wird dann ignoriert (Quelle steht im State).")
+    args = ap.parse_args()
+    if not args.source and not args.load_drafts:
+        ap.error("--source ist erforderlich (außer mit --load-drafts)")
+
+    _setup_phoenix_tracing()
+    _auto_start_dashboard()
+    _auto_version_bump()
+
+    if getattr(args, "fresh_run", False):
+        from agents.base import set_cache_namespace
+        from agents.tracing import _RUN_ID
+        set_cache_namespace(_RUN_ID)
+        print(f"  [cache] --fresh-run: Namespace={_RUN_ID} (kein Hit aus alten Runs)")
+
+    if getattr(args, "no_llm", False):
+        import config as _cfg
+        _cfg.ENABLE_LLM = False  # Modul-Attribut mutieren — sichtbar für alle Agents
+        print("[no-llm] Stage-6-Agents im FOSS-Modus (Verifier/CrossRef/Critic ohne LLM)")
+
+    import time as _time
+    _run_start = _time.time()
+    from agents.base import trace_event as _trace_event
+
+    if args.load_drafts:
+        (drafts, concept_map, existing_concepts, concept_links,
+         text, chunks, acronym_dict, quality_report, pdf_meta,
+         _src_name, tag_whitelist, background_map,
+         fb_year) = _load_draft_state(args.load_drafts)
+        source_path = Path(_src_name)
+        word_count = len(text.split())
+        dropped_total = 0
+        print(f"\n=== Atomic Agent (load-drafts): {source_path.name} ===\n")
+        print(f"  [load-drafts] {len(drafts)} Drafts geladen · Stage 1–5 übersprungen")
+    else:
+        source_path = Path(args.source)
+        if not source_path.exists():
+            sys.exit(f"Datei nicht gefunden: {source_path}")
+        print(f"\n=== Atomic Agent: {source_path.name} ===\n")
+        (drafts, concept_map, existing_concepts, concept_links,
+         text, chunks, acronym_dict, quality_report, pdf_meta,
+         source_path, tag_whitelist, background_map, fb_year,
+         dropped_total, word_count) = _run_extraction_stages(args, source_path)
+        if args.save_drafts:
+            _save_draft_state(
+                args.save_drafts, drafts=drafts, concept_map=concept_map,
+                existing_concepts=existing_concepts, concept_links=concept_links,
+                text=text, chunks=chunks, acronym_dict=acronym_dict,
+                quality_report=quality_report, pdf_meta=pdf_meta,
+                source_name=str(source_path), tag_whitelist=tag_whitelist,
+                background_map=background_map, filename_year=fb_year,
+            )
 
     if not drafts:
         print("\nKeine Konzepte extrahiert. Fertig.")
@@ -1128,7 +1215,7 @@ def main():
         enriched_meta["Title"] = quality_report.crossref_title
     if quality_report.crossref_author:
         enriched_meta["Author"] = quality_report.crossref_author
-    if quality_report.crossref_year and not fb.get("Year"):
+    if quality_report.crossref_year and not fb_year:
         # Filename-Year hat Vorrang (v28): CrossRef darf nur überschreiben wenn Filename kein Jahr hat
         enriched_meta["Year"] = quality_report.crossref_year
 
