@@ -4,7 +4,7 @@ from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
-_ENV = Environment(loader=FileSystemLoader(str(_TEMPLATES_DIR)))
+_ENV = Environment(loader=FileSystemLoader(str(_TEMPLATES_DIR), encoding="utf-8-sig"))
 _FORMAT_MAP = {
     "obsidian": "obsidian.md.jinja2",
     "md": "generic.md.jinja2",

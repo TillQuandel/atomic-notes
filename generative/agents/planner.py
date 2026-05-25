@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import re
 
-# Generika-Blacklist (portiert aus foss/gliner_planner.py, angepasst für LLM-Output).
+# Generika-Blacklist (portiert aus extractive/gliner_planner.py, angepasst für LLM-Output).
 # Fängt seltene LLM-"Ausrutscher" ab wenn trotz Prompt-Vorgabe abstrakte Einzel-Konzepte
 # geplant werden. Normalisierung auf lowercase Pflicht (LLM gibt Title-Case aus).
 _GENERIC_BLACKLIST: frozenset[str] = frozenset({
@@ -243,7 +243,7 @@ def filter_hallucinated(plan: ConceptPlan, full_text: str,
         if coverage < min_coverage:
             rejected.append(c.title)
             continue
-        # Blacklist-Check: generische Einzel-Konzepte verwerfen (portiert aus foss).
+        # Blacklist-Check: generische Einzel-Konzepte verwerfen (portiert aus extractive).
         # Normalisierung auf lowercase nötig da LLM Title-Case ausgibt.
         if c.title.strip().lower() in _GENERIC_BLACKLIST:
             rejected.append(c.title)

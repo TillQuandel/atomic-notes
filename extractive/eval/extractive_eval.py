@@ -9,7 +9,7 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from shared.db_schema import SCHEMA_SQL as _SCHEMA_MIGRATION
 
 _ANCHOR_RE = re.compile(r"\s*\(S\.\s*\d+(?:-\d+)?\)")
@@ -57,7 +57,7 @@ def compute_hallucination_rate(sentences: list[str], fulltext: str, threshold: i
     return hallucinated / len(scorable)
 
 
-def insert_foss_run(
+def insert_extractive_run(
     db_path: Path,
     run_id: str,
     pipeline_version: str,
@@ -83,17 +83,17 @@ def insert_foss_run(
             Path(pdf_source).stem.lower().replace(" ", "-"),
             Path(pdf_source).stem,
             n_generated,
-            n_generated,  # foss schreibt alles nach output-dir (kein vault-routing)
+            n_generated,  # extractive schreibt alles nach output-dir (kein vault-routing)
             "gliner_medium-v2.1",
             duration_s,
-            "foss-1.0",
+            "extractive-1.0",
         ))
         conn.commit()
     finally:
         conn.close()
 
 
-def insert_foss_eval(
+def insert_extractive_eval(
     db_path: Path,
     run_id: str,
     note_title: str,
@@ -122,7 +122,7 @@ def insert_foss_eval(
         "pipeline_version":  pipeline_version,
         "pdf":               source_file,
         "language":          language or None,
-        "eval_version":      "foss-1.0",
+        "eval_version":      "extractive-1.0",
         "timestamp":         datetime.utcnow().isoformat(),
     }
     conn = _connect(db_path)

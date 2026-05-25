@@ -1,0 +1,1497 @@
+﻿<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Atomic Agent — Eval Dashboard</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700;800&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="data.js"></script>
+<style>
+/* ===== ATOMIC AGENT — PIPELINE EVAL ============================= */
+/* CSS from Claude Design handoff — adapted for plain HTML + Chart.js */
+
+:root {
+  --bg: #0b1120; --bg-elev: #111827; --bg-card: #141e2e;
+  --ink-1: #f0f4f8; --ink-2: #c4cdd9; --ink-3: #8fa3b8;
+  --ink-4: #566779; --ink-5: #3d4f60;
+  --amber: #e8b53b; --coral: #e07a5f; --mint: #6dbf8c;
+  --teal: #5bbfbf; --violet: #8a86c8;
+  --cat-1: #60a5fa; --cat-2: #c084fc; --cat-3: #fb923c;
+  --cat-4: #38bdf8; --cat-5: #8a86c8;
+  --hair: rgba(255,255,255,.06); --hair-strong: rgba(255,255,255,.10);
+  --tint-mint: rgba(109,191,140,.10); --tint-coral: rgba(224,122,95,.10);
+  --tint-amber: rgba(232,181,59,.12); --tint-cat1: rgba(96,165,250,.16);
+  --f-display: "Syne", Georgia, serif;
+  --f-body: "IBM Plex Sans", system-ui, sans-serif;
+  --f-mono: "JetBrains Mono", ui-monospace, monospace;
+  --side-w: 220px;
+}
+body.light {
+  --bg: #f4f1eb; --bg-elev: #ece7dc; --bg-card: #ffffff;
+  --ink-1: #0d0d0d; --ink-2: #333333; --ink-3: #666666;
+  --ink-4: #999999; --ink-5: #cccccc;
+  --amber: #9e6a00; --coral: #a8391e; --mint: #1e7a45;
+  --teal: #2e7575; --violet: #5a55a3;
+  --cat-1: #2f6db3; --cat-2: #7a3fa8; --cat-3: #c45a14;
+  --cat-4: #2a87b3; --cat-5: #5a55a3;
+  --hair: rgba(0,0,0,.08); --hair-strong: rgba(0,0,0,.16);
+  --tint-mint: rgba(30,122,69,.10); --tint-coral: rgba(168,57,30,.08);
+  --tint-amber: rgba(158,106,0,.10);
+}
+body.collapsed { --side-w: 52px; }
+
+*, *::before, *::after { box-sizing: border-box; }
+html, body { margin: 0; padding: 0; }
+body {
+  font-family: var(--f-body);
+  background: var(--bg); color: var(--ink-2);
+  font-size: 13px; line-height: 1.5;
+  font-feature-settings: "ss01","cv11","tnum";
+  -webkit-font-smoothing: antialiased;
+}
+button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; padding: 0; }
+
+/* warm paper texture */
+body.light::before {
+  content: ""; position: fixed; inset: 0; pointer-events: none; z-index: 0;
+  background-image:
+    radial-gradient(circle at 20% 30%, rgba(120,90,40,.025) 0, transparent 35%),
+    radial-gradient(circle at 80% 70%, rgba(80,60,30,.025) 0, transparent 40%),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.4 0 0 0 0 0.3 0 0 0 0 0.15 0 0 0 .035 0'/></filter><rect width='100%' height='100%' filter='url(%23n)'/></svg>");
+  mix-blend-mode: multiply; opacity: .55;
+}
+
+/* ── Layout ────────────────────────────────────────────────────── */
+.app {
+  display: grid;
+  grid-template-columns: var(--side-w) 1fr;
+  min-height: 100vh;
+  align-items: start;
+  position: relative; z-index: 1;
+  transition: grid-template-columns 220ms cubic-bezier(.4,0,.2,1);
+  overflow-x: clip;
+}
+
+/* ── Sidebar ───────────────────────────────────────────────────── */
+.side {
+  border-right: 1px solid var(--hair);
+  display: flex; flex-direction: column;
+  position: sticky; top: 0; height: 100vh;
+  overflow: hidden; background: var(--bg);
+  align-self: start;
+}
+.side-head {
+  display: flex; align-items: center; gap: 10px;
+  padding: 18px 16px; border-bottom: 1px solid var(--hair);
+  min-height: 64px;
+}
+.logo {
+  width: 28px; height: 28px; flex: 0 0 28px;
+  display: grid; place-items: center;
+  background: linear-gradient(135deg, var(--amber) 0%, var(--coral) 100%);
+  color: var(--bg); border-radius: 4px;
+  font-family: var(--f-display); font-weight: 800; font-size: 15px;
+  letter-spacing: -.02em; cursor: pointer; flex-shrink: 0;
+}
+body.light .logo { color: #fff; }
+.side-title { display: flex; flex-direction: column; flex: 1; min-width: 0; overflow: hidden; line-height: 1.15; }
+.side-title .t1 { font-family: var(--f-display); font-weight: 700; font-size: 14px; color: var(--ink-1); letter-spacing: -.01em; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.side-title .t2 { font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); letter-spacing: .04em; text-transform: lowercase; white-space: nowrap; }
+.collapse-btn {
+  width: 22px; height: 22px; display: grid; place-items: center;
+  border: 1px solid var(--hair); border-radius: 3px; color: var(--ink-3);
+  flex-shrink: 0; transition: color .15s, border-color .15s;
+}
+.collapse-btn:hover { color: var(--ink-1); border-color: var(--hair-strong); }
+
+/* collapsed */
+body.collapsed .side-head { padding: 0; justify-content: center; height: 64px; }
+body.collapsed .side-title { display: none; }
+body.collapsed .logo { display: none; }
+body.collapsed .collapse-btn {
+  position: static; width: 32px; height: 32px;
+  border-radius: 4px; background: var(--bg-elev);
+}
+.expand-hint { display: none; }
+
+.side-nav { padding: 14px 8px; display: flex; flex-direction: column; gap: 2px; flex: 1; }
+.nav-item {
+  display: flex; align-items: center; gap: 12px;
+  padding: 8px 10px; border-radius: 4px;
+  color: var(--ink-3); font-size: 13px; letter-spacing: -.005em;
+  position: relative; white-space: nowrap; text-decoration: none;
+  transition: color .15s, background .15s;
+}
+.nav-item:hover { color: var(--ink-1); background: var(--bg-elev); }
+.nav-item.active { color: var(--ink-1); font-weight: 500; }
+body.light .nav-item.active { background: rgba(158,106,0,.05); }
+.nav-item.active::before {
+  content: ""; position: absolute; left: -8px; top: 6px; bottom: 6px;
+  width: 2px; background: var(--amber); border-radius: 2px;
+  box-shadow: 0 0 8px var(--tint-amber);
+}
+.nav-item .ico { width: 16px; height: 16px; flex: 0 0 16px; display: grid; place-items: center; color: var(--ink-4); }
+.nav-item.active .ico { color: var(--amber); }
+body.collapsed .nav-item { justify-content: center; padding: 8px; }
+body.collapsed .nav-item .nav-label { display: none; }
+
+.side-foot {
+  margin-top: auto; padding: 14px 16px;
+  border-top: 1px solid var(--hair);
+  display: flex; flex-direction: column; gap: 8px;
+  font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); line-height: 1.6;
+}
+.side-foot .eval-row { display: flex; align-items: center; gap: 6px; color: var(--ink-3); }
+.side-foot .ev-v { font-size: 10px; padding: 1px 5px; background: var(--tint-amber); color: var(--amber); border-radius: 2px; }
+.theme-toggle {
+  display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+  border: 1px solid var(--hair); border-radius: 3px;
+  font-family: var(--f-mono); font-size: 10px; color: var(--ink-3);
+  text-transform: uppercase; letter-spacing: .08em;
+  transition: border-color .15s, color .15s;
+}
+.theme-toggle:hover { color: var(--ink-1); border-color: var(--hair-strong); }
+.theme-toggle .tdot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); }
+body.collapsed .side-foot { padding: 14px 10px; align-items: center; }
+body.collapsed .side-foot > *:not(.theme-toggle) { display: none; }
+body.collapsed .theme-toggle > *:not(.tdot) { display: none; }
+body.collapsed .theme-toggle { padding: 6px; }
+
+/* ── Main ──────────────────────────────────────────────────────── */
+.main { min-width: 0; min-height: 100vh; position: relative; }
+
+/* ── Filter bar ────────────────────────────────────────────────── */
+.filterbar {
+  position: sticky; top: 0; z-index: 10;
+  display: flex; align-items: center; gap: 0;
+  background: var(--bg); border-bottom: 1px solid var(--hair);
+  min-height: 48px; padding: 0 20px;
+  backdrop-filter: blur(8px);
+}
+.filter-group {
+  display: flex; align-items: center; gap: 7px;
+  padding: 0 14px; border-right: 1px solid var(--hair); height: 30px;
+}
+.filter-group:first-child { padding-left: 0; }
+.filter-group:last-of-type { border-right: 0; }
+.filter-label { font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); text-transform: uppercase; letter-spacing: .12em; white-space: nowrap; }
+.fselect {
+  background: var(--bg-card); border: 1px solid var(--hair);
+  border-radius: 3px; padding: 4px 22px 4px 8px;
+  font-family: var(--f-mono); font-size: 12px; color: var(--ink-1);
+  cursor: pointer; transition: border-color .15s; appearance: none;
+  min-width: 60px; max-width: 200px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path fill='none' stroke='%23566779' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round' d='M1 1l4 4 4-4'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+.fselect:hover { border-color: var(--hair-strong); }
+.fselect:focus { outline: none; border-color: var(--amber); }
+.delta-pill { margin-left: auto; display: flex; align-items: center; gap: 8px; font-family: var(--f-mono); font-size: 11px; color: var(--ink-3); }
+.delta-pill .num { font-weight: 600; }
+.live { display: flex; align-items: center; gap: 6px; font-family: var(--f-mono); font-size: 10px; color: var(--mint); text-transform: uppercase; letter-spacing: .14em; margin-left: 24px; }
+.live .pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--mint); animation: pulse 2s ease-out infinite; }
+.filter-badges { display: none; flex-wrap: wrap; gap: 6px; padding: 6px 20px; min-height: 0; }
+.fbadge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 10px;
+  background: var(--tint-amber); border: 1px solid rgba(232,181,59,.25); border-radius: 3px;
+  font-family: var(--f-mono); font-size: 10.5px; color: var(--amber); }
+.fbadge button { display: flex; align-items: center; color: var(--amber); opacity: .6; }
+.fbadge button:hover { opacity: 1; }
+.kpi-n { display: block; font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); margin-top: 1px; }
+.kpi-n.warn-n { color: var(--amber); }
+@keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--mint) 70%, transparent); } 100% { box-shadow: 0 0 0 8px transparent; } }
+.eval-ver-warn { margin-left: 12px; font-size: 11px; color: var(--amber); background: var(--tint-amber); border: 1px solid rgba(232,181,59,.25); border-radius: 2px; padding: 3px 10px; display: none; font-family: var(--f-mono); }
+
+/* ── Sections ──────────────────────────────────────────────────── */
+.section { padding: 28px 28px 8px; }
+.sec-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  padding-bottom: 10px; margin-bottom: 16px; border-bottom: 1px solid var(--hair);
+}
+.sec-head .sec-name { font-family: var(--f-mono); font-size: 11px; color: var(--ink-1); text-transform: uppercase; letter-spacing: .18em; font-weight: 500; }
+.sec-head .sec-right { font-family: var(--f-body); font-size: 11px; color: var(--ink-4); font-style: italic; }
+
+/* ── Sub-heads (innerhalb Übersicht) ──────────────────────────── */
+.sub-head {
+  display: flex; align-items: baseline; justify-content: space-between;
+  margin-bottom: 8px; gap: 12px;
+}
+.sub-label {
+  font-family: var(--f-mono); font-size: 11px; font-weight: 600;
+  color: var(--ink-2); text-transform: uppercase; letter-spacing: .10em;
+}
+.sub-meta {
+  font-family: var(--f-body); font-size: 11px;
+  color: var(--ink-4); font-style: italic;
+}
+
+/* ── Strip ─────────────────────────────────────────────────────── */
+.strip {
+  display: grid; grid-template-columns: repeat(8, 1fr);
+  border: 1px solid var(--hair); background: var(--bg-card); border-radius: 4px;
+}
+.strip .cell {
+  padding: 12px 14px; border-right: 1px solid var(--hair);
+  display: flex; flex-direction: column; gap: 4px; min-width: 0;
+}
+.strip .cell:last-child { border-right: 0; }
+.strip .cell .lbl { font-family: var(--f-mono); font-size: 9.5px; color: var(--ink-4); text-transform: uppercase; letter-spacing: .12em; }
+.strip .cell .val { font-family: var(--f-mono); font-size: 18px; color: var(--ink-1); font-weight: 500; letter-spacing: -.01em; display: flex; align-items: baseline; gap: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.strip .cell .val .u { font-size: 11px; color: var(--ink-4); font-weight: 400; }
+.strip .cell .sub { font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+/* ── KPI tiles ─────────────────────────────────────────────────── */
+.kpis {
+  display: grid; grid-template-columns: repeat(6, 1fr);
+  margin-top: 12px; border: 1px solid var(--hair);
+  background: var(--bg-card); border-radius: 4px; overflow: hidden;
+}
+.kpi {
+  padding: 16px 18px 14px; border-right: 1px solid var(--hair);
+  display: flex; flex-direction: column; gap: 8px; position: relative;
+  min-width: 0; cursor: pointer;
+  transition: background .2s, transform .2s, box-shadow .2s;
+}
+.kpi:last-child { border-right: 0; }
+.kpi:hover {
+  background: var(--bg-elev);
+  transform: translateY(-3px);
+  box-shadow: 0 6px 20px rgba(0,0,0,.25);
+  z-index: 1;
+}
+body.light .kpi:hover { box-shadow: 0 6px 20px rgba(0,0,0,.12); }
+.kpi.open { background: var(--bg-elev); }
+.kpi .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.kpi .lbl { font-family: var(--f-mono); font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .12em; }
+.kpi .value-row { display: flex; align-items: baseline; gap: 4px; margin-top: 2px; }
+.kpi .v {
+  font-family: var(--f-display); font-weight: 700;
+  font-size: clamp(36px, 3.8vw, 52px); line-height: .92;
+  letter-spacing: -.045em; color: var(--ink-1);
+  font-feature-settings: "tnum","lnum";
+}
+.kpi .u { font-family: var(--f-display); font-weight: 600; font-size: clamp(14px,1.4vw,18px); color: var(--ink-3); letter-spacing: -.02em; margin-left: 2px; }
+.kpi .tgt {
+  display: inline-flex; align-self: flex-start;
+  font-family: var(--f-mono); font-size: 10px; letter-spacing: .04em;
+  padding: 2px 6px; border-radius: 2px; margin-top: 2px;
+}
+.kpi.bad  .tgt { background: var(--tint-coral); color: var(--coral); }
+.kpi.good .tgt { background: var(--tint-mint);  color: var(--mint); }
+.kpi.warn .tgt { background: var(--tint-amber); color: var(--amber); }
+.kpi.info .tgt { background: rgba(91,191,191,.12); color: var(--teal); }
+.kpi.neutral .tgt { background: var(--hair); color: var(--ink-3); }
+.kpi .accent { display: none; }
+
+/* KPI spark row — außerhalb des kpis-Grid, animiert */
+.spark-row {
+  /* Border immer vorhanden, nur Farbe wechselt — verhindert Race-Condition-Glitch */
+  border-top: 2px solid transparent;
+  border-left: 1px solid transparent;
+  border-right: 1px solid transparent;
+  border-bottom: 1px solid transparent;
+  background: var(--bg-elev);
+  overflow: hidden;
+  max-height: 0;
+  transition: max-height .32s cubic-bezier(.4,0,.2,1),
+              border-color .1s linear;
+}
+.spark-row.open {
+  max-height: 300px;
+  border-top-color: var(--spark-border-color, var(--hair-strong));
+  border-left-color: var(--hair);
+  border-right-color: var(--hair);
+  border-bottom-color: var(--hair);
+}
+.spark-row-inner {
+  overflow: hidden;
+  display: flex; flex-direction: column; gap: 10px;
+  padding: 0 20px;
+  opacity: 0;
+  transform: translateY(-6px);
+  transition: opacity .22s .06s, transform .22s .06s;
+}
+.spark-row.open .spark-row-inner {
+  opacity: 1;
+  transform: translateY(0);
+  padding: 16px 20px 18px;
+}
+/* Content-Wechsel zwischen Kacheln */
+.spark-row-inner.switching {
+  opacity: 0;
+  transform: translateY(4px);
+  transition: opacity .1s, transform .1s;
+}
+.spark-row-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 16px;
+}
+.spark-row-head strong { font-family: var(--f-display); font-size: 13px; font-weight: 600; color: var(--ink-1); letter-spacing: -.01em; }
+.spark-row-head .spark-delta { font-family: var(--f-mono); font-size: 11px; color: var(--ink-3); }
+.spark-row-head .spark-delta .dpos { color: var(--mint); font-weight: 600; }
+.spark-row-head .spark-delta .dneg { color: var(--coral); font-weight: 600; }
+.spark-chart-wrap { width: 100%; }
+/* SVG Hover-Tooltip auf Datenpunkten */
+.spark-pt { cursor: crosshair; }
+.spark-pt .tip { opacity: 0; pointer-events: none; transition: opacity .12s; }
+.spark-pt:hover .tip { opacity: 1; }
+.spark-pt:hover circle { r: 5; }
+
+/* ── Panels ─────────────────────────────────────────────────────── */
+.row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+@media (max-width: 1100px) { .row { grid-template-columns: 1fr; } }
+.panel {
+  background: var(--bg-card); border: 1px solid var(--hair); border-radius: 4px;
+  padding: 18px 20px 20px; display: flex; flex-direction: column; min-width: 0;
+}
+.p-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 14px; }
+.p-title { font-family: var(--f-display); font-weight: 600; font-size: 16px; color: var(--ink-1); letter-spacing: -.012em; }
+.p-sub { margin-top: 3px; font-size: 12px; color: var(--ink-3); line-height: 1.45; }
+.p-sub strong { color: var(--ink-2); font-weight: 600; }
+.p-meta { font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); letter-spacing: .04em; text-transform: uppercase; text-align: right; white-space: nowrap; flex-shrink: 0; }
+.chart-body { position: relative; height: 280px; }
+.chart-body canvas { display: block; }
+
+
+/* legend */
+.legend { display: flex; align-items: center; gap: 14px; margin-top: 10px; font-family: var(--f-mono); font-size: 10.5px; color: var(--ink-3); letter-spacing: .03em; flex-wrap: wrap; }
+.legend span { display: inline-flex; align-items: center; gap: 6px; }
+.legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
+
+/* ── Compare table ─────────────────────────────────────────────── */
+.table-wrap { border: 1px solid var(--hair); border-radius: 4px; background: var(--bg-card); overflow: hidden; }
+table.cmp { width: 100%; border-collapse: collapse; }
+table.cmp th, table.cmp td { padding: 14px 18px; text-align: left; }
+table.cmp thead th { font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); text-transform: uppercase; letter-spacing: .12em; font-weight: 500; border-bottom: 1px solid var(--hair); }
+table.cmp thead th.num { text-align: right; }
+table.cmp tbody tr { border-bottom: 1px solid var(--hair); }
+table.cmp tbody tr:last-child { border-bottom: 0; }
+table.cmp tbody tr:hover td { background: rgba(255,255,255,.02); }
+body.light table.cmp tbody tr:hover td { background: rgba(0,0,0,.02); }
+table.cmp td { font-family: var(--f-mono); font-size: 13px; color: var(--ink-1); font-feature-settings: "tnum"; }
+table.cmp td.num { text-align: right; }
+table.cmp td.pdf { font-family: var(--f-display); font-weight: 600; font-size: 14px; letter-spacing: -.01em; }
+table.cmp td.dim { color: var(--ink-3); }
+.v-tag { display: inline-block; font-family: var(--f-mono); font-size: 11px; padding: 1px 6px; background: var(--tint-amber); color: var(--amber); border-radius: 2px; }
+.acc-bar { display: flex; align-items: center; gap: 10px; }
+.acc-bar .track { flex: 1; max-width: 100px; height: 4px; background: var(--hair); border-radius: 2px; overflow: hidden; }
+.acc-bar .fill { height: 100%; border-radius: 2px; }
+.acc-bar .pct { font-weight: 600; }
+.good-t { color: var(--mint); } .bad-t { color: var(--coral); } .warn-t { color: var(--amber); }
+
+/* ── Footer ─────────────────────────────────────────────────────── */
+.foot { padding: 26px 28px 32px; display: flex; justify-content: space-between; font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); letter-spacing: .08em; text-transform: lowercase; border-top: 1px solid var(--hair); margin-top: 28px; }
+.foot .sep { color: var(--ink-5); margin: 0 8px; }
+
+/* ── Scrollbar ──────────────────────────────────────────────────── */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--hair-strong); border-radius: 5px; border: 2px solid var(--bg); }
+
+/* ── Responsive ─────────────────────────────────────────────────── */
+@media (max-width: 900px) {
+  .strip { grid-template-columns: repeat(4,1fr); }
+  .kpis { grid-template-columns: 1fr 1fr; }
+  .filterbar { min-height: auto; padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
+  .filter-group { height: auto; padding: 4px 12px; }
+}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+
+<!-- ── Sidebar ──────────────────────────────────────────────────── -->
+<aside class="side">
+  <div class="side-head">
+    <div class="logo" title="Atomic Agent">A</div>
+    <div class="side-title">
+      <span class="t1">Atomic Agent</span>
+      <span class="t2">pipeline eval</span>
+    </div>
+    <button class="collapse-btn" onclick="toggleSidebar()" title="Sidebar ein-/ausklappen">
+      <svg viewBox="0 0 16 16" width="12" height="12" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+        <path id="chev-path" d="M10 3l-4 5 4 5"/>
+      </svg>
+    </button>
+  </div>
+
+  <nav class="side-nav" id="side-nav">
+    <a href="#s-overview" class="nav-item active" title="Übersicht">
+      <span class="ico"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="2" y="2" width="5" height="5" rx=".5"/><rect x="9" y="2" width="5" height="5" rx=".5"/><rect x="2" y="9" width="5" height="5" rx=".5"/><rect x="9" y="9" width="5" height="5" rx=".5"/></svg></span>
+      <span class="nav-label">Übersicht</span>
+    </a>
+    <a href="#s-quality" class="nav-item" title="Qualität">
+      <span class="ico"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"><path d="M8 1.5l2 4.5 4.8.5-3.6 3.4 1 4.8L8 12l-4.2 2.7 1-4.8L1.2 6.5l4.8-.5L8 1.5z"/></svg></span>
+      <span class="nav-label">Qualität</span>
+    </a>
+    <a href="#s-cost" class="nav-item" title="Kosten &amp; Performance">
+      <span class="ico"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="8" r="6"/><path d="M8 4.5V8l2.5 1.5" stroke-linecap="round"/></svg></span>
+      <span class="nav-label">Kosten</span>
+    </a>
+    <a href="#s-agents" class="nav-item" title="Agenten">
+      <span class="ico"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4"><circle cx="8" cy="5" r="2.5"/><path d="M3 14c0-3 2.5-5 5-5s5 2 5 5"/></svg></span>
+      <span class="nav-label">Agenten</span>
+    </a>
+    <a href="#s-tradeoff" class="nav-item" title="Trade-off">
+      <span class="ico"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2 13l4-5 3 3 5-7"/></svg></span>
+      <span class="nav-label">Trade-off</span>
+    </a>
+    <a href="#s-calib" class="nav-item" title="Kalibrierung: LLM vs. Human">
+      <span class="ico"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"><path d="M2 8h3l2-5 3 10 2-5h2"/></svg></span>
+      <span class="nav-label">Kalibrierung</span>
+    </a>
+    <a href="#s-compare" class="nav-item" title="Vergleich nach PDF">
+      <span class="ico"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2v12M3 5l5-3 5 3M3 11l5 3 5-3"/></svg></span>
+      <span class="nav-label">Vergleich</span>
+    </a>
+  </nav>
+
+  <div class="side-foot">
+    <div class="eval-row">Eval <span class="ev-v" id="sf-ev-pill">–</span></div>
+    <div id="sf-time">–</div>
+    <div>auto-refresh 15 s</div>
+    <button class="theme-toggle" onclick="toggleTheme()">
+      <span class="tdot" id="theme-dot"></span>
+      <span id="theme-label">Light Mode</span>
+    </button>
+  </div>
+</aside>
+
+<!-- ── Main ────────────────────────────────────────────────────── -->
+<main class="main">
+
+  <!-- Filter bar -->
+  <div class="filterbar">
+    <div class="filter-group">
+      <span class="filter-label">Version</span>
+      <select class="fselect" id="global-pver" onchange="onGlobalFilterChange()">
+        <option value="__all__">Alle</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">PDF</span>
+      <select class="fselect" id="global-pdf" onchange="onGlobalFilterChange()">
+        <option value="__all__">Alle</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Sprache</span>
+      <select class="fselect" id="global-lang" onchange="onGlobalFilterChange()">
+        <option value="__all__">Alle</option>
+        <option value="DE-DE">DE→DE</option>
+        <option value="EN-DE">EN→DE</option>
+        <option value="EN-EN">EN→EN</option>
+      </select>
+    </div>
+    <div class="filter-group">
+      <span class="filter-label">Modell</span>
+      <select class="fselect" id="global-model" onchange="onGlobalFilterChange()">
+        <option value="__all__">Alle</option>
+      </select>
+    </div>
+<div class="live" style="margin-left:auto"><span class="pulse"></span><span>LIVE</span></div>
+  </div>
+  <div class="filter-badges" id="filter-badges"></div>
+
+  <!-- ── Übersicht ─────────────────────────────────────────────── -->
+  <section class="section" id="s-overview">
+    <div class="sec-head">
+      <span class="sec-name">Übersicht</span>
+    </div>
+
+    <!-- Gesamt: alle Versionen + Runs -->
+    <div class="sub-head">
+      <span class="sub-label" id="strip-label">Aktuelle Version</span>
+      <span class="sub-meta" id="strip-meta">Lädt…</span>
+    </div>
+    <div class="strip" id="strip"><div class="cell"><div class="lbl">Lädt</div><div class="val">…</div></div></div>
+
+    <!-- Qualität: immer neueste Pipeline-Version -->
+    <div class="sub-head" style="margin-top:20px">
+      <span class="sub-label">Qualität — <span id="kpi-ver-label" style="color:var(--amber)">lädt…</span></span>
+      <span class="sub-meta">Neueste Pipeline-Version · Klick auf Kachel zeigt Versions-Trend</span>
+    </div>
+    <div class="kpis" id="kpis"><div style="grid-column:1/-1;padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Daten werden geladen…</div></div>
+    <div class="spark-row" id="spark-row">
+      <div class="spark-row-inner" id="spark-inner"></div>
+    </div>
+  </section>
+
+  <!-- ── Qualität ──────────────────────────────────────────────── -->
+  <section class="section" id="s-quality">
+    <div class="sec-head">
+      <span class="sec-name">Qualität</span>
+      <span class="sec-right">Fehlerquote + Belegrate nach Version</span>
+    </div>
+    <div class="row">
+      <div class="panel">
+        <div class="p-head">
+          <div><div class="p-title">Akzeptanzrate je PDF</div><div class="p-sub">Anteil der Notes, die <strong>automatisch akzeptiert</strong> wurden.</div></div>
+          <div class="p-meta" id="ax1">in %</div>
+        </div>
+        <div class="chart-body"><canvas id="ch1"></canvas></div>
+      </div>
+      <div class="panel">
+        <div class="p-head">
+          <div><div class="p-title">Jede Note: Fehlerquote vs. Belegrate</div><div class="p-sub">Jeder Punkt ist eine evaluierte Note. <strong>Links oben</strong> = ideal. <em>Belegrate</em> = Anteil der Textzitate die im Original-PDF nachweisbar sind.</div></div>
+          <div class="p-meta" id="ax2">evaluierte notes</div>
+        </div>
+        <div class="chart-body"><canvas id="ch2"></canvas></div>
+        <div class="legend" id="leg2"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Kosten ────────────────────────────────────────────────── -->
+  <section class="section" id="s-cost">
+    <div class="sec-head">
+      <span class="sec-name">Kosten &amp; Performance</span>
+      <span class="sec-right">Token-Verbrauch + Laufzeit</span>
+    </div>
+    <div class="row">
+      <div class="panel">
+        <div class="p-head">
+          <div><div class="p-title">Token-Verbrauch pro Run</div><div class="p-sub">Input / Output / Cache gestapelt.</div></div>
+          <div class="p-meta" id="ax5">chronologisch</div>
+        </div>
+        <div class="chart-body"><canvas id="ch5"></canvas></div>
+        <div class="legend" id="leg5"></div>
+      </div>
+      <div class="panel">
+        <div class="p-head">
+          <div><div class="p-title">Laufzeit pro Run</div><div class="p-sub">Trend zeigt Pipeline-Effizienz über Versionen.</div></div>
+          <div class="p-meta">Minuten</div>
+        </div>
+        <div class="chart-body"><canvas id="ch6"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Agenten ───────────────────────────────────────────────── -->
+  <section class="section" id="s-agents">
+    <div class="sec-head">
+      <span class="sec-name">Agenten</span>
+      <span class="sec-right">Token-Kosten + Laufzeit je Agent</span>
+    </div>
+    <div class="row">
+      <div class="panel">
+        <div class="p-head">
+          <div><div class="p-title">Output-Tokens je Agent</div><div class="p-sub">Output-Tokens dominieren die Kosten. Cache-Hit-Rate in Klammern.</div></div>
+          <div class="p-meta" id="ax7">kumuliert</div>
+        </div>
+        <div class="chart-body"><canvas id="ch7"></canvas></div>
+      </div>
+      <div class="panel">
+        <div class="p-head">
+          <div><div class="p-title">Laufzeit je Agent</div><div class="p-sub">Wo ist der Flaschenhals?</div></div>
+          <div class="p-meta">sekunden kumuliert</div>
+        </div>
+        <div class="chart-body"><canvas id="ch8"></canvas></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Trade-off ─────────────────────────────────────────────── -->
+  <section class="section" id="s-tradeoff">
+    <div class="sec-head">
+      <span class="sec-name">Trade-off</span>
+      <span class="sec-right">Skalierung + Verlauf</span>
+    </div>
+    <div class="row">
+      <div class="panel">
+        <div class="p-head">
+          <div><div class="p-title">Skaliert die Pipeline mit der PDF-Länge?</div><div class="p-sub">Lange Papers erzeugen <strong>nicht</strong> linear mehr Notes.</div></div>
+          <div class="p-meta">Notes vs. Wörter</div>
+        </div>
+        <div class="chart-body"><canvas id="ch3"></canvas></div>
+        <div class="legend" id="leg3"></div>
+      </div>
+      <div class="panel">
+        <div class="p-head">
+          <div><div class="p-title">Akzeptanzrate über Versionen</div><div class="p-sub"><strong>Steigende Linie</strong> = Verbesserung.</div></div>
+          <div class="p-meta">Verlauf</div>
+        </div>
+        <div class="chart-body"><canvas id="ch4"></canvas></div>
+        <div class="legend" id="leg4"></div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── Kalibrierung ─────────────────────────────────────────── -->
+  <section class="section" id="s-calib">
+    <div class="sec-head">
+      <span class="sec-name">Kalibrierung</span>
+      <span class="sec-right">LLM-Judge (v4.1) vs. Human-Labels — wie zuverlässig ist der Eval?</span>
+    </div>
+
+    <!-- KPI-Strip Kalibrierung -->
+    <div id="calib-strip" style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;
+      border:1px solid var(--hair);background:var(--bg-card);border-radius:4px;margin-bottom:16px;">
+      <div style="padding:12px 16px;border-right:1px solid var(--hair)">
+        <div style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px">Evaluiert (v4.1)</div>
+        <div id="calib-n-eval" style="font-family:var(--f-mono);font-size:18px;color:var(--ink-1);font-weight:500">–</div>
+      </div>
+      <div style="padding:12px 16px;border-right:1px solid var(--hair)">
+        <div style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px">Human-gelabelt</div>
+        <div id="calib-n-labeled" style="font-family:var(--f-mono);font-size:18px;color:var(--ink-1);font-weight:500">–</div>
+      </div>
+      <div style="padding:12px 16px;border-right:1px solid var(--hair)">
+        <div style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px">Ø Agreement</div>
+        <div id="calib-agree" style="font-family:var(--f-mono);font-size:18px;color:var(--ink-1);font-weight:500">–</div>
+      </div>
+      <div style="padding:12px 16px">
+        <div style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px">Status</div>
+        <div id="calib-status" style="font-family:var(--f-mono);font-size:12px;color:var(--amber);font-weight:500">Labeln ausstehend</div>
+      </div>
+    </div>
+
+    <!-- Tabelle -->
+    <div class="table-wrap">
+      <table class="cmp" id="calib-table">
+        <thead><tr>
+          <th>Note</th>
+          <th>PDF</th>
+          <th class="num">LLM-Fehlerquote</th>
+          <th class="num">Human-Fehlerquote</th>
+          <th class="num">Agreement</th>
+          <th>Status</th>
+        </tr></thead>
+        <tbody id="calib-body">
+          <tr><td colspan="6" style="padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">
+            Daten werden geladen…
+          </td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <!-- ── Vergleich ─────────────────────────────────────────────── -->
+  <section class="section" id="s-compare">
+    <div class="sec-head">
+      <span class="sec-name">Vergleich nach Quell-PDF</span>
+      <span class="sec-right">↑ aufklappen für Details</span>
+    </div>
+    <div class="table-wrap">
+      <table class="cmp" id="cmp-table">
+        <thead><tr>
+          <th style="width:28px"></th>
+          <th>Quell-PDF</th><th>Version</th>
+          <th class="num">Wörter</th><th class="num">Seiten</th>
+          <th>Akzeptiert</th><th>Fehlerquote</th>
+          <th>Belegrate</th><th class="num">Notes</th>
+        </tr></thead>
+        <tbody id="cmp-body"><tr><td colspan="9" style="padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Wird geladen…</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+
+  <footer class="foot">
+    <span>atomic agent <span class="sep">·</span> pipeline eval <span class="sep">·</span> localhost</span>
+    <span id="foot-time">–</span>
+  </footer>
+
+</main>
+</div><!-- /app -->
+
+<script>
+/* ── Chart.js Defaults ────────────────────────────────────────── */
+const cssv = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const C = () => ({
+  amber: cssv('--amber'), coral: cssv('--coral'), mint: cssv('--mint'),
+  teal: cssv('--teal'), violet: cssv('--violet'),
+  ink1: cssv('--ink-1'), ink2: cssv('--ink-2'), ink3: cssv('--ink-3'),
+  ink4: cssv('--ink-4'), ink5: cssv('--ink-5'),
+  hair: cssv('--hair'), bg: cssv('--bg'), card: cssv('--bg-card'),
+  c1: cssv('--cat-1'), c2: cssv('--cat-2'), c3: cssv('--cat-3'),
+  c4: cssv('--cat-4'), c5: cssv('--cat-5'),
+});
+
+function applyChartDefaults() {
+  const t = C();
+  Chart.defaults.color = t.ink3;
+  Chart.defaults.font.family = "'IBM Plex Sans', system-ui, sans-serif";
+  Chart.defaults.font.size = 11;
+  Chart.defaults.borderColor = t.hair;
+  Chart.defaults.plugins.legend.display = false;
+  Object.assign(Chart.defaults.plugins.tooltip, {
+    backgroundColor: cssv('--bg-elev'), titleColor: t.ink1, bodyColor: t.ink2,
+    borderColor: t.hair, borderWidth: 1, padding: 10, cornerRadius: 3,
+    titleFont: {weight:600, size:11.5, family:"'IBM Plex Sans',sans-serif"},
+    bodyFont: {size:11.5, family:"'IBM Plex Sans',sans-serif"},
+  });
+}
+applyChartDefaults();
+
+const axisCfg = (x={}) => ({
+  grid: {color: cssv('--hair'), drawTicks: false},
+  border: {display: false},
+  ticks: {color: cssv('--ink-3'), font:{size:10.5}, padding:8},
+  ...x
+});
+const legendCfg = () => ({labels:{color:cssv('--ink-2'), boxWidth:10, font:{size:11}}});
+
+let charts = {};
+function getOrCreate(id, cfg) {
+  if (charts[id]) charts[id].destroy();
+  charts[id] = new Chart(document.getElementById(id), cfg);
+  return charts[id];
+}
+
+/* ── Sidebar ──────────────────────────────────────────────────── */
+function toggleSidebar() {
+  document.body.classList.toggle('collapsed');
+  const path = document.getElementById('chev-path');
+  if (path) path.setAttribute('d', document.body.classList.contains('collapsed') ? 'M6 3l4 5-4 5' : 'M10 3l-4 5 4 5');
+  localStorage.setItem('sidebar-collapsed', document.body.classList.contains('collapsed'));
+}
+if (localStorage.getItem('sidebar-collapsed') === 'true') {
+  document.body.classList.add('collapsed');
+  const path = document.getElementById('chev-path');
+  if (path) path.setAttribute('d', 'M6 3l4 5-4 5');
+}
+
+/* IntersectionObserver für aktive Sektion */
+(function() {
+  const links = document.querySelectorAll('.nav-item');
+  const obs = new IntersectionObserver(entries => {
+    entries.forEach(e => {
+      if (!e.isIntersecting) return;
+      links.forEach(l => l.classList.toggle('active', l.getAttribute('href') === '#'+e.target.id));
+    });
+  }, {rootMargin: '-40% 0px -55% 0px'});
+  document.querySelectorAll('section[id]').forEach(s => obs.observe(s));
+})();
+
+/* ── Theme ────────────────────────────────────────────────────── */
+function applyTheme(light) {
+  document.body.classList.toggle('light', light);
+  const lbl = document.getElementById('theme-label');
+  const dot  = document.getElementById('theme-dot');
+  if (lbl) lbl.textContent = light ? 'Dark Mode' : 'Light Mode';
+  if (dot) dot.style.background = light ? cssv('--ink-3') : cssv('--amber');
+  applyChartDefaults();
+  if (window._lastData) _renderWithData(window._lastData);
+}
+function toggleTheme() {
+  const light = !document.body.classList.contains('light');
+  localStorage.setItem('theme', light ? 'light' : 'dark');
+  applyTheme(light);
+}
+if (localStorage.getItem('theme') === 'light') applyTheme(true);
+
+/* ── Globale Filter ───────────────────────────────────────────── */
+let _globalFilters = { pver: '__all__', pdf: '__all__', lang: '__all__', model: '__all__' };
+
+function _initGlobalLangFilter(langs) {
+  const sel = document.getElementById('global-lang'); if (!sel) return;
+  const key = langs.join(',');
+  if (sel.dataset.loaded === key) return;
+  sel.dataset.loaded = key;
+  sel.innerHTML = `<option value="__all__">Alle</option>` +
+    langs.map(l => `<option value="${l}">${l}</option>`).join('');
+}
+function _modelLabel(m) {
+  if (!m) return m;
+  if (m.startsWith('gliner') || m.startsWith('extractive')) return `extractive (${m})`;
+  if (m.startsWith('claude')) return `agent (${m})`;
+  return m;
+}
+
+function _initGlobalModelFilter(models) {
+  const sel = document.getElementById('global-model'); if (!sel) return;
+  const key = models.join(',');
+  if (sel.dataset.loaded === key) return;
+  sel.dataset.loaded = key;
+  sel.innerHTML = `<option value="__all__">Alle</option>` +
+    models.map(m => `<option value="${m}">${_modelLabel(m)}</option>`).join('');
+}
+
+function _escHTML(s) {
+  return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+function _renderFilterBadges() {
+  const container = document.getElementById('filter-badges');
+  if (!container) return;
+  const labels = { pver: 'Version', pdf: 'PDF', lang: 'Sprache', model: 'Modell' };
+  const active = Object.entries(_globalFilters)
+    .filter(([k, v]) => v && v !== '__all__' && labels[k]);
+  container.innerHTML = active.map(([k, v]) =>
+    `<span class="fbadge">
+      ${_escHTML(labels[k])}: <strong>${_escHTML(v)}</strong>
+      <button onclick="_clearFilter('${_escHTML(k)}')" title="Filter entfernen" aria-label="Filter ${_escHTML(labels[k])} entfernen">
+        <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 2l6 6M8 2l-6 6"/></svg>
+      </button>
+    </span>`
+  ).join('');
+  container.style.display = active.length ? '' : 'none';
+}
+
+window._clearFilter = function(key) {
+  _globalFilters[key] = '__all__';
+  const idMap = { pver: 'global-pver', pdf: 'global-pdf', lang: 'global-lang', model: 'global-model' };
+  const sel = document.getElementById(idMap[key]);
+  if (sel) sel.value = '__all__';
+  _renderFilterBadges();
+  if (typeof MOCK_DATA !== 'undefined') {
+    _renderWithData(_transformMockData(MOCK_DATA, _currentEvalVersion, _globalFilters));
+  } else {
+    loadAndRender();
+  }
+};
+
+function onGlobalFilterChange() {
+  const selPver = document.getElementById('global-pver');
+  const selPdf  = document.getElementById('global-pdf');
+  const selLang  = document.getElementById('global-lang');
+  const selModel = document.getElementById('global-model');
+  _globalFilters.pver  = selPver  ? selPver.value  : '__all__';
+  _globalFilters.pdf   = selPdf   ? selPdf.value   : '__all__';
+  _globalFilters.lang  = selLang  ? selLang.value  : '__all__';
+  _globalFilters.model = selModel ? selModel.value : '__all__';
+  _renderFilterBadges();
+  if (typeof MOCK_DATA !== 'undefined') {
+    _renderWithData(_transformMockData(MOCK_DATA, _currentEvalVersion, _globalFilters));
+  } else {
+    loadAndRender();
+  }
+}
+
+function _initGlobalPverFilter(versions) {
+  const sel = document.getElementById('global-pver'); if (!sel) return;
+  const key = versions.join(',');
+  if (sel.dataset.loaded === key) return;
+  sel.dataset.loaded = key;
+  sel.innerHTML = `<option value="__all__">Alle</option>` +
+    versions.map(v => `<option value="${v}">${v}</option>`).join('');
+}
+
+function _initGlobalPdfFilter(pdfs) {
+  const sel = document.getElementById('global-pdf'); if (!sel) return;
+  const key = pdfs.join(',');
+  if (sel.dataset.loaded === key) return;
+  sel.dataset.loaded = key;
+  sel.innerHTML = `<option value="__all__">Alle</option>` +
+    pdfs.map(p => `<option value="${p.toLowerCase()}">${p}</option>`).join('');
+}
+
+/* ── Eval-Version ─────────────────────────────────────────────── */
+let _currentEvalVersion = null;
+function _getEvalVerFromUrl() { return new URLSearchParams(window.location.search).get('eval_version'); }
+function _setEvalVerInUrl(ver) { const u = new URL(window.location.href); u.searchParams.set('eval_version', ver); window.history.replaceState(null,'',u.toString()); }
+function onEvalVerChange() {
+  const sel = document.getElementById('eval-ver-select'); if (!sel) return;
+  _currentEvalVersion = sel.value; _setEvalVerInUrl(_currentEvalVersion);
+  typeof MOCK_DATA !== 'undefined' ? _renderWithData(_transformMockData(MOCK_DATA, _currentEvalVersion)) : loadAndRender();
+}
+function _initEvalVerDropdown(available, selected) {
+  const sel = document.getElementById('eval-ver-select'); if (!sel) return;
+  const key = available.join(',');
+  if (sel.dataset.loaded === key && _currentEvalVersion === selected) return;
+  sel.dataset.loaded = key;
+  sel.innerHTML = available.map(v=>`<option value="${v}"${v===selected?' selected':''}>${v}</option>`).join('');
+  _currentEvalVersion = selected;
+  const warn = document.getElementById('eval-ver-warn');
+  if (warn) warn.style.display = available.length > 1 ? '' : 'none';
+  const pill = document.getElementById('sf-ev-pill');
+  if (pill) pill.textContent = selected || '–';
+}
+
+/* ── KPI Sparkline ────────────────────────────────────────────── */
+let _openKpiIdx = null;
+let _kpiData = null;
+
+function _kpiTone(k, avg_hall, avg_cov, avg_accept, T) {
+  if (k === 'hall') return avg_hall != null ? (avg_hall <= T.hall[0] ? 'good' : avg_hall >= T.hall[1] ? 'bad' : 'warn') : 'neutral';
+  if (k === 'cov')  return avg_cov  != null ? (avg_cov  >= T.cov[0]  ? 'good' : avg_cov  <= T.cov[1]  ? 'bad' : 'warn') : 'neutral';
+  if (k === 'accept') return avg_accept != null ? (avg_accept >= T.accept[0] ? 'good' : avg_accept <= T.accept[1] ? 'bad' : 'warn') : 'neutral';
+  return 'neutral';
+}
+
+function renderKpis(kpis, thresh, kpiTrend) {
+  const T = thresh;
+  const t = C();
+
+  const toneColor = (tone) => tone==='good'?t.mint:tone==='bad'?t.coral:tone==='warn'?t.amber:tone==='info'?t.teal:t.ink4;
+
+  const kpiDefs = [
+    { id:'kpi-accept', key:'accept', label:'Automatisch akzeptiert', val:kpis.avg_accept, u:'%',
+      tone: kpis.avg_accept!=null?(kpis.avg_accept>=T.accept[0]?'good':kpis.avg_accept<=T.accept[1]?'bad':'warn'):'neutral',
+      tgt: kpis.avg_accept!=null?(kpis.avg_accept>=T.accept[0]?'Ziel erreicht':`Ziel ≥ ${T.accept[0]} %`):'–' },
+    { id:'kpi-hall', key:'hall', label:'Fehlerquote', val:kpis.avg_hall, u:'%',
+      tone: kpis.avg_hall!=null?(kpis.avg_hall<=T.hall[0]?'good':kpis.avg_hall>=T.hall[1]?'bad':'warn'):'neutral',
+      tgt: `Ziel ≤ ${T.hall[0]} %` },
+    { id:'kpi-cov', key:'cov', label:'Belegrate', val:kpis.avg_cov, u:'%',
+      tone: kpis.avg_cov!=null?(kpis.avg_cov>=T.cov[0]?'good':kpis.avg_cov<=T.cov[1]?'bad':'warn'):'neutral',
+      tgt: kpis.avg_cov!=null?(kpis.avg_cov>=T.cov[0]?'Ziel erreicht':`Ziel ≥ ${T.cov[0]} %`):'–' },
+    { id:'kpi-n', key:'n', label:'Evaluierte Notes', val:kpis.n_notes, u:'',
+      tone:'info', tgt: kpis.total_generated ? `${(100*kpis.n_notes/kpis.total_generated).toFixed(1)} % der Notes` : '–' },
+    { id:'kpi-dur',    key:'dur',    label:'Laufzeit',       val:kpis.cur_dur_h??kpis.total_dur_h,   u:'h', tone:'neutral', tgt:'' },
+    { id:'kpi-tokens', key:'tokens', label:'Pipeline-Tokens', val:(kpis.cur_tokens??kpis.total_tokens)?Math.round((kpis.cur_tokens??kpis.total_tokens)/1e6*100)/100:null, u:'M', tone:'neutral', tgt:'' },
+    { id:'kpi-cost', key:'cost', label:'API-Kosten',
+      val: (kpis.cur_cost_usd > 0) ? kpis.cur_cost_usd : null,
+      u:'$', tone:'neutral',
+      tgt: (kpis.cur_cost_usd > 0) ? '' : 'Subscription' },
+  ];
+
+  const nNotes = kpis?.n_notes ?? null;
+  document.getElementById('kpis').innerHTML = kpiDefs.map((kd, i) => {
+    const showN = nNotes != null && ['hall','cov','accept'].includes(kd.key);
+    const nWarn = showN && nNotes < 20;
+    const nTag = showN
+      ? `<span class="kpi-n${nWarn?' warn-n':''}" title="${nWarn?'n<20 — Ziel-Marker ausgeblendet':''}">(n=${nNotes})</span>`
+      : '';
+    return `<div class="kpi ${kd.tone}${_openKpiIdx===i?' open':''}" id="${kd.id}" onclick="_openKpiSpark(${i})" title="Klick: Versions-Trend">
+      <div class="top"><span class="lbl">${kd.label}</span></div>
+      <div class="value-row">
+        <span class="v">${kd.val != null ? kd.val : '–'}</span>
+        ${kd.u ? `<span class="u">${kd.u}</span>` : ''}
+      </div>
+      ${nTag}
+      ${kd.tgt && !nWarn ? `<span class="tgt">${kd.tgt}</span>` : ''}
+    </div>`;
+  }).join('');
+
+  _kpiData = {kpis, thresh, kpiTrend, _defs: kpiDefs};  // nach kpiDefs-Definition
+
+  // Spark-Row separat aktualisieren
+  if (_openKpiIdx != null) {
+    const kd = kpiDefs[_openKpiIdx];
+    const vals = kpiTrend?.[kd.key] || [];
+    const vers = kpiTrend?.versions || [];
+    const sparkColor = toneColor(kd.tone);
+    const sparkSvg = _trendChart(vals, vers, sparkColor, kd.u);
+    const validVals = vals.filter(v=>v!=null);
+    const delta = validVals.length >= 2 ? (validVals[validVals.length-1] - validVals[0]).toFixed(1) : null;
+    const dClass = delta!=null ? (parseFloat(delta)>0 ? (kd.key==='hall'?'dneg':'dpos') : (kd.key==='hall'?'dpos':'dneg')) : '';
+    const sign = delta!=null && parseFloat(delta)>0 ? '+' : '';
+    const inner = document.getElementById('spark-inner');
+    if (inner) inner.innerHTML = `
+      <div class="spark-row-head">
+        <strong>${kd.label} — Versions-Trend</strong>
+        <div class="spark-delta">${delta!=null ? `Δ <span class="${dClass}">${sign}${delta} ${kd.u}</span> · ${vers.length} Versionen` : `${vers.length} Pipeline-Versionen`}</div>
+      </div>
+      <div class="spark-chart-wrap">${sparkSvg}</div>`;
+  }
+}
+
+function _autoUnit(values, unit) {
+  // Wählt sinnvolle Einheit + Formatierung dynamisch nach Wertebereich
+  const max = Math.max(...values.filter(v=>v!=null));
+  // Explizit übergebene Einheiten: behalte sie, formatiere nur den Wert
+  if (unit === '%')  return { u: '%',   fmt: v => v.toFixed(1) };
+  if (unit === 'h')  return { u: 'h',   fmt: v => v < 1 ? `${Math.round(v*60)} min` : v.toFixed(1)+' h' };
+  if (unit === 'M')  return { u: 'M',   fmt: v => v < 0.1 ? `${Math.round(v*1000)} k` : v.toFixed(2)+' M' };
+  if (unit === 'k')  return { u: 'k',   fmt: v => v >= 1000 ? `${(v/1000).toFixed(1)} M` : Math.round(v)+' k' };
+  // Kein unit: auto-scale nach Größenordnung
+  if (max >= 1e6)    return { u: 'M',   fmt: v => (v/1e6).toFixed(2)+' M' };
+  if (max >= 1000)   return { u: 'k',   fmt: v => (v/1000).toFixed(1)+' k' };
+  if (max < 10)      return { u: unit||'', fmt: v => v.toFixed(2)+(unit||'') };
+  return               { u: unit||'', fmt: v => v.toFixed(1)+(unit||'') };
+}
+
+function _trendChart(points, versions, color, unit) {
+  const w = 900, h = 90, padL = 8, padR = 8, padT = 16, padB = 20;
+  const iw = w - padL - padR, ih = h - padT - padB;
+  if (!points || points.length < 2) return `<svg width="100%" viewBox="0 0 ${w} ${h}"></svg>`;
+  const valid = points.filter(v => v != null);
+  if (!valid.length) return `<svg width="100%" viewBox="0 0 ${w} ${h}"></svg>`;
+  const au = _autoUnit(valid, unit);  // dynamische Einheit + Formatter
+  const vmax = Math.max(...valid), vmin = Math.min(...valid);
+  const pad = (vmax - vmin) * 0.2 || (vmax * 0.1) || 1;
+  const max = vmax + pad, min = Math.max(0, vmin - pad);
+  const span = (max - min) || 1;
+  const n = points.length;
+  const xs = points.map((_,i) => padL + (i/(n-1))*iw);
+  const ys = points.map(v => v != null ? padT + ih - ((v-min)/span)*ih : null);
+  const hair = cssv('--hair'); const ink4 = cssv('--ink-3'); const card = cssv('--bg-card');
+  const bg = cssv('--bg-elev');
+
+  let d = '', first = true;
+  points.forEach((v, i) => {
+    if (v == null) { first = true; return; }
+    d += `${first?'M':'L'}${xs[i].toFixed(1)},${ys[i].toFixed(1)} `;
+    if (first) first = false;
+  });
+  const da = `${d} L${xs[n-1]},${padT+ih} L${xs[0]},${padT+ih} Z`;
+
+  // Datenpunkte mit Hover-Tooltip — Position dynamisch je nach Rand
+  const dotGroups = points.map((v, i) => {
+    if (v == null) return '';
+    const cx = parseFloat(xs[i].toFixed(1));
+    const cy = parseFloat(ys[i].toFixed(1));
+    const isLast = i === n-1;
+    const label = au.fmt(v);
+    const tipW = label.length * 7 + 16;
+    const tipH = 18;
+    // Horizontal: zentriert, aber an Rändern anpassen
+    const margin = tipW / 2 + 4;
+    let tipAnchor = 'middle';
+    let tipTx = 0;
+    if (cx < margin) { tipAnchor = 'start'; tipTx = -cx + 4; }
+    else if (cx > w - margin) { tipAnchor = 'end'; tipTx = w - cx - 4; }
+    // Vertikal: über dem Punkt, aber nicht über die SVG-Oberkante
+    const tipTy = cy > padT + 22 ? -20 : 14;
+    return `<g class="spark-pt">
+      <circle cx="${cx}" cy="${cy}" r="${isLast?4.5:3.5}"
+        fill="${isLast?color:card}" stroke="${color}" stroke-width="1.8"
+        style="transition:r .12s"/>
+      <g class="tip" transform="translate(${cx},${cy})">
+        <rect
+          x="${tipTx - (tipAnchor==='middle'?tipW/2:tipAnchor==='start'?0:tipW)}"
+          y="${tipTy - tipH + 4}" width="${tipW}" height="${tipH}"
+          rx="3" fill="${bg}" stroke="${color}" stroke-width="1" opacity=".97"/>
+        <text x="${tipTx}" y="${tipTy - 3}"
+          fill="${color}" font-size="11" font-weight="600"
+          text-anchor="${tipAnchor}" font-family="JetBrains Mono">${label}</text>
+      </g>
+    </g>`;
+  }).join('');
+
+  // Version-Labels auf X-Achse
+  const verLabels = (versions||[]).map((v,i) =>
+    `<text x="${xs[i].toFixed(1)}" y="${h-3}" fill="${ink4}"
+      font-size="9.5" text-anchor="middle" font-family="JetBrains Mono">${v}</text>`
+  ).join('');
+
+  // 3 Hilfslinien mit Wert-Beschriftung — mehr Kontext
+  const hairLines = [0, 0.5, 1].map(t => {
+    const y = (padT + ih - t*ih).toFixed(1);
+    const val = (min + t*span).toFixed(1);
+    return `<line x1="${padL}" x2="${w-padR}" y1="${y}" y2="${y}" stroke="${hair}"/>
+      <text x="${parseFloat(padL)+4}" y="${parseFloat(y)-3}"
+        fill="${ink4}" font-size="9" font-family="JetBrains Mono"
+        opacity=".7">${au.fmt(parseFloat(val))}</text>`;
+  }).join('');
+
+  return `<svg width="100%" viewBox="0 0 ${w} ${h}"
+    preserveAspectRatio="xMidYMid meet" style="display:block;overflow:visible">
+    ${hairLines}
+    <path d="${da}" fill="${color}" opacity=".10"/>
+    <path d="${d}" stroke="${color}" stroke-width="2" fill="none" stroke-linecap="round"/>
+    ${dotGroups}
+    ${verLabels}
+  </svg>`;
+}
+
+const _toneColor = (tone) => {
+  const t = C();
+  return {good:'mint', bad:'coral', warn:'amber', info:'teal', neutral:'ink-4'}[tone]
+    ? cssv(`--${({good:'mint',bad:'coral',warn:'amber',info:'teal',neutral:'ink-4'}[tone]||'ink-4')}`)
+    : t.ink4;
+};
+
+window._openKpiSpark = function(idx) {
+  const row = document.getElementById('spark-row');
+  const inner = document.getElementById('spark-inner');
+  const wasOpen = _openKpiIdx != null;
+  const isSame = _openKpiIdx === idx;
+
+  if (isSame) {
+    _openKpiIdx = null;
+    if (row) row.classList.remove('open');
+    if (_kpiData) renderKpis(_kpiData.kpis, _kpiData.thresh, _kpiData.kpiTrend);
+    return;
+  }
+
+  // Border-Farbe auf KPI-Tone setzen
+  if (row && _kpiData) {
+    const kpiDefs = _kpiData._defs || [];
+    const tone = kpiDefs[idx]?.tone || 'neutral';
+    row.style.setProperty('--spark-border-color', _toneColor(tone));
+  }
+
+  if (wasOpen && inner) {
+    inner.classList.add('switching');
+    setTimeout(() => {
+      _openKpiIdx = idx;
+      if (_kpiData) renderKpis(_kpiData.kpis, _kpiData.thresh, _kpiData.kpiTrend);
+      inner.classList.remove('switching');
+    }, 110);
+  } else {
+    _openKpiIdx = idx;
+    if (_kpiData) renderKpis(_kpiData.kpis, _kpiData.thresh, _kpiData.kpiTrend);
+    requestAnimationFrame(() => { if (row) row.classList.add('open'); });
+  }
+};
+
+window.closeKpiSpark = function() {
+  const row = document.getElementById('spark-row');
+  _openKpiIdx = null;
+  if (row) row.classList.remove('open');
+  if (_kpiData) renderKpis(_kpiData.kpis, _kpiData.thresh, _kpiData.kpiTrend);
+};
+
+/* ── Strip ────────────────────────────────────────────────────── */
+function renderStrip(kpis) {
+  const tok = kpis.total_tokens ? (kpis.total_tokens/1e6).toFixed(2)+'M' : '–';
+  const pct = kpis.total_generated ? (100*kpis.total_accepted/kpis.total_generated).toFixed(1) : '–';
+  const cell = (k,v,u,sub) => `<div class="cell"><div class="lbl">${k}</div><div class="val">${v}${u?`<span class="u">${u}</span>`:''}</div>${sub?`<div class="sub">${sub}</div>`:''}</div>`;
+  const _sl = document.getElementById('strip-label');
+  const _sm = document.getElementById('strip-meta');
+  if (_sl) _sl.textContent = 'Alle Versionen — Gesamt';
+  if (_sm) _sm.textContent = kpis.n_versions > 1 ? `Kumuliert über alle Runs und Pipeline-Versionen · ${kpis.versions_range}` : kpis.versions_range||'';
+  document.getElementById('strip').innerHTML =
+    cell('PDFs', kpis.n_pdfs||'–') +
+    cell('Versionen', kpis.n_versions||'–', '', kpis.versions_range||'') +
+    cell('Runs', kpis.total_runs||'–') +
+    cell('Notes generiert', kpis.total_generated||'–') +
+    cell('Direkt Vault', kpis.total_accepted||'–', '', `/ ${pct} %`) +
+    cell('Merge-Stubs', kpis.total_merged||0) +
+    cell('Dropped', kpis.total_dropped||0) +
+    cell('Tokens', tok, '', kpis.total_dur_h ? kpis.total_dur_h+'h Laufzeit' : '');
+}
+
+/* ── Table ────────────────────────────────────────────────────── */
+let PDF_META = {};
+function toggleRow(btn) {
+  const detail = btn.closest('tr').nextElementSibling;
+  if (!detail || !detail.classList.contains('detail-row')) return;
+  const open = detail.style.display !== 'none';
+  detail.style.display = open ? 'none' : 'table-row';
+  btn.classList.toggle('open', !open);
+}
+function renderTable(rows, thresh) {
+  const T = thresh;
+  const latest = rows.length ? rows[rows.length-1].version : '';
+  const accColor = (v) => v>=T.accept[0]?cssv('--mint'):v>=T.accept[1]?cssv('--amber'):cssv('--coral');
+  document.getElementById('cmp-body').innerHTML = rows.map(r => {
+    const w = r.words ? Number(r.words).toLocaleString('de-DE') : '—';
+    const ac = r.accept != null;
+    return `<tr>
+      <td style="width:28px"></td>
+      <td class="pdf">${r.label||r.key}</td>
+      <td><span class="v-tag${r.version===latest?' cur':''}">${r.version||'–'}</span></td>
+      <td class="num dim">${w}</td>
+      <td class="num dim">${r.pages||'—'}</td>
+      <td>${ac?`<span class="acc-bar"><span class="track"><span class="fill" style="width:${r.accept}%;background:${accColor(r.accept)}"></span></span><span class="pct" style="color:${accColor(r.accept)}">${r.accept.toFixed(1)}%</span></span>`:'—'}</td>
+      <td class="${r.hall!=null?(r.hall<=T.hall[0]?'good-t':r.hall>=T.hall[1]?'bad-t':'warn-t'):''}">${r.hall!=null?r.hall.toFixed(1)+'%':'—'}</td>
+      <td class="${r.cov!=null?(r.cov>=T.cov[0]?'good-t':r.cov<=T.cov[1]?'bad-t':'warn-t'):''}">${r.cov!=null?r.cov.toFixed(1)+'%':'—'}</td>
+      <td class="num dim">${r.n_notes||'—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+/* ── Charts ───────────────────────────────────────────────────── */
+function renderCharts(d) {
+  const T = d.thresholds;
+  const t = C();
+
+  // ch1 — Acceptance bar (nur Einträge mit >0 Notes, Labels auf 18 Zeichen gekürzt)
+  if (d.accept?.labels?.length) {
+    const nMap = d.pdf_table ? Object.fromEntries(d.pdf_table.map(r=>[r.label||r.key, r.n_notes])) : {};
+    const rawPairs = d.accept.labels.map((l,i)=>({l, v:d.accept.values[i]}))
+      .filter(p => p.v > 0 || (nMap[p.l] && nMap[p.l] > 0));
+    const truncLabel = (l) => l.length > 18 ? l.slice(0,16)+'…' : l;
+    const ax1 = document.getElementById('ax1');
+    if (ax1) ax1.textContent = `in % · N=${rawPairs.reduce((s,p)=>s+(nMap[p.l]||0),0)} Notes`;
+    getOrCreate('ch1', {
+      type:'bar',
+      data:{
+        labels: rawPairs.map(p=>`${truncLabel(p.l)}${nMap[p.l]?' (n='+nMap[p.l]+')':''}`),
+        datasets:[{data:rawPairs.map(p=>p.v),
+          backgroundColor:rawPairs.map(p=>p.v>=T.accept[0]?t.mint+'bb':p.v>=T.accept[1]?t.amber+'bb':t.coral+'bb'),
+          borderWidth:0, borderRadius:2, barPercentage:.55, categoryPercentage:.85}]
+      },
+      options:{maintainAspectRatio:false,responsive:true,animation:{duration:500,easing:'easeOutQuart'},
+        clip:false,layout:{padding:{top:22}},
+        plugins:{tooltip:{callbacks:{label:ctx=>`${ctx.parsed.y.toFixed(1)} % akzeptiert`}}},
+        scales:{x:axisCfg({grid:{display:false},ticks:{color:t.ink3,font:{size:11}}}),
+          y:axisCfg({beginAtZero:true,max:100,ticks:{callback:v=>v+' %',stepSize:25}})}},
+      plugins:[{id:'top',afterDatasetsDraw(chart){
+        const {ctx,chartArea}=chart; ctx.save(); ctx.font='600 11px "IBM Plex Sans"'; ctx.textAlign='center';
+        ctx.beginPath(); ctx.rect(0,0,chart.width,chart.height); ctx.clip();
+        chart.getDatasetMeta(0).data.forEach((bar,i)=>{
+          const val=rawPairs[i]?.v??0; const col=val>=T.accept[0]?t.mint:val>=T.accept[1]?t.amber:t.coral;
+          ctx.fillStyle=col; ctx.fillText(val.toFixed(1)+' %',bar.x,Math.max(bar.y-6,12));
+        }); ctx.restore();
+      }}]
+    });
+  }
+
+  // ch2 — Scatter
+  if (d.scatter?.points?.length) renderScatter(d.scatter, T);
+
+  // ch3 — Scaling
+  if (d.scaling?.points?.length) {
+    const keys = d.scaling.keys||[];
+    getOrCreate('ch3',{type:'scatter',
+      data:{datasets:keys.map(k=>{
+        const col=[t.c1,t.c2,t.c3][keys.indexOf(k)]||t.c1;
+        return{label:(d.scaling.points.find(p=>p.key===k)||{}).label||k,
+          data:d.scaling.points.filter(p=>p.key===k).map(p=>({x:p.x,y:p.y,_p:p})),
+          backgroundColor:col+'b0',borderColor:col,borderWidth:1,pointRadius:6,pointHoverRadius:9};
+      })},
+      options:{maintainAspectRatio:false,responsive:true,animation:{duration:500},
+        plugins:{legend:legendCfg(),tooltip:{callbacks:{label:ctx=>{const p=ctx.raw._p||{};return [`${p.label} ${p.ver}`,`${(p.x||0).toLocaleString('de-DE')} Wörter · ${p.y} Notes`];}}}},
+        scales:{x:axisCfg({min:0,title:{display:true,text:'PDF-Länge (Wörter)',color:t.ink2,font:{size:11}},ticks:{callback:v=>(v/1000).toFixed(0)+'k'}}),
+          y:axisCfg({min:0,title:{display:true,text:'Notes pro Run',color:t.ink2,font:{size:11}},ticks:{stepSize:2}})}}
+    });
+    const l3=document.getElementById('leg3');
+    if(l3) l3.innerHTML=keys.map((k,i)=>{const c=[t.c1,t.c2,t.c3][i]||t.c1;const lbl=(d.scaling.points.find(p=>p.key===k)||{}).label||k;return `<span><span class="dot" style="background:${c}"></span>${lbl}</span>`;}).join('');
+  }
+
+  // ch4 — Akzeptanzrate über Versionen (zeigt alle, hebt aktive hervor)
+  if (d.long?.versions?.length) {
+    const t2 = C();
+    const activePver = _globalFilters.pver;
+    getOrCreate('ch4',{type:'line',
+      data:{labels:d.long.versions, datasets:d.long.datasets.map(ds=>{
+        const col=ds.color;
+        return{label:ds.label,data:ds.data,borderColor:col,backgroundColor:col,
+          pointBackgroundColor:t2.card,pointBorderColor:col,pointBorderWidth:2,
+          pointRadius:4,pointHoverRadius:7,borderWidth:2,tension:.35,spanGaps:true};
+      })},
+      options:{maintainAspectRatio:false,responsive:true,animation:{duration:300},
+        plugins:{legend:legendCfg(),tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${ctx.raw} %`}}},
+        scales:{x:axisCfg({ticks:{maxRotation:45}}),
+          y:axisCfg({beginAtZero:true,max:100,ticks:{callback:v=>v+' %',stepSize:25}})}}});
+    const l4=document.getElementById('leg4');
+    if(l4) l4.innerHTML=d.long.datasets.map(ds=>`<span><span class="dot" style="background:${ds.color}"></span>${ds.label}</span>`).join('');
+  }
+
+  // ch5 — Tokens
+  if (d.tokens?.labels?.length) {
+    const ax5=document.getElementById('ax5'); if(ax5) ax5.textContent=`${d.tokens.labels.length} Runs · chronologisch`;
+    const _tokPdf = d.tokens.pdf_labels||[];
+    getOrCreate('ch5',{type:'bar',data:{labels:d.tokens.labels,datasets:[
+      {label:'Input', data:d.tokens.tokens_in, backgroundColor:t.teal+'aa', stack:'t'},
+      {label:'Output',data:d.tokens.tokens_out,backgroundColor:t.mint+'aa', stack:'t'},
+      {label:'Cache', data:d.tokens.tokens_cache,backgroundColor:t.violet+'77',stack:'t'},
+    ]},options:{maintainAspectRatio:false,responsive:true,animation:{duration:500},
+      plugins:{legend:legendCfg(),tooltip:{callbacks:{title:items=>{const i=items[0]?.dataIndex;const pdf=_tokPdf[i];return pdf?`${d.tokens.labels[i]} · ${pdf}`:d.tokens.labels[i];}}}},
+      scales:{x:axisCfg({grid:{display:false},ticks:{color:t.ink3,maxRotation:45,font:{size:9}}}),
+        y:{...axisCfg(),stacked:true,title:{display:true,text:'Tokens',color:t.ink4,font:{size:11}}}}}});
+    const l5=document.getElementById('leg5');
+    if(l5) l5.innerHTML=[{c:t.teal,l:'Input'},{c:t.mint,l:'Output'},{c:t.violet,l:'Cache'}].map(x=>`<span><span class="dot" style="background:${x.c}"></span>${x.l}</span>`).join('');
+    // ch6 — Duration
+    getOrCreate('ch6',{type:'line',data:{labels:d.tokens.labels,datasets:[{data:d.tokens.duration_min||[],borderColor:t.coral,backgroundColor:t.coral+'18',borderWidth:2,pointRadius:4,pointHoverRadius:7,pointBackgroundColor:t.card,pointBorderColor:t.coral,pointBorderWidth:2,tension:.3,fill:true}]},
+      options:{maintainAspectRatio:false,responsive:true,animation:{duration:500},
+        plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>{const i=items[0]?.dataIndex;const pdf=_tokPdf[i];return pdf?`${d.tokens.labels[i]} · ${pdf}`:d.tokens.labels[i];}}}},
+        scales:{x:axisCfg({grid:{display:false},ticks:{color:t.ink3,maxRotation:45,font:{size:9}}}),y:axisCfg({beginAtZero:true,ticks:{callback:v=>v+' min'}})}}});
+  }
+
+  // ch7 + ch8 — Agents
+  const ag = d.agent_stats;
+  if (ag?.labels?.length) {
+    const agColors = [t.c1,t.c2,t.c3,t.c4,t.c5];
+    const bgC = ag.labels.map((_,i)=>agColors[i%agColors.length]+'cc');
+    const agLabelsN = ag.labels.map((l,i)=>ag.calls?.[i]?`${l} (${ag.calls[i]}×)`:l);
+    const ax7=document.getElementById('ax7'); if(ax7) ax7.textContent=`kumuliert · ${ag.calls?.reduce((a,b)=>a+b,0)||0} calls`;
+    getOrCreate('ch7',{type:'bar',data:{labels:agLabelsN,datasets:[{data:ag.output,backgroundColor:bgC,borderWidth:0,borderRadius:2,barPercentage:.65}]},
+      options:{indexAxis:'y',maintainAspectRatio:false,responsive:true,animation:{duration:500},
+        plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const i=ctx.dataIndex;const costStr=(ag.cost_usd?.[i]>0)?` · $${ag.cost_usd[i].toFixed(4)}`:'';return `${(ctx.raw/1000).toFixed(0)}k tokens · Cache ${ag.cache_pct?.[i]} %${costStr}`;}}}},
+        scales:{x:axisCfg({ticks:{callback:v=>v>=1000?(v/1000).toFixed(0)+'k':v}}),y:axisCfg({grid:{display:false},ticks:{color:t.ink2,font:{size:12}}})}}});
+    getOrCreate('ch8',{type:'bar',data:{labels:agLabelsN,datasets:[{data:ag.dur_s,backgroundColor:bgC,borderWidth:0,borderRadius:2,barPercentage:.65}]},
+      options:{indexAxis:'y',maintainAspectRatio:false,responsive:true,animation:{duration:500},
+        plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const s=ctx.raw;return s>=60?`${(s/60).toFixed(1)} min`:`${s} s`;}}}},
+        scales:{x:axisCfg({ticks:{callback:v=>v>=60?(v/60).toFixed(0)+'min':v+'s'}}),y:axisCfg({grid:{display:false},ticks:{color:t.ink2,font:{size:12}}})}}});
+  }
+}
+
+/* ── Scatter ──────────────────────────────────────────────────── */
+let scatterChart=null;
+function renderScatter(scat, T) {
+  const t = C();
+  const pdfList=scat.pdfs||[];
+  // Kein lokaler Filter — globale Filter-Bar steuert die Daten
+  const catColors=[t.c1,t.c2,t.c3,t.c4,t.c5,t.violet];
+  const buildDS=()=>pdfList.map((p,i)=>({
+    label:p.label,
+    data:scat.points.filter(pt=>pt.pdf===p.raw),
+    backgroundColor:catColors[i%catColors.length]+'cc',
+    borderColor:catColors[i%catColors.length],
+    borderWidth:1,pointRadius:6,pointHoverRadius:9
+  }));
+  const cfg={type:'scatter',data:{datasets:buildDS()},
+    options:{maintainAspectRatio:false,responsive:true,animation:{duration:300},
+      plugins:{legend:legendCfg(),tooltip:{callbacks:{label:ctx=>{const p=ctx.raw;return [p.label||'',`v: ${p.version}`,`Fehler: ${p.x} % · Belegrate: ${p.y} %`];}}}},
+      scales:{x:axisCfg({min:0,title:{display:true,text:'Fehlerquote % (kleiner = besser)',color:t.ink3,font:{size:11}},ticks:{callback:v=>v+' %'}}),
+        y:axisCfg({min:0,title:{display:true,text:'Belegrate % (größer = besser)',color:t.ink3,font:{size:11}},ticks:{callback:v=>v+' %'}})}},
+    plugins:[{id:'ideal',beforeDatasetsDraw(chart){const{ctx,scales:{x,y}}=chart;const l=x.getPixelForValue(0),r=x.getPixelForValue(T.hall[0]),top=y.getPixelForValue(y.max),b=y.getPixelForValue(T.cov[0]);ctx.save();ctx.fillStyle=cssv('--tint-mint');ctx.fillRect(l,top,r-l,b-top);ctx.strokeStyle=cssv('--mint');ctx.globalAlpha=.25;ctx.setLineDash([3,3]);ctx.lineWidth=1;ctx.strokeRect(l,top,r-l,b-top);ctx.setLineDash([]);ctx.globalAlpha=1;ctx.font='700 9px "IBM Plex Sans"';ctx.fillStyle=cssv('--mint');ctx.fillText('IDEAL',l+6,top+13);ctx.restore();}}]};
+  if(scatterChart) scatterChart.destroy();
+  scatterChart=new Chart(document.getElementById('ch2'),cfg); charts['ch2']=scatterChart;
+  const ax2=document.getElementById('ax2'); if(ax2) ax2.textContent=scat.points.length+' evaluierte notes';
+  const l2=document.getElementById('leg2'); if(l2) l2.innerHTML=pdfList.map((p,i)=>`<span><span class="dot" style="background:${catColors[i%catColors.length]}"></span>${p.label}</span>`).join('')+`<span style="margin-left:auto"><span class="dot" style="background:color-mix(in srgb, var(--mint) 40%, transparent)"></span>Zielzone</span>`;
+}
+
+/* ── Version range (vereinfacht, kein Von/Bis mehr) ──────────── */
+window.onVerChange = function() {}; // kein Von/Bis mehr
+
+/* ── Data load ────────────────────────────────────────────────── */
+/* ── Kalibrierung ─────────────────────────────────────────────── */
+function renderCalibration(calib) {
+  if (!calib) return;
+  const el = (id) => document.getElementById(id);
+
+  // Strip
+  if (el('calib-n-eval'))    el('calib-n-eval').textContent    = calib.n_eval ?? '–';
+  if (el('calib-n-labeled')) el('calib-n-labeled').textContent = calib.n_labeled ?? '–';
+  if (el('calib-agree'))     el('calib-agree').textContent     = calib.avg_agree != null ? calib.avg_agree + ' %' : '–';
+  if (el('calib-status')) {
+    const pct = calib.n_eval > 0 ? Math.round(calib.n_labeled / calib.n_eval * 100) : 0;
+    el('calib-status').textContent = calib.has_labels
+      ? `${pct} % gelabelt`
+      : 'Labeln ausstehend';
+    el('calib-status').style.color = calib.has_labels ? cssv('--mint') : cssv('--amber');
+  }
+
+  // Tabelle
+  const body = el('calib-body'); if (!body) return;
+  if (!calib.rows || !calib.rows.length) {
+    body.innerHTML = `<tr><td colspan="6" style="padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">
+      Keine v4.1-Eval-Daten — erst reeval_baseline.py ausführen</td></tr>`;
+    return;
+  }
+
+  const fmtHall = (v) => v != null
+    ? `<span class="${v <= 5 ? 'good-t' : v >= 20 ? 'bad-t' : 'warn-t'}">${v} %</span>`
+    : '<span class="dash">–</span>';
+  const fmtAgree = (v) => v != null
+    ? `<span class="${v >= 80 ? 'good-t' : v >= 60 ? 'warn-t' : 'bad-t'}">${v} %</span>`
+    : '<span class="dash">–</span>';
+  const fmtStatus = (s) => s === 'labeled'
+    ? `<span style="font-family:var(--f-mono);font-size:10px;padding:2px 6px;background:var(--tint-mint);color:var(--mint);border-radius:2px">Gelabelt</span>`
+    : `<span style="font-family:var(--f-mono);font-size:10px;padding:2px 6px;background:var(--tint-amber);color:var(--amber);border-radius:2px">Evaluiert</span>`;
+
+  body.innerHTML = calib.rows.map(r => `<tr>
+    <td style="font-family:var(--f-mono);font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.note}">${r.note}</td>
+    <td class="dim" style="font-size:12px">${(r.pdf||'').split(' - ')[0]||r.pdf||'–'}</td>
+    <td class="num">${fmtHall(r.llm_hall)}</td>
+    <td class="num">${fmtHall(r.human_hall)}</td>
+    <td class="num">${fmtAgree(r.agreement)}</td>
+    <td>${fmtStatus(r.status)}</td>
+  </tr>`).join('');
+}
+
+function _renderWithData(d) {
+  if(!d) return; window._lastData=d;
+  const t = C();
+  _initEvalVerDropdown(d.available_eval_versions||[], d.eval_version||'');
+  // Dropdowns: immer mit ALLEN Optionen befüllen (vor globalem Filter)
+  if (d.all_pvers?.length)   _initGlobalPverFilter(d.all_pvers);
+  if (d.all_pdfs?.length)    _initGlobalPdfFilter(d.all_pdfs);
+  if (d.all_langs?.length)   _initGlobalLangFilter(d.all_langs);
+  if (d.all_models?.length)  _initGlobalModelFilter(d.all_models);
+  const sfTime=document.getElementById('sf-time'); if(sfTime) sfTime.textContent=d.generated_at||'–';
+  const footTime=document.getElementById('foot-time'); if(footTime) footTime.textContent=d.generated_at||'–';
+  renderStrip(d.kpis);
+  const verLbl = document.getElementById('kpi-ver-label');
+  if (verLbl) verLbl.textContent = d.kpis.kpi_version || '–';
+  renderKpis(d.kpis, d.thresholds||{accept:[85,65],hall:[5,15],cov:[80,50]}, d.kpi_trend);
+  renderTable(d.pdf_table||[], d.thresholds||{accept:[85,65],hall:[5,15],cov:[80,50]});
+  renderCharts(d);
+  renderCalibration(d.calibration);
+}
+
+async function loadAndRender() {
+  try {
+    const urlVer=_getEvalVerFromUrl(), verParam=_currentEvalVersion||urlVer||'';
+    const p = new URLSearchParams();
+    if (verParam) p.set('eval_version', verParam);
+    if (_globalFilters.lang  && _globalFilters.lang  !== '__all__') p.set('language',         _globalFilters.lang);
+    if (_globalFilters.model && _globalFilters.model !== '__all__') p.set('model',             _globalFilters.model);
+    if (_globalFilters.pdf   && _globalFilters.pdf   !== '__all__') p.set('pdf',               _globalFilters.pdf);
+    if (_globalFilters.pver  && _globalFilters.pver  !== '__all__') p.set('pipeline_version',  _globalFilters.pver);
+    const url = '/data.json' + (p.toString() ? '?' + p.toString() : '');
+    _renderWithData(await fetch(url).then(r=>r.json()));
+  } catch(e) { console.warn('Ladefehler:',e); }
+}
+
+/* ── Mock transform ───────────────────────────────────────────── */
+function _transformMockData(rows, forceEvalVersion, globalFilters) {
+  if(!rows||!Array.isArray(rows)) return null;
+  const median=(a)=>{const s=[...a].sort((x,y)=>x-y),m=Math.floor(s.length/2);return s.length%2?s[m]:(s[m-1]+s[m])/2;};
+  const mean=(a)=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
+  const allEV=[...new Set(rows.map(r=>r.eval_version))].sort();
+  const latestEV=(forceEvalVersion&&allEV.includes(forceEvalVersion))?forceEvalVersion:allEV[allEV.length-1];
+  const evRows=rows.filter(r=>r.eval_version===latestEV);
+  // Alle PDFs + Sprachen VOR dem Filtern — für Dropdown-Optionen
+  const allPdfs=[...new Set(evRows.map(r=>r.pdf).filter(Boolean))];
+  const allLangs=[...new Set(evRows.map(r=>r.language).filter(Boolean))];
+  // Alle verfügbaren Pipeline-Versionen VOR dem Filtern
+  const allPvers = [...new Set(evRows.map(r=>r.pipeline_version).filter(Boolean))].sort();
+  // Globale Filter anwenden
+  const gf = globalFilters || _globalFilters || {pver:'__all__', pdf:'__all__', lang:'__all__'};
+  let filtered = evRows;
+  if (gf.pver && gf.pver !== '__all__') filtered = filtered.filter(r => r.pipeline_version === gf.pver);
+  if (gf.pdf  && gf.pdf  !== '__all__') filtered = filtered.filter(r => r.pdf?.toLowerCase() === gf.pdf);
+  if (gf.lang && gf.lang !== '__all__') filtered = filtered.filter(r => r.language === gf.lang);
+  if (!filtered.length) filtered = evRows; // Fallback wenn Filter zu eng
+  const pdfs=[...new Set(filtered.map(r=>r.pdf))];
+  const vers=[...new Set(filtered.map(r=>r.pipeline_version))].sort();
+  // KPIs = neueste Pipeline-Version, nicht Durchschnitt aller Versionen
+  const latestVer=vers[vers.length-1];
+  const latestRows=filtered.filter(r=>r.pipeline_version===latestVer);
+  const latestAcc=latestRows.filter(r=>r.acceptance).length;
+  const acc=filtered.filter(r=>r.acceptance).length;
+  // Aktuelle Version: Runs-by-version Eintrag für latestVer
+  const latestRunStats = (data.runs_by_version||{})[latestVer] || {};
+  const kpis={
+    n_pdfs:pdfs.length,n_versions:vers.length,
+    versions_range:vers.length>1?vers[0]+'–'+latestVer:latestVer,
+    total_runs: latestRunStats.n_runs||latestRows.length||0,
+    total_generated: latestRunStats.n_total||latestRows.length,
+    total_accepted:  latestRunStats.n_vault||Math.round(latestRows.filter(r=>r.acceptance).length),
+    total_merged:    latestRunStats.n_merge||0,
+    total_dropped:   latestRunStats.n_dropped||0,
+    total_tokens:latestRows.reduce((s,r)=>s+(r.tokens_in||0)+(r.tokens_out||0),0),
+    total_dur_h:(latestRows.reduce((s,r)=>s+(r.duration_s||0),0)/3600).toFixed(1),
+    avg_accept:latestRows.length?Math.round(latestAcc/latestRows.length*1000)/10:null,
+    avg_hall:  latestRows.length?Math.round(median(latestRows.map(r=>r.hallucination))*10)/10:null,
+    avg_cov:   latestRows.length?Math.round(median(latestRows.map(r=>r.coverage))*10)/10:null,
+    n_notes:latestRows.length,kpi_version:latestVer,
+  };
+  const accept={labels:pdfs,values:pdfs.map(pdf=>{const s=filtered.filter(r=>r.pdf===pdf);return Math.round(s.filter(r=>r.acceptance).length/s.length*1000)/10;})};
+  const scatPoints=filtered.map(r=>({x:Math.round(r.hallucination*10)/10,y:Math.round(r.coverage*10)/10,label:r.note_title,pdf:r.pdf.toLowerCase(),pdf_label:r.pdf,version:r.pipeline_version}));
+  const scatter={points:scatPoints,pdfs:pdfs.map(p=>({raw:p.toLowerCase(),label:p})),versions:vers};
+  const pdfC={Bates:'#60a5fa',Kuhlthau:'#c084fc',Schlebbe:'#fb923c'};
+  const long={versions:vers,datasets:pdfs.map(pdf=>({label:pdf,color:pdfC[pdf]||'#60a5fa',data:vers.map(v=>{const s=filtered.filter(r=>r.pdf===pdf&&r.pipeline_version===v);return s.length?Math.round(s.filter(r=>r.acceptance).length/s.length*1000)/10:null;})}))};
+  const pdfWords=Object.assign({Bates:12000,Kuhlthau:8000,Schlebbe:5000}, d.pdf_words||{});
+  const tokens={labels:vers,tokens_in:vers.map(v=>filtered.filter(r=>r.pipeline_version===v).reduce((s,r)=>s+(r.tokens_in||0),0)),tokens_out:vers.map(v=>filtered.filter(r=>r.pipeline_version===v).reduce((s,r)=>s+(r.tokens_out||0),0)),tokens_cache:vers.map(v=>filtered.filter(r=>r.pipeline_version===v).reduce((s,r)=>s+(r.tokens_cache||0),0)),duration_min:vers.map(v=>{const s=filtered.filter(r=>r.pipeline_version===v);return s.length?Math.round(s.reduce((a,r)=>a+(r.duration_s||0),0)/60*10)/10:null;})};
+  const scaling={keys:pdfs.map(p=>p.toLowerCase()),points:pdfs.map(pdf=>({key:pdf.toLowerCase(),label:pdf,x:pdfWords[pdf]||8000,y:Math.round(filtered.filter(r=>r.pdf===pdf).length/vers.length),ver:latestEV,pct:Math.round(filtered.filter(r=>r.pdf===pdf&&r.acceptance).length/filtered.filter(r=>r.pdf===pdf).length*100)}))};
+  const kpi_trend={
+    versions:vers,
+    hall:   vers.map(v=>Math.round(median(filtered.filter(r=>r.pipeline_version===v).map(r=>r.hallucination))*10)/10),
+    cov:    vers.map(v=>Math.round(median(filtered.filter(r=>r.pipeline_version===v).map(r=>r.coverage))*10)/10),
+    accept: vers.map(v=>{const s=filtered.filter(r=>r.pipeline_version===v);return s.length?Math.round(s.filter(r=>r.acceptance).length/s.length*1000)/10:null;}),
+    n:      vers.map(v=>filtered.filter(r=>r.pipeline_version===v).length),
+    dur:    vers.map(v=>{const s=filtered.filter(r=>r.pipeline_version===v);return s.length?Math.round(s.reduce((a,r)=>a+(r.duration_s||0),0)/60*10)/10:null;}),
+    // Pipeline-Tokens (agent_stats approximiert pro Version)
+    tokens: vers.map((_,i) => Math.round((0.8 + i * 0.15) * 100) / 100), // Mock: ~0.8–1.1M je Version
+    cost:   vers.map(() => null),  // Placeholder bis API-Runs vorhanden
+  };
+  const pdf_table=pdfs.map(pdf=>{const s=filtered.filter(r=>r.pdf===pdf);return{key:pdf.toLowerCase(),label:pdf,version:latestEV,words:pdfWords[pdf]||'—',pages:'—',accept:Math.round(s.filter(r=>r.acceptance).length/s.length*1000)/10,hall:Math.round(mean(s.map(r=>r.hallucination))*10)/10,cov:Math.round(mean(s.map(r=>r.coverage))*10)/10,n_notes:s.length};});
+  const agent_stats={agents:['planner','extractor','verifier','cross_reference','critic'],labels:['Planner','Extractor','Verifier','Cross-Ref','Critic'],output:[9388,162304,119848,247705,409237],dur_s:[187,3419,1428,2989,3837],calls:[11,133,155,110,116],cache_pct:[92.3,94.8,94.2,93.6,90.4],errors:[0,0,0,0,0]};
+  // Mock-Kalibrierungsdaten — "vor Labeln" Status
+  const calibration = {
+    n_eval: 23, n_labeled: 0, avg_agree: null, has_labels: false,
+    rows: [
+      {note:'Follow-the-Information-Prinzip (Bates)', pdf:'Bates', llm_hall:18, llm_cov:42, human_hall:null, agreement:null, status:'evaluated'},
+      {note:'Ranganathan Five Laws of Library Science', pdf:'Bates', llm_hall:8,  llm_cov:55, human_hall:null, agreement:null, status:'evaluated'},
+      {note:'Information Seeking by Experimentation', pdf:'Hertzum', llm_hall:22, llm_cov:38, human_hall:null, agreement:null, status:'evaluated'},
+      {note:'Backtalk (Schön, rezipiert von Hertzum)', pdf:'Hertzum', llm_hall:14, llm_cov:45, human_hall:null, agreement:null, status:'evaluated'},
+      {note:'Faculty-Librarian Collaboration in ILI', pdf:'Kaletski', llm_hall:35, llm_cov:28, human_hall:null, agreement:null, status:'evaluated'},
+    ]
+  };
+
+  return{generated_at:new Date().toLocaleString('de-DE'),eval_version:latestEV,available_eval_versions:allEV,all_pdfs:allPdfs,all_langs:allLangs,all_pvers:allPvers,kpis,accept,scatter,long,tokens,scaling,kpi_trend,pdf_table,agent_stats,calibration,pdf_meta:{},thresholds:{accept:[85,65],hall:[5,15],cov:[80,50]}};
+}
+
+/* ── Boot ─────────────────────────────────────────────────────── */
+_renderFilterBadges();
+if (typeof MOCK_DATA !== 'undefined') {
+  _renderWithData(_transformMockData(MOCK_DATA));
+} else {
+  loadAndRender();
+  setInterval(loadAndRender, 15000);
+}
+</script>
+</body>
+</html>
+
+
+
+

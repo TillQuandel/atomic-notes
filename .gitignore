@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *.pyo
 .pytest_cache/
+.pytest-tmp/
 *.egg-info/
 dist/
 build/
@@ -14,7 +15,7 @@ venv/
 tests/fixtures/*.pdf
 
 # Cache
-foss/.cache/
+extractive/.cache/
 .cache/
 
 # Env
@@ -28,8 +29,11 @@ output/
 tmp/
 
 # Agent cache + worktrees
-agent/.cache/
-agent/.worktrees/
-agent/**/__pycache__/
-agent/calibration/labels-active/
-agent/calibration/labels-active-blind/
+generative/.cache/
+generative/.worktrees/
+generative/**/__pycache__/
+generative/calibration/labels-active/
+generative/calibration/labels-active-blind/
+
+# Legacy local runtime leftovers after agent/ -> generative/ rename
+agent/

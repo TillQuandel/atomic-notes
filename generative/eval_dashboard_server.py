@@ -57,7 +57,7 @@ def _read_agent_stats(allowed_run_ids: set | None = None) -> dict:
             import re as _re
             latest_ver = sorted(
                 {r["pipeline_version"] for r in db_runs if r.get("pipeline_version")
-                 and not r["pipeline_version"].startswith("foss-")},
+                 and not r["pipeline_version"].startswith("extractive-")},
                 key=lambda v: [int(x) for x in _re.findall(r"\d+", v)]
             )[-1]
             allowed_ids = {r["run_id"] for r in db_runs if r.get("pipeline_version") == latest_ver}
@@ -289,7 +289,7 @@ def build_data(eval_version: str | None = None,
     except Exception:
         pass
 
-    # DB-only Runs (z.B. foss — kein JSONL) zu token_runs hinzufuegen
+    # DB-only Runs (z.B. extractive — kein JSONL) zu token_runs hinzufuegen
     try:
         import db as _db_only
         _jsonl_run_ids = {tr.get("run_id") for tr in token_runs}
@@ -871,7 +871,7 @@ class Handler(BaseHTTPRequestHandler):
 # HTML-Template (ohne eingebettete Daten -- laedt per fetch)
 # ---------------------------------------------------------------------------
 
-_HTML_TEMPLATE_PATH = Path(__file__).parent.parent / "dashboard" / "eval_dashboard.html"
+_HTML_TEMPLATE_PATH = Path(__file__).parent.parent / "internal" / "dashboard" / "eval_dashboard.html"
 
 
 def _build_live_html() -> str:

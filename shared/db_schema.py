@@ -1,6 +1,6 @@
 """shared/db_schema.py — Kanonisches SQLite-Schema für atomic_analytics.db.
 
-Importiert von agent/db.py und foss/eval/foss_eval.py.
+Importiert von generative/db.py und extractive/eval/extractive_eval.py.
 Änderungen hier einmalig pflegen — nie in beiden Files separat.
 """
 

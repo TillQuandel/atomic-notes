@@ -1,4 +1,4 @@
-from foss.eval.foss_eval import compute_anchor_rate, compute_hallucination_rate
+from extractive.eval.extractive_eval import compute_anchor_rate, compute_hallucination_rate
 
 def test_anchor_rate_all_anchored():
     assert compute_anchor_rate(["IB is broad. (S. 1)", "Bates defines it. (S. 2)"]) == 1.0

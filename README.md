@@ -1,69 +1,68 @@
-# atomic-notes
+﻿# atomic-notes
 
-PDF → atomare Obsidian-Notes via Multi-Agent-Pipeline.
+Atomic Notes transforms rich sources into verified atomic knowledge units.
 
-## Stand
+The current implementation starts with PDFs, but the project is meant to be input- and output-independent: source adapters normalize different media into a common source representation, pipelines create atomic notes, and renderers/exporters decide where those notes go.
 
-**v0.3.72** · **foss-v0.2.0** · letzte Änderung: 2026-05-25
-
-## Struktur
-
-```
-agent/          LLM-Pipeline (Claude Opus, 7 Stages)
-foss/           FOSS-Pipeline (GLiNER, kein LLM)
-shared/         Gemeinsame DB-Schema, Utilities
-dashboard/      Eval-Dashboard
+```text
+source input -> normalized source -> atomic-note pipeline -> output renderer
 ```
 
-## Schnellstart
+PDF input and Obsidian-style Markdown are the first supported path, not the whole product.
+
+## Status
+
+**generative v0.3.72** · **extractive v0.2.0** · last updated: 2026-05-25
+
+## Repository Layout
+
+```text
+generative/     LLM-based synthesis pipeline with verifier, critic, and quality gates
+extractive/     Local extractive pipeline; no free generation, source sentences only
+shared/         Shared schemas, database schema, and cross-pipeline utilities
+tests/          Repository-level tests, currently focused on the extractive pipeline
+internal/       Internal evaluation assets and development notes, not user-facing product
+```
+
+`internal/dashboard/` is used for evaluation and debugging while developing the pipelines. It is not part of the public user workflow.
+
+## Pipelines
+
+### Generative
+
+The generative pipeline synthesizes standalone atomic notes from source material. It uses LLM stages for planning, extraction, verification, cross-reference checks, and critique. This is the higher-quality path when synthesis is useful and API/model access is acceptable.
 
 ```bash
-# Agent-Pipeline
-cd agent/
-python orchestrator.py --source <pdf> --dry-run    # Test ohne Schreiben
-python orchestrator.py --source <pdf>              # Live-Run → 00-inbox/
-python orchestrator.py --source <pdf> --no-llm     # FOSS-only
-
-# Dashboard
-python eval_dashboard_server.py                    # http://127.0.0.1:8051
+cd generative
+python orchestrator.py --source <pdf> --dry-run
+python orchestrator.py --source <pdf>
 ```
 
-## Agent-Pipeline (7 Stages)
+### Extractive
 
-| Stage | Was | Status |
-|---|---|---|
-| 1 | PDF → Text + Chunks | stabil |
-| 2 | Context-Builder: Vault-Scan → Relevanz-Profil | stabil |
-| 3 | Quality-Agent: CrossRef/OpenAlex | stabil |
-| 4 | Planner: ConceptPlan (Sonnet) | stabil |
-| 5 | Extractor × N parallel (Sonnet) | stabil |
-| 6 | Verifier + CrossRef + Critic pro Note (Haiku / `--no-llm`) | stabil |
-| 7 | Vault-Writer → 00-inbox/ oder 04-wissen/ | stabil |
-| 8 | Eval (LLM-as-Judge via `eval_quality_v4`) | stabil (v0.3.66) |
+The extractive pipeline builds notes from source sentences. It is local-first and does not freely generate prose, so it is useful as a privacy-preserving baseline and as a low-hallucination comparison path.
 
-## FOSS-Pipeline
+```bash
+python extractive/orchestrator.py --source <pdf> --output obsidian --out-dir ./notes
+python extractive/orchestrator.py --source <pdf> --output json --out-dir ./notes
+```
 
-GLiNER-basierte Extraktion ohne LLM. Stand v0.2.0: 18 PDFs, Ø 8.5% Halluzinationsrate (LLM-Judge v4.1). Extractive-vs-Generative-Gap offen.
+## Output Direction
 
-Offene TODOs: LexRank-Definitional-Filter (v0.2.1), ER-Stage-1-Threshold, KeyBERT-Fallback-Tuning, Bates-Regression (EN hall 28%).
+The long-term output contract is a structured atomic note: title, body, source anchors, source metadata, quality status, and optional links/tags. Obsidian Markdown is one renderer. Plain Markdown, JSON, ZIP exports, and other PKM formats should be renderer concerns rather than pipeline assumptions.
 
-## Qualitätsziele (agent)
+## Input Direction
 
-| Metrik | Aktuell | Ziel kurz | Ziel lang |
-|---|---|---|---|
-| Halluzinationsrate | ~16% (Eval v4.1, margin-TOP_K) | <10% | <5% |
-| Inbox-Rate | ~30% | <20% | <10% |
-| Coverage | ~52% | >60% | >80% |
+PDF is the first adapter. Future adapters should normalize HTML/articles, RSS items, transcripts, podcasts, videos, and other concept-rich sources into the same source model before the pipeline runs.
 
-Referenz: Claude Sonnet-4.6 Baseline = 10.6% (Vectara Leaderboard Mai 2026).
-no-LLM (`--no-llm`): vergleichbare Metriken bei 3× schneller, 4× weniger Tokens — echter A/B-Vergleich ausstehend (`--save-drafts`/`--load-drafts` geplant).
+## Development Notes
 
-## Calibration (offen)
+The project is still early and carries some historical naming in older internal docs and eval data. New code and public documentation should use:
 
-30 Hybrid-Notes mit Status `to-label` — manuelles Labeling ~3-5h ausstehend.
-Nach Labeln: `collect.py` → `adversarial.py` → `kappa.py`. Ziel: AC1 ≥ 0.70.
+- `generative` for the LLM synthesis pipeline
+- `extractive` for the local sentence-extraction pipeline
+- `internal` for dashboards, calibration, and development-only tooling
 
-## GitHub
+## License
 
-[TillQuandel/atomic-notes](https://github.com/TillQuandel/atomic-notes) — Issues #1–#14
-Milestones: v0.4.0 Bugfixes · v0.5.0 PDF-Extraction-Upgrade · v1.0.0 Public Release
+Apache 2.0

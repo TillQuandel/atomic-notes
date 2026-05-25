@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
 """run_eval.py — Post-Processing LLM-Judge Eval auf generierten Notes.
 
-Nimmt einen foss- oder agent-Run (run_id + Notes-Verzeichnis + Quell-PDF)
+Nimmt einen extractive- oder generative-Run (run_id + Notes-Verzeichnis + Quell-PDF)
 und evaluiert jede Note mit eval_quality_v4.eval_note() (Claude-API).
 Ergebnisse landen in note_evals mit eval_version=4.1 und der uebergebenen
-pipeline_version — direkt vergleichbar mit agent-Runs im Dashboard.
+pipeline_version — direkt vergleichbar mit generative-Runs im internen Dashboard.
 
 Usage:
-    python run_eval.py --run-id <uuid> --notes ./tmp/foss-bates --pdf bates.pdf
-    python run_eval.py --run-id <uuid> --notes ./tmp/foss-bates --pdf bates.pdf --no-cache
+    python run_eval.py --run-id <uuid> --notes ./tmp/extractive-bates --pdf bates.pdf
+    python run_eval.py --run-id <uuid> --notes ./tmp/extractive-bates --pdf bates.pdf --no-cache
 """
 from __future__ import annotations
 
@@ -18,11 +18,11 @@ from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(_REPO_ROOT))
-sys.path.insert(0, str(_REPO_ROOT / "agent"))
+sys.path.insert(0, str(_REPO_ROOT / "generative"))
 
 # decision_engine liegt im Vault-Worktree (nicht im Repo) — optionaler Pfad
 _DE_CANDIDATES = [
-    _REPO_ROOT / "agent" / ".worktrees" / "lib",
+    _REPO_ROOT / "generative" / ".worktrees" / "lib",
     Path.home() / "Obsidian_Vault" / "98-system" / "scripts" / "atomic-agent" / ".worktrees" / "lib",
 ]
 for _p in _DE_CANDIDATES:

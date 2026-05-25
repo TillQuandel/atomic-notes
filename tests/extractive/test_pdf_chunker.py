@@ -1,4 +1,4 @@
-from foss.pipeline.pdf_chunker import detect_language, strip_anchors
+from extractive.pipeline.pdf_chunker import detect_language, strip_anchors
 
 def test_detect_english():
     assert detect_language("This is an English text about information behavior.") == "en"

@@ -1,7 +1,7 @@
 from pydantic import BaseModel, field_validator
 
 
-class AtomicNoteFoss(BaseModel):
+class AtomicNoteExtractive(BaseModel):
     title: str
     concept_type: str
     extracted_body: list[str]
@@ -9,7 +9,7 @@ class AtomicNoteFoss(BaseModel):
     related: list[str] = []
     tags: list[str] = []
     source_file: str
-    pipeline: str = "foss-atomic"
+    pipeline: str = "extractive"
     hallucination_rate: float = 0.0
     extraction_coverage: float = 0.0
     created: str = ""
