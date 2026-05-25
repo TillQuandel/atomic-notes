@@ -8,6 +8,7 @@ dist/
 build/
 .venv/
 venv/
+.venv-phoenix/
 
 # Test fixtures — large PDFs not committed
 tests/fixtures/*.pdf
@@ -21,8 +22,10 @@ foss/.cache/
 
 # Run output
 test-output/
+test-output*/
 output/
 *.jsonl
+tmp/
 
 # Agent cache + worktrees
 agent/.cache/
