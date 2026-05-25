@@ -856,9 +856,13 @@ def _run_extraction_stages(args, source_path: Path):
     word_count = len(text.split())
     print(f"      {word_count} Wörter")
     chunks = pdf_chunker.split_by_chapters(text)
-    source_pages = 0  # source_meta war in main() nie definiert → immer 0; bleibt so
+    pdf_meta_early = pdf_chunker.pdf_metadata(source_path) or {}
+    try:
+        source_pages = int(pdf_meta_early.get("Pages") or 0)
+    except (TypeError, ValueError):
+        source_pages = 0
     if (len(chunks) > MAX_CHUNKS_SHORT_DOC
-            and source_pages <= MAX_PAGES_SHORT_DOC
+            and 0 < source_pages <= MAX_PAGES_SHORT_DOC
             and not getattr(args, "by_chapter", False)):
         print(f"      [chunk-cap] {len(chunks)} Chunks bei {source_pages} S. → "
               f"Fallback auf Word-Count-Split (max {MAX_CHUNKS_SHORT_DOC})")
@@ -872,7 +876,7 @@ def _run_extraction_stages(args, source_path: Path):
               f"{', '.join(list(acronym_dict.keys())[:8])}"
               f"{'...' if len(acronym_dict) > 8 else ''}")
     overview = pdf_chunker.extract_overview(text)
-    pdf_meta = pdf_chunker.pdf_metadata(source_path)
+    pdf_meta = pdf_meta_early
     if pdf_meta:
         meta_line = (f"{pdf_meta.get('Title', '?')[:60]} | "
                      f"{pdf_meta.get('Author', '?')[:40]} | "
@@ -922,6 +926,7 @@ def _run_extraction_stages(args, source_path: Path):
 
     tag_whitelist = relevance_profile.get("tag_whitelist", [])
     background_map: dict = {}
+    related_mentions: list[str] = []
 
     if getattr(args, "by_chapter", False) and len(chunks) > 1:
         # --- Schritt 4+5: Planner + Extractor kapitelweise ---
@@ -963,6 +968,9 @@ def _run_extraction_stages(args, source_path: Path):
                 background_map={},
                 related_mentions=ch_related,
             ))
+            for t in ch_related:
+                if t not in related_mentions:
+                    related_mentions.append(t)
             dropped_total += ch_dropped
             all_drafts.extend(ch_drafts)
             for draft_title, concept_context in ch_map.items():
@@ -1027,7 +1035,8 @@ def _save_draft_state(path: str, *, drafts: list, concept_map: dict,
                       text: str, chunks: list, acronym_dict: dict,
                       quality_report, pdf_meta: dict, source_name: str,
                       tag_whitelist: list, background_map: dict,
-                      filename_year: str | None) -> None:
+                      filename_year: str | None,
+                      related_mentions: list[str] | None = None) -> None:
     state = {
         "drafts": [dataclasses.asdict(d) for d in drafts],
         "concept_map": {k: [dataclasses.asdict(v[0]), v[1]] for k, v in concept_map.items()},
@@ -1042,6 +1051,7 @@ def _save_draft_state(path: str, *, drafts: list, concept_map: dict,
         "tag_whitelist": tag_whitelist,
         "background_map": background_map or {},
         "filename_year": filename_year,
+        "related_mentions": related_mentions or [],
     }
     Path(path).write_text(json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"  [save-drafts] {len(drafts)} Drafts → {path}")
@@ -1069,6 +1079,7 @@ def _load_draft_state(path: str):
         state["pdf_meta"], state["source_name"],
         state["tag_whitelist"], state.get("background_map") or {},
         state.get("filename_year"),
+        state.get("related_mentions") or [],
     )
 
 
@@ -1132,11 +1143,10 @@ def main():
         (drafts, concept_map, existing_concepts, concept_links,
          text, chunks, acronym_dict, quality_report, pdf_meta,
          _src_name, tag_whitelist, background_map,
-         fb_year) = _load_draft_state(args.load_drafts)
+         fb_year, related_mentions) = _load_draft_state(args.load_drafts)
         source_path = Path(_src_name)
         word_count = len(text.split())
         dropped_total = 0
-        related_mentions = None
         print(f"\n=== Atomic Agent (load-drafts): {source_path.name} ===\n")
         print(f"  [load-drafts] {len(drafts)} Drafts geladen · Stage 1–5 übersprungen")
     else:
@@ -1156,6 +1166,7 @@ def main():
                 quality_report=quality_report, pdf_meta=pdf_meta,
                 source_name=str(source_path), tag_whitelist=tag_whitelist,
                 background_map=background_map, filename_year=fb_year,
+                related_mentions=related_mentions,
             )
 
     if not drafts:

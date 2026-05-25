@@ -67,11 +67,8 @@ MAX_CONCURRENT_CALLS = 4
 # weiter. Beobachtet: normale Calls 5–60s; ein hängender Critic-Call hat 110min blockiert.
 CALL_TIMEOUT_SEC = int(os.getenv("ATOMIC_AGENT_CALL_TIMEOUT", "180"))
 
-# Strict-Quality: Pipeline bricht ab wenn Quality-API ausfällt (statt blind weiter)
-STRICT_QUALITY = True
-
 # Pipeline-Version für agent-version Frontmatter
-AGENT_VERSION = "v0.3.70"  # Window-Builder Option D: Sliding-Window Co-Occurrence Ranking statt ±cluster-expansion
+AGENT_VERSION = "v0.3.72"  # Welle 1: by-chapter/source_pages/mkdir/relative_to/ER-Threshold/dead-code
 
 # Background-Extractor (Stage-0.5): Trainingswissen pro Konzept vor Extractor abfragen.
 # Deaktivierbar via ENV ENABLE_BACKGROUND_EXTRACTOR=0 — z.B. für Baseline-Eval-Tests
@@ -104,8 +101,10 @@ ER_BODY_COSINE_THRESHOLD = 0.985
 
 # Title-Cosine-Threshold für semantic deduplication (v35). Adressiert die Lücke
 # bei Titel-Varianten mit null Token-Overlap (z.B. Übersetzung EN-DE).
-# Schwelle 0.88 ist konservativ (GraphRAG-Empfehlung Bereich 0.85-0.90 für identity).
-ER_TITLE_COSINE_THRESHOLD = 0.88
+# Schwelle 0.93: konservativer gewählt nach Afzal-Run-Befund (Issue #2) — Präfix-
+# dominante Titel ("Kompetenzbereich X") erzeugten bei 0.88 false-positive
+# Stage-2.5-Paare. 0.93 hält DE-EN-Übersetzungs-Match (>0.95) weiterhin sicher.
+ER_TITLE_COSINE_THRESHOLD = 0.93
 # Blocking: Title-Token-Subset als HARD-Constraint (siehe entity_resolution).
 # Jaccard-Konstante ist deprecated (vorher als Vorfilter genutzt) — Subset-Test
 # ist strukturell präziser und verhindert ISP-Phase-Kollaps.

@@ -702,9 +702,17 @@ def write_note(note: AtomicNoteDraft, source_file: str, dry_run: bool = False,
         (eval_dir / f"{prefix}__{target.name}").write_text(content, encoding="utf-8")
         return target
 
+    target.parent.mkdir(parents=True, exist_ok=True)
     target.write_text(content, encoding="utf-8")
+
+    def _display(p: Path) -> str:
+        try:
+            return str(p.relative_to(VAULT))
+        except ValueError:
+            return str(p)
+
     if is_merge_stub:
-        print(f"  [Merge-Stub] {target.relative_to(VAULT)}  -> {existing_vault.relative_to(VAULT)}")
+        print(f"  [Merge-Stub] {_display(target)}  -> {_display(existing_vault)}")
     else:
-        print(f"  [Inbox] {target.relative_to(VAULT)}  ({'vault-empfohlen' if auto else 'review'})")
+        print(f"  [Inbox] {_display(target)}  ({'vault-empfohlen' if auto else 'review'})")
     return target
