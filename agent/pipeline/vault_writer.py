@@ -499,15 +499,17 @@ def find_existing_in_vault(title: str, aliases: list[str],
     return None
 
 
-def find_existing_in_inbox(source_file: str, title: str) -> Path | None:
+def find_existing_in_inbox(source_file: str, title: str,
+                           inbox_dir: Path | None = None) -> Path | None:
     """Idempotenz-Check: Inbox-Datei mit identischem source-file + title.
     Findet eigene Pipeline-Drafts aus früherem Run derselben PDF — überschreiben statt
     -2-Suffix anhängen.
     """
-    if not INBOX.exists():
+    search_dir = inbox_dir if inbox_dir is not None else INBOX
+    if not search_dir.exists():
         return None
     title_norm = title.strip().lower()
-    for f in INBOX.glob("*.md"):
+    for f in search_dir.glob("*.md"):
         try:
             text = f.read_text(encoding="utf-8", errors="replace")
         except OSError:
@@ -600,7 +602,8 @@ tags:
 
 def write_note(note: AtomicNoteDraft, source_file: str, dry_run: bool = False,
                source_meta: dict[str, str] | None = None,
-               existing_concepts: dict[str, str] | None = None) -> Path:
+               existing_concepts: dict[str, str] | None = None,
+               inbox_dir: Path | None = None) -> Path:
     """Schreibt Note immer nach 00-inbox/. Auto-Note-Mover-Plugin (Obsidian) routet
     basierend auf Tags zu Zielordner (siehe CLAUDE.md Auto-Note-Mover-Mapping).
 
@@ -622,7 +625,7 @@ def write_note(note: AtomicNoteDraft, source_file: str, dry_run: bool = False,
     if not auto:
         note.quality_flags.append(f"vault-empfehlung blockiert: {reason}")
 
-    target_dir = INBOX
+    target_dir = inbox_dir if inbox_dir is not None else INBOX
     is_merge_stub = False
     existing_vault: Path | None = None
     if existing_concepts:
@@ -644,7 +647,7 @@ def write_note(note: AtomicNoteDraft, source_file: str, dry_run: bool = False,
         filename = f"{stub_prefix} - {slugify(note.title)}.md"
         target = target_dir / filename
         # Idempotenz auch für merge-stubs: gleicher source_file + title → überschreiben
-        existing_stub = find_existing_in_inbox(source_file, f"MERGE: {note.title}")
+        existing_stub = find_existing_in_inbox(source_file, f"MERGE: {note.title}", inbox_dir)
         if existing_stub is not None:
             target = existing_stub
         elif target.exists():
@@ -658,7 +661,7 @@ def write_note(note: AtomicNoteDraft, source_file: str, dry_run: bool = False,
                                     source_meta=source_meta)
     else:
         # Idempotenz: eigener früherer Run derselben PDF → überschreibe
-        existing_inbox = find_existing_in_inbox(source_file, note.title)
+        existing_inbox = find_existing_in_inbox(source_file, note.title, inbox_dir)
         if existing_inbox is not None:
             target = existing_inbox
         else:

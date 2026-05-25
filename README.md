@@ -4,7 +4,7 @@ PDF → atomare Obsidian-Notes via Multi-Agent-Pipeline.
 
 ## Stand
 
-**v0.3.66** · **foss-v0.2.0** · letzte Änderung: 2026-05-24
+**v0.3.66** · **foss-v0.2.0** · letzte Änderung: 2026-05-25
 
 ## Struktur
 

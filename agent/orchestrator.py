@@ -1099,6 +1099,9 @@ def main():
     ap.add_argument("--load-drafts", default=None, metavar="PATH",
                     help="Drafts aus --save-drafts laden und Stage 1–5 überspringen. "
                          "--source wird dann ignoriert (Quelle steht im State).")
+    ap.add_argument("--inbox-dir", default=None, metavar="PATH",
+                    help="Zielordner statt 00-inbox/ (wird erstellt falls nicht vorhanden). "
+                         "Nützlich für A/B-Vergleiche: --inbox-dir 00-inbox/ab-llm/")
     args = ap.parse_args()
     if not args.source and not args.load_drafts:
         ap.error("--source ist erforderlich (außer mit --load-drafts)")
@@ -1228,13 +1231,18 @@ def main():
                 draft.tags.append(target_tag)
         print(f"\n[target-tag] '{target_tag}' an {len(drafts)} Notes angehängt (Auto-Note-Mover-Routing)")
 
+    _inbox_dir = Path(args.inbox_dir) if args.inbox_dir else None
+    if _inbox_dir and not args.dry_run:
+        _inbox_dir.mkdir(parents=True, exist_ok=True)
+
     print(f"\n[7/7] Vault-Writer…")
     written = 0
     with _span("VaultWriter", pdf=source_path.name, n_drafts=len(drafts), dry_run=args.dry_run):
         for draft in drafts:
             vault_writer.write_note(draft, source_file=source_path.name,
                                     dry_run=args.dry_run, source_meta=enriched_meta,
-                                    existing_concepts=existing_concepts)
+                                    existing_concepts=existing_concepts,
+                                    inbox_dir=_inbox_dir)
         will_vault, _ = vault_writer.auto_write_decision(draft)
         _trace_event("orchestrator", "note_outcome", {
             "title": draft.title,
