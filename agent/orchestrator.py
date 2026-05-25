@@ -454,6 +454,7 @@ def _run_note_pipeline(
     all_hub_concepts: dict | None = None,
     all_run_concept_links: dict | None = None,
     background_map: dict | None = None,
+    related_mentions: list[str] | None = None,
 ) -> tuple[int, AtomicNoteDraft]:
     """Stage-6-Pipeline für eine einzelne Note. Läuft in asyncio.to_thread().
 
@@ -624,6 +625,7 @@ async def process_all_notes_async(
     quality_report, pdf_meta: dict,
     source_path: Path, tag_whitelist: list,
     background_map: dict | None = None,
+    related_mentions: list[str] | None = None,
 ) -> list[AtomicNoteDraft]:
     """Stage-6-Pipeline für alle Notes parallel via asyncio.to_thread() + Semaphore."""
     sem = asyncio.Semaphore(MAX_CONCURRENT_CALLS)
@@ -665,6 +667,7 @@ async def process_all_notes_async(
                 source_path, tag_whitelist,
                 all_hub_concepts, all_run_concept_links,
                 background_map,
+                related_mentions,
             )
 
     results = await asyncio.gather(
@@ -1016,7 +1019,7 @@ def _run_extraction_stages(args, source_path: Path):
     return (drafts, concept_map, existing_concepts, concept_links,
             text, chunks, acronym_dict, quality_report, pdf_meta,
             source_path, tag_whitelist, background_map, fb.get("Year"),
-            dropped_total, word_count)
+            dropped_total, word_count, related_mentions)
 
 
 def _save_draft_state(path: str, *, drafts: list, concept_map: dict,
@@ -1133,6 +1136,7 @@ def main():
         source_path = Path(_src_name)
         word_count = len(text.split())
         dropped_total = 0
+        related_mentions = None
         print(f"\n=== Atomic Agent (load-drafts): {source_path.name} ===\n")
         print(f"  [load-drafts] {len(drafts)} Drafts geladen · Stage 1–5 übersprungen")
     else:
@@ -1143,7 +1147,7 @@ def main():
         (drafts, concept_map, existing_concepts, concept_links,
          text, chunks, acronym_dict, quality_report, pdf_meta,
          source_path, tag_whitelist, background_map, fb_year,
-         dropped_total, word_count) = _run_extraction_stages(args, source_path)
+         dropped_total, word_count, related_mentions) = _run_extraction_stages(args, source_path)
         if args.save_drafts:
             _save_draft_state(
                 args.save_drafts, drafts=drafts, concept_map=concept_map,
@@ -1204,6 +1208,7 @@ def main():
             quality_report=quality_report, pdf_meta=pdf_meta,
             source_path=source_path, tag_whitelist=tag_whitelist,
             background_map=background_map,
+            related_mentions=related_mentions,
         ))
 
     # --- Hebel #5: Boilerplate-Dedup zwischen Hub-Drafts und Sub-Konzept-Drafts ---
@@ -1243,14 +1248,14 @@ def main():
                                     dry_run=args.dry_run, source_meta=enriched_meta,
                                     existing_concepts=existing_concepts,
                                     inbox_dir=_inbox_dir)
-        will_vault, _ = vault_writer.auto_write_decision(draft)
-        _trace_event("orchestrator", "note_outcome", {
-            "title": draft.title,
-            "destination": "vault" if will_vault else "inbox",
-            "critic_score": draft.critic_score,
-            "hard_gates_pass": draft.hard_gates_pass,
-        })
-        written += 1
+            will_vault, _ = vault_writer.auto_write_decision(draft)
+            _trace_event("orchestrator", "note_outcome", {
+                "title": draft.title,
+                "destination": "vault" if will_vault else "inbox",
+                "critic_score": draft.critic_score,
+                "hard_gates_pass": draft.hard_gates_pass,
+            })
+            written += 1
 
     print(f"\n=== Fertig: {written} Notes {'(dry-run)' if args.dry_run else 'geschrieben'} ===")
     vault_count = sum(1 for d in drafts if vault_writer.auto_write_decision(d)[0])
