@@ -7,6 +7,7 @@ Modell-IDs in config.py für beide Backends.
 from __future__ import annotations
 import asyncio
 import json
+import os
 import subprocess
 import sys
 import time
@@ -59,11 +60,14 @@ def call_full(prompt: str, *, model: str, agent: str = "unknown"):
     """Synchroner Subprocess-Aufruf. Cache/Trace übernimmt base.py."""
     for attempt in range(_MAX_RETRIES + 1):
         try:
+            _env = os.environ.copy()
+            _env["CLAUDE_INTERNAL_CALL"] = "1"
             proc = subprocess.run(
                 _build_argv(model),
                 input=prompt,
                 capture_output=True, text=True, encoding="utf-8", errors="replace",
                 timeout=CALL_TIMEOUT_SEC,
+                env=_env,
             )
         except subprocess.TimeoutExpired:
             raise RuntimeError(f"claude CLI Timeout nach {CALL_TIMEOUT_SEC}s ({agent}/{model})")
@@ -102,11 +106,14 @@ async def call_full_async(prompt: str, *, model: str, agent: str = "unknown"):
     rc = None
     for attempt in range(_MAX_RETRIES + 1):
         try:
+            _env = os.environ.copy()
+            _env["CLAUDE_INTERNAL_CALL"] = "1"
             proc = await asyncio.create_subprocess_exec(
                 *_build_argv(model),
                 stdin=asyncio.subprocess.PIPE,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env=_env,
             )
         except OSError as e:
             raise RuntimeError(f"claude CLI nicht aufrufbar: {e}") from e
