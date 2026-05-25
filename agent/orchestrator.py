@@ -1312,10 +1312,10 @@ def main():
         else:
             from config import INBOX, WISSEN
             note_files = []
+            _eval_search_dirs = ([_inbox_dir] if _inbox_dir else []) + [INBOX, WISSEN]
             for d in drafts:
-                # Versuche Note-Datei im Vault zu finden
                 slug = vault_writer.slugify(d.title)
-                for search_dir in [INBOX, WISSEN]:
+                for search_dir in _eval_search_dirs:
                     candidates = list(search_dir.glob(f"{slug}*.md")) + list(search_dir.glob(f"*{slug}*.md"))
                     if candidates:
                         note_files.append(candidates[0])
