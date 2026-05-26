@@ -2,6 +2,7 @@ from __future__ import annotations
 import re
 from pathlib import Path
 from jinja2 import Environment, FileSystemLoader
+from shared.path_safety import contained_child_path, safe_filename_stem
 
 _TEMPLATES_DIR = Path(__file__).parent.parent / "templates"
 _ENV = Environment(loader=FileSystemLoader(str(_TEMPLATES_DIR), encoding="utf-8-sig"))
@@ -56,7 +57,7 @@ def render_note(note, output_format: str = "obsidian") -> str:
 
 def write_note(note, out_dir: Path, output_format: str = "obsidian") -> Path:
     ext = "json" if output_format == "json" else "md"
-    slug = note.title.lower().replace(" ", "-")[:60]
-    path = out_dir / f"{slug}.{ext}"
+    slug = safe_filename_stem(note.title)
+    path = contained_child_path(out_dir, f"{slug}.{ext}")
     path.write_text(render_note(note, output_format), encoding="utf-8")
     return path
