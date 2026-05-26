@@ -22,6 +22,7 @@ import asyncio
 import contextlib
 import dataclasses
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -760,6 +761,12 @@ def _auto_start_dashboard() -> None:
         print("  [dashboard] Server gestartet: http://localhost:8051")
 
 
+def inline_eval_enabled(env=None) -> bool:
+    """Whether Stage-8 inline quality evaluation should run for this process."""
+    source = os.environ if env is None else env
+    return source.get("ATOMIC_AGENT_INLINE_EVAL", "1") != "0"
+
+
 def _auto_version_bump() -> None:
     """Erhöht AGENT_VERSION Patch wenn sich Pipeline-Code seit letztem Run geändert hat."""
     import hashlib, json as _json, re as _re
@@ -1311,6 +1318,10 @@ def main():
     # --- Stage 8: Qualitäts-Eval (deterministisch, immer gespeichert) ---
     # Läuft nach jedem Run automatisch — PyMuPDF + Fuzzy + Semantic gegen Quell-PDF.
     # Ergebnisse in .cache/quality_history.jsonl für Longitudinal-Vergleiche.
+    # Abschaltbar via ATOMIC_AGENT_INLINE_EVAL=0; retroaktive Eval via reeval_baseline.py.
+    if not inline_eval_enabled():
+        print(f"\n[8/8] Qualitäts-Eval übersprungen (ATOMIC_AGENT_INLINE_EVAL=0) — retro via reeval_baseline.py.")
+        return
     print(f"\n[8/8] Qualitäts-Eval…")
     try:
         import eval_quality_v4 as _eq
