@@ -20,6 +20,23 @@ from config import MODEL_OPUS, CACHE_DIR, BACKEND
 from agents.tracing import trace_event, trace_run_start, set_tracing_backend, flush_tracing  # noqa: F401
 from agents.tracing import _RUN_ID  # single source of truth for run ID
 
+# OTel-Tracer für Phoenix. Bleibt None bis orchestrator._setup_phoenix_tracing()
+# ihn via set_llm_tracer() explizit setzt (nur bei ATOMIC_AGENT_TRACING=phoenix).
+# Kein impliziter ProxyTracer: ein anderswo gesetzter globaler Provider soll NICHT
+# ungewollt LLM-Spans erzeugen. None → _llm_span ist garantiert No-Op.
+try:
+    from opentelemetry.trace import Status as _OtelStatus, StatusCode as _OtelStatusCode
+except Exception:  # opentelemetry nicht installiert
+    _OtelStatus = _OtelStatusCode = None
+_OTEL_TRACER = None
+
+
+def set_llm_tracer(tracer) -> None:
+    """Aktiviert die LLM-Call-Instrumentierung mit einem konkreten OTel-Tracer.
+    Aufruf aus orchestrator._setup_phoenix_tracing(). None = Tracing aus."""
+    global _OTEL_TRACER
+    _OTEL_TRACER = tracer
+
 # Backend-Dispatch
 if BACKEND == "litellm":
     from agents._litellm_backend import call_full as _backend_call_full
@@ -135,6 +152,39 @@ def _trace(agent: str, prompt: str, model: str, result: CallResult,
     _tracing_backend.write(entry)
 
 
+from contextlib import contextmanager as _contextmanager
+
+
+@_contextmanager
+def _llm_span(agent: str, prompt: str, model: str):
+    """OTel-LLM-Span für einen einzelnen Call. No-op wenn Tracing aus.
+
+    Wird VOR dem Cache-Check geöffnet, damit auch Cache-Hits in Phoenix
+    erscheinen (sonst fehlt bei Re-Runs die halbe Pipeline).
+    """
+    if _OTEL_TRACER is None:
+        yield None
+        return
+    with _OTEL_TRACER.start_as_current_span(agent) as span:
+        span.set_attribute("openinference.span.kind", "LLM")
+        span.set_attribute("input.value", prompt)
+        span.set_attribute("llm.model_name", model)
+        yield span
+
+
+def _annotate_llm_span(span, result: "CallResult", *, cache_hit: bool = False,
+                       error: Optional[str] = None) -> None:
+    """Schreibt Output + Usage in den LLM-Span. No-op wenn span is None."""
+    if span is None:
+        return
+    span.set_attribute("output.value", str(result.text or ""))
+    span.set_attribute("llm.token_count.prompt", result.input_tokens)
+    span.set_attribute("llm.token_count.completion", result.output_tokens)
+    span.set_attribute("cache.hit", cache_hit)
+    if error:
+        span.set_status(_OtelStatus(_OtelStatusCode.ERROR, error))
+
+
 def call_claude(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
                 use_cache: bool = True) -> str:
     """Synchroner Aufruf. Gibt nur den Text zurück (Backwards-Compat)."""
@@ -144,24 +194,28 @@ def call_claude(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
 def call_claude_full(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
                      use_cache: bool = True) -> CallResult:
     """Synchroner Aufruf mit vollem CallResult (text + usage)."""
-    key = _cache_key(prompt, model, agent)
-    if use_cache:
-        cached = _cache_get(key)
-        if cached is not None:
-            _trace(agent, prompt, model, cached)
-            return cached
+    with _llm_span(agent, prompt, model) as span:
+        key = _cache_key(prompt, model, agent)
+        if use_cache:
+            cached = _cache_get(key)
+            if cached is not None:
+                _annotate_llm_span(span, cached, cache_hit=True)
+                _trace(agent, prompt, model, cached)
+                return cached
 
-    try:
-        result = _backend_call_full(prompt, model=model, agent=agent)
-    except RuntimeError as e:
-        result = CallResult(text="")
-        _trace(agent, prompt, model, result, error=str(e))
-        raise
+        try:
+            result = _backend_call_full(prompt, model=model, agent=agent)
+        except RuntimeError as e:
+            result = CallResult(text="")
+            _annotate_llm_span(span, result, error=str(e))
+            _trace(agent, prompt, model, result, error=str(e))
+            raise
 
-    if use_cache:
-        _cache_put(key, result)
-    _trace(agent, prompt, model, result)
-    return result
+        _annotate_llm_span(span, result)
+        if use_cache:
+            _cache_put(key, result)
+        _trace(agent, prompt, model, result)
+        return result
 
 
 async def call_claude_async(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
@@ -171,24 +225,28 @@ async def call_claude_async(prompt: str, *, model: str = MODEL_OPUS, agent: str 
 
 async def call_claude_full_async(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
                                  use_cache: bool = True) -> CallResult:
-    key = _cache_key(prompt, model, agent)
-    if use_cache:
-        cached = _cache_get(key)
-        if cached is not None:
-            _trace(agent, prompt, model, cached)
-            return cached
+    with _llm_span(agent, prompt, model) as span:
+        key = _cache_key(prompt, model, agent)
+        if use_cache:
+            cached = _cache_get(key)
+            if cached is not None:
+                _annotate_llm_span(span, cached, cache_hit=True)
+                _trace(agent, prompt, model, cached)
+                return cached
 
-    try:
-        result = await _backend_call_full_async(prompt, model=model, agent=agent)
-    except RuntimeError as e:
-        result = CallResult(text="")
-        _trace(agent, prompt, model, result, error=str(e))
-        raise
+        try:
+            result = await _backend_call_full_async(prompt, model=model, agent=agent)
+        except RuntimeError as e:
+            result = CallResult(text="")
+            _annotate_llm_span(span, result, error=str(e))
+            _trace(agent, prompt, model, result, error=str(e))
+            raise
 
-    if use_cache:
-        _cache_put(key, result)
-    _trace(agent, prompt, model, result)
-    return result
+        _annotate_llm_span(span, result)
+        if use_cache:
+            _cache_put(key, result)
+        _trace(agent, prompt, model, result)
+        return result
 
 
 # Provider-agnostische Aliase für Backend-Abstraktion

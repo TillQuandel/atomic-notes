@@ -26,16 +26,18 @@ import os
 import sys
 from pathlib import Path
 
-_TRACER = None  # gesetzt von _setup_phoenix_tracing wenn Phoenix läuft
+_TRACER = None    # gesetzt von _setup_phoenix_tracing wenn Phoenix läuft
+_PROVIDER = None  # TracerProvider von register() — für force_flush am Prozess-Ende
 
 
 @contextlib.contextmanager
 def _span(name: str, **attrs):
-    """OTel-Span wenn Phoenix aktiv, sonst no-op."""
+    """OTel-Stage-Span wenn Phoenix aktiv, sonst no-op."""
     if _TRACER is None:
         yield
         return
     with _TRACER.start_as_current_span(name) as span:
+        span.set_attribute("openinference.span.kind", "CHAIN")
         for k, v in attrs.items():
             span.set_attribute(k, str(v))
         yield span
@@ -824,21 +826,47 @@ def _auto_version_bump() -> None:
 
 def _setup_phoenix_tracing() -> None:
     """Sendet OTel-Traces an laufenden Phoenix-Server (http://localhost:6006).
-    Kein Fehler wenn Phoenix nicht läuft — Pipeline startet normal."""
-    global _TRACER
+
+    Nur aktiv bei ENV ATOMIC_AGENT_TRACING=phoenix. Kein Fehler wenn Phoenix
+    nicht läuft — Pipeline startet normal ohne Traces.
+
+    Die LLM-Calls werden manuell in agents/base.py instrumentiert (gilt für
+    beide Backends: claude-CLI-Subprocess UND litellm). Daher KEIN
+    Auto-Instrumentor — der würde bei BACKEND=litellm doppelte Spans erzeugen
+    und beim CLI-Subprocess-Default ohnehin nichts sehen.
+    """
+    global _TRACER, _PROVIDER
+    if os.getenv("ATOMIC_AGENT_TRACING") != "phoenix":
+        return
     try:
+        # Rohes OpenTelemetry statt phoenix.otel.register: Die Pipeline läuft im
+        # System-Python, wo `import phoenix` an einem sqlean-Paketkonflikt crasht.
+        # Der Phoenix-SERVER läuft als separater Prozess; wir müssen hier nur
+        # OTLP-Spans an localhost:6006 schicken — das braucht KEIN phoenix-Paket.
         from opentelemetry import trace
         from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.resources import Resource
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-        from openinference.instrumentation.litellm import LiteLLMInstrumentor
 
-        exporter = OTLPSpanExporter(endpoint="http://localhost:6006/v1/traces")
-        provider = TracerProvider()
-        provider.add_span_processor(BatchSpanProcessor(exporter))
-        trace.set_tracer_provider(provider)
-        LiteLLMInstrumentor().instrument()
+        # SimpleSpanProcessor: sofortiger Export pro Span. Robuster als
+        # BatchSpanProcessor bei kurzlebigen CLI-Runs (kein Flush-Verlust).
+        # Resource openinference.project.name → Phoenix gruppiert in dieses Projekt
+        # (statt "default"); entspricht register(project_name=...).
+        _PROVIDER = TracerProvider(
+            resource=Resource.create({"openinference.project.name": "atomic-agent"})
+        )
+        _PROVIDER.add_span_processor(
+            SimpleSpanProcessor(OTLPSpanExporter(endpoint="http://localhost:6006/v1/traces"))
+        )
+        trace.set_tracer_provider(_PROVIDER)
         _TRACER = trace.get_tracer("atomic-agent")
+        # LLM-Call-Instrumentierung in base.py explizit aktivieren (nur hier, nur
+        # bei aktivem Tracing — kein impliziter Proxy-Tracer).
+        from agents.base import set_llm_tracer
+        set_llm_tracer(_TRACER)
+        import atexit
+        atexit.register(lambda: _PROVIDER and _PROVIDER.force_flush())
         print("[phoenix] Tracing aktiv → http://localhost:6006")
     except Exception as e:
         print(f"[phoenix] Tracing nicht verfügbar ({e}) — Pipeline läuft ohne Traces")
