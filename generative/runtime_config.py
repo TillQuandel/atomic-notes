@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
+from enum import Enum
 from typing import Mapping
 
 
@@ -142,3 +143,62 @@ def load_runtime_config(env: Mapping[str, str] | None = None) -> RuntimeConfig:
         )
 
     return cfg
+
+
+# ---------------------------------------------------------------------------
+# Pure refine decision helpers
+# ---------------------------------------------------------------------------
+
+
+class RefineTrigger(Enum):
+    NONE = "none"
+    TRIGGER_A = "score_band"
+    TRIGGER_B = "hard_gate_failure"
+
+
+@dataclass(frozen=True)
+class RefineDecision:
+    attempt: bool
+    trigger: RefineTrigger
+    reason: str
+
+
+def should_attempt_refine(
+    draft,
+    policy: RefinePolicy,
+    *,
+    auto_threshold: int,
+    has_concept_context: bool,
+    synthesized_hint: str | None = None,
+) -> RefineDecision:
+    if not policy.enabled:
+        return RefineDecision(False, RefineTrigger.NONE, "refine_disabled")
+    if not has_concept_context:
+        return RefineDecision(False, RefineTrigger.NONE, "missing_concept_context")
+
+    has_hint = bool(getattr(draft, "revision_hint", "") or synthesized_hint)
+    score = int(getattr(draft, "critic_score", 0))
+    hard_gates_pass = bool(getattr(draft, "hard_gates_pass", False))
+
+    trigger_a = policy.min_trigger_a_score <= score < auto_threshold
+    if trigger_a:
+        if score == 2 and not policy.score2_enabled:
+            return RefineDecision(False, RefineTrigger.NONE, "score2_disabled")
+        if score == 3 and policy.score3_requires_hint and not has_hint:
+            return RefineDecision(False, RefineTrigger.NONE, "score3_without_hint")
+        if not has_hint:
+            return RefineDecision(False, RefineTrigger.NONE, "missing_revision_hint")
+        return RefineDecision(True, RefineTrigger.TRIGGER_A, "score_band")
+
+    trigger_b = score >= auto_threshold and not hard_gates_pass
+    if trigger_b and policy.trigger_b_enabled and has_hint:
+        return RefineDecision(True, RefineTrigger.TRIGGER_B, "hard_gate_failure")
+
+    return RefineDecision(False, RefineTrigger.NONE, "no_trigger")
+
+
+def refine_accepted(refined, *, auto_threshold: int) -> bool:
+    return (
+        bool(getattr(refined, "hard_gates_pass", False))
+        and int(getattr(refined, "critic_score", 0)) >= auto_threshold
+    )

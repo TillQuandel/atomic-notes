@@ -86,3 +86,102 @@ def test_negative_int_override_raises():
         load_runtime_config(env={"ATOMIC_AGENT_CALL_TIMEOUT": "-5"})
     with pytest.raises(ValueError):
         load_runtime_config(env={"ATOMIC_AGENT_MAX_CONCEPTS": "-1"})
+
+
+# ---------------------------------------------------------------------------
+# Task 2: Pure refine decision helpers
+# ---------------------------------------------------------------------------
+
+from types import SimpleNamespace
+
+from runtime_config import RefineTrigger, refine_accepted, should_attempt_refine
+
+
+def _draft(score, hard_gates=True, hint="", flags=None):
+    return SimpleNamespace(
+        critic_score=score,
+        hard_gates_pass=hard_gates,
+        revision_hint=hint,
+        quality_flags=flags or [],
+    )
+
+
+def test_fast_profile_never_attempts_refine():
+    cfg = load_runtime_config(env={"ATOMIC_AGENT_PROFILE": "fast"})
+
+    decision = should_attempt_refine(
+        _draft(4, hard_gates=False, hint="fix anchors"),
+        cfg.refine,
+        auto_threshold=4,
+        has_concept_context=True,
+    )
+
+    assert decision.attempt is False
+    assert decision.trigger is RefineTrigger.NONE
+
+
+def test_balanced_rejects_score2_refine():
+    cfg = load_runtime_config(env={"ATOMIC_AGENT_PROFILE": "balanced"})
+
+    decision = should_attempt_refine(
+        _draft(2, hard_gates=False, hint="fix"),
+        cfg.refine,
+        auto_threshold=4,
+        has_concept_context=True,
+    )
+
+    assert decision.attempt is False
+
+
+def test_balanced_allows_score3_only_with_hint():
+    cfg = load_runtime_config(env={"ATOMIC_AGENT_PROFILE": "balanced"})
+
+    without_hint = should_attempt_refine(
+        _draft(3, hard_gates=False, hint=""),
+        cfg.refine,
+        auto_threshold=4,
+        has_concept_context=True,
+    )
+    with_hint = should_attempt_refine(
+        _draft(3, hard_gates=False, hint="fix standalone"),
+        cfg.refine,
+        auto_threshold=4,
+        has_concept_context=True,
+    )
+
+    assert without_hint.attempt is False
+    assert with_hint.attempt is True
+    assert with_hint.trigger is RefineTrigger.TRIGGER_A
+
+
+def test_balanced_allows_score4_hard_gate_failure_with_hint():
+    cfg = load_runtime_config(env={"ATOMIC_AGENT_PROFILE": "balanced"})
+
+    decision = should_attempt_refine(
+        _draft(4, hard_gates=False, hint="fix source anchors"),
+        cfg.refine,
+        auto_threshold=4,
+        has_concept_context=True,
+    )
+
+    assert decision.attempt is True
+    assert decision.trigger is RefineTrigger.TRIGGER_B
+
+
+def test_refine_requires_concept_context():
+    cfg = load_runtime_config(env={"ATOMIC_AGENT_PROFILE": "quality"})
+
+    decision = should_attempt_refine(
+        _draft(4, hard_gates=False, hint="fix"),
+        cfg.refine,
+        auto_threshold=4,
+        has_concept_context=False,
+    )
+
+    assert decision.attempt is False
+
+
+def test_refine_acceptance_preserves_current_gate():
+    assert refine_accepted(_draft(4, hard_gates=True), auto_threshold=4) is True
+    assert refine_accepted(_draft(5, hard_gates=False), auto_threshold=4) is False
+    assert refine_accepted(_draft(3, hard_gates=True), auto_threshold=4) is False
