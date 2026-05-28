@@ -234,17 +234,25 @@ class RunBudget:
 # ---------------------------------------------------------------------------
 
 
+def is_actionable_concept(concept) -> bool:
+    """Prüft ob ein Konzept actionable ist (weder skip noch secondary_mention)."""
+    return getattr(concept, "action", None) != "skip" and getattr(concept, "origin", None) != "secondary_mention"
+
+
+def count_actionable(concepts) -> int:
+    """Zählt actionable Konzepte in einer Liste."""
+    return sum(1 for c in concepts if is_actionable_concept(c))
+
+
 def cap_actionable_concepts(concepts: list, max_concepts: int | None) -> tuple[list, list]:
-    actionable = [c for c in concepts if getattr(c, "action", None) != "skip" and getattr(c, "origin", None) != "secondary_mention"]
+    actionable = [c for c in concepts if is_actionable_concept(c)]
     if max_concepts is None or len(actionable) <= max_concepts:
         return concepts, []
 
     kept_actionable_ids = {id(c) for c in actionable[:max_concepts]}
     capped = [
         c for c in concepts
-        if id(c) in kept_actionable_ids
-        or getattr(c, "action", None) == "skip"
-        or getattr(c, "origin", None) == "secondary_mention"
+        if id(c) in kept_actionable_ids or not is_actionable_concept(c)
     ]
     dropped = actionable[max_concepts:]
     return capped, dropped

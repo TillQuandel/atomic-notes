@@ -69,7 +69,7 @@ from config import (
     MAX_CHUNKS_SHORT_DOC,
     MAX_PAGES_SHORT_DOC,
 )
-from runtime_config import load_runtime_config, cap_actionable_concepts
+from runtime_config import load_runtime_config, cap_actionable_concepts, count_actionable
 
 LARGE_DOC_THRESHOLD = 15
 
@@ -872,7 +872,7 @@ def _setup_phoenix_tracing() -> None:
         print(f"[phoenix] Tracing nicht verfügbar ({e}) — Pipeline läuft ohne Traces")
 
 
-def _run_extraction_stages(args, source_path: Path, runtime_config=None):
+def _run_extraction_stages(args, source_path: Path, runtime_config=None):  # main() übergibt immer einen RuntimeConfig; None = kein Runtime-Config / Capping deaktiviert
     """Stages 0–5: PDF extract → planning → extraction.
 
     Returns:
@@ -999,11 +999,7 @@ def _run_extraction_stages(args, source_path: Path, runtime_config=None):
                         f"{', '.join(c.title for c in _capped[:3])}"
                         f"{'…' if len(_capped) > 3 else ''}"
                     )
-                kept_actionable = sum(
-                    1 for c in chapter_plan.concepts
-                    if getattr(c, "action", None) != "skip"
-                    and getattr(c, "origin", None) != "secondary_mention"
-                )
+                kept_actionable = count_actionable(chapter_plan.concepts)
                 if remaining_concepts is not None:
                     remaining_concepts = max(0, remaining_concepts - kept_actionable)
             ch_related = [c.title for c in chapter_plan.concepts

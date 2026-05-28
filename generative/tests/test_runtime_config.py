@@ -317,3 +317,14 @@ def test_cap_is_run_wide_across_multiple_chapter_plans():
         kept_actionable_titles += [c.title for c in kept]
         remaining = max(0, remaining - len(kept))
     assert kept_actionable_titles == ["A1", "A2", "B1"]  # exactly 3 run-wide, not 6
+
+
+from runtime_config import count_actionable, is_actionable_concept
+
+
+def test_is_actionable_and_count():
+    cs = [_concept("A"), _concept("B", action="skip"), _concept("C", origin="secondary_mention"), _concept("D")]
+    assert is_actionable_concept(cs[0]) is True
+    assert is_actionable_concept(cs[1]) is False
+    assert is_actionable_concept(cs[2]) is False
+    assert count_actionable(cs) == 2
