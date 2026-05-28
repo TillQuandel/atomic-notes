@@ -70,7 +70,7 @@ MAX_CONCURRENT_CALLS = 4
 CALL_TIMEOUT_SEC = int(os.getenv("ATOMIC_AGENT_CALL_TIMEOUT", "300"))
 
 # Pipeline-Version für agent-version Frontmatter
-AGENT_VERSION = "v0.3.77"  # Welle 1: by-chapter/source_pages/mkdir/relative_to/ER-Threshold/dead-code
+AGENT_VERSION = "v0.3.78"  # Welle 1: by-chapter/source_pages/mkdir/relative_to/ER-Threshold/dead-code
 
 # Background-Extractor (Stage-0.5): Trainingswissen pro Konzept vor Extractor abfragen.
 # Deaktivierbar via ENV ENABLE_BACKGROUND_EXTRACTOR=0 — z.B. für Baseline-Eval-Tests
