@@ -69,6 +69,7 @@ from config import (
     MAX_CHUNKS_SHORT_DOC,
     MAX_PAGES_SHORT_DOC,
 )
+from runtime_config import load_runtime_config
 
 LARGE_DOC_THRESHOLD = 15
 
@@ -763,10 +764,9 @@ def _auto_start_dashboard() -> None:
         print("  [dashboard] Server gestartet: http://localhost:8051")
 
 
-def inline_eval_enabled(env=None) -> bool:
+def inline_eval_enabled(runtime_config) -> bool:
     """Whether Stage-8 inline quality evaluation should run for this process."""
-    source = os.environ if env is None else env
-    return source.get("ATOMIC_AGENT_INLINE_EVAL", "1") != "0"
+    return bool(runtime_config.inline_eval)
 
 
 def _auto_version_bump() -> None:
@@ -1159,6 +1159,16 @@ def main():
     _auto_start_dashboard()
     _auto_version_bump()
 
+    runtime_config = load_runtime_config()
+    print(
+        "[runtime-config] "
+        f"profile={runtime_config.profile} "
+        f"inline_eval={runtime_config.inline_eval} "
+        f"max_concepts={runtime_config.max_concepts} "
+        f"max_refines_per_run={runtime_config.refine.max_refines_per_run} "
+        f"timeout_retries={runtime_config.timeout_retries}"
+    )
+
     if getattr(args, "fresh_run", False):
         from agents.base import set_cache_namespace
         from agents.tracing import _RUN_ID
@@ -1347,7 +1357,7 @@ def main():
     # Läuft nach jedem Run automatisch — PyMuPDF + Fuzzy + Semantic gegen Quell-PDF.
     # Ergebnisse in .cache/quality_history.jsonl für Longitudinal-Vergleiche.
     # Abschaltbar via ATOMIC_AGENT_INLINE_EVAL=0; retroaktive Eval via reeval_baseline.py.
-    if not inline_eval_enabled():
+    if not inline_eval_enabled(runtime_config):
         print(f"\n[8/8] Qualitäts-Eval übersprungen (ATOMIC_AGENT_INLINE_EVAL=0) — retro via reeval_baseline.py.")
         return
     print(f"\n[8/8] Qualitäts-Eval…")
