@@ -71,7 +71,7 @@ from config import (
 )
 from runtime_config import (
     load_runtime_config, cap_actionable_concepts, count_actionable,
-    RunBudget, refine_accepted, should_attempt_refine, LEGACY as _LEGACY_RUNTIME_CFG,
+    RunBudget, refine_accepted, should_attempt_refine, LEGACY,
 )
 
 LARGE_DOC_THRESHOLD = 15
@@ -447,9 +447,6 @@ async def entity_resolution(drafts: list[AtomicNoteDraft]) -> list[AtomicNoteDra
     return result
 
 
-_REFINE_MIN_SCORE = 2  # v26: Hub-Notes Score 2 mit konkretem Hint ist reparierbar
-
-
 def _run_note_pipeline(
     i: int, n_total: int, draft: AtomicNoteDraft,
     initial_drafts: list[AtomicNoteDraft],
@@ -462,7 +459,7 @@ def _run_note_pipeline(
     all_run_concept_links: dict | None = None,
     background_map: dict | None = None,
     related_mentions: list[str] | None = None,
-    runtime_config=None,
+    runtime_config=None,  # None → LEGACY-Fallback; refine_budget=None → unbegrenztes Budget
     refine_budget: RunBudget | None = None,
 ) -> tuple[int, AtomicNoteDraft]:
     """Stage-6-Pipeline für eine einzelne Note. Läuft in asyncio.to_thread().
@@ -532,7 +529,7 @@ def _run_note_pipeline(
     draft = critic.run(draft, existing_concepts=hub_concepts, concept_links=run_concept_links)
 
     # Self-Refine (Milestone 3.6 + v8): Retry bei knapp gescheiterten Notes
-    refine_trigger_b = (draft.critic_score >= CRITIC_AUTO_THRESHOLD and not draft.hard_gates_pass)
+    refine_trigger_b = (draft.critic_score >= CRITIC_AUTO_THRESHOLD and not draft.hard_gates_pass)  # nur noch für synthesized_hint; Refine-Gating macht should_attempt_refine unten
     fs_violations = [f for f in draft.quality_flags if f.startswith("⚠️ Future-Self:")]
     synthesized_hint = None
     if not draft.revision_hint and refine_trigger_b and fs_violations:
@@ -549,7 +546,7 @@ def _run_note_pipeline(
 
     # Bug #5: concept_map-Lookup mit refine_key-Fallback (nach ER kann draft.title abweichen)
     _refine_map_key = draft.title if draft.title in concept_map else draft.refine_key
-    _policy = runtime_config.refine if runtime_config is not None else _LEGACY_RUNTIME_CFG.refine
+    _policy = runtime_config.refine if runtime_config is not None else LEGACY.refine
     refine_decision = should_attempt_refine(
         draft,
         _policy,
