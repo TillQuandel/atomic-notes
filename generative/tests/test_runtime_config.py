@@ -185,3 +185,59 @@ def test_refine_acceptance_preserves_current_gate():
     assert refine_accepted(_draft(4, hard_gates=True), auto_threshold=4) is True
     assert refine_accepted(_draft(5, hard_gates=False), auto_threshold=4) is False
     assert refine_accepted(_draft(3, hard_gates=True), auto_threshold=4) is False
+
+
+def test_trigger_b_fallthrough_without_hint_or_disabled():
+    cfg = load_runtime_config(env={"ATOMIC_AGENT_PROFILE": "balanced"})
+
+    # trigger_b fires (score >= auto_threshold, hard_gates False) but has_hint is False → no_trigger
+    decision = should_attempt_refine(
+        _draft(4, hard_gates=False, hint=""),
+        cfg.refine,
+        auto_threshold=4,
+        has_concept_context=True,
+    )
+    assert decision.attempt is False
+    assert decision.trigger is RefineTrigger.NONE
+    assert decision.reason == "no_trigger"
+
+    # trigger_b_enabled=False, so even with a hint it falls through to no_trigger
+    policy = dataclasses.replace(cfg.refine, trigger_b_enabled=False)
+    decision = should_attempt_refine(
+        _draft(4, hard_gates=False, hint="fix"),
+        policy,
+        auto_threshold=4,
+        has_concept_context=True,
+    )
+    assert decision.attempt is False
+    assert decision.reason == "no_trigger"
+
+
+def test_score2_disabled_reason_when_score2_in_band():
+    cfg = load_runtime_config(env={"ATOMIC_AGENT_PROFILE": "balanced"})
+
+    # min_trigger_a_score=2 puts score 2 inside the trigger_a band; score2_enabled=False → score2_disabled
+    policy = dataclasses.replace(cfg.refine, enabled=True, min_trigger_a_score=2, score2_enabled=False)
+    decision = should_attempt_refine(
+        _draft(2, hard_gates=False, hint="fix"),
+        policy,
+        auto_threshold=4,
+        has_concept_context=True,
+    )
+    assert decision.attempt is False
+    assert decision.reason == "score2_disabled"
+
+
+def test_synthesized_hint_alone_enables_trigger_a():
+    cfg = load_runtime_config(env={"ATOMIC_AGENT_PROFILE": "balanced"})
+
+    # No draft hint; synthesized_hint satisfies has_hint → trigger_a fires
+    decision = should_attempt_refine(
+        _draft(3, hard_gates=False, hint=""),
+        cfg.refine,
+        auto_threshold=4,
+        has_concept_context=True,
+        synthesized_hint="fix standalone",
+    )
+    assert decision.attempt is True
+    assert decision.trigger is RefineTrigger.TRIGGER_A
