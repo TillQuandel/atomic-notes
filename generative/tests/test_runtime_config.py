@@ -300,3 +300,20 @@ def test_concept_cap_limits_only_actionable_concepts():
 
     assert [c.title for c in capped] == ["A", "B", "C", "D"]
     assert [c.title for c in dropped] == ["E"]
+
+
+def test_cap_is_run_wide_across_multiple_chapter_plans():
+    # Three "chapters", each with 2 actionable concepts; run cap = 3 total.
+    chapters = [
+        [_concept("A1"), _concept("A2")],
+        [_concept("B1"), _concept("B2")],
+        [_concept("C1"), _concept("C2")],
+    ]
+    remaining = 3
+    kept_actionable_titles = []
+    for concepts in chapters:
+        capped, _dropped = cap_actionable_concepts(concepts, remaining)
+        kept = [c for c in capped if c.action != "skip" and c.origin != "secondary_mention"]
+        kept_actionable_titles += [c.title for c in kept]
+        remaining = max(0, remaining - len(kept))
+    assert kept_actionable_titles == ["A1", "A2", "B1"]  # exactly 3 run-wide, not 6

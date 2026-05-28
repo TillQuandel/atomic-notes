@@ -969,6 +969,7 @@ def _run_extraction_stages(args, source_path: Path, runtime_config=None):
         all_drafts: list[AtomicNoteDraft] = []
         all_concept_map: dict = {}
         dropped_total = 0
+        remaining_concepts = runtime_config.max_concepts if runtime_config is not None else None
 
         for i, chunk in enumerate(chunks, 1):
             title_preview = chunk.title[:60]
@@ -989,15 +990,22 @@ def _run_extraction_stages(args, source_path: Path, runtime_config=None):
             if runtime_config is not None:
                 chapter_plan.concepts, _capped = cap_actionable_concepts(
                     chapter_plan.concepts,
-                    runtime_config.max_concepts,
+                    remaining_concepts,
                 )
                 if _capped:
                     print(
-                        f"      [runtime-config] max_concepts={runtime_config.max_concepts} "
+                        f"      [runtime-config] remaining_concepts={remaining_concepts} "
                         f"-> {len(_capped)} Konzept(e) übersprungen: "
                         f"{', '.join(c.title for c in _capped[:3])}"
                         f"{'…' if len(_capped) > 3 else ''}"
                     )
+                kept_actionable = sum(
+                    1 for c in chapter_plan.concepts
+                    if getattr(c, "action", None) != "skip"
+                    and getattr(c, "origin", None) != "secondary_mention"
+                )
+                if remaining_concepts is not None:
+                    remaining_concepts = max(0, remaining_concepts - kept_actionable)
             ch_related = [c.title for c in chapter_plan.concepts
                           if c.origin == "secondary_mention"]
             actionable = [c for c in chapter_plan.concepts
