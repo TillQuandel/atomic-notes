@@ -69,7 +69,10 @@ from config import (
     MAX_CHUNKS_SHORT_DOC,
     MAX_PAGES_SHORT_DOC,
 )
-from runtime_config import load_runtime_config, cap_actionable_concepts, count_actionable
+from runtime_config import (
+    load_runtime_config, cap_actionable_concepts, count_actionable,
+    RunBudget, refine_accepted, should_attempt_refine, LEGACY as _LEGACY_RUNTIME_CFG,
+)
 
 LARGE_DOC_THRESHOLD = 15
 
@@ -459,6 +462,8 @@ def _run_note_pipeline(
     all_run_concept_links: dict | None = None,
     background_map: dict | None = None,
     related_mentions: list[str] | None = None,
+    runtime_config=None,
+    refine_budget: RunBudget | None = None,
 ) -> tuple[int, AtomicNoteDraft]:
     """Stage-6-Pipeline für eine einzelne Note. Läuft in asyncio.to_thread().
 
@@ -527,7 +532,6 @@ def _run_note_pipeline(
     draft = critic.run(draft, existing_concepts=hub_concepts, concept_links=run_concept_links)
 
     # Self-Refine (Milestone 3.6 + v8): Retry bei knapp gescheiterten Notes
-    refine_trigger_a = (_REFINE_MIN_SCORE <= draft.critic_score < CRITIC_AUTO_THRESHOLD)
     refine_trigger_b = (draft.critic_score >= CRITIC_AUTO_THRESHOLD and not draft.hard_gates_pass)
     fs_violations = [f for f in draft.quality_flags if f.startswith("⚠️ Future-Self:")]
     synthesized_hint = None
@@ -545,9 +549,19 @@ def _run_note_pipeline(
 
     # Bug #5: concept_map-Lookup mit refine_key-Fallback (nach ER kann draft.title abweichen)
     _refine_map_key = draft.title if draft.title in concept_map else draft.refine_key
-    if ((refine_trigger_a or refine_trigger_b)
-            and (draft.revision_hint or synthesized_hint)
-            and _refine_map_key in concept_map):
+    _policy = runtime_config.refine if runtime_config is not None else _LEGACY_RUNTIME_CFG.refine
+    refine_decision = should_attempt_refine(
+        draft,
+        _policy,
+        auto_threshold=CRITIC_AUTO_THRESHOLD,
+        has_concept_context=_refine_map_key in concept_map,
+        synthesized_hint=synthesized_hint,
+    )
+    _should_attempt = refine_decision.attempt
+    _budget_ok = (refine_budget is None or refine_budget.try_consume()) if _should_attempt else False
+    if _should_attempt and not _budget_ok:
+        print("      [refine] übersprungen: Run-Budget ausgeschöpft")
+    if _should_attempt and _budget_ok:
         base_hint = draft.revision_hint or synthesized_hint
         augmented_hint = (
             base_hint
@@ -596,13 +610,7 @@ def _run_note_pipeline(
                 citation_count=quality_report.citation_count,
             )
             refined = critic.run(refined, existing_concepts=hub_concepts, concept_links=run_concept_links)
-            better = False
-            # Bug #2: Trigger-A muss hard_gates_pass verlangen — sonst wird Note mit höherem
-            # Score aber weiterhin failing Gates fälschlich als Verbesserung akzeptiert
-            if refine_trigger_a and refined.hard_gates_pass and refined.critic_score >= CRITIC_AUTO_THRESHOLD:
-                better = True
-            elif refine_trigger_b and refined.hard_gates_pass and refined.critic_score >= CRITIC_AUTO_THRESHOLD:
-                better = True
+            better = refine_accepted(refined, auto_threshold=CRITIC_AUTO_THRESHOLD)
             if better:
                 print(f"      [refine] Score {draft.critic_score}/{draft.hard_gates_pass} → "
                       f"{refined.critic_score}/{refined.hard_gates_pass} ✓")
@@ -630,6 +638,8 @@ async def process_all_notes_async(
     source_path: Path, tag_whitelist: list,
     background_map: dict | None = None,
     related_mentions: list[str] | None = None,
+    runtime_config=None,
+    refine_budget: RunBudget | None = None,
 ) -> list[AtomicNoteDraft]:
     """Stage-6-Pipeline für alle Notes parallel via asyncio.to_thread() + Semaphore."""
     sem = asyncio.Semaphore(MAX_CONCURRENT_CALLS)
@@ -672,6 +682,8 @@ async def process_all_notes_async(
                 all_hub_concepts, all_run_concept_links,
                 background_map,
                 related_mentions,
+                runtime_config,
+                refine_budget,
             )
 
     results = await asyncio.gather(
@@ -1188,6 +1200,7 @@ def main():
     _auto_version_bump()
 
     runtime_config = load_runtime_config()
+    refine_budget = RunBudget(max_refines_per_run=runtime_config.refine.max_refines_per_run)
     print(
         "[runtime-config] "
         f"profile={runtime_config.profile} "
@@ -1293,6 +1306,8 @@ def main():
             source_path=source_path, tag_whitelist=tag_whitelist,
             background_map=background_map,
             related_mentions=related_mentions,
+            runtime_config=runtime_config,
+            refine_budget=refine_budget,
         ))
 
     # --- Hebel #5: Boilerplate-Dedup zwischen Hub-Drafts und Sub-Konzept-Drafts ---
