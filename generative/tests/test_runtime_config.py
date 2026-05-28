@@ -274,3 +274,29 @@ def test_run_budget_is_thread_safe():
 
     assert sum(1 for result in results if result) == 2
     assert budget.consumed == 2
+
+
+# ---------------------------------------------------------------------------
+# Task 5: Concept cap helper
+# ---------------------------------------------------------------------------
+
+from runtime_config import cap_actionable_concepts
+
+
+def _concept(title, action="create", origin="primary"):
+    return SimpleNamespace(title=title, action=action, origin=origin)
+
+
+def test_concept_cap_limits_only_actionable_concepts():
+    concepts = [
+        _concept("A"),
+        _concept("B", origin="secondary_mention"),
+        _concept("C"),
+        _concept("D", action="skip"),
+        _concept("E"),
+    ]
+
+    capped, dropped = cap_actionable_concepts(concepts, 2)
+
+    assert [c.title for c in capped] == ["A", "B", "C", "D"]
+    assert [c.title for c in dropped] == ["E"]

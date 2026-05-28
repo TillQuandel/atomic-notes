@@ -227,3 +227,24 @@ class RunBudget:
                 return False
             self._consumed += 1
             return True
+
+
+# ---------------------------------------------------------------------------
+# Concept cap helper
+# ---------------------------------------------------------------------------
+
+
+def cap_actionable_concepts(concepts: list, max_concepts: int | None) -> tuple[list, list]:
+    actionable = [c for c in concepts if getattr(c, "action", None) != "skip" and getattr(c, "origin", None) != "secondary_mention"]
+    if max_concepts is None or len(actionable) <= max_concepts:
+        return concepts, []
+
+    kept_actionable_ids = {id(c) for c in actionable[:max_concepts]}
+    capped = [
+        c for c in concepts
+        if id(c) in kept_actionable_ids
+        or getattr(c, "action", None) == "skip"
+        or getattr(c, "origin", None) == "secondary_mention"
+    ]
+    dropped = actionable[max_concepts:]
+    return capped, dropped

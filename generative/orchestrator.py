@@ -69,7 +69,7 @@ from config import (
     MAX_CHUNKS_SHORT_DOC,
     MAX_PAGES_SHORT_DOC,
 )
-from runtime_config import load_runtime_config
+from runtime_config import load_runtime_config, cap_actionable_concepts
 
 LARGE_DOC_THRESHOLD = 15
 
@@ -872,7 +872,7 @@ def _setup_phoenix_tracing() -> None:
         print(f"[phoenix] Tracing nicht verfügbar ({e}) — Pipeline läuft ohne Traces")
 
 
-def _run_extraction_stages(args, source_path: Path):
+def _run_extraction_stages(args, source_path: Path, runtime_config=None):
     """Stages 0–5: PDF extract → planning → extraction.
 
     Returns:
@@ -986,6 +986,18 @@ def _run_extraction_stages(args, source_path: Path):
             if hallucinated:
                 print(f"      {len(hallucinated)} halluzinierte Konzepte verworfen: "
                       f"{', '.join(hallucinated[:3])}{'...' if len(hallucinated)>3 else ''}")
+            if runtime_config is not None:
+                chapter_plan.concepts, _capped = cap_actionable_concepts(
+                    chapter_plan.concepts,
+                    runtime_config.max_concepts,
+                )
+                if _capped:
+                    print(
+                        f"      [runtime-config] max_concepts={runtime_config.max_concepts} "
+                        f"-> {len(_capped)} Konzept(e) übersprungen: "
+                        f"{', '.join(c.title for c in _capped[:3])}"
+                        f"{'…' if len(_capped) > 3 else ''}"
+                    )
             ch_related = [c.title for c in chapter_plan.concepts
                           if c.origin == "secondary_mention"]
             actionable = [c for c in chapter_plan.concepts
@@ -1024,6 +1036,18 @@ def _run_extraction_stages(args, source_path: Path):
         if hallucinated:
             print(f"      {len(hallucinated)} halluzinierte Konzepte verworfen: "
                   f"{', '.join(hallucinated[:3])}{'…' if len(hallucinated)>3 else ''}")
+        if runtime_config is not None:
+            concept_plan.concepts, _capped = cap_actionable_concepts(
+                concept_plan.concepts,
+                runtime_config.max_concepts,
+            )
+            if _capped:
+                print(
+                    f"      [runtime-config] max_concepts={runtime_config.max_concepts} "
+                    f"-> {len(_capped)} Konzept(e) übersprungen: "
+                    f"{', '.join(c.title for c in _capped[:3])}"
+                    f"{'…' if len(_capped) > 3 else ''}"
+                )
 
         related_mentions = [c.title for c in concept_plan.concepts
                             if c.origin == "secondary_mention"]
@@ -1202,7 +1226,7 @@ def main():
         (drafts, concept_map, existing_concepts, concept_links,
          text, chunks, acronym_dict, quality_report, pdf_meta,
          source_path, tag_whitelist, background_map, fb_year,
-         dropped_total, word_count, related_mentions) = _run_extraction_stages(args, source_path)
+         dropped_total, word_count, related_mentions) = _run_extraction_stages(args, source_path, runtime_config)
         if args.save_drafts:
             _save_draft_state(
                 args.save_drafts, drafts=drafts, concept_map=concept_map,
