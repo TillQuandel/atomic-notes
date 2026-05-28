@@ -1356,9 +1356,9 @@ def main():
     # --- Stage 8: Qualitäts-Eval (deterministisch, immer gespeichert) ---
     # Läuft nach jedem Run automatisch — PyMuPDF + Fuzzy + Semantic gegen Quell-PDF.
     # Ergebnisse in .cache/quality_history.jsonl für Longitudinal-Vergleiche.
-    # Abschaltbar via ATOMIC_AGENT_INLINE_EVAL=0; retroaktive Eval via reeval_baseline.py.
+    # Abschaltbar via ATOMIC_AGENT_INLINE_EVAL=0 oder Profil (fast/balanced); retroaktive Eval via reeval_baseline.py.
     if not inline_eval_enabled(runtime_config):
-        print(f"\n[8/8] Qualitäts-Eval übersprungen (ATOMIC_AGENT_INLINE_EVAL=0) — retro via reeval_baseline.py.")
+        print(f"\n[8/8] Qualitäts-Eval übersprungen (Profil: {runtime_config.profile}, inline_eval deaktiviert) — retro via reeval_baseline.py.")
         return
     print(f"\n[8/8] Qualitäts-Eval…")
     try:
