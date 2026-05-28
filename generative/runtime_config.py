@@ -104,6 +104,13 @@ def _parse_optional_int(value: str) -> int | None:
     return parsed
 
 
+def _parse_nonneg_int(value: str) -> int:
+    parsed = int(value)
+    if parsed < 0:
+        raise ValueError("Runtime config integer values must be >= 0")
+    return parsed
+
+
 def load_runtime_config(env: Mapping[str, str] | None = None) -> RuntimeConfig:
     import os
 
@@ -118,13 +125,13 @@ def load_runtime_config(env: Mapping[str, str] | None = None) -> RuntimeConfig:
     if "ATOMIC_AGENT_INLINE_EVAL" in source:
         cfg = replace(cfg, inline_eval=_parse_bool(source["ATOMIC_AGENT_INLINE_EVAL"]))
     if "ATOMIC_AGENT_CALL_TIMEOUT" in source:
-        cfg = replace(cfg, call_timeout_sec=int(source["ATOMIC_AGENT_CALL_TIMEOUT"]))
+        cfg = replace(cfg, call_timeout_sec=_parse_nonneg_int(source["ATOMIC_AGENT_CALL_TIMEOUT"]))
     if "ATOMIC_AGENT_TIMEOUT_RETRIES" in source:
-        cfg = replace(cfg, timeout_retries=int(source["ATOMIC_AGENT_TIMEOUT_RETRIES"]))
+        cfg = replace(cfg, timeout_retries=_parse_nonneg_int(source["ATOMIC_AGENT_TIMEOUT_RETRIES"]))
     if "ATOMIC_AGENT_MAX_CONCEPTS" in source:
         cfg = replace(cfg, max_concepts=_parse_optional_int(source["ATOMIC_AGENT_MAX_CONCEPTS"]))
     if "ATOMIC_AGENT_MAX_CONCURRENT_CALLS" in source:
-        cfg = replace(cfg, max_concurrent_calls=int(source["ATOMIC_AGENT_MAX_CONCURRENT_CALLS"]))
+        cfg = replace(cfg, max_concurrent_calls=_parse_nonneg_int(source["ATOMIC_AGENT_MAX_CONCURRENT_CALLS"]))
     if "ATOMIC_AGENT_MAX_REFINES_PER_RUN" in source:
         cfg = replace(
             cfg,

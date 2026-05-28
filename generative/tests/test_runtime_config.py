@@ -69,3 +69,20 @@ def test_runtime_config_is_immutable():
 
     with pytest.raises(dataclasses.FrozenInstanceError):
         cfg.inline_eval = False
+
+
+def test_unknown_profile_raises():
+    with pytest.raises(ValueError):
+        load_runtime_config(env={"ATOMIC_AGENT_PROFILE": "turbo"})
+
+
+def test_invalid_bool_override_raises():
+    with pytest.raises(ValueError):
+        load_runtime_config(env={"ATOMIC_AGENT_INLINE_EVAL": "maybe"})
+
+
+def test_negative_int_override_raises():
+    with pytest.raises(ValueError):
+        load_runtime_config(env={"ATOMIC_AGENT_CALL_TIMEOUT": "-5"})
+    with pytest.raises(ValueError):
+        load_runtime_config(env={"ATOMIC_AGENT_MAX_CONCEPTS": "-1"})
