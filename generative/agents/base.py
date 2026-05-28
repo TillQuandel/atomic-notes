@@ -8,7 +8,6 @@ Trace-Hook: jeder Call schreibt eine Zeile nach ``.cache/runs/<run-id>.jsonl``
 from __future__ import annotations
 import hashlib
 import json
-import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -59,8 +58,6 @@ class CallResult:
 
 _LLM_CACHE_DIR = CACHE_DIR / "llm"
 _RUN_DIR = CACHE_DIR / "runs"
-_TRACE_FILE: Optional[Path] = None
-_TRACE_LOCK = threading.Lock()
 
 # Run-Namespace für --fresh-run: leerer String = normaler Cache (shared across runs).
 # Gesetzt via set_cache_namespace(salt) aus orchestrator.py bei --fresh-run.
@@ -128,7 +125,6 @@ def _cache_put(key: str, result: CallResult) -> None:
 
 def _trace(agent: str, prompt: str, model: str, result: CallResult,
            error: Optional[str] = None) -> None:
-    global _TRACE_FILE
     entry = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "agent": agent,
@@ -142,12 +138,6 @@ def _trace(agent: str, prompt: str, model: str, result: CallResult,
         "cached": result.cached,
         "error": error,
     }
-    with _TRACE_LOCK:
-        if _TRACE_FILE is None:
-            _ensure_dirs()
-            _TRACE_FILE = _RUN_DIR / f"{_RUN_ID}.jsonl"
-        with _TRACE_FILE.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     from agents.tracing import _backend as _tracing_backend
     _tracing_backend.write(entry)
 
