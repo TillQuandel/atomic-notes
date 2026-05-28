@@ -16,6 +16,7 @@ from config import CLAUDE_BIN, CALL_TIMEOUT_SEC
 
 _TRANSIENT_RC = {3221226505}
 _MAX_RETRIES = 2
+_TIMEOUT_RETRIES = int(os.getenv("ATOMIC_AGENT_TIMEOUT_RETRIES", "0"))
 
 _CLI_ALIASES: dict[str, str] = {
     "anthropic/claude-opus-4-7":           "opus",
@@ -70,6 +71,11 @@ def call_full(prompt: str, *, model: str, agent: str = "unknown"):
                 env=_env,
             )
         except subprocess.TimeoutExpired:
+            timeout_retries = min(_MAX_RETRIES, _TIMEOUT_RETRIES)
+            if attempt < timeout_retries:
+                print(f"      [cli-retry] {agent}/{model} timeout (attempt {attempt+1}/{timeout_retries+1}) â€” 10s Pause", file=sys.stderr)
+                time.sleep(10.0)
+                continue
             raise RuntimeError(f"claude CLI Timeout nach {CALL_TIMEOUT_SEC}s ({agent}/{model})")
         except OSError as e:
             raise RuntimeError(f"claude CLI nicht aufrufbar: {e}") from e
@@ -125,6 +131,11 @@ async def call_full_async(prompt: str, *, model: str, agent: str = "unknown"):
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
+            timeout_retries = min(_MAX_RETRIES, _TIMEOUT_RETRIES)
+            if attempt < timeout_retries:
+                print(f"      [cli-retry] {agent}/{model} timeout (attempt {attempt+1}/{timeout_retries+1}) â€” 10s Pause", file=sys.stderr)
+                await asyncio.sleep(10.0)
+                continue
             raise RuntimeError(f"claude CLI Timeout nach {CALL_TIMEOUT_SEC}s ({agent}/{model})")
 
         stdout = stdout_b.decode("utf-8", errors="replace")

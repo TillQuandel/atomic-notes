@@ -1,4 +1,5 @@
 """Tests für _subscription_backend und _litellm_backend."""
+import asyncio
 import json
 import subprocess
 from unittest.mock import MagicMock, patch, AsyncMock
@@ -7,6 +8,7 @@ import pytest
 from agents._subscription_backend import call_full as sub_call_full
 from agents._subscription_backend import call_full_async as sub_call_full_async
 from agents._subscription_backend import _to_cli_model
+import agents._subscription_backend as sub_backend
 from agents.base import CallResult
 
 
@@ -58,6 +60,49 @@ def test_sub_call_full_returns_callresult(tmp_path, monkeypatch):
     assert result.output_tokens == 5
 
 
+def test_sub_call_full_does_not_retry_timeout_by_default(monkeypatch):
+    with patch(
+        "subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd=["claude"], timeout=300),
+    ) as run_mock:
+        with pytest.raises(RuntimeError, match="Timeout nach"):
+            sub_call_full("test prompt", model="anthropic/claude-opus-4-7", agent="test")
+
+    assert run_mock.call_count == 1
+
+
+def test_sub_call_full_retries_timeout_when_enabled(monkeypatch):
+    fake_response = json.dumps({
+        "result": "recovered",
+        "is_error": False,
+        "duration_ms": 123,
+        "usage": {
+            "input_tokens": 10,
+            "output_tokens": 5,
+            "cache_read_input_tokens": 0,
+            "cache_creation_input_tokens": 0,
+        },
+    })
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout = fake_response
+    mock_proc.stderr = ""
+
+    monkeypatch.setattr(sub_backend, "_TIMEOUT_RETRIES", 1)
+
+    with patch(
+        "subprocess.run",
+        side_effect=[
+            subprocess.TimeoutExpired(cmd=["claude"], timeout=300),
+            mock_proc,
+        ],
+    ) as run_mock, patch("time.sleep"):
+        result = sub_call_full("test prompt", model="anthropic/claude-opus-4-7", agent="test")
+
+    assert result.text == "recovered"
+    assert run_mock.call_count == 2
+
+
 # --- Subscription async call ---
 
 @pytest.mark.asyncio
@@ -83,6 +128,67 @@ async def test_sub_call_full_async_returns_callresult(monkeypatch):
 
     assert result.text == "async hello"
     assert result.input_tokens == 8
+
+
+@pytest.mark.asyncio
+async def test_sub_call_full_async_does_not_retry_timeout_by_default(monkeypatch):
+    timed_out_proc = AsyncMock()
+    timed_out_proc.returncode = None
+    timed_out_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+    timed_out_proc.kill = MagicMock()
+    timed_out_proc.wait = AsyncMock()
+
+    with patch("asyncio.create_subprocess_exec", return_value=timed_out_proc) as create_mock:
+        with pytest.raises(RuntimeError, match="Timeout nach"):
+            await sub_call_full_async(
+                "test prompt",
+                model="anthropic/claude-opus-4-7",
+                agent="test",
+            )
+
+    assert create_mock.call_count == 1
+    timed_out_proc.kill.assert_called_once()
+    timed_out_proc.wait.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_sub_call_full_async_retries_timeout_when_enabled(monkeypatch):
+    fake_response = json.dumps({
+        "result": "async recovered",
+        "is_error": False,
+        "duration_ms": 99,
+        "usage": {"input_tokens": 8, "output_tokens": 3,
+                  "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
+    })
+
+    timed_out_proc = AsyncMock()
+    timed_out_proc.returncode = None
+    timed_out_proc.communicate = AsyncMock(side_effect=asyncio.TimeoutError())
+    timed_out_proc.kill = MagicMock()
+    timed_out_proc.wait = AsyncMock()
+
+    recovered_proc = AsyncMock()
+    recovered_proc.returncode = 0
+    recovered_proc.communicate = AsyncMock(
+        return_value=(fake_response.encode(), b"")
+    )
+
+    monkeypatch.setattr(sub_backend, "_TIMEOUT_RETRIES", 1)
+
+    with patch(
+        "asyncio.create_subprocess_exec",
+        side_effect=[timed_out_proc, recovered_proc],
+    ) as create_mock, patch("asyncio.sleep", new_callable=AsyncMock):
+        result = await sub_call_full_async(
+            "test prompt",
+            model="anthropic/claude-opus-4-7",
+            agent="test",
+        )
+
+    assert result.text == "async recovered"
+    assert create_mock.call_count == 2
+    timed_out_proc.kill.assert_called_once()
+    timed_out_proc.wait.assert_awaited_once()
 
 
 # --- litellm-Backend ---
