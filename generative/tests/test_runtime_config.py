@@ -241,3 +241,36 @@ def test_synthesized_hint_alone_enables_trigger_a():
     )
     assert decision.attempt is True
     assert decision.trigger is RefineTrigger.TRIGGER_A
+
+
+# ---------------------------------------------------------------------------
+# Task 3: Thread-safe refine budget
+# ---------------------------------------------------------------------------
+
+from concurrent.futures import ThreadPoolExecutor
+
+from runtime_config import RunBudget
+
+
+def test_run_budget_allows_unlimited_when_limit_is_none():
+    budget = RunBudget(max_refines_per_run=None)
+
+    assert [budget.try_consume() for _ in range(5)] == [True, True, True, True, True]
+    assert budget.consumed == 5
+
+
+def test_run_budget_stops_at_limit():
+    budget = RunBudget(max_refines_per_run=2)
+
+    assert [budget.try_consume() for _ in range(4)] == [True, True, False, False]
+    assert budget.consumed == 2
+
+
+def test_run_budget_is_thread_safe():
+    budget = RunBudget(max_refines_per_run=2)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        results = list(pool.map(lambda _: budget.try_consume(), range(20)))
+
+    assert sum(1 for result in results if result) == 2
+    assert budget.consumed == 2

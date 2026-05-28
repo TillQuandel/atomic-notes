@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import threading
 from dataclasses import dataclass, replace
 from enum import Enum
 from typing import Mapping
@@ -202,3 +203,27 @@ def refine_accepted(refined, *, auto_threshold: int) -> bool:
         bool(getattr(refined, "hard_gates_pass", False))
         and int(getattr(refined, "critic_score", 0)) >= auto_threshold
     )
+
+
+# ---------------------------------------------------------------------------
+# Mutable run state — kept outside frozen RuntimeConfig intentionally
+# ---------------------------------------------------------------------------
+
+
+class RunBudget:
+    def __init__(self, *, max_refines_per_run: int | None):
+        self._max_refines_per_run = max_refines_per_run
+        self._consumed = 0
+        self._lock = threading.Lock()
+
+    @property
+    def consumed(self) -> int:
+        with self._lock:
+            return self._consumed
+
+    def try_consume(self) -> bool:
+        with self._lock:
+            if self._max_refines_per_run is not None and self._consumed >= self._max_refines_per_run:
+                return False
+            self._consumed += 1
+            return True
