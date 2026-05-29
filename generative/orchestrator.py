@@ -1197,6 +1197,8 @@ def main():
     _auto_version_bump()
 
     runtime_config = load_runtime_config()
+    from agents.base import set_llm_runtime_config
+    set_llm_runtime_config(runtime_config)
     refine_budget = RunBudget(max_refines_per_run=runtime_config.refine.max_refines_per_run)
     print(
         "[runtime-config] "

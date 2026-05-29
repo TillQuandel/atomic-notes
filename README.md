@@ -12,7 +12,7 @@ PDF input and Obsidian-style Markdown are the first supported path, not the whol
 
 ## Status
 
-**generative v0.3.74** · **extractive v0.2.0** · last updated: 2026-05-27
+**generative v0.3.79** · **extractive v0.2.0** · last updated: 2026-05-29
 
 ## Repository Layout
 

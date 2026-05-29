@@ -64,6 +64,39 @@ _RUN_DIR = CACHE_DIR / "runs"
 _CACHE_NAMESPACE: str = ""
 
 
+@dataclass(frozen=True)
+class LLMRuntimeSettings:
+    call_timeout_sec: int
+    timeout_retries: int
+
+
+_LLM_RUNTIME_SETTINGS: LLMRuntimeSettings | None = None
+
+
+def set_llm_runtime_config(runtime_config) -> None:
+    """Set per-run backend settings resolved by runtime_config.load_runtime_config()."""
+    global _LLM_RUNTIME_SETTINGS
+    _LLM_RUNTIME_SETTINGS = LLMRuntimeSettings(
+        call_timeout_sec=int(runtime_config.call_timeout_sec),
+        timeout_retries=int(runtime_config.timeout_retries),
+    )
+
+
+def clear_llm_runtime_config() -> None:
+    """Clear per-run backend settings so direct backend defaults apply again."""
+    global _LLM_RUNTIME_SETTINGS
+    _LLM_RUNTIME_SETTINGS = None
+
+
+def _backend_runtime_kwargs() -> dict[str, int]:
+    if _LLM_RUNTIME_SETTINGS is None:
+        return {}
+    return {
+        "call_timeout_sec": _LLM_RUNTIME_SETTINGS.call_timeout_sec,
+        "timeout_retries": _LLM_RUNTIME_SETTINGS.timeout_retries,
+    }
+
+
 def set_cache_namespace(salt: str) -> None:
     """Setzt einen Run-spezifischen Salt für den Cache-Key.
     Leerer String = normales Caching (Wiederverwendung über Runs).
@@ -194,7 +227,7 @@ def call_claude_full(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unkn
                 return cached
 
         try:
-            result = _backend_call_full(prompt, model=model, agent=agent)
+            result = _backend_call_full(prompt, model=model, agent=agent, **_backend_runtime_kwargs())
         except RuntimeError as e:
             result = CallResult(text="")
             _annotate_llm_span(span, result, error=str(e))
@@ -225,7 +258,7 @@ async def call_claude_full_async(prompt: str, *, model: str = MODEL_OPUS, agent:
                 return cached
 
         try:
-            result = await _backend_call_full_async(prompt, model=model, agent=agent)
+            result = await _backend_call_full_async(prompt, model=model, agent=agent, **_backend_runtime_kwargs())
         except RuntimeError as e:
             result = CallResult(text="")
             _annotate_llm_span(span, result, error=str(e))

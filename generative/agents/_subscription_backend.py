@@ -57,8 +57,17 @@ def _parse_cli_json(raw: str):
     )
 
 
-def call_full(prompt: str, *, model: str, agent: str = "unknown"):
+def call_full(
+    prompt: str,
+    *,
+    model: str,
+    agent: str = "unknown",
+    call_timeout_sec: int | None = None,
+    timeout_retries: int | None = None,
+):
     """Synchroner Subprocess-Aufruf. Cache/Trace übernimmt base.py."""
+    call_timeout_sec = CALL_TIMEOUT_SEC if call_timeout_sec is None else call_timeout_sec
+    timeout_retries = _TIMEOUT_RETRIES if timeout_retries is None else timeout_retries
     for attempt in range(_MAX_RETRIES + 1):
         try:
             _env = os.environ.copy()
@@ -67,16 +76,18 @@ def call_full(prompt: str, *, model: str, agent: str = "unknown"):
                 _build_argv(model),
                 input=prompt,
                 capture_output=True, text=True, encoding="utf-8", errors="replace",
-                timeout=CALL_TIMEOUT_SEC,
+                timeout=call_timeout_sec,
                 env=_env,
             )
         except subprocess.TimeoutExpired:
-            timeout_retries = min(_MAX_RETRIES, _TIMEOUT_RETRIES)
-            if attempt < timeout_retries:
-                print(f"      [cli-retry] {agent}/{model} timeout (attempt {attempt+1}/{timeout_retries+1}) â€” 10s Pause", file=sys.stderr)
+            # Runtime config controls timeout retries, but transient process retries
+            # remain bounded by the existing backend retry ceiling.
+            effective_timeout_retries = min(_MAX_RETRIES, timeout_retries)
+            if attempt < effective_timeout_retries:
+                print(f"      [cli-retry] {agent}/{model} timeout (attempt {attempt+1}/{effective_timeout_retries+1}) â€” 10s Pause", file=sys.stderr)
                 time.sleep(10.0)
                 continue
-            raise RuntimeError(f"claude CLI Timeout nach {CALL_TIMEOUT_SEC}s ({agent}/{model})")
+            raise RuntimeError(f"claude CLI Timeout nach {call_timeout_sec}s ({agent}/{model})")
         except OSError as e:
             raise RuntimeError(f"claude CLI nicht aufrufbar: {e}") from e
 
@@ -106,8 +117,17 @@ def call_full(prompt: str, *, model: str, agent: str = "unknown"):
         raise RuntimeError(f"JSON-Parse: {e} | stdout[:200]={proc.stdout[:200]}") from e
 
 
-async def call_full_async(prompt: str, *, model: str, agent: str = "unknown"):
+async def call_full_async(
+    prompt: str,
+    *,
+    model: str,
+    agent: str = "unknown",
+    call_timeout_sec: int | None = None,
+    timeout_retries: int | None = None,
+):
     """Asynchroner Subprocess-Aufruf. Cache/Trace übernimmt base.py."""
+    call_timeout_sec = CALL_TIMEOUT_SEC if call_timeout_sec is None else call_timeout_sec
+    timeout_retries = _TIMEOUT_RETRIES if timeout_retries is None else timeout_retries
     stdout = ""
     rc = None
     for attempt in range(_MAX_RETRIES + 1):
@@ -126,17 +146,19 @@ async def call_full_async(prompt: str, *, model: str, agent: str = "unknown"):
         try:
             stdout_b, stderr_b = await asyncio.wait_for(
                 proc.communicate(input=prompt.encode("utf-8")),
-                timeout=CALL_TIMEOUT_SEC,
+                timeout=call_timeout_sec,
             )
         except asyncio.TimeoutError:
             proc.kill()
             await proc.wait()
-            timeout_retries = min(_MAX_RETRIES, _TIMEOUT_RETRIES)
-            if attempt < timeout_retries:
-                print(f"      [cli-retry] {agent}/{model} timeout (attempt {attempt+1}/{timeout_retries+1}) â€” 10s Pause", file=sys.stderr)
+            # Runtime config controls timeout retries, but transient process retries
+            # remain bounded by the existing backend retry ceiling.
+            effective_timeout_retries = min(_MAX_RETRIES, timeout_retries)
+            if attempt < effective_timeout_retries:
+                print(f"      [cli-retry] {agent}/{model} timeout (attempt {attempt+1}/{effective_timeout_retries+1}) â€” 10s Pause", file=sys.stderr)
                 await asyncio.sleep(10.0)
                 continue
-            raise RuntimeError(f"claude CLI Timeout nach {CALL_TIMEOUT_SEC}s ({agent}/{model})")
+            raise RuntimeError(f"claude CLI Timeout nach {call_timeout_sec}s ({agent}/{model})")
 
         stdout = stdout_b.decode("utf-8", errors="replace")
         stderr = stderr_b.decode("utf-8", errors="replace")
