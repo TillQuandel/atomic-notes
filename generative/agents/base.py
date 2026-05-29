@@ -8,6 +8,7 @@ Trace-Hook: jeder Call schreibt eine Zeile nach ``.cache/runs/<run-id>.jsonl``
 from __future__ import annotations
 import hashlib
 import json
+import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -54,6 +55,31 @@ class CallResult:
     cache_creation_tokens: int = 0
     duration_ms: int = 0
     cached: bool = False
+
+
+# Thread-lokaler Record des letzten LLM-Calls (Issue #17): erlaubt einem
+# Stage-6-Crash-Handler, Prompt + rohen Output des gecrashten Calls eindeutig
+# zuzuordnen — auch bei N parallelen Notes via asyncio.to_thread (je eigener Thread).
+_LAST_CALL = threading.local()
+
+
+def _record_call(agent: str, prompt: str, raw_output: str, error: Optional[str] = None) -> None:
+    _LAST_CALL.record = {
+        "agent": agent,
+        "prompt": prompt,
+        "raw_output": raw_output,
+        "error": error,
+    }
+
+
+def get_last_call_record() -> Optional[dict]:
+    """Letzter LLM-Call des aktuellen Threads (oder None). Nur sync-Pfad."""
+    return getattr(_LAST_CALL, "record", None)
+
+
+def clear_last_call_record() -> None:
+    if hasattr(_LAST_CALL, "record"):
+        del _LAST_CALL.record
 
 
 _LLM_CACHE_DIR = CACHE_DIR / "llm"
@@ -224,6 +250,7 @@ def call_claude_full(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unkn
             if cached is not None:
                 _annotate_llm_span(span, cached, cache_hit=True)
                 _trace(agent, prompt, model, cached)
+                _record_call(agent, prompt, cached.text)
                 return cached
 
         try:
@@ -232,12 +259,14 @@ def call_claude_full(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unkn
             result = CallResult(text="")
             _annotate_llm_span(span, result, error=str(e))
             _trace(agent, prompt, model, result, error=str(e))
+            _record_call(agent, prompt, "", error=str(e))
             raise
 
         _annotate_llm_span(span, result)
         if use_cache:
             _cache_put(key, result)
         _trace(agent, prompt, model, result)
+        _record_call(agent, prompt, result.text)
         return result
 
 

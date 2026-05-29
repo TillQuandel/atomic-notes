@@ -24,6 +24,8 @@ import dataclasses
 import json
 import os
 import sys
+import threading
+import traceback
 from pathlib import Path
 
 _TRACER = None    # gesetzt von _setup_phoenix_tracing wenn Phoenix läuft
@@ -447,6 +449,73 @@ async def entity_resolution(drafts: list[AtomicNoteDraft]) -> list[AtomicNoteDra
     return result
 
 
+# --- Stage-6-Crash-Handling (Issue #17) ------------------------------------
+# Eine Note, die in Stage 6 (Verifier/Cross-Reference/Critic) crasht, wird NICHT
+# als unverifizierter Draft geschrieben, sondern gedroppt + als JSON-Crash-Report
+# diagnostizierbar abgelegt. Siehe pipeline/crash_report.py.
+
+_STAGE6_PHASE = threading.local()  # "initial" | "refine" pro to_thread-Worker
+
+
+def _current_phase() -> str:
+    return getattr(_STAGE6_PHASE, "value", "initial")
+
+
+class _Stage6Failure:
+    """Sentinel-Ergebnis eines gecrashten Stage-6-Note-Laufs (statt Exception)."""
+    def __init__(self, idx: int, payload: dict):
+        self.idx = idx
+        self.payload = payload
+
+
+def _run_note_pipeline_guarded(i, n_total, draft, *args, _run_meta=None, **kwargs):
+    """Läuft im to_thread-Worker. Fängt jeden Stage-6-Crash und baut — im selben
+    Thread, in dem der Call-Record gesetzt wurde — einen vollständigen Crash-Payload.
+    Gibt (i, draft) bei Erfolg oder _Stage6Failure(i, payload) bei Crash zurück.
+    """
+    from agents.base import get_last_call_record, clear_last_call_record
+    clear_last_call_record()
+    _STAGE6_PHASE.value = "initial"
+    try:
+        return _run_note_pipeline(i, n_total, draft, *args, **kwargs)
+    except Exception as e:
+        rec = get_last_call_record() or {}
+        payload = {
+            "title": draft.title,
+            "step": rec.get("agent", "unknown"),
+            "exception": f"{type(e).__name__}: {e}",
+            "traceback": traceback.format_exc(),
+            "prompt": rec.get("prompt", ""),
+            "raw_output": rec.get("raw_output", ""),
+            "draft_body": draft.body or "",
+            "phase": _current_phase(),
+            "run_meta": _run_meta or {},
+        }
+        return _Stage6Failure(i, payload)
+
+
+def _collect_stage6_results(results, failed_dir: Path):
+    """Trennt Stage-6-Ergebnisse: erfolgreiche Drafts (idx-sortiert) vs. Crashes.
+    Schreibt pro Crash einen JSON-Report nach failed_dir. Gibt (survived, crashes).
+    """
+    from pipeline.crash_report import write_crash_report
+    survived_by_idx: dict[int, AtomicNoteDraft] = {}
+    crashes: list[_Stage6Failure] = []
+    for res in results:
+        if isinstance(res, _Stage6Failure):
+            write_crash_report(failed_dir, res.payload)
+            crashes.append(res)
+        elif isinstance(res, BaseException):
+            # Crash außerhalb des guarded Wrappers — defensiv, ohne Payload.
+            print(f"  [WARN] Stage-6 unerwartet fehlgeschlagen (kein Crash-Report): {res}",
+                  file=sys.stderr)
+        else:
+            idx, d = res
+            survived_by_idx[idx] = d
+    survived = [survived_by_idx[i] for i in sorted(survived_by_idx)]
+    return survived, crashes
+
+
 def _run_note_pipeline(
     i: int, n_total: int, draft: AtomicNoteDraft,
     initial_drafts: list[AtomicNoteDraft],
@@ -594,6 +663,7 @@ def _run_note_pipeline(
             if expanded:
                 print(f"      [acronym-fix] (refine) {', '.join(expanded)} aufgelöst")
                 refined.body = new_body
+            _STAGE6_PHASE.value = "refine"  # Crash ab hier wird als refine-Phase getaggt (Issue #17)
             refined = verifier.run(refined, source_chunk)
             refined = cross_reference.run(refined, existing_concepts, siblings=siblings)
             new_body, repaired = anchor_repair.repair_trailing_anchors(refined.body)
@@ -637,6 +707,7 @@ async def process_all_notes_async(
     related_mentions: list[str] | None = None,
     runtime_config=None,
     refine_budget: RunBudget | None = None,
+    failed_dir: Path | None = None,
 ) -> list[AtomicNoteDraft]:
     """Stage-6-Pipeline für alle Notes parallel via asyncio.to_thread() + Semaphore."""
     sem = asyncio.Semaphore(MAX_CONCURRENT_CALLS)
@@ -666,10 +737,16 @@ async def process_all_notes_async(
                 outgoing.add(tgt_path)
         all_run_concept_links[sib_path] = outgoing
 
+    from agents.base import _RUN_ID
+    from config import CACHE_DIR, BACKEND
+    if failed_dir is None:
+        failed_dir = CACHE_DIR / "failed" / _RUN_ID
+    run_meta = {"run_id": _RUN_ID, "pdf": source_path.name, "backend": BACKEND}
+
     async def _with_sem(i: int, draft: AtomicNoteDraft):
         async with sem:
             return await asyncio.to_thread(
-                _run_note_pipeline,
+                _run_note_pipeline_guarded,
                 i, n_total, draft, initial_drafts,
                 existing_concepts, concept_links,
                 chunk_map, full_text,
@@ -681,6 +758,7 @@ async def process_all_notes_async(
                 related_mentions,
                 runtime_config,
                 refine_budget,
+                _run_meta=run_meta,
             )
 
     results = await asyncio.gather(
@@ -688,14 +766,18 @@ async def process_all_notes_async(
         return_exceptions=True,
     )
 
-    for res in results:
-        if isinstance(res, Exception):
-            print(f"  [WARN] Stage-6 fehlgeschlagen: {res}", file=sys.stderr)
-        else:
-            idx, d = res
-            drafts[idx] = d
+    survived, crashes = _collect_stage6_results(results, failed_dir)
 
-    return drafts
+    if crashes:
+        print(f"\n  [Stage-6-Crash] {len(crashes)} Note(s) verworfen (unverifiziert, nicht geschrieben):",
+              file=sys.stderr)
+        for c in crashes:
+            p = c.payload
+            print(f"    - {p['title']} | {p['step']}/{p['phase']} | {p['exception']}",
+                  file=sys.stderr)
+        print(f"    Crash-Reports: {failed_dir}", file=sys.stderr)
+
+    return survived
 
 
 _ABSENCE_PHRASES = (
