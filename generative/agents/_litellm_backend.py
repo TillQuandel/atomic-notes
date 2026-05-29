@@ -43,14 +43,22 @@ def _parse_response(resp, duration_ms: float):
     )
 
 
-def call_full(prompt: str, *, model: str, agent: str = "unknown"):
+def call_full(
+    prompt: str,
+    *,
+    model: str,
+    agent: str = "unknown",
+    call_timeout_sec: int | None = None,
+    timeout_retries: int | None = None,
+):
     """Synchroner LLM-Aufruf via litellm. Cache/Trace übernimmt base.py."""
+    call_timeout_sec = CALL_TIMEOUT_SEC if call_timeout_sec is None else call_timeout_sec
     t0 = time.time()
     try:
         resp = litellm.completion(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            request_timeout=CALL_TIMEOUT_SEC,
+            request_timeout=call_timeout_sec,
             num_retries=_MAX_RETRIES,
         )
     except Exception as e:
@@ -58,14 +66,22 @@ def call_full(prompt: str, *, model: str, agent: str = "unknown"):
     return _parse_response(resp, (time.time() - t0) * 1000)
 
 
-async def call_full_async(prompt: str, *, model: str, agent: str = "unknown"):
+async def call_full_async(
+    prompt: str,
+    *,
+    model: str,
+    agent: str = "unknown",
+    call_timeout_sec: int | None = None,
+    timeout_retries: int | None = None,
+):
     """Asynchroner LLM-Aufruf via litellm. Cache/Trace übernimmt base.py."""
+    call_timeout_sec = CALL_TIMEOUT_SEC if call_timeout_sec is None else call_timeout_sec
     t0 = time.time()
     try:
         resp = await litellm.acompletion(
             model=model,
             messages=[{"role": "user", "content": prompt}],
-            request_timeout=CALL_TIMEOUT_SEC,
+            request_timeout=call_timeout_sec,
             num_retries=_MAX_RETRIES,
         )
     except Exception as e:

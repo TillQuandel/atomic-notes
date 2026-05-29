@@ -22,19 +22,22 @@ import asyncio
 import contextlib
 import dataclasses
 import json
+import os
 import sys
 from pathlib import Path
 
-_TRACER = None  # gesetzt von _setup_phoenix_tracing wenn Phoenix läuft
+_TRACER = None    # gesetzt von _setup_phoenix_tracing wenn Phoenix läuft
+_PROVIDER = None  # TracerProvider von register() — für force_flush am Prozess-Ende
 
 
 @contextlib.contextmanager
 def _span(name: str, **attrs):
-    """OTel-Span wenn Phoenix aktiv, sonst no-op."""
+    """OTel-Stage-Span wenn Phoenix aktiv, sonst no-op."""
     if _TRACER is None:
         yield
         return
     with _TRACER.start_as_current_span(name) as span:
+        span.set_attribute("openinference.span.kind", "CHAIN")
         for k, v in attrs.items():
             span.set_attribute(k, str(v))
         yield span
@@ -65,6 +68,10 @@ from config import (
     MODEL_LLM_DEDUP,
     MAX_CHUNKS_SHORT_DOC,
     MAX_PAGES_SHORT_DOC,
+)
+from runtime_config import (
+    load_runtime_config, cap_actionable_concepts, count_actionable,
+    RunBudget, refine_accepted, should_attempt_refine, LEGACY,
 )
 
 LARGE_DOC_THRESHOLD = 15
@@ -440,9 +447,6 @@ async def entity_resolution(drafts: list[AtomicNoteDraft]) -> list[AtomicNoteDra
     return result
 
 
-_REFINE_MIN_SCORE = 2  # v26: Hub-Notes Score 2 mit konkretem Hint ist reparierbar
-
-
 def _run_note_pipeline(
     i: int, n_total: int, draft: AtomicNoteDraft,
     initial_drafts: list[AtomicNoteDraft],
@@ -455,6 +459,8 @@ def _run_note_pipeline(
     all_run_concept_links: dict | None = None,
     background_map: dict | None = None,
     related_mentions: list[str] | None = None,
+    runtime_config=None,  # None → LEGACY-Fallback; refine_budget=None → unbegrenztes Budget
+    refine_budget: RunBudget | None = None,
 ) -> tuple[int, AtomicNoteDraft]:
     """Stage-6-Pipeline für eine einzelne Note. Läuft in asyncio.to_thread().
 
@@ -523,8 +529,7 @@ def _run_note_pipeline(
     draft = critic.run(draft, existing_concepts=hub_concepts, concept_links=run_concept_links)
 
     # Self-Refine (Milestone 3.6 + v8): Retry bei knapp gescheiterten Notes
-    refine_trigger_a = (_REFINE_MIN_SCORE <= draft.critic_score < CRITIC_AUTO_THRESHOLD)
-    refine_trigger_b = (draft.critic_score >= CRITIC_AUTO_THRESHOLD and not draft.hard_gates_pass)
+    refine_trigger_b = (draft.critic_score >= CRITIC_AUTO_THRESHOLD and not draft.hard_gates_pass)  # nur noch für synthesized_hint; Refine-Gating macht should_attempt_refine unten
     fs_violations = [f for f in draft.quality_flags if f.startswith("⚠️ Future-Self:")]
     synthesized_hint = None
     if not draft.revision_hint and refine_trigger_b and fs_violations:
@@ -541,9 +546,19 @@ def _run_note_pipeline(
 
     # Bug #5: concept_map-Lookup mit refine_key-Fallback (nach ER kann draft.title abweichen)
     _refine_map_key = draft.title if draft.title in concept_map else draft.refine_key
-    if ((refine_trigger_a or refine_trigger_b)
-            and (draft.revision_hint or synthesized_hint)
-            and _refine_map_key in concept_map):
+    _policy = runtime_config.refine if runtime_config is not None else LEGACY.refine
+    refine_decision = should_attempt_refine(
+        draft,
+        _policy,
+        auto_threshold=CRITIC_AUTO_THRESHOLD,
+        has_concept_context=_refine_map_key in concept_map,
+        synthesized_hint=synthesized_hint,
+    )
+    _should_attempt = refine_decision.attempt
+    _budget_ok = (refine_budget is None or refine_budget.try_consume()) if _should_attempt else False
+    if _should_attempt and not _budget_ok:
+        print("      [refine] übersprungen: Run-Budget ausgeschöpft")
+    if _should_attempt and _budget_ok:
         base_hint = draft.revision_hint or synthesized_hint
         augmented_hint = (
             base_hint
@@ -592,13 +607,7 @@ def _run_note_pipeline(
                 citation_count=quality_report.citation_count,
             )
             refined = critic.run(refined, existing_concepts=hub_concepts, concept_links=run_concept_links)
-            better = False
-            # Bug #2: Trigger-A muss hard_gates_pass verlangen — sonst wird Note mit höherem
-            # Score aber weiterhin failing Gates fälschlich als Verbesserung akzeptiert
-            if refine_trigger_a and refined.hard_gates_pass and refined.critic_score >= CRITIC_AUTO_THRESHOLD:
-                better = True
-            elif refine_trigger_b and refined.hard_gates_pass and refined.critic_score >= CRITIC_AUTO_THRESHOLD:
-                better = True
+            better = refine_accepted(refined, auto_threshold=CRITIC_AUTO_THRESHOLD)
             if better:
                 print(f"      [refine] Score {draft.critic_score}/{draft.hard_gates_pass} → "
                       f"{refined.critic_score}/{refined.hard_gates_pass} ✓")
@@ -626,6 +635,8 @@ async def process_all_notes_async(
     source_path: Path, tag_whitelist: list,
     background_map: dict | None = None,
     related_mentions: list[str] | None = None,
+    runtime_config=None,
+    refine_budget: RunBudget | None = None,
 ) -> list[AtomicNoteDraft]:
     """Stage-6-Pipeline für alle Notes parallel via asyncio.to_thread() + Semaphore."""
     sem = asyncio.Semaphore(MAX_CONCURRENT_CALLS)
@@ -668,6 +679,8 @@ async def process_all_notes_async(
                 all_hub_concepts, all_run_concept_links,
                 background_map,
                 related_mentions,
+                runtime_config,
+                refine_budget,
             )
 
     results = await asyncio.gather(
@@ -760,6 +773,11 @@ def _auto_start_dashboard() -> None:
         print("  [dashboard] Server gestartet: http://localhost:8051")
 
 
+def inline_eval_enabled(runtime_config) -> bool:
+    """Whether Stage-8 inline quality evaluation should run for this process."""
+    return bool(runtime_config.inline_eval)
+
+
 def _auto_version_bump() -> None:
     """Erhöht AGENT_VERSION Patch wenn sich Pipeline-Code seit letztem Run geändert hat."""
     import hashlib, json as _json, re as _re
@@ -817,27 +835,53 @@ def _auto_version_bump() -> None:
 
 def _setup_phoenix_tracing() -> None:
     """Sendet OTel-Traces an laufenden Phoenix-Server (http://localhost:6006).
-    Kein Fehler wenn Phoenix nicht läuft — Pipeline startet normal."""
-    global _TRACER
+
+    Nur aktiv bei ENV ATOMIC_AGENT_TRACING=phoenix. Kein Fehler wenn Phoenix
+    nicht läuft — Pipeline startet normal ohne Traces.
+
+    Die LLM-Calls werden manuell in agents/base.py instrumentiert (gilt für
+    beide Backends: claude-CLI-Subprocess UND litellm). Daher KEIN
+    Auto-Instrumentor — der würde bei BACKEND=litellm doppelte Spans erzeugen
+    und beim CLI-Subprocess-Default ohnehin nichts sehen.
+    """
+    global _TRACER, _PROVIDER
+    if os.getenv("ATOMIC_AGENT_TRACING") != "phoenix":
+        return
     try:
+        # Rohes OpenTelemetry statt phoenix.otel.register: Die Pipeline läuft im
+        # System-Python, wo `import phoenix` an einem sqlean-Paketkonflikt crasht.
+        # Der Phoenix-SERVER läuft als separater Prozess; wir müssen hier nur
+        # OTLP-Spans an localhost:6006 schicken — das braucht KEIN phoenix-Paket.
         from opentelemetry import trace
         from opentelemetry.sdk.trace import TracerProvider
-        from opentelemetry.sdk.trace.export import BatchSpanProcessor
+        from opentelemetry.sdk.trace.export import SimpleSpanProcessor
+        from opentelemetry.sdk.resources import Resource
         from opentelemetry.exporter.otlp.proto.http.trace_exporter import OTLPSpanExporter
-        from openinference.instrumentation.litellm import LiteLLMInstrumentor
 
-        exporter = OTLPSpanExporter(endpoint="http://localhost:6006/v1/traces")
-        provider = TracerProvider()
-        provider.add_span_processor(BatchSpanProcessor(exporter))
-        trace.set_tracer_provider(provider)
-        LiteLLMInstrumentor().instrument()
+        # SimpleSpanProcessor: sofortiger Export pro Span. Robuster als
+        # BatchSpanProcessor bei kurzlebigen CLI-Runs (kein Flush-Verlust).
+        # Resource openinference.project.name → Phoenix gruppiert in dieses Projekt
+        # (statt "default"); entspricht register(project_name=...).
+        _PROVIDER = TracerProvider(
+            resource=Resource.create({"openinference.project.name": "atomic-agent"})
+        )
+        _PROVIDER.add_span_processor(
+            SimpleSpanProcessor(OTLPSpanExporter(endpoint="http://localhost:6006/v1/traces"))
+        )
+        trace.set_tracer_provider(_PROVIDER)
         _TRACER = trace.get_tracer("atomic-agent")
+        # LLM-Call-Instrumentierung in base.py explizit aktivieren (nur hier, nur
+        # bei aktivem Tracing — kein impliziter Proxy-Tracer).
+        from agents.base import set_llm_tracer
+        set_llm_tracer(_TRACER)
+        import atexit
+        atexit.register(lambda: _PROVIDER and _PROVIDER.force_flush())
         print("[phoenix] Tracing aktiv → http://localhost:6006")
     except Exception as e:
         print(f"[phoenix] Tracing nicht verfügbar ({e}) — Pipeline läuft ohne Traces")
 
 
-def _run_extraction_stages(args, source_path: Path):
+def _run_extraction_stages(args, source_path: Path, runtime_config=None):  # main() übergibt immer einen RuntimeConfig; None = kein Runtime-Config / Capping deaktiviert
     """Stages 0–5: PDF extract → planning → extraction.
 
     Returns:
@@ -934,6 +978,7 @@ def _run_extraction_stages(args, source_path: Path):
         all_drafts: list[AtomicNoteDraft] = []
         all_concept_map: dict = {}
         dropped_total = 0
+        remaining_concepts = runtime_config.max_concepts if runtime_config is not None else None
 
         for i, chunk in enumerate(chunks, 1):
             title_preview = chunk.title[:60]
@@ -951,6 +996,21 @@ def _run_extraction_stages(args, source_path: Path):
             if hallucinated:
                 print(f"      {len(hallucinated)} halluzinierte Konzepte verworfen: "
                       f"{', '.join(hallucinated[:3])}{'...' if len(hallucinated)>3 else ''}")
+            if runtime_config is not None:
+                chapter_plan.concepts, _capped = cap_actionable_concepts(
+                    chapter_plan.concepts,
+                    remaining_concepts,
+                )
+                if _capped:
+                    print(
+                        f"      [runtime-config] remaining_concepts={remaining_concepts} "
+                        f"-> {len(_capped)} Konzept(e) übersprungen: "
+                        f"{', '.join(c.title for c in _capped[:3])}"
+                        f"{'…' if len(_capped) > 3 else ''}"
+                    )
+                kept_actionable = count_actionable(chapter_plan.concepts)
+                if remaining_concepts is not None:
+                    remaining_concepts = max(0, remaining_concepts - kept_actionable)
             ch_related = [c.title for c in chapter_plan.concepts
                           if c.origin == "secondary_mention"]
             actionable = [c for c in chapter_plan.concepts
@@ -989,6 +1049,18 @@ def _run_extraction_stages(args, source_path: Path):
         if hallucinated:
             print(f"      {len(hallucinated)} halluzinierte Konzepte verworfen: "
                   f"{', '.join(hallucinated[:3])}{'…' if len(hallucinated)>3 else ''}")
+        if runtime_config is not None:
+            concept_plan.concepts, _capped = cap_actionable_concepts(
+                concept_plan.concepts,
+                runtime_config.max_concepts,
+            )
+            if _capped:
+                print(
+                    f"      [runtime-config] max_concepts={runtime_config.max_concepts} "
+                    f"-> {len(_capped)} Konzept(e) übersprungen: "
+                    f"{', '.join(c.title for c in _capped[:3])}"
+                    f"{'…' if len(_capped) > 3 else ''}"
+                )
 
         related_mentions = [c.title for c in concept_plan.concepts
                             if c.origin == "secondary_mention"]
@@ -1124,6 +1196,19 @@ def main():
     _auto_start_dashboard()
     _auto_version_bump()
 
+    runtime_config = load_runtime_config()
+    from agents.base import set_llm_runtime_config
+    set_llm_runtime_config(runtime_config)
+    refine_budget = RunBudget(max_refines_per_run=runtime_config.refine.max_refines_per_run)
+    print(
+        "[runtime-config] "
+        f"profile={runtime_config.profile} "
+        f"inline_eval={runtime_config.inline_eval} "
+        f"max_concepts={runtime_config.max_concepts} "
+        f"max_refines_per_run={runtime_config.refine.max_refines_per_run} "
+        f"timeout_retries={runtime_config.timeout_retries}"
+    )
+
     if getattr(args, "fresh_run", False):
         from agents.base import set_cache_namespace
         from agents.tracing import _RUN_ID
@@ -1157,7 +1242,7 @@ def main():
         (drafts, concept_map, existing_concepts, concept_links,
          text, chunks, acronym_dict, quality_report, pdf_meta,
          source_path, tag_whitelist, background_map, fb_year,
-         dropped_total, word_count, related_mentions) = _run_extraction_stages(args, source_path)
+         dropped_total, word_count, related_mentions) = _run_extraction_stages(args, source_path, runtime_config)
         if args.save_drafts:
             _save_draft_state(
                 args.save_drafts, drafts=drafts, concept_map=concept_map,
@@ -1220,6 +1305,8 @@ def main():
             source_path=source_path, tag_whitelist=tag_whitelist,
             background_map=background_map,
             related_mentions=related_mentions,
+            runtime_config=runtime_config,
+            refine_budget=refine_budget,
         ))
 
     # --- Hebel #5: Boilerplate-Dedup zwischen Hub-Drafts und Sub-Konzept-Drafts ---
@@ -1311,6 +1398,10 @@ def main():
     # --- Stage 8: Qualitäts-Eval (deterministisch, immer gespeichert) ---
     # Läuft nach jedem Run automatisch — PyMuPDF + Fuzzy + Semantic gegen Quell-PDF.
     # Ergebnisse in .cache/quality_history.jsonl für Longitudinal-Vergleiche.
+    # Abschaltbar via ATOMIC_AGENT_INLINE_EVAL=0 oder Profil (fast/balanced); retroaktive Eval via reeval_baseline.py.
+    if not inline_eval_enabled(runtime_config):
+        print(f"\n[8/8] Qualitäts-Eval übersprungen (Profil: {runtime_config.profile}, inline_eval deaktiviert) — retro via reeval_baseline.py.")
+        return
     print(f"\n[8/8] Qualitäts-Eval…")
     try:
         import eval_quality_v4 as _eq

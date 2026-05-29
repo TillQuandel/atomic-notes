@@ -1948,7 +1948,7 @@ def main() -> None:
     OUTPUT.write_text(html, encoding="utf-8")
     print(f"\n[dashboard] Geschrieben: {OUTPUT}")
 
-    webbrowser.open(OUTPUT.as_uri())
+    webbrowser.open(OUTPUT.resolve().as_uri())
     print("[dashboard] Browser geöffnet.")
 
 

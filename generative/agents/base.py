@@ -8,7 +8,6 @@ Trace-Hook: jeder Call schreibt eine Zeile nach ``.cache/runs/<run-id>.jsonl``
 from __future__ import annotations
 import hashlib
 import json
-import threading
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -19,6 +18,23 @@ from config import MODEL_OPUS, CACHE_DIR, BACKEND
 # Re-Export für Backwards-Compat — Agenten importieren aus agents.base
 from agents.tracing import trace_event, trace_run_start, set_tracing_backend, flush_tracing  # noqa: F401
 from agents.tracing import _RUN_ID  # single source of truth for run ID
+
+# OTel-Tracer für Phoenix. Bleibt None bis orchestrator._setup_phoenix_tracing()
+# ihn via set_llm_tracer() explizit setzt (nur bei ATOMIC_AGENT_TRACING=phoenix).
+# Kein impliziter ProxyTracer: ein anderswo gesetzter globaler Provider soll NICHT
+# ungewollt LLM-Spans erzeugen. None → _llm_span ist garantiert No-Op.
+try:
+    from opentelemetry.trace import Status as _OtelStatus, StatusCode as _OtelStatusCode
+except Exception:  # opentelemetry nicht installiert
+    _OtelStatus = _OtelStatusCode = None
+_OTEL_TRACER = None
+
+
+def set_llm_tracer(tracer) -> None:
+    """Aktiviert die LLM-Call-Instrumentierung mit einem konkreten OTel-Tracer.
+    Aufruf aus orchestrator._setup_phoenix_tracing(). None = Tracing aus."""
+    global _OTEL_TRACER
+    _OTEL_TRACER = tracer
 
 # Backend-Dispatch
 if BACKEND == "litellm":
@@ -42,12 +58,43 @@ class CallResult:
 
 _LLM_CACHE_DIR = CACHE_DIR / "llm"
 _RUN_DIR = CACHE_DIR / "runs"
-_TRACE_FILE: Optional[Path] = None
-_TRACE_LOCK = threading.Lock()
 
 # Run-Namespace für --fresh-run: leerer String = normaler Cache (shared across runs).
 # Gesetzt via set_cache_namespace(salt) aus orchestrator.py bei --fresh-run.
 _CACHE_NAMESPACE: str = ""
+
+
+@dataclass(frozen=True)
+class LLMRuntimeSettings:
+    call_timeout_sec: int
+    timeout_retries: int
+
+
+_LLM_RUNTIME_SETTINGS: LLMRuntimeSettings | None = None
+
+
+def set_llm_runtime_config(runtime_config) -> None:
+    """Set per-run backend settings resolved by runtime_config.load_runtime_config()."""
+    global _LLM_RUNTIME_SETTINGS
+    _LLM_RUNTIME_SETTINGS = LLMRuntimeSettings(
+        call_timeout_sec=int(runtime_config.call_timeout_sec),
+        timeout_retries=int(runtime_config.timeout_retries),
+    )
+
+
+def clear_llm_runtime_config() -> None:
+    """Clear per-run backend settings so direct backend defaults apply again."""
+    global _LLM_RUNTIME_SETTINGS
+    _LLM_RUNTIME_SETTINGS = None
+
+
+def _backend_runtime_kwargs() -> dict[str, int]:
+    if _LLM_RUNTIME_SETTINGS is None:
+        return {}
+    return {
+        "call_timeout_sec": _LLM_RUNTIME_SETTINGS.call_timeout_sec,
+        "timeout_retries": _LLM_RUNTIME_SETTINGS.timeout_retries,
+    }
 
 
 def set_cache_namespace(salt: str) -> None:
@@ -111,7 +158,6 @@ def _cache_put(key: str, result: CallResult) -> None:
 
 def _trace(agent: str, prompt: str, model: str, result: CallResult,
            error: Optional[str] = None) -> None:
-    global _TRACE_FILE
     entry = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "agent": agent,
@@ -125,14 +171,41 @@ def _trace(agent: str, prompt: str, model: str, result: CallResult,
         "cached": result.cached,
         "error": error,
     }
-    with _TRACE_LOCK:
-        if _TRACE_FILE is None:
-            _ensure_dirs()
-            _TRACE_FILE = _RUN_DIR / f"{_RUN_ID}.jsonl"
-        with _TRACE_FILE.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(entry, ensure_ascii=False) + "\n")
     from agents.tracing import _backend as _tracing_backend
     _tracing_backend.write(entry)
+
+
+from contextlib import contextmanager as _contextmanager
+
+
+@_contextmanager
+def _llm_span(agent: str, prompt: str, model: str):
+    """OTel-LLM-Span für einen einzelnen Call. No-op wenn Tracing aus.
+
+    Wird VOR dem Cache-Check geöffnet, damit auch Cache-Hits in Phoenix
+    erscheinen (sonst fehlt bei Re-Runs die halbe Pipeline).
+    """
+    if _OTEL_TRACER is None:
+        yield None
+        return
+    with _OTEL_TRACER.start_as_current_span(agent) as span:
+        span.set_attribute("openinference.span.kind", "LLM")
+        span.set_attribute("input.value", prompt)
+        span.set_attribute("llm.model_name", model)
+        yield span
+
+
+def _annotate_llm_span(span, result: "CallResult", *, cache_hit: bool = False,
+                       error: Optional[str] = None) -> None:
+    """Schreibt Output + Usage in den LLM-Span. No-op wenn span is None."""
+    if span is None:
+        return
+    span.set_attribute("output.value", str(result.text or ""))
+    span.set_attribute("llm.token_count.prompt", result.input_tokens)
+    span.set_attribute("llm.token_count.completion", result.output_tokens)
+    span.set_attribute("cache.hit", cache_hit)
+    if error:
+        span.set_status(_OtelStatus(_OtelStatusCode.ERROR, error))
 
 
 def call_claude(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
@@ -144,24 +217,28 @@ def call_claude(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
 def call_claude_full(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
                      use_cache: bool = True) -> CallResult:
     """Synchroner Aufruf mit vollem CallResult (text + usage)."""
-    key = _cache_key(prompt, model, agent)
-    if use_cache:
-        cached = _cache_get(key)
-        if cached is not None:
-            _trace(agent, prompt, model, cached)
-            return cached
+    with _llm_span(agent, prompt, model) as span:
+        key = _cache_key(prompt, model, agent)
+        if use_cache:
+            cached = _cache_get(key)
+            if cached is not None:
+                _annotate_llm_span(span, cached, cache_hit=True)
+                _trace(agent, prompt, model, cached)
+                return cached
 
-    try:
-        result = _backend_call_full(prompt, model=model, agent=agent)
-    except RuntimeError as e:
-        result = CallResult(text="")
-        _trace(agent, prompt, model, result, error=str(e))
-        raise
+        try:
+            result = _backend_call_full(prompt, model=model, agent=agent, **_backend_runtime_kwargs())
+        except RuntimeError as e:
+            result = CallResult(text="")
+            _annotate_llm_span(span, result, error=str(e))
+            _trace(agent, prompt, model, result, error=str(e))
+            raise
 
-    if use_cache:
-        _cache_put(key, result)
-    _trace(agent, prompt, model, result)
-    return result
+        _annotate_llm_span(span, result)
+        if use_cache:
+            _cache_put(key, result)
+        _trace(agent, prompt, model, result)
+        return result
 
 
 async def call_claude_async(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
@@ -171,24 +248,28 @@ async def call_claude_async(prompt: str, *, model: str = MODEL_OPUS, agent: str 
 
 async def call_claude_full_async(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
                                  use_cache: bool = True) -> CallResult:
-    key = _cache_key(prompt, model, agent)
-    if use_cache:
-        cached = _cache_get(key)
-        if cached is not None:
-            _trace(agent, prompt, model, cached)
-            return cached
+    with _llm_span(agent, prompt, model) as span:
+        key = _cache_key(prompt, model, agent)
+        if use_cache:
+            cached = _cache_get(key)
+            if cached is not None:
+                _annotate_llm_span(span, cached, cache_hit=True)
+                _trace(agent, prompt, model, cached)
+                return cached
 
-    try:
-        result = await _backend_call_full_async(prompt, model=model, agent=agent)
-    except RuntimeError as e:
-        result = CallResult(text="")
-        _trace(agent, prompt, model, result, error=str(e))
-        raise
+        try:
+            result = await _backend_call_full_async(prompt, model=model, agent=agent, **_backend_runtime_kwargs())
+        except RuntimeError as e:
+            result = CallResult(text="")
+            _annotate_llm_span(span, result, error=str(e))
+            _trace(agent, prompt, model, result, error=str(e))
+            raise
 
-    if use_cache:
-        _cache_put(key, result)
-    _trace(agent, prompt, model, result)
-    return result
+        _annotate_llm_span(span, result)
+        if use_cache:
+            _cache_put(key, result)
+        _trace(agent, prompt, model, result)
+        return result
 
 
 # Provider-agnostische Aliase für Backend-Abstraktion

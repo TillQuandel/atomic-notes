@@ -4,10 +4,8 @@ Swap-Beispiel (nach SDK-Migration):
     from agents.tracing import set_tracing_backend
     set_tracing_backend(OtelBackend(endpoint="..."))
 
-# Note: LLM-call tracing still uses _trace() in agents/base.py (legacy path).
-# Both write to the same run JSONL file. Full migration to TracingBackend
-# (so LLM calls also flow through the backend, enabling Langfuse spans)
-# is planned as part of the SDK migration (Plan 2).
+LLM-call tracing in agents/base.py routet über _backend.write(); strukturierte
+Events fließen via trace_event()/trace_run_start() in denselben Backend-Pfad.
 """
 from __future__ import annotations
 import json
