@@ -69,6 +69,14 @@ def _parse_filename_fallback(source_file: str) -> dict[str, str]:
     return {}
 
 
+_PAGE_PREFIX_RE = re.compile(r"^\s*S\.\s*", re.IGNORECASE)
+
+
+def _strip_page_prefix(value: str) -> str:
+    """Entfernt einen führenden `S. `-Prefix aus einem Anker-Page-Wert (Issue #20)."""
+    return _PAGE_PREFIX_RE.sub("", value)
+
+
 def build_quellen_block(note: AtomicNoteDraft, source_file: str,
                         source_meta: dict[str, str] | None) -> str:
     """Quellen-Block deterministisch aus PDF-Metadata + verifizierten Anker-Pages.
@@ -98,8 +106,10 @@ def build_quellen_block(note: AtomicNoteDraft, source_file: str,
 
     # Seiten aus verifizierten Ankern. F8: page (LLM-exact) ODER fuzzy_page
     # (rapidfuzz-Fallback) — beide sind valide Seitenbelege für den Quellen-Block.
+    # Issue #20: Anker-Werte enthalten bereits den `S. `-Prefix (Verifier setzt
+    # `page_str = f"S. {n}"`). Hier strippen, da Z. 119 ihn erneut voranstellt.
     pages = sorted({
-        (a.page or a.fuzzy_page).strip()
+        _strip_page_prefix((a.page or a.fuzzy_page).strip())
         for a in note.source_anchors
         if (a.page or a.fuzzy_page) and (a.page or a.fuzzy_page).strip().lower() not in ("none", "null", "")
     })
@@ -598,6 +608,42 @@ tags:
         build_quellen_block(note, source_file, source_meta).rstrip(),
     ]
     return frontmatter + "\n" + "\n".join(body_parts) + "\n"
+
+
+def rewrite_merged_related_links(drafts: list[AtomicNoteDraft],
+                                 existing_concepts: dict[str, str] | None) -> int:
+    """Issue #21: Drafts, die beim Schreiben zu Merge-Stubs werden (Title-/Alias-
+    Match im Vault), erscheinen unter dem Dateinamen der bestehenden Note
+    (`[[<vault-stem>]]`), nicht unter ihrem Draft-Titel. Sibling-Drafts behalten
+    aber `related: [[<draft-titel>]]` — das ergibt nach dem Lauf einen toten Link.
+
+    Pre-Pass vor der Write-Schleife: baut eine Map {normalisierter Draft-Titel/Alias
+    → Merge-Target-Stem} aus genau den Drafts, die `find_existing_in_vault` trifft,
+    und schreibt alle passenden `related`-Einträge der Drafts auf das Target um.
+    Gibt die Anzahl umgeschriebener Links zurück.
+    """
+    if not existing_concepts:
+        return 0
+    rename_map: dict[str, str] = {}
+    for d in drafts:
+        existing_vault = find_existing_in_vault(d.title, d.aliases, existing_concepts)
+        if existing_vault is None:
+            continue
+        new_stem = existing_vault.stem
+        for key in [d.title, *d.aliases]:
+            if key and key.strip():
+                rename_map[key.strip().lower()] = new_stem
+    if not rename_map:
+        return 0
+    rewritten = 0
+    for d in drafts:
+        for i, link in enumerate(d.related):
+            target = link.strip().strip("[]").split("|", 1)[0].strip()
+            new_stem = rename_map.get(target.lower())
+            if new_stem and new_stem != target:
+                d.related[i] = f"[[{new_stem}]]"
+                rewritten += 1
+    return rewritten
 
 
 def write_note(note: AtomicNoteDraft, source_file: str, dry_run: bool = False,
