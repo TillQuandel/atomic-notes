@@ -9,7 +9,19 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from pipeline.vault_writer import convert_inline_to_footnotes
+from pipeline.vault_writer import convert_inline_to_footnotes, build_quellen_block
+from schemas.atomic_note import AtomicNoteDraft, TextAnchor
+
+
+def _draft_with_anchors(anchors: list[TextAnchor]) -> AtomicNoteDraft:
+    return AtomicNoteDraft(
+        title="Test-Konzept",
+        body="Body.",
+        source_anchors=anchors,
+        related=[],
+        tags=[],
+        synthesis_confidence="high",
+    )
 
 
 class TestPageRange(unittest.TestCase):
@@ -121,6 +133,106 @@ class TestBlockQuotePreservation(unittest.TestCase):
         out = convert_inline_to_footnotes(body, "Hiatt 2006")
         # Keine [^N] und kein [^N]: Definitions-Block
         self.assertNotIn("[^1]", out)
+
+
+class TestQuellenBlockPagePrefix(unittest.TestCase):
+    """Issue #20: Anker-Page-Werte enthalten bereits `S. ` (Verifier setzt
+    `page_str = f"S. {n}"`). Der Quellen-Block darf den Prefix nicht erneut
+    voranstellen — sonst `S. S. 1`."""
+
+    SRC = "Bates - 2017 - Information Behavior.pdf"
+    META = {"Author": "Bates", "Year": "2017", "Title": "Information Behavior"}
+
+    def test_page_with_prefix_not_doubled(self):
+        draft = _draft_with_anchors([TextAnchor(quote="x", page="S. 1")])
+        out = build_quellen_block(draft, self.SRC, self.META)
+        self.assertIn(", S. 1*", out)
+        self.assertNotIn("S. S.", out)
+
+    def test_fuzzy_page_with_prefix_not_doubled(self):
+        draft = _draft_with_anchors([TextAnchor(quote="x", page=None, fuzzy_page="S. 2")])
+        out = build_quellen_block(draft, self.SRC, self.META)
+        self.assertIn(", S. 2*", out)
+        self.assertNotIn("S. S.", out)
+
+    def test_page_without_prefix_still_renders(self):
+        # Extractor-Pfad kann rohe "page"-Werte ohne Prefix liefern.
+        draft = _draft_with_anchors([TextAnchor(quote="x", page="3")])
+        out = build_quellen_block(draft, self.SRC, self.META)
+        self.assertIn(", S. 3*", out)
+        self.assertNotIn("S. S.", out)
+
+    def test_multiple_pages_each_stripped(self):
+        draft = _draft_with_anchors([
+            TextAnchor(quote="a", page="S. 1"),
+            TextAnchor(quote="b", page="S. 5"),
+        ])
+        out = build_quellen_block(draft, self.SRC, self.META)
+        self.assertIn(", S. 1, 5*", out)
+        self.assertNotIn("S. S.", out)
+
+
+class TestRewriteMergedRelatedLinks(unittest.TestCase):
+    """Issue #21: Drafts, die beim Schreiben zu Merge-Stubs werden (Title-/Alias-
+    Match im Vault), erscheinen unter dem Dateinamen der bestehenden Note. Sibling-
+    Drafts behalten aber `related: [[<alter-draft-titel>]]` → toter Link. Pre-Pass
+    schreibt diese related-Einträge auf das Merge-Target um."""
+
+    def _draft(self, title, related=None, aliases=None):
+        return AtomicNoteDraft(
+            title=title, body="b", source_anchors=[],
+            related=list(related or []), tags=[], synthesis_confidence="high",
+            aliases=list(aliases or []),
+        )
+
+    def test_sibling_related_rewritten_to_merge_target(self):
+        merged = self._draft("Information Behavior (Bates)")
+        sibling = self._draft("Forschungsstroeme",
+                              related=["[[Information Behavior (Bates)]]"])
+        existing = {"information behavior (bates)":
+                    "04-wissen/IBI Forschungsbereich Information Behavior.md"}
+        from pipeline.vault_writer import rewrite_merged_related_links
+        count = rewrite_merged_related_links([merged, sibling], existing)
+        self.assertEqual(sibling.related,
+                         ["[[IBI Forschungsbereich Information Behavior]]"])
+        self.assertEqual(count, 1)
+
+    def test_non_merged_related_untouched(self):
+        from pipeline.vault_writer import rewrite_merged_related_links
+        sibling = self._draft("A", related=["[[Some Other Note]]"])
+        existing = {"information behavior (bates)":
+                    "04-wissen/IBI Forschungsbereich Information Behavior.md"}
+        count = rewrite_merged_related_links([sibling], existing)
+        self.assertEqual(sibling.related, ["[[Some Other Note]]"])
+        self.assertEqual(count, 0)
+
+    def test_alias_match_also_rewritten(self):
+        from pipeline.vault_writer import rewrite_merged_related_links
+        merged = self._draft("Information Behavior (Bates)",
+                             aliases=["IB Bates"])
+        sibling = self._draft("B", related=["[[IB Bates]]"])
+        existing = {"information behavior (bates)":
+                    "04-wissen/IBI Forschungsbereich Information Behavior.md"}
+        rewrite_merged_related_links([merged, sibling], existing)
+        self.assertEqual(sibling.related,
+                         ["[[IBI Forschungsbereich Information Behavior]]"])
+
+    def test_display_alias_link_rewritten_to_canonical(self):
+        from pipeline.vault_writer import rewrite_merged_related_links
+        merged = self._draft("Information Behavior (Bates)")
+        sibling = self._draft("C",
+                             related=["[[Information Behavior (Bates)|IB]]"])
+        existing = {"information behavior (bates)":
+                    "04-wissen/IBI Forschungsbereich Information Behavior.md"}
+        rewrite_merged_related_links([merged, sibling], existing)
+        self.assertEqual(sibling.related,
+                         ["[[IBI Forschungsbereich Information Behavior]]"])
+
+    def test_no_existing_concepts_is_noop(self):
+        from pipeline.vault_writer import rewrite_merged_related_links
+        sibling = self._draft("D", related=["[[X]]"])
+        self.assertEqual(rewrite_merged_related_links([sibling], None), 0)
+        self.assertEqual(sibling.related, ["[[X]]"])
 
 
 if __name__ == "__main__":

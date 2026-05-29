@@ -1338,6 +1338,12 @@ def main():
     if _inbox_dir and not args.dry_run:
         _inbox_dir.mkdir(parents=True, exist_ok=True)
 
+    # Issue #21: Sibling-related-Links auf Merge-Targets umschreiben, bevor
+    # geschrieben wird — sonst zeigen sie auf nie-erzeugte Draft-Titel-Dateien.
+    n_rewritten = vault_writer.rewrite_merged_related_links(drafts, existing_concepts)
+    if n_rewritten:
+        print(f"[merge-links] {n_rewritten} related-Link(s) auf Merge-Target umgeschrieben")
+
     print(f"\n[7/7] Vault-Writer…")
     written = 0
     with _span("VaultWriter", pdf=source_path.name, n_drafts=len(drafts), dry_run=args.dry_run):
