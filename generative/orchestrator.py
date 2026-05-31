@@ -778,6 +778,26 @@ def inline_eval_enabled(runtime_config) -> bool:
     return bool(runtime_config.inline_eval)
 
 
+def dry_run_eval_targets(written: list[tuple[Path, bool]], cache_note_dir: Path) -> list[Path]:
+    """Eval-Dateien des aktuellen Dry-Runs — nur die vault-empfohlenen Notes DIESES Laufs.
+
+    Verhindert, dass Stage-8 veraltete `vault__*.md` aus früheren Läufen im selben
+    Cache-Ordner mit-evaluiert (sonst Kontamination von quality_history.jsonl und der
+    Run-End-Mittelwerte). Spiegelt das Live-Verhalten, das nur die Run-Notes wertet.
+
+    `written`: (target, is_auto)-Paare aus dem Vault-Writer. Der Dry-Run schreibt
+    vault-empfohlene Notes als `vault__<target.name>` ins Cache-Verzeichnis.
+    """
+    files: list[Path] = []
+    for target, is_auto in written:
+        if not is_auto:
+            continue
+        eval_file = cache_note_dir / f"vault__{target.name}"
+        if eval_file.exists():
+            files.append(eval_file)
+    return files
+
+
 def _auto_version_bump() -> None:
     """Erhöht AGENT_VERSION Patch wenn sich Pipeline-Code seit letztem Run geändert hat."""
     import hashlib, json as _json, re as _re
@@ -1346,13 +1366,15 @@ def main():
 
     print(f"\n[7/7] Vault-Writer…")
     written = 0
+    written_targets: list[tuple[Path, bool]] = []
     with _span("VaultWriter", pdf=source_path.name, n_drafts=len(drafts), dry_run=args.dry_run):
         for draft in drafts:
-            vault_writer.write_note(draft, source_file=source_path.name,
+            target = vault_writer.write_note(draft, source_file=source_path.name,
                                     dry_run=args.dry_run, source_meta=enriched_meta,
                                     existing_concepts=existing_concepts,
                                     inbox_dir=_inbox_dir)
             will_vault, _ = vault_writer.auto_write_decision(draft)
+            written_targets.append((target, will_vault))
             _trace_event("orchestrator", "note_outcome", {
                 "title": draft.title,
                 "destination": "vault" if will_vault else "inbox",
@@ -1414,9 +1436,8 @@ def main():
         from config import CACHE_DIR as _CACHE_DIR
         # Dry-Run: Notes im Cache-Verzeichnis; Live: im Vault (00-inbox oder 04-wissen)
         if args.dry_run:
-            stem = source_path.stem.replace(" ", "_").replace(",", "")
             cache_note_dir = _CACHE_DIR / "eval" / "baseline" / source_path.stem
-            note_files = list(cache_note_dir.glob("vault__*.md")) if cache_note_dir.exists() else []
+            note_files = dry_run_eval_targets(written_targets, cache_note_dir)
         else:
             from config import INBOX, WISSEN
             note_files = []
