@@ -172,3 +172,94 @@ def test_aggregate_includes_model_config(tmp_path):
     assert "model_config" in result
     assert isinstance(result["model_config"], dict)
     assert "extractor" in result["model_config"]
+
+
+def test_run_totals_includes_eval_entries(tmp_path):
+    """run_totals summiert flache Run-Tokens über ALLE Calls — inkl. Stage-8
+    eval_quality-Einträge, die nach dem Pipeline-Print in den Trace kommen.
+    Cached-Einträge werden ausgeschlossen (matcht orchestrator-Verhalten)."""
+    import json, sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+
+    trace = tmp_path / "run.jsonl"
+    entries = [
+        {"type": "run_start", "run_id": "r1", "model_config": {}, "ts": "t0"},
+        # Pipeline (Stages 1-7)
+        {"agent": "extractor", "model": "sonnet", "input_tokens": 1000, "output_tokens": 500,
+         "cache_read_tokens": 100, "cache_creation_tokens": 50, "cached": False, "ts": "t1"},
+        {"agent": "critic", "model": "haiku", "input_tokens": 200, "output_tokens": 80,
+         "cached": False, "ts": "t2"},
+        # Cached-Call darf NICHT zählen
+        {"agent": "extractor", "model": "sonnet", "input_tokens": 9999, "output_tokens": 9999,
+         "cached": True, "ts": "t3"},
+        # Stage-8 Eval (landet nach dem frühen Print im selben Trace)
+        {"agent": "eval_quality_v3_primary", "model": "sonnet", "input_tokens": 300,
+         "output_tokens": 400, "cached": False, "ts": "t4"},
+        {"agent": "eval_quality_v3_audit", "model": "sonnet", "input_tokens": 150,
+         "output_tokens": 120, "cached": False, "ts": "t5"},
+    ]
+    trace.write_text("\n".join(json.dumps(e) for e in entries), encoding="utf-8")
+
+    import eval_agent_stats as eas
+    totals = eas.run_totals(trace)
+
+    # In: 1000+200+300+150 = 1650 (cached 9999 ausgeschlossen)
+    assert totals["input"] == 1650
+    # Out: 500+80+400+120 = 1100
+    assert totals["output"] == 1100
+    assert totals["cache_read"] == 100
+    assert totals["cache_create"] == 50
+    assert totals["total"] == 1650 + 1100 + 100 + 50
+    assert "cost_usd" in totals
+
+
+def test_run_totals_sums_cost_per_call(tmp_path, monkeypatch):
+    """cost_usd summiert die Per-Call-Kosten via config.compute_cost_per_call."""
+    import json, sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+    import config
+
+    monkeypatch.setattr(config, "BACKEND", "api")
+    monkeypatch.setattr(config, "MODEL_PRICING",
+                        {"test-model": {"input": 3.0, "output": 15.0, "cache_read": 0.0}})
+
+    trace = tmp_path / "run.jsonl"
+    entries = [
+        {"agent": "extractor", "model": "test-model",
+         "input_tokens": 1_000_000, "output_tokens": 1_000_000, "cached": False, "ts": "t1"},
+        {"agent": "eval_quality_v3_primary", "model": "test-model",
+         "input_tokens": 1_000_000, "output_tokens": 0, "cached": False, "ts": "t2"},
+    ]
+    trace.write_text("\n".join(json.dumps(e) for e in entries), encoding="utf-8")
+
+    import eval_agent_stats as eas
+    totals = eas.run_totals(trace)
+
+    # Call 1: 3.0 + 15.0 = 18.0 ; Call 2: 3.0 → Summe 21.0
+    assert totals["cost_usd"] == pytest.approx(21.0)
+
+
+def test_run_totals_tolerates_malformed_line(tmp_path):
+    """Eine kaputte Zeile (z.B. null-Token-Feld) darf die Aggregation NICHT
+    abbrechen — der Rest wird weiterverarbeitet (wie die alten Inline-Schleifen)."""
+    import json, sys
+    from pathlib import Path
+    sys.path.insert(0, str(Path(__file__).parent.parent))
+
+    trace = tmp_path / "run.jsonl"
+    entries = [
+        {"agent": "extractor", "model": "sonnet", "input_tokens": 100, "output_tokens": 50, "cached": False},
+        # null-Feld: e.get("input_tokens", 0) liefert None → würde ti += None crashen
+        {"agent": "critic", "model": "haiku", "input_tokens": None, "output_tokens": 20, "cached": False},
+        {"agent": "eval_quality_v3_primary", "model": "sonnet", "input_tokens": 300, "output_tokens": 80, "cached": False},
+    ]
+    trace.write_text("\n".join(json.dumps(e) for e in entries), encoding="utf-8")
+
+    import eval_agent_stats as eas
+    totals = eas.run_totals(trace)
+
+    # Kaputte Zeile übersprungen, valide summiert: In 100+300=400, Out 50+80=130
+    assert totals["input"] == 400
+    assert totals["output"] == 130

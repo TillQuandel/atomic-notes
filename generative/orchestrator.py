@@ -1480,27 +1480,17 @@ def main():
     from agents.tracing import flush_tracing as _flush_tracing
     _flush_tracing()
 
-    # Token + Laufzeit-Summary — immer gedruckt (auch dry-run)
+    # Token + Laufzeit-Summary (Pipeline Stages 1–7) — immer gedruckt (auch dry-run).
+    # Stage-8-Eval läuft erst danach; deren Tokens/Zeit kommen in der finalen
+    # Re-Aggregation am Run-Ende dazu (sonst unsichtbar — siehe Reporting-Quirk).
     _wall_s_early = round(_time.time() - _run_start, 1)
     try:
         from agents.base import _RUN_ID, _RUN_DIR
-        import json as _json
+        import eval_agent_stats as _eas
         _trace_path = _RUN_DIR / f"{_RUN_ID}.jsonl"
-        _ti = _to = _tcr = _tcc = 0
-        if _trace_path.exists():
-            for _line in _trace_path.read_text(encoding="utf-8").splitlines():
-                try:
-                    _e = _json.loads(_line)
-                    if not _e.get("cached"):
-                        _ti  += _e.get("input_tokens", 0)
-                        _to  += _e.get("output_tokens", 0)
-                        _tcr += _e.get("cache_read_tokens", 0)
-                        _tcc += _e.get("cache_creation_tokens", 0)
-                except Exception:
-                    pass
-        _tt = _ti + _to + _tcr + _tcc
+        _pipe = _eas.run_totals(_trace_path)
         print(f"   -> Zeit:   {_wall_s_early}s")
-        print(f"   -> Tokens: {_tt:,} (In:{_ti:,} Out:{_to:,} Cache-R:{_tcr:,} Cache-C:{_tcc:,})")
+        print(f"   -> Tokens: {_pipe['total']:,} (In:{_pipe['input']:,} Out:{_pipe['output']:,} Cache-R:{_pipe['cache_read']:,} Cache-C:{_pipe['cache_create']:,})")
         print(f"   -> Quelle: {source_path.name}")
     except Exception:
         print(f"   -> Zeit:   {_wall_s_early}s  |  Tokens: n/a  |  Quelle: {source_path.name}")
@@ -1532,50 +1522,18 @@ def main():
                         note_files.append(candidates[0])
                         break
 
-        # Token + Wand-Zeit aus Trace-Datei aggregieren
+        # Pipeline-Tokens/Kosten (Stages 1–7, vor Eval) für run_meta + DB.
+        # Charakterisiert die Note-Generierung; der Stage-8-Eval-Overhead wird
+        # bewusst NICHT in run_meta/DB attribuiert, nur am Run-Ende geprintet.
+        import eval_agent_stats as _eas
+        from agents.base import _RUN_ID, _RUN_DIR
+        _trace_path = _RUN_DIR / f"{_RUN_ID}.jsonl"
         _wall_s = round(_time.time() - _run_start, 1)
-        _tok_in = _tok_out = _tok_cache_r = _tok_cache_c = 0
-        try:
-            from agents.base import _RUN_ID, _RUN_DIR
-            import json as _json
-            _trace_path = _RUN_DIR / f"{_RUN_ID}.jsonl"
-            if _trace_path.exists():
-                for _line in _trace_path.read_text(encoding="utf-8").splitlines():
-                    try:
-                        _e = _json.loads(_line)
-                        if not _e.get("cached"):
-                            _tok_in      += _e.get("input_tokens", 0)
-                            _tok_out     += _e.get("output_tokens", 0)
-                            _tok_cache_r += _e.get("cache_read_tokens", 0)
-                            _tok_cache_c += _e.get("cache_creation_tokens", 0)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-        _tok_total = _tok_in + _tok_out + _tok_cache_r + _tok_cache_c
-
-        # Per-Call-Kosten aus JSONL-Trace: jeder Call hat sein eigenes Modell
-        _cost_usd = 0.0
-        try:
-            from agents.base import _RUN_ID as _cost_run_id, _RUN_DIR as _cost_run_dir
-            import json as _json_cost
-            from config import compute_cost_per_call as _cost_fn
-            _trace_file = _cost_run_dir / f"{_cost_run_id}.jsonl"
-            if _trace_file.exists():
-                for _line in _trace_file.read_text(encoding="utf-8").splitlines():
-                    try:
-                        _call = _json_cost.loads(_line.strip())
-                        _cost_usd += _cost_fn(
-                            model=_call.get("model", ""),
-                            input_tokens=_call.get("input_tokens", 0),
-                            output_tokens=_call.get("output_tokens", 0),
-                            cache_read_tokens=_call.get("cache_read_tokens", 0),
-                        )
-                    except Exception:
-                        pass
-        except Exception:
-            pass
-        _cost_usd = round(_cost_usd, 4)
+        _pre = _eas.run_totals(_trace_path)
+        _tok_in, _tok_out = _pre["input"], _pre["output"]
+        _tok_cache_r, _tok_cache_c = _pre["cache_read"], _pre["cache_create"]
+        _tok_total = _pre["total"]
+        _cost_usd = _pre["cost_usd"]
 
         run_meta = {
             "wall_time_s": _wall_s,
@@ -1630,8 +1588,20 @@ def main():
                 avg_hall = sum(hall_rates) / len(hall_rates)
                 avg_cov  = sum(cov_rates) / len(cov_rates) if cov_rates else 0.0
                 print(f"      Ø Halluzinationsrate: {avg_hall:.1%}  |  Ø Coverage (faktisch): {avg_cov:.1%}")
-                print(f"      Zeit: {_wall_s}s  |  Tokens: {_tok_total:,} (In:{_tok_in:,} Out:{_tok_out:,} Cache-R:{_tok_cache_r:,} Cache-C:{_tok_cache_c:,})")
                 print(f"      {len(eval_results)} Notes → .cache/quality_history.jsonl")
+
+        # Re-Aggregation NACH der Eval-Schleife: die eval_quality-Calls stehen jetzt
+        # im Trace. Macht den sonst unsichtbaren Stage-8-Tail (~33 % Out-Tok, Eval-
+        # Wandzeit) im Run-Ende-Print sichtbar (Reporting-Quirk-Fix).
+        _final_wall = round(_time.time() - _run_start, 1)
+        _grand = _eas.run_totals(_trace_path)
+        _eval_out  = _grand["output"] - _pre["output"]
+        _eval_wall = round(_final_wall - _wall_s, 1)
+        _eval_pct  = (_eval_out / _grand["output"]) if _grand["output"] else 0.0
+        print(f"\n   === Run-Gesamt (inkl. Stage-8-Eval) ===")
+        print(f"   -> Zeit:   {_final_wall}s  (davon Stage-8: +{_eval_wall}s)")
+        print(f"   -> Tokens: {_grand['total']:,} (In:{_grand['input']:,} Out:{_grand['output']:,} Cache-R:{_grand['cache_read']:,} Cache-C:{_grand['cache_create']:,})")
+        print(f"   -> Stage-8-Eval: +{_eval_out:,} Out-Tok ({_eval_pct:.0%} des Out-Totals)")
     except Exception as e:
         print(f"      [eval-warn] Qualitäts-Eval übersprungen: {e}", file=sys.stderr)
 

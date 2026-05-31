@@ -90,6 +90,53 @@ def aggregate(trace_path: Path) -> dict[str, dict]:
     return stats
 
 
+def run_totals(trace_path: Path) -> dict:
+    """Flache Run-Gesamtkosten aus dem Trace-JSONL (über ALLE LLM-Calls).
+
+    Liest die Datei genau einmal und summiert Tokens + USD-Kosten. Cached-Calls
+    werden ausgeschlossen (matcht den orchestrator-Summary-Print). Wird zweimal
+    aufgerufen: nach dem Pipeline-Run (Stages 1–7) und erneut nach Stage-8, damit
+    der Eval-Tail im Print sichtbar wird statt unsichtbar zu bleiben.
+
+    LLM-Call-Entries haben kein 'type'-Feld (base._trace()-Format); strukturierte
+    Events (run_start, score_result, …) tragen eines und werden übersprungen.
+    """
+    from config import compute_cost_per_call
+
+    ti = to = tcr = tcc = 0
+    cost = 0.0
+    if trace_path.exists():
+        for line in trace_path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            # Ganze Zeile in try: eine kaputte Zeile (Parse-Fehler, null-Feld,
+            # unbekanntes Modell) überspringen, nicht die Aggregation abbrechen.
+            try:
+                e = json.loads(line)
+                if e.get("type") is not None or e.get("cached"):
+                    continue
+                ti  += e.get("input_tokens", 0)
+                to  += e.get("output_tokens", 0)
+                tcr += e.get("cache_read_tokens", 0)
+                tcc += e.get("cache_creation_tokens", 0)
+                cost += compute_cost_per_call(
+                    model=e.get("model", ""),
+                    input_tokens=e.get("input_tokens", 0),
+                    output_tokens=e.get("output_tokens", 0),
+                    cache_read_tokens=e.get("cache_read_tokens", 0),
+                )
+            except Exception:
+                continue
+    return {
+        "input": ti,
+        "output": to,
+        "cache_read": tcr,
+        "cache_create": tcc,
+        "total": ti + to + tcr + tcc,
+        "cost_usd": round(cost, 4),
+    }
+
+
 def _find_latest_trace() -> Path | None:
     runs_dir = Path(__file__).parent / ".cache" / "runs"
     if not runs_dir.exists():
