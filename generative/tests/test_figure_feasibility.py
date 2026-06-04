@@ -22,6 +22,7 @@ from eval_figure_feasibility import (
     find_figure_captions,
     match_caption_to_chunk,
     report_has_no_hardcoded_literature_paths,
+    warning_for_classification,
 )
 
 
@@ -83,13 +84,42 @@ def test_match_caption_to_chunk_returns_none_when_no_page_range_matches():
     assert match_caption_to_chunk(caption, chunks) is None
 
 
-def test_classify_page_signals_distinguishes_raster_vector_caption_and_empty():
-    assert classify_page_signals(PageVisualSignals(page=1, raster_images=2, vector_drawings=0, captions=[])) == "raster"
-    assert classify_page_signals(PageVisualSignals(page=2, raster_images=0, vector_drawings=5, captions=[])) == "vector_or_composite"
-    assert classify_page_signals(PageVisualSignals(page=3, raster_images=1, vector_drawings=5, captions=[])) == "vector_or_composite"
-    captions = find_figure_captions("Figure 1: Conceptual model.", page=4)
-    assert classify_page_signals(PageVisualSignals(page=4, raster_images=0, vector_drawings=0, captions=captions)) == "caption_only/no_visual_signal"
-    assert classify_page_signals(PageVisualSignals(page=5, raster_images=0, vector_drawings=0, captions=[])) == "no_signal"
+def test_classify_page_signals_uses_only_caption_and_raster():
+    caption = find_figure_captions("Figure 1: Conceptual model.", page=1)
+    assert classify_page_signals(PageVisualSignals(page=1, raster_images=2, vector_drawings=0, captions=caption)) == "captioned_raster"
+    assert classify_page_signals(PageVisualSignals(page=2, raster_images=0, vector_drawings=0, captions=caption)) == "captioned_no_raster"
+    assert classify_page_signals(PageVisualSignals(page=3, raster_images=2, vector_drawings=0, captions=[])) == "raster_uncaptioned"
+    assert classify_page_signals(PageVisualSignals(page=4, raster_images=0, vector_drawings=0, captions=[])) == "no_signal"
+
+
+def test_classify_ignores_noisy_vector_drawings_without_caption_or_raster():
+    """Regressions-Guard: Layout-Vektoren allein erzeugen keine Figur-Klasse."""
+    signals = PageVisualSignals(page=1, raster_images=0, vector_drawings=56, captions=[])
+
+    assert classify_page_signals(signals) == "no_signal"
+
+
+def test_classify_vector_count_never_upgrades_the_class():
+    """Hoher vector_drawings-Count darf keine Klasse hochstufen (alter Dominanz-Fehler)."""
+    caption = find_figure_captions("Abb. 2: Schema.", page=7)
+    # Caption ohne Raster bleibt captioned_no_raster, egal wie viele Vektorpfade.
+    assert classify_page_signals(PageVisualSignals(page=7, raster_images=0, vector_drawings=99, captions=caption)) == "captioned_no_raster"
+    # Raster ohne Caption bleibt raster_uncaptioned, egal wie viele Vektorpfade.
+    assert classify_page_signals(PageVisualSignals(page=8, raster_images=1, vector_drawings=99, captions=[])) == "raster_uncaptioned"
+    # Caption + Raster bleibt captioned_raster, egal wie viele Vektorpfade.
+    assert classify_page_signals(PageVisualSignals(page=9, raster_images=1, vector_drawings=99, captions=caption)) == "captioned_raster"
+
+
+def test_warning_only_fires_for_no_signal_and_is_honest_about_vector():
+    """no_signal = weder Caption noch Raster; Vektorpfade zaehlen nicht als Signal.
+
+    Der Warning-Text darf nicht "no visual signal" behaupten, solange
+    vector_drawings (Layout-Rohsignal) im selben Report weiter ausgegeben wird.
+    """
+    assert warning_for_classification("no_signal") == "no caption or raster signal"
+    assert warning_for_classification("captioned_raster") is None
+    assert warning_for_classification("captioned_no_raster") is None
+    assert warning_for_classification("raster_uncaptioned") is None
 
 
 def test_report_has_no_hardcoded_literature_paths():

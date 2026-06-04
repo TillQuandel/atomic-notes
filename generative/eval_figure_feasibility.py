@@ -90,14 +90,36 @@ def match_caption_to_chunk(caption: FigureCaption, chunks: list[Any]) -> Caption
 
 
 def classify_page_signals(signals: PageVisualSignals) -> str:
-    """Klassifiziert Seiten-Signale fuer die spaetere Go/No-Go-Entscheidung."""
-    if signals.vector_drawings > 0:
-        return "vector_or_composite"
-    if signals.raster_images > 0:
-        return "raster"
-    if signals.captions:
-        return "caption_only/no_visual_signal"
+    """Klassifiziert eine Seite nach Variante-A-Tauglichkeit.
+
+    Nur die zwei verifiziert relevanten Signale entscheiden: nummerierte
+    Caption (chunk-ankerbar via Seiten-Range) und Raster-Bild (einbettbares
+    Asset). ``vector_drawings`` fliesst bewusst NICHT ein -- ``get_drawings()``
+    zaehlt Layout-Linien/Rahmen/Bullets auf praktisch jeder Seite und ist als
+    Figur-Diskriminator wertlos (empirisch: >0 auf 100 % der Seiten). Der
+    Rohwert bleibt reine Diagnostik im Report.
+    """
+    has_caption = bool(signals.captions)
+    has_raster = signals.raster_images > 0
+    if has_caption and has_raster:
+        return "captioned_raster"
+    if has_caption:
+        return "captioned_no_raster"
+    if has_raster:
+        return "raster_uncaptioned"
     return "no_signal"
+
+
+def warning_for_classification(classification: str) -> str | None:
+    """Report-Warnung fuer Seiten ohne handlungsrelevantes Figur-Signal.
+
+    Bewusst NICHT "no visual signal": ``vector_drawings`` (Layout-Rohsignal)
+    kann >0 sein und wird im selben Report weiter ausgegeben. ``no_signal``
+    heisst praezise "keine Caption und kein Raster".
+    """
+    if classification == "no_signal":
+        return "no caption or raster signal"
+    return None
 
 
 def chunk_summary_rows(chunks: list[Any]) -> list[dict[str, Any]]:
@@ -180,7 +202,7 @@ def analyze_pdf(pdf_path: Path) -> dict[str, Any]:
             "vector_drawings": signal.vector_drawings,
             "captions": [dataclasses.asdict(c) for c in signal.captions],
             "classification": classification,
-            "warning": "no visual signal" if classification == "no_signal" else None,
+            "warning": warning_for_classification(classification),
         })
 
     return {
