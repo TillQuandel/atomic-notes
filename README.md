@@ -12,7 +12,7 @@ PDF input and Obsidian-style Markdown are the first supported path, not the whol
 
 ## Status
 
-**generative v0.3.79** · **extractive v0.2.0** · last updated: 2026-05-29
+**generative v0.3.136** · **extractive v0.2.0** · last updated: 2026-06-03
 
 ## Repository Layout
 
@@ -54,6 +54,8 @@ The long-term output contract is a structured atomic note: title, body, source a
 ## Input Direction
 
 PDF is the first adapter. Future adapters should normalize HTML/articles, RSS items, transcripts, podcasts, videos, and other concept-rich sources into the same source model before the pipeline runs.
+
+Current Stage-0 baseline is `pdftotext`. A June 2026 A/B probe evaluated pdfplumber and GROBID but did not show a robust advantage over `pdftotext`; pdfplumber also regressed on a two-column PDF through glued words and lower word yield. The pdfplumber adapter is therefore parked until a focused comparison shows a yield or grounding gain over `pdftotext` beyond run noise.
 
 ## Development Notes
 
