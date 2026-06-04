@@ -1,7 +1,7 @@
 # Feasibility: Figur+Caption-Einbettung in atomic notes ("Variante A")
 
 **Datum:** 2026-06-04
-**Status:** Vektor-Pfad widerlegt & pausiert; Caption-Overmatch refutiert (keine Härtung nötig); Raster-only-Minimal (~17 %, saubere Eingabe) offen — reine User-Entscheidung Bau vs. Pause
+**Status:** Vektor-Pfad widerlegt & pausiert; Caption-Overmatch refutiert; **Tagged-PDF-Pfad (Spike A) als einzige deterministische Lösung bestätigt; pdffigures2 (Spike C) für DE-Korpus widerlegt; Pfad C (Alt-Text-only) GEBAUT** (`pipeline/figure_alt.py`, TDD, in Orchestrator eingehängt)
 **Methode:** Brainstorm + iteratives Cross-Model-Review (Codex via `codex exec`, Qwen 3.7 max) + zwei empirische Wegwerf-Spikes.
 
 ## Ziel
@@ -58,7 +58,43 @@ Die Modell-Hypothese (Caption-Regex matcht In-Text-Referenzen) wurde gegen die e
 ### Resultierende Entscheidung
 Es gibt keine Caption-Kontamination zu fixen. Damit ist die Wahl rein: **Raster-only-Minimalfeature bauen (~17 % Coverage, saubere Eingabe)** vs. **Feature ganz pausieren**. Der Vektor-Pfad bleibt unabhängig davon tot (Vision/Tagged-PDF nötig). Offen für den User.
 
+## Nachtrag 2026-06-04 (Folge-Session): Spike A + C, Pfad-C gebaut
+
+### Spike A — Tagged-PDF-Struktur (entscheidend, kippt „deterministisch tot")
+Empirisch über die 5 Korpus-PDFs gemessen (`C:\tmp\tagged_pdf_probe.py`):
+
+| PDF | getaggt | StructTree | `/Figure`-Tags |
+|---|---|---|---:|
+| Klaus 2016 / Reibel-Felten 2022 / Varian 2016 / Blankart 2017 | nein | nein | 0 |
+| **Felsmann 2025** | **ja** | **ja** | **162** |
+
+Beim getaggten PDF: **161/162 `/Figure`-Tags mit sauberer `/BBox`** (Layout-Attribut) + `/Pg` + **`/Alt`-Text für alle 162**. Gerenderte Crops visuell verifiziert: echte Figuren **inkl. reiner Vektor-Infografik** (zuvor unbergbare Klasse). → Der deterministische Pfad ist **viabel, aber tagged-gated**. „Deterministisch tot" galt nur für *untagged* PDFs. Getaggter Anteil wächst (EU Accessibility Act / BFSG ab 2025).
+
+### Spike C — pdffigures2 (Allen AI) — für DE-Korpus widerlegt
+Huang-lab-Docker-Image (Java 11/Scala 2.12, `--network none`, gepinnt `f39fea9`) auf untagged-Auszügen:
+
+| Auszug | Abb-Captions | Raster | pdffigures2 fand |
+|---|---:|---:|---:|
+| Blankart 80–209 | 38 | 28 | **0** |
+| Varian 40–69 | 10 | 14 | **0** |
+
+0 Figuren trotz 48 echter Captions. Ursache: pdffigures2 detektiert Captions über **englische Keywords** („Figure"/„Table"); deutsche „Abbildung"/„Tabelle" matchen nicht + Layout-Heuristik fürs EN-Paper-Format. Für den **deutschsprachigen** Korpus wertlos. (Engine-Mixing war NICHT die Ursache — pdffigures2 hat eine konsistente Engine und scheiterte trotzdem.)
+
+### Cross-Model-Verdikt (Qwen 3.7 max + Codex + Mistral)
+Feature-Optionen A (voller Crop) / B (pausieren) / C (nur Alt-Text): **2/3 (Qwen+Codex) → C**, Mistral → A. Kern: für eine **Retrieval**-Pipeline ist der menschengeschriebene Alt-Text der suchbare Payload (ein nicht-OCR'tes PNG ist es nicht); C teilt den harten Teil (Tagged-Parsing, `source_anchors`-Bindung) mit A → A bleibt späteres Crop-Upgrade.
+
+### Gebaut: Pfad C (Alt-Text-only), TDD
+`generative/pipeline/figure_alt.py` (+ `tests/test_figure_alt.py`, 15 Tests; Fixture-Generator `tests/fixtures_gen/make_tagged_fixtures.py`):
+- `extract_tagged_figures` — `/Figure`→`/Alt`+`/Pg` via `xref_get_key` (löst indirekte Refs auf, dekodiert); **StructTreeRoot-Gate** → untagged liefert `[]`.
+- `pdf_index_to_anchor_page` — PyMuPDF-Index → `source_anchor`-Seitennummer (pdftotext-Space, textlose Seiten verworfen). **Kritisch:** Felsmann-Figur auf PyMuPDF-Seite 340 → korrekt Anchor-Seite 319 gemappt (21 textlose Vorspann-Seiten); naive Index-Bindung hätte falsch gebunden.
+- `bind_figures_to_drafts` — **precision-first**: nur `action=="create"`, nur exakter `page`-Match (nie `fuzzy_page`); 0/>1 Treffer → Skip-Report. Body-Mutation: gruppiert unter einer `## Abbildungen`-Sektion.
+- `embed_alt_figures` — Entry-Point, in `orchestrator.py` vor dem Vault-Writer eingehängt; No-op auf untagged.
+- Cross-Review-Härtung (Codex+Qwen): fail-closed bei pdftotext-Fehler, `_sanitize_alt` gegen Wikilink-/Pipe-Injection, pdftotext-Timeout.
+
+**Akzeptanz erfüllt:** Felsmann ≥1 saubere Bindung (korrektes Page-Mapping, Alt-Text im Body), untagged 0, volle Suite 392 grün.
+**Offen/Upgrade:** Pfad A (PNG-Crop via `get_pixmap(clip=/BBox)`) wenn Anschau-Nutzen + getaggte Coverage es rechtfertigen — teilt die gebaute Bindungs-Infrastruktur.
+
 ## Salvage / Wert dieser Arbeit
 - Klassifikator-Fix committed (`b297be0`), unabhängig nützlich.
 - Probe + Mess-Skripte zeigen die Raster/Vektor-Verteilung deterministisch.
-- Klare Grenze dokumentiert: deterministische Figur-Extraktion endet bei Vektor-Lehrbuchfiguren; alles darüber braucht Vision/Tagged-PDF.
+- Klare Grenze dokumentiert: deterministische Figur-Extraktion endet bei Vektor-Lehrbuchfiguren *in untagged PDFs*; getaggte PDFs (PDF-UA) liefern `/Figure`+`/Alt`+`/BBox` deterministisch (Pfad C gebaut).

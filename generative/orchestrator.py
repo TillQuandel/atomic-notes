@@ -52,7 +52,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 
 from agents import context_builder, quality, planner, extractor, background_extractor, verifier, cross_reference, confidence, critic, canonicalizer
-from pipeline import pdf_chunker, vault_writer, embeddings, acronym_fix, anchor_repair, boilerplate_dedup
+from pipeline import pdf_chunker, vault_writer, embeddings, acronym_fix, anchor_repair, boilerplate_dedup, figure_alt
 from schemas.atomic_note import AtomicNoteDraft, ConceptPlan
 from config import (
     AGENT_VERSION,
@@ -1445,6 +1445,14 @@ def main():
     n_rewritten = vault_writer.rewrite_merged_related_links(drafts, existing_concepts)
     if n_rewritten:
         print(f"[merge-links] {n_rewritten} related-Link(s) auf Merge-Target umgeschrieben")
+
+    # Figur-Alt-Text aus PDF-UA-getaggten PDFs einbetten (Pfad C). Mutiert create-Draft-
+    # Bodies VOR dem Render. No-op auf untagged PDFs (Gate). Precision-first: nur exakte
+    # 1:1-Bindung Figur→Note via source_anchor-Seite, sonst skip. Siehe figure_alt.py.
+    fig_report = figure_alt.embed_alt_figures(source_path, drafts)
+    if fig_report.bound or fig_report.skipped:
+        print(f"[figures] {len(fig_report.bound)} Alt-Text-Figur(en) eingebettet, "
+              f"{len(fig_report.skipped)} ohne eindeutige Bindung übersprungen")
 
     print(f"\n[7/7] Vault-Writer…")
     written = 0
