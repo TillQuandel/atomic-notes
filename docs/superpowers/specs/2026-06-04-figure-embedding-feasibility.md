@@ -1,7 +1,7 @@
 # Feasibility: Figur+Caption-Einbettung in atomic notes ("Variante A")
 
 **Datum:** 2026-06-04
-**Status:** Vektor-Pfad widerlegt & pausiert; Raster-only-Minimal offen (entscheidet sich nach Caption-Härtung + Re-Messung)
+**Status:** Vektor-Pfad widerlegt & pausiert; Caption-Overmatch refutiert (keine Härtung nötig); Raster-only-Minimal (~17 %, saubere Eingabe) offen — reine User-Entscheidung Bau vs. Pause
 **Methode:** Brainstorm + iteratives Cross-Model-Review (Codex via `codex exec`, Qwen 3.7 max) + zwei empirische Wegwerf-Spikes.
 
 ## Ziel
@@ -30,7 +30,7 @@ Aus PDFs Figur+Caption **deterministisch** (kein Vision-Modell, kein LLM) extrah
 | Felsmann (Fachbuch) | 107 | 15 | 92 |
 | **Gesamt** | **432** | **73 (17 %)** | **359 (83 %)** |
 
-Befund: in Lehrbuch-/Akademik-PDFs sind ~83 % der caption-führenden Seiten vektor-only (kein qualifizierendes Raster). → Ein Vektor-Pfad wäre nötig, um die Mehrheit zu erfassen. **Caveat:** „vektor-only" ist eine Obergrenze — manche Caption-Treffer könnten In-Text-Referenzen oder Nachbarseiten-Floats sein (siehe Spike).
+Befund: in Lehrbuch-/Akademik-PDFs sind ~83 % der caption-führenden Seiten vektor-only (kein qualifizierendes Raster). → Ein Vektor-Pfad wäre nötig, um die Mehrheit zu erfassen. Die Messung nutzte „genau eine Caption pro Seite" (`== 1`), Verzeichnis-/Mehr-Caption-Seiten sind also ausgeschlossen.
 
 ### 3. Design-Pivot (Codex + Qwen unabhängig konvergent)
 Vektor-**Pfade clustern** wurde verworfen (das tote/fragile CV-Regelwerk). Stattdessen **caption-anchored ROI extraction**: Figur = Negativraum zwischen Caption und nächstem Textblock, spaltenbegrenzt; ROI via `get_pixmap(clip=…)` rendern; per Weißraum/Textzeilen/Grid-Check validieren. Begründung: Text-Geometrie ist exporter-stabil, der Renderer löst Raster/Vektor einheitlich auf.
@@ -49,11 +49,14 @@ Deterministische caption-verankerte Vektor-Extraktion ist **konzeptionell widerl
 ## Entscheidung
 
 1. **Vektor-Pfad: pausiert + dokumentiert.** Nicht weiterbauen, bis entweder PDF-Strukturmetadaten genutzt werden oder ein Vision-/Segmentierungs-Ansatz explizit akzeptiert ist.
-2. **Caption-Detektion härten** (gemeinsamer Root beider Probleme): weg von loser pdftotext-Regex, hin zu layout-gebunden über **eine** Engine (PyMuPDF `get_text("dict")`): Zeilenanfang-Strict-Regex, **Verb-Blacklist** („zeigt/siehe/stellt/dargestellt/illustriert"), eigener kurzer Block (nicht mitten im Absatz), Font-Size-Delta, Raster-Nähe. **Dann neu messen** (saubere Caption-Zahl + echte Raster-Coverage + Precision/Skip-Rate).
-3. **Raster-only-Minimalfeature**: Entscheidung B (shippen) vs. weiter vertagen fällt **nach** der Re-Messung — nicht auf den kontaminierten 17 % aufbauen.
+2. **Caption-Härtung gegen Overmatch: nicht nötig** (Hypothese refutiert, s. o.). Die Captions auf Einzel-Caption-Seiten sind sauber. (Verzeichnis-Seiten sind durch die `== 1`-Regel schon raus.)
+3. **Raster-only-Minimalfeature**: reine Bau-vs-Pause-Entscheidung. Eingabe ist sauber (~17 % Coverage, echte Captions + echte Raster). Kosten = die Embedder-Maschinerie (Bindung über `source_anchors`, Asset-Export via `get_pixmap`, Render-Helper in `vault_writer`, Idempotenz, Manifest) — auch raster-only nicht trivial. Nutzen = manchmal eine perfekte Figur, nie Müll.
 
-### Offene Hypothese (in der Re-Messung zu verifizieren)
-Caption-Overmatch (In-Text-Referenz wie „Abbildung 4 zeigt…" trotz Separator-Guard) ist eine **Modell-Hypothese**, auf den Spike-Seiten **nicht** direkt verifiziert — die Body-Text-Crops erklären sich primär durch ROI-Versagen, nicht zwingend durch falsche Captions. Die Re-Messung muss trennen: wie viele „Captions" sind echte Caption-Blöcke vs. In-Text-Referenzen.
+### Caption-Overmatch-Hypothese: verifiziert → REFUTIERT (Schritt 2a)
+Die Modell-Hypothese (Caption-Regex matcht In-Text-Referenzen) wurde gegen die echten gematchten Caption-Zeilen geprüft: Auf **Einzel-Caption-Seiten** (genau die, die in die 83 %-Messung eingehen) sind die Treffer durchweg **echte Captions** (Label + Beschreibung, z. B. „Abbildung 1.1: Altruisten, Egoisten und Bösartige"). Die einzige Kontamination sind **Abbildungsverzeichnis-Seiten** (viele Caption-Labels auf einer Seite) — die sind durch die `== 1`-Regel bereits ausgeschlossen. **Folge:** Keine Caption-Härtung gegen Overmatch nötig. Die 83 %-Vektor-Zahl ist robust; die 17 %-Raster-Pages haben saubere Captions + echte Raster-Figuren.
+
+### Resultierende Entscheidung
+Es gibt keine Caption-Kontamination zu fixen. Damit ist die Wahl rein: **Raster-only-Minimalfeature bauen (~17 % Coverage, saubere Eingabe)** vs. **Feature ganz pausieren**. Der Vektor-Pfad bleibt unabhängig davon tot (Vision/Tagged-PDF nötig). Offen für den User.
 
 ## Salvage / Wert dieser Arbeit
 - Klassifikator-Fix committed (`b297be0`), unabhängig nützlich.
