@@ -1,7 +1,12 @@
 # Stage-0-Extractor — Re-Design-Plan für belastbares A/B (Issue #3)
 
-**Status:** geparkt. Erst ausführen, wenn ein Alternativ-Extractor (#5 pdfplumber / #6 GROBID)
-tatsächlich gebaut werden soll. Bis dahin bleibt die Vorentscheidung „strukturiert > roh" stehen.
+**Status:** AUSGEFÜHRT 2026-06-03. Follow-up-Entscheidung nach Qwen 3.7 Max + Claude:
+**keinen pdfplumber-Adapter bauen.** AK (N≥10) nicht erreicht — Subscription-5h-Session-Limit
+(~8 Läufe/Fenster). Hall%-Zahlen trennen die Tools nicht (N=1, Rauschen). Der relevante
+Vergleich ist `pdftotext` vs. pdfplumber, nicht pdfplumber vs. GROBID; pdfplumber zeigte auf
+dem zweispaltigen Bates-PDF eine Grounding-Regression (`Thelibraryisagrowing`, 5784 vs. 8846 W).
+`pdftotext` bleibt Stage-0-Baseline. GROBID nur für #13/#14. Volldoku: Wissenspool
+`[[Atomic-Agent-Pipeline]]` §Stand 2026-06-03, Issue #3.
 
 ## Warum dieser Plan existiert
 Eine erste A/B-Voruntersuchung (2026-06-02, Bates + Porst-Auszug, je N=1–2) zeigte robust:
@@ -10,7 +15,7 @@ deutlich gegenüber rohem `pdftotext`** (Porst Ø 14,7 % → 6–8 %). Die *Tool
 *Mechanismus* (sauberer Text vs. bessere Segmentierung) konnten NICHT geklärt werden — ein
 Cross-Model-Review (Codex/gpt-5.5) deckte vier Confounds auf. Dieser Plan behebt sie.
 
-Befund-SSoT: Wissenspool `[[Atomic-Agent-Pipeline]]` §Stand 2026-06-02. GitHub: Issue #3 (offen).
+Befund-SSoT: Wissenspool `[[Atomic-Agent-Pipeline]]` §Stand 2026-06-03. GitHub: Issue #3 geschlossen; Reopen nur mit neuen Vergleichsdaten gegen `pdftotext`.
 
 ## Akzeptanzkriterium
 Eine **statistisch trennscharfe** Aussage zu: (a) #5 vs #6 vs Status-quo bei Halluzination UND
@@ -69,5 +74,41 @@ Artikel) abdecken — „immer besser" ist widerlegt.
 
 ## Aufwand
 ~12+ h Pipeline-Wandzeit (N≥10 × ≥4 Zellen × ~25 min) + Quota + Runner-Erweiterung. Deshalb
-geparkt bis Bau-Entscheidung. Ein lokaler Prototyp-Harness (Monkeypatch-Runner + GROBID-/pdfplumber-
+kein weiterer Matrix-Lauf ohne neue konkrete Reopen-Frage. Ein lokaler Prototyp-Harness (Monkeypatch-Runner + GROBID-/pdfplumber-
 Extractoren) existierte für die erste Runde, ist aber Wegwerf-Code außerhalb des Repos.
+
+## Follow-up-Entscheidung 2026-06-03
+
+Qwen 3.7 Max und Claude prüften die Option, pdfplumber als optionalen Stage-0-Adapter mit
+Mehrspalten-/Textqualitäts-Guard zu bauen. Beide lehnten ab: Der Guard wäre selbst das
+unbewiesene schwierige Feature und würde im Zweifel auf `pdftotext` zurückfallen. Damit ist
+`pdftotext` weiter die einfachere und sicherere Baseline.
+
+Reopen-Kriterien für pdfplumber:
+- fokussierter Vergleich gegen `pdftotext`, nicht gegen GROBID;
+- mindestens N≥10 oder ein kleineres, aber klar gepaartes Experiment mit stabiler Effektgröße;
+- belegter Yield- oder Grounding-Gewinn über `pdftotext` jenseits von Run-Rauschen;
+- keine Zweispalter-Regression bei Wortgrenzen, Seitenmarkern und Anchor-Treffern.
+
+Nächster Kandidat ist kein Adapter-Build, sondern eine separate Messung zu Overlap-Chunking /
+Planner-Recall bei fixem Extractor.
+
+## Phase-A-Messung 2026-06-04 (LLM-frei, deterministisch)
+
+Umgesetzt als `generative/eval_chunk_recall.py` (+ Tests). Zwei deterministische Metriken bei
+fixem Extractor (pdftotext), gemessen auf Porst-2014, Bates-2017, Beutelspacher-2014; Konzept-
+Referenz aus `calibration/labels-active` (menschlich, source-getaggt, N=10). Codex-gehärtet.
+
+- **Boundary-Loss (`straddle_stats`, Modus `word_split`):** Sätze, die an Wort-Split-Chunk-
+  Grenzen zerschnitten werden. ≤0,6 % bei `CHUNK_WORDS=3000`, durch Overlap=50 vollständig
+  rückgeholt. **Caveat:** misst nur den `_split_by_words`-Fallback, NICHT den Default
+  (`split_by_chapters` / `concept_text_window`, das schon 50 % Overlap hat). → Kein Hinweis,
+  dass Overlap-Chunking nötig ist; Schluss gilt für einen von mehreren Chunking-Modi.
+- **Overview-Coverage (`overview_coverage`):** token-basierte SCHWACHE Recall-Obergrenze.
+  Sensitivitätskurve statt Einzelzahl: @0.5 = 10/10, @0.75 = 9/10, @1.0 = 8/10, exakter
+  Phrasen-Match nur 2/10. Die ursprüngliche „100 %" war ein Schwellen-Artefakt von
+  `min_coverage=0.5` (Codex-Review). Belastbar nur: in dieser kleinen Stichprobe kein großer
+  Recall-Gap, aber die Metrik ist zu lasch/zirkulär (gleiche `_tokens`-Logik wie der Pipeline-
+  Filter) für eine „kein Gap"-Behauptung. N=10 underpowered.
+
+Volldoku + projektübergreifende Lehre: Wissenspool `[[Atomic-Agent-Pipeline]]` §Phase-A.
