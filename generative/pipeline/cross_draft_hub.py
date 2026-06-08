@@ -22,6 +22,7 @@ from schemas.atomic_note import AtomicNoteDraft
 from agents.critic import _has_overview_marker
 
 HUB_MIN_CROSS_MENTIONS = 3
+SUGGEST_MIN_CLUSTER = 5  # ab wievielen marker-losen Drafts mit gemeinsamem Token ein MoC vorgeschlagen wird (#4)
 # Token-Stoppwörter, die nicht als impliziter Single-Token-Key zählen (zu generisch)
 _STOPWORD_TOKENS = {
     "modell", "model", "framework", "moc", "übersicht", "atlas", "taxonomie",
@@ -139,6 +140,36 @@ def _extract_description_from_h1(body: str) -> str:
     if first_line.startswith("# ") and ": " in first_line:
         return first_line.split(": ", 1)[1].strip()
     return ""
+
+
+def suggest_unmarked_clusters(
+        drafts: list[AtomicNoteDraft]) -> list[tuple[str, list[str]]]:
+    """Findet thematische Cluster OHNE Übersichts-Marker (#4): ≥SUGGEST_MIN_CLUSTER
+    Drafts, deren Title einen gemeinsamen nicht-generischen Token teilen, und die
+    `resolve()` mangels Marker nie als Hub erkennt (z.B. 8 Agent-Notes aus einem
+    Guide-Run). Liefert (token, member_titles), nach Cluster-Größe absteigend.
+
+    Bewusst seiteneffektfrei: schlägt nur einen MoC-Titel vor (`MoC-{Token}`),
+    erzeugt KEINE Note — Auto-Anlage wäre Synthese-/Fabrikations-Risiko und ist
+    eine separate, vom User zu treffende Entscheidung.
+
+    Hub- und Marker-Drafts werden ausgeschlossen (die deckt `resolve()` ab);
+    Token < 4 Zeichen und Stoppwörter zählen nicht.
+    """
+    candidates = [d for d in drafts
+                  if d.action != "hub" and not _has_overview_marker(d.title)]
+    token_to_titles: dict[str, list[str]] = {}
+    for d in candidates:
+        seen: set[str] = set()
+        for tok in _TITLE_SPLIT_RE.split(d.title.strip()):
+            t = tok.lower()
+            if len(t) >= 4 and t not in _STOPWORD_TOKENS and t not in seen:
+                seen.add(t)
+                token_to_titles.setdefault(t, []).append(d.title)
+    out = [(tok, titles) for tok, titles in token_to_titles.items()
+           if len(titles) >= SUGGEST_MIN_CLUSTER]
+    out.sort(key=lambda x: (-len(x[1]), x[0]))
+    return out
 
 
 def resolve(drafts: list[AtomicNoteDraft]) -> int:

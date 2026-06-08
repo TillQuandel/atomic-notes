@@ -1392,6 +1392,12 @@ def main():
     hub_resolved = cross_draft_hub.resolve(drafts)
     if hub_resolved:
         print(f"      [hub-resolution] {hub_resolved} Draft(s) als MoC erkannt (Cross-Mentions)")
+    # #4: marker-lose thematische Cluster, die resolve() nicht fängt — nur vorschlagen,
+    # nicht auto-anlegen (Fabrikations-Risiko, separate User-Entscheidung).
+    for _token, _members in cross_draft_hub.suggest_unmarked_clusters(drafts):
+        _preview = ", ".join(_members[:4]) + ("…" if len(_members) > 4 else "")
+        print(f"      [moc-suggestion] {len(_members)} marker-lose Drafts teilen "
+              f"'{_token}' → MoC-{_token.capitalize()}? ({_preview})")
 
     # --- Schritte 6a-c: Verifier + Cross-Reference + Critic pro Note (parallel) ---
     print(f"\n[6/7] Verifier + Cross-Reference + Critic für {len(drafts)} Notes…")
