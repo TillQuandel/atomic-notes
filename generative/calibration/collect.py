@@ -74,6 +74,26 @@ def parse_md(md_text: str) -> list[dict]:
     return rows
 
 
+def note_claim_agreement(human_claims: dict[int, str],
+                          pipeline_labels: dict[tuple[str, int], str],
+                          note: str) -> float | None:
+    """Claim-level Übereinstimmung Mensch↔Pipeline für EINE Note (#24).
+
+    Paart Human- und Pipeline-Label pro `claim_idx` und liefert den Anteil
+    übereinstimmender Claims, oder None wenn es keine gemeinsam gelabelten Claims
+    gibt. Ersetzt die alte Aggregat-Differenz `1 - |human_hall - llm_hall|`, die
+    zwei Notes mit gleicher Halluzinationsrate als 100% einig zeigte, auch wenn
+    sie bei keinem einzelnen Claim übereinstimmten.
+    """
+    pairs = [(label, pipeline_labels[(note, idx)])
+             for idx, label in human_claims.items()
+             if (note, idx) in pipeline_labels]
+    if not pairs:
+        return None
+    agree = sum(1 for h, p in pairs if h == p)
+    return round(agree / len(pairs), 4)
+
+
 def main() -> None:
     if not NOTES_DIR.exists():
         print(f"FEHLER: {NOTES_DIR} fehlt — erst build_labels.py laufen", file=sys.stderr)
@@ -139,11 +159,25 @@ def main() -> None:
         import sqlite3 as _sq
         from datetime import datetime as _dt
 
-        # Aggregiere Labels pro Note
+        # Aggregiere Labels pro Note + sammle claim-level Human-Labels (#24)
         from collections import defaultdict
         per_note: dict = defaultdict(lambda: {"s": 0, "h": 0, "?": 0})
+        human_by_note: dict[str, dict[int, str]] = defaultdict(dict)
         for row in collected:
             per_note[row["note"]][row["label"]] += 1
+            human_by_note[row["note"]][row["claim_idx"]] = row["label"]
+
+        # Pipeline-Label pro (note, claim_idx) für claim-level Agreement (SSoT: kappa.py).
+        # Bei fehlender quality_history/Deps bleibt agreement_rate None statt zu crashen.
+        try:
+            _sys.path.insert(0, str(Path(__file__).resolve().parent))
+            from kappa import extract_pipeline_labels, load_pipeline_results
+            pipeline_labels = extract_pipeline_labels(load_pipeline_results())
+        except (Exception, SystemExit) as _ke:  # noqa: BLE001
+            # SystemExit muss mit: kappa→eval_quality_v4 kann beim Import per
+            # sys.exit() abbrechen (fehlendes fitz/rapidfuzz) — das ist kein Exception.
+            print(f"  [warn] Pipeline-Labels für Agreement nicht ladbar: {_ke}", file=_sys.stderr)
+            pipeline_labels = {}
 
         # LLM-Halluzinationsraten aus note_evals holen
         conn_plain = _sq.connect(str(ROOT / ".cache" / "atomic_analytics.db"))
@@ -161,10 +195,9 @@ def main() -> None:
                 n_valid = n_s + n_h
                 human_hall = round(n_h / n_valid, 4) if n_valid > 0 else None
                 llm_hall   = llm_rates.get(note_name)
-                agree      = None
-                if human_hall is not None and llm_hall is not None:
-                    # Übereinstimmung: beide einig pro Claim
-                    agree = round(1 - abs(human_hall - llm_hall), 4)
+                # Claim-level statt Aggregat-Differenz (#24)
+                agree = note_claim_agreement(human_by_note.get(note_name, {}),
+                                             pipeline_labels, note_name)
                 conn.execute("""
                     INSERT OR REPLACE INTO calibration_labels
                     (note_path, eval_version, labeled_at, n_claims, n_supported, n_hallucinated,
