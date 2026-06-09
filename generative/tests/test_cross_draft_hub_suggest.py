@@ -84,4 +84,31 @@ def test_strongest_cluster_first():
     ]]
     result = suggest_unmarked_clusters(drafts)
     assert result[0][0] == "agent"
-    assert result[0][1].__len__() == 5
+    assert len(result[0][1]) == 5
+
+
+def test_resolved_hub_members_excluded():
+    # resolve() hat 'ADKAR-Modell' als Hub erkannt; die 5 Stage-Member stehen in
+    # hub_subconcepts und teilen Token 'adkar' — der Cluster ist abgedeckt und
+    # darf NICHT erneut vorgeschlagen werden.
+    member_titles = [
+        "ADKAR Awareness", "ADKAR Desire", "ADKAR Knowledge",
+        "ADKAR Ability", "ADKAR Reinforcement",
+    ]
+    hub = _draft("ADKAR-Modell", action="hub")
+    hub.hub_subconcepts = list(member_titles)
+    drafts = [hub] + [_draft(t) for t in member_titles]
+    assert suggest_unmarked_clusters(drafts) == []
+
+
+def test_identical_member_sets_deduped():
+    # Alle 5 Titel teilen 'agent' UND 'memory' → ohne Dedup zwei Vorschläge für
+    # denselben Cluster; es darf nur einer bleiben (stärkstes/alphabetisch erstes Token).
+    drafts = [_draft(t) for t in [
+        "Agent Memory Store", "Agent Memory Cache", "Agent Memory Index",
+        "Agent Memory Eviction", "Agent Memory TTL",
+    ]]
+    result = suggest_unmarked_clusters(drafts)
+    assert len(result) == 1
+    assert result[0][0] == "agent"
+    assert len(result[0][1]) == 5
