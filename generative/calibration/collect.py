@@ -74,6 +74,26 @@ def parse_md(md_text: str) -> list[dict]:
     return rows
 
 
+def note_claim_agreement(human_claims: dict[int, str],
+                          pipeline_labels: dict[tuple[str, int], str],
+                          note: str) -> float | None:
+    """Claim-level Übereinstimmung Mensch↔Pipeline für EINE Note (#24).
+
+    Paart Human- und Pipeline-Label pro `claim_idx` und liefert den Anteil
+    übereinstimmender Claims, oder None wenn es keine gemeinsam gelabelten Claims
+    gibt. Ersetzt die alte Aggregat-Differenz `1 - |human_hall - llm_hall|`, die
+    zwei Notes mit gleicher Halluzinationsrate als 100% einig zeigte, auch wenn
+    sie bei keinem einzelnen Claim übereinstimmten.
+    """
+    pairs = [(label, pipeline_labels[(note, idx)])
+             for idx, label in human_claims.items()
+             if (note, idx) in pipeline_labels]
+    if not pairs:
+        return None
+    agree = sum(1 for h, p in pairs if h == p)
+    return round(agree / len(pairs), 4)
+
+
 def main() -> None:
     if not NOTES_DIR.exists():
         print(f"FEHLER: {NOTES_DIR} fehlt — erst build_labels.py laufen", file=sys.stderr)
@@ -139,14 +159,40 @@ def main() -> None:
         import sqlite3 as _sq
         from datetime import datetime as _dt
 
-        # Aggregiere Labels pro Note
+        # Aggregiere Labels pro Note + sammle claim-level Human-Labels (#24)
         from collections import defaultdict
         per_note: dict = defaultdict(lambda: {"s": 0, "h": 0, "?": 0})
+        human_by_note: dict[str, dict[int, str]] = defaultdict(dict)
         for row in collected:
             per_note[row["note"]][row["label"]] += 1
+            prev = human_by_note[row["note"]].get(row["claim_idx"])
+            if prev is not None and prev != row["label"]:
+                print(f"  [warn] widersprüchliche Labels für {row['note']} claim "
+                      f"{row['claim_idx']}: '{prev}' vs. '{row['label']}' — letztes gewinnt, "
+                      f"Counts zählen beide", file=_sys.stderr)
+            human_by_note[row["note"]][row["claim_idx"]] = row["label"]
 
-        # LLM-Halluzinationsraten aus note_evals holen
-        conn_plain = _sq.connect(str(ROOT / ".cache" / "atomic_analytics.db"))
+        # Pipeline-Label pro (note, claim_idx) für claim-level Agreement (SSoT: kappa.py).
+        # Bei fehlender quality_history bleibt agreement_rate None statt zu crashen —
+        # aber laut (sonst sieht ein Versions-Bump wie 0 % Agreement aus). Bewusst KEIN
+        # stiller Fallback auf andere Versionen (Provenance: Labels müssen zum Run passen).
+        pipeline_labels: dict[tuple[str, int], str] = {}
+        if per_note:
+            try:
+                from calibration.kappa import extract_pipeline_labels, load_pipeline_results
+                from config import AGENT_VERSION
+                pipeline_labels = extract_pipeline_labels(load_pipeline_results())
+                if not pipeline_labels:
+                    print(f"  [warn] 0 Pipeline-Labels für AGENT_VERSION={AGENT_VERSION} in "
+                          f"quality_history.jsonl — agreement_rate bleibt None (Labels evtl. "
+                          f"unter älterer Version erzeugt)", file=_sys.stderr)
+            except (ImportError, OSError, KeyError) as _ke:
+                print(f"  [warn] Pipeline-Labels für Agreement nicht ladbar: {_ke}", file=_sys.stderr)
+
+        # LLM-Halluzinationsraten aus note_evals holen (kanonische DB: db.DB_PATH —
+        # nicht generative/.cache, dort liegt keine DB)
+        _db.init_db(_db.DB_PATH)
+        conn_plain = _sq.connect(str(_db.DB_PATH))
         llm_rates = {
             r[0]: r[1]
             for r in conn_plain.execute(
@@ -155,16 +201,15 @@ def main() -> None:
         }
         conn_plain.close()
 
-        with _db.get_db() as conn:
+        with _db.get_db(_db.DB_PATH) as conn:
             for note_name, counts in per_note.items():
                 n_s, n_h, n_q = counts["s"], counts["h"], counts["?"]
                 n_valid = n_s + n_h
                 human_hall = round(n_h / n_valid, 4) if n_valid > 0 else None
                 llm_hall   = llm_rates.get(note_name)
-                agree      = None
-                if human_hall is not None and llm_hall is not None:
-                    # Übereinstimmung: beide einig pro Claim
-                    agree = round(1 - abs(human_hall - llm_hall), 4)
+                # Claim-level statt Aggregat-Differenz (#24)
+                agree = note_claim_agreement(human_by_note.get(note_name, {}),
+                                             pipeline_labels, note_name)
                 conn.execute("""
                     INSERT OR REPLACE INTO calibration_labels
                     (note_path, eval_version, labeled_at, n_claims, n_supported, n_hallucinated,

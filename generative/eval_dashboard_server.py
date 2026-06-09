@@ -124,6 +124,15 @@ def _read_agent_stats(allowed_run_ids: set | None = None) -> dict:
     }
 
 
+def _avg_agreement(rows: list[dict]) -> float | None:
+    """Mittelt agreement über Rows; None (nicht 0.0) wenn kein Wert vorliegt —
+    sonst rendert das Frontend "0 %" statt "–" bei fehlenden Agreement-Daten."""
+    vals = [r["agreement"] for r in rows if r["agreement"] is not None]
+    if not vals:
+        return None
+    return round(sum(vals) / len(vals), 1)
+
+
 def _read_calibration_data(allowed_note_paths: set | None = None) -> dict:
     """Liest Kalibrierungs-Stand: LLM-Eval (v4.1) vs. Human-Labels."""
     try:
@@ -181,8 +190,7 @@ def _read_calibration_data(allowed_note_paths: set | None = None) -> dict:
 
         n_eval    = len(evaluated)
         n_labeled = len(labeled)
-        avg_agree = round(sum(r["agreement"] for r in rows if r["agreement"] is not None) /
-                          max(1, sum(1 for r in rows if r["agreement"] is not None)), 1) if rows else None
+        avg_agree = _avg_agreement(rows)
 
         return {
             "rows":      rows,
