@@ -38,9 +38,12 @@ Parallel-Agenten würden auf derselben Fläche kollidieren.
 - Alle `sys.path.insert`-Hacks aus Quell- und Testfiles entfernen → Paket-Imports.
 - `requirements.txt` → `pyproject` dependencies; Extras erwägen (z. B. `[eval]` für
   schwere Eval-Deps), nur wenn es die Installation real vereinfacht.
-- GitHub Actions: ubuntu-latest, Python 3.12, `apt-get install poppler-utils`,
-  `pip install -e .`, `pytest` (Suite ist LLM-frei, ~30 s). Badge ins README.
-- CI deckt Linux-Portabilität zwangsläufig auf (Pfade, `claude` vs. `claude.cmd`) —
+- GitHub Actions mit **OS-Matrix ubuntu + windows**, Python 3.12, poppler-Install
+  (ubuntu: apt, windows: choco/scoop), `pip install -e .`, `pytest` (Suite ist
+  LLM-frei, ~30 s). Badge ins README.
+- Die Matrix macht OS-Unabhängigkeit zum dauerhaften Regressionsschutz statt
+  Einmal-Aktion; sie deckt versteckte Plattform-Annahmen zwangsläufig auf
+  (Pfade, `claude` vs. `claude.cmd` via `shutil.which`, CRLF/Encoding) —
   portabel fixen, Tests nicht blind skippen.
 
 **Akzeptanz S1:** frische venv → `pip install -e .` → volle Suite grün ohne
@@ -71,6 +74,9 @@ reproduziert die Showcase-Notes.
 Reihenfolge: S1 → S2 → S3 (S2/S3 sind nach S1 unabhängig; nacheinander in 1–2 Sessions
 reicht — Parallel-Worktrees lohnen den Overhead hier nicht).
 
+Geparkt (nach M1): Codex-CLI-Backend für ChatGPT-Subscription ohne API-Key — Issue #30
+(experimental; Quality-Gates sind Claude-kalibriert, braucht eigene Benchmark-Zahl via M2).
+
 ---
 
 ## Session-Prompt S1 (copy-paste für nächste Session)
@@ -86,7 +92,8 @@ dieselben Files).
 
 Scope (hart): pyproject.toml + installierbares Paket-Layout für generative/extractive/
 shared, Console-Entry-Point `atomic-notes run`, ALLE sys.path.insert-Hacks raus,
-GitHub-Actions-Workflow (ubuntu, poppler-utils, pip install -e ., pytest), Badge.
+GitHub-Actions-Workflow (OS-Matrix ubuntu + windows, poppler, pip install -e .,
+pytest), Badge.
 KEIN Verhalten ändern, KEINE Features, KEIN Refactoring jenseits der Imports.
 Subscription-Backend bleibt Default. Windows bleibt unterstützt.
 
