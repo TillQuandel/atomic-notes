@@ -15,6 +15,10 @@ WISSEN = VAULT / "04-wissen"
 BA_DIR = VAULT / "01-studium" / "bachelorarbeit"
 SCRIPTS_DIR = Path(__file__).resolve().parent
 CACHE_DIR = SCRIPTS_DIR / ".cache"
+# Eval-Historie (Stage-8). Hier statt in eval_quality_v4 definiert, damit reine
+# Label-Tools (kappa.py, build_labels.py, collect.py) den Pfad importieren können,
+# ohne eval_quality_v4s Import-Zeit-sys.exit() bei fehlendem fitz/rapidfuzz zu ziehen.
+QUALITY_HISTORY = CACHE_DIR / "quality_history.jsonl"
 # Externe Quell-PDFs. Renderer baut hieraus den `file://`-Link
 # in den Quellen-Callout, damit User die PDF aus der Note öffnen kann.
 LITERATURE_DIR = Path(os.environ.get(

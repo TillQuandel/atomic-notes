@@ -165,22 +165,34 @@ def main() -> None:
         human_by_note: dict[str, dict[int, str]] = defaultdict(dict)
         for row in collected:
             per_note[row["note"]][row["label"]] += 1
+            prev = human_by_note[row["note"]].get(row["claim_idx"])
+            if prev is not None and prev != row["label"]:
+                print(f"  [warn] widersprüchliche Labels für {row['note']} claim "
+                      f"{row['claim_idx']}: '{prev}' vs. '{row['label']}' — letztes gewinnt, "
+                      f"Counts zählen beide", file=_sys.stderr)
             human_by_note[row["note"]][row["claim_idx"]] = row["label"]
 
         # Pipeline-Label pro (note, claim_idx) für claim-level Agreement (SSoT: kappa.py).
-        # Bei fehlender quality_history/Deps bleibt agreement_rate None statt zu crashen.
-        try:
-            _sys.path.insert(0, str(Path(__file__).resolve().parent))
-            from kappa import extract_pipeline_labels, load_pipeline_results
-            pipeline_labels = extract_pipeline_labels(load_pipeline_results())
-        except (Exception, SystemExit) as _ke:  # noqa: BLE001
-            # SystemExit muss mit: kappa→eval_quality_v4 kann beim Import per
-            # sys.exit() abbrechen (fehlendes fitz/rapidfuzz) — das ist kein Exception.
-            print(f"  [warn] Pipeline-Labels für Agreement nicht ladbar: {_ke}", file=_sys.stderr)
-            pipeline_labels = {}
+        # Bei fehlender quality_history bleibt agreement_rate None statt zu crashen —
+        # aber laut (sonst sieht ein Versions-Bump wie 0 % Agreement aus). Bewusst KEIN
+        # stiller Fallback auf andere Versionen (Provenance: Labels müssen zum Run passen).
+        pipeline_labels: dict[tuple[str, int], str] = {}
+        if per_note:
+            try:
+                from calibration.kappa import extract_pipeline_labels, load_pipeline_results
+                from config import AGENT_VERSION
+                pipeline_labels = extract_pipeline_labels(load_pipeline_results())
+                if not pipeline_labels:
+                    print(f"  [warn] 0 Pipeline-Labels für AGENT_VERSION={AGENT_VERSION} in "
+                          f"quality_history.jsonl — agreement_rate bleibt None (Labels evtl. "
+                          f"unter älterer Version erzeugt)", file=_sys.stderr)
+            except (ImportError, OSError, KeyError) as _ke:
+                print(f"  [warn] Pipeline-Labels für Agreement nicht ladbar: {_ke}", file=_sys.stderr)
 
-        # LLM-Halluzinationsraten aus note_evals holen
-        conn_plain = _sq.connect(str(ROOT / ".cache" / "atomic_analytics.db"))
+        # LLM-Halluzinationsraten aus note_evals holen (kanonische DB: db.DB_PATH —
+        # nicht generative/.cache, dort liegt keine DB)
+        _db.init_db(_db.DB_PATH)
+        conn_plain = _sq.connect(str(_db.DB_PATH))
         llm_rates = {
             r[0]: r[1]
             for r in conn_plain.execute(
@@ -189,7 +201,7 @@ def main() -> None:
         }
         conn_plain.close()
 
-        with _db.get_db() as conn:
+        with _db.get_db(_db.DB_PATH) as conn:
             for note_name, counts in per_note.items():
                 n_s, n_h, n_q = counts["s"], counts["h"], counts["?"]
                 n_valid = n_s + n_h
