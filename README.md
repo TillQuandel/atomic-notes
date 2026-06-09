@@ -12,7 +12,20 @@ PDF input and Obsidian-style Markdown are the first supported path, not the whol
 
 ## Status
 
-**generative v0.3.136** · **extractive v0.2.0** · last updated: 2026-06-03
+**generative v0.3.136** · **extractive v0.2.0** · last updated: 2026-06-10
+
+413 tests passing. An independent multi-rater project assessment (2026-06-10) and the
+resulting roadmap live in `internal/docs/` — see `2026-06-10-projekt-bewertung.md`
+and `m1-installierbarkeit-plan.md`.
+
+## Roadmap
+
+1. **M1 — installable by strangers**: packaging (`pyproject.toml`, entry points), CI,
+   preflight `doctor`, quickstart docs. Plan: `internal/docs/m1-installierbarkeit-plan.md`.
+2. **M2 — trustworthy output**: gold-standard coverage measurement, threshold
+   calibration, PDF text-quality gate + OCR fallback, a small reproducible benchmark.
+3. **M3 — staying power**: configurable note conventions beyond Obsidian, REST/API
+   layer (issues #9–#11).
 
 ## Repository Layout
 
@@ -31,6 +44,11 @@ internal/       Internal evaluation assets and development notes, not user-facin
 ### Generative
 
 The generative pipeline synthesizes standalone atomic notes from source material. It uses LLM stages for planning, extraction, verification, cross-reference checks, and critique. This is the higher-quality path when synthesis is useful and API/model access is acceptable.
+
+No API key is required: the default backend drives the Claude Code CLI, so a Claude
+Pro/Max subscription plus a logged-in CLI is enough. An API-based backend (litellm:
+Anthropic, OpenAI, Ollama, …) is available via `ATOMIC_AGENT_BACKEND=litellm`. See
+`generative/README.md` for details and limits.
 
 ```bash
 cd generative

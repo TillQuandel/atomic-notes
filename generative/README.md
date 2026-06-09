@@ -25,8 +25,19 @@ python orchestrator.py --source "path/to/paper.pdf" --dry-run
 ## Requirements
 
 - Python 3.11+
-- Claude CLI or a configured API backend
+- `pdftotext`/`pdfinfo` (poppler-utils) on PATH
+- An LLM backend (see below)
 - A writable output target for generated notes
+
+## Backends
+
+| Backend | Set via | Needs | Notes |
+|---|---|---|---|
+| `subscription` (default) | `ATOMIC_AGENT_BACKEND=subscription` | Claude Pro/Max subscription + installed, logged-in Claude Code CLI (`claude`) | No API key, no extra cost beyond the subscription. Headless `claude -p` is an officially documented CLI mode. Subject to the subscription's 5-hour rate window — roughly 8 full pipeline runs per window, then HTTP 429 until reset. |
+| `litellm` | `ATOMIC_AGENT_BACKEND=litellm` | Provider API key (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, or local Ollama) | Pay-as-you-go; no rate-window coupling. Model IDs in `.env` use litellm naming. |
+
+Model IDs are configured once in litellm format (e.g. `anthropic/claude-sonnet-4-6`);
+the subscription backend maps them to CLI shorthands internally.
 
 Obsidian output is currently the best-tested target, but the pipeline should not be treated as Obsidian-specific long term.
 
