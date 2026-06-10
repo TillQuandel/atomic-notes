@@ -110,8 +110,9 @@ def _latest_version(ver_map: dict) -> str:
     return sorted(ver_map.keys(), key=_ver_sort_key)[-1]
 
 def _median(lst: list[float]) -> float:
-    s = sorted(lst)
-    return s[len(s) // 2]
+    # statistics.median (interpoliert) — muss zur kpi_trend-Berechnung im
+    # Server passen, sonst zeigen KPI-Karte und Sparkline verschiedene Werte.
+    return statistics.median(lst)
 
 def _pdf_short_name(raw: str) -> str:
     name = raw.replace(".pdf", "").strip()
@@ -319,6 +320,7 @@ def _calc_kpis(
         "total_generated": total_generated,
         "total_accepted":  total_accepted,
         "total_merged":    total_merged,
+        "total_dropped":   sum(r.get("n_dropped", 0) or 0 for r in all_log_runs),
         "total_tokens":    total_tokens,
         "total_dur_h":     round(total_dur_s / 3600, 1),
         "cur_tokens":      cur_tokens,

@@ -8,7 +8,6 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700;800&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
-<script src="data.js"></script>
 <style>
 /* ===== ATOMIC AGENT — PIPELINE EVAL ============================= */
 /* CSS from Claude Design handoff — adapted for plain HTML + Chart.js */
@@ -835,11 +834,7 @@ window._clearFilter = function(key) {
   const sel = document.getElementById(idMap[key]);
   if (sel) sel.value = '__all__';
   _renderFilterBadges();
-  if (typeof MOCK_DATA !== 'undefined') {
-    _renderWithData(_transformMockData(MOCK_DATA, _currentEvalVersion, _globalFilters));
-  } else {
-    loadAndRender();
-  }
+  loadAndRender();
 };
 
 function onGlobalFilterChange() {
@@ -852,11 +847,7 @@ function onGlobalFilterChange() {
   _globalFilters.lang  = selLang  ? selLang.value  : '__all__';
   _globalFilters.model = selModel ? selModel.value : '__all__';
   _renderFilterBadges();
-  if (typeof MOCK_DATA !== 'undefined') {
-    _renderWithData(_transformMockData(MOCK_DATA, _currentEvalVersion, _globalFilters));
-  } else {
-    loadAndRender();
-  }
+  loadAndRender();
 }
 
 function _initGlobalPverFilter(versions) {
@@ -884,7 +875,7 @@ function _setEvalVerInUrl(ver) { const u = new URL(window.location.href); u.sear
 function onEvalVerChange() {
   const sel = document.getElementById('eval-ver-select'); if (!sel) return;
   _currentEvalVersion = sel.value; _setEvalVerInUrl(_currentEvalVersion);
-  typeof MOCK_DATA !== 'undefined' ? _renderWithData(_transformMockData(MOCK_DATA, _currentEvalVersion)) : loadAndRender();
+  loadAndRender();
 }
 function _initEvalVerDropdown(available, selected) {
   const sel = document.getElementById('eval-ver-select'); if (!sel) return;
@@ -1400,94 +1391,10 @@ async function loadAndRender() {
   } catch(e) { console.warn('Ladefehler:',e); }
 }
 
-/* ── Mock transform ───────────────────────────────────────────── */
-function _transformMockData(rows, forceEvalVersion, globalFilters) {
-  if(!rows||!Array.isArray(rows)) return null;
-  const median=(a)=>{const s=[...a].sort((x,y)=>x-y),m=Math.floor(s.length/2);return s.length%2?s[m]:(s[m-1]+s[m])/2;};
-  const mean=(a)=>a.length?a.reduce((x,y)=>x+y,0)/a.length:null;
-  const allEV=[...new Set(rows.map(r=>r.eval_version))].sort();
-  const latestEV=(forceEvalVersion&&allEV.includes(forceEvalVersion))?forceEvalVersion:allEV[allEV.length-1];
-  const evRows=rows.filter(r=>r.eval_version===latestEV);
-  // Alle PDFs + Sprachen VOR dem Filtern — für Dropdown-Optionen
-  const allPdfs=[...new Set(evRows.map(r=>r.pdf).filter(Boolean))];
-  const allLangs=[...new Set(evRows.map(r=>r.language).filter(Boolean))];
-  // Alle verfügbaren Pipeline-Versionen VOR dem Filtern
-  const allPvers = [...new Set(evRows.map(r=>r.pipeline_version).filter(Boolean))].sort();
-  // Globale Filter anwenden
-  const gf = globalFilters || _globalFilters || {pver:'__all__', pdf:'__all__', lang:'__all__'};
-  let filtered = evRows;
-  if (gf.pver && gf.pver !== '__all__') filtered = filtered.filter(r => r.pipeline_version === gf.pver);
-  if (gf.pdf  && gf.pdf  !== '__all__') filtered = filtered.filter(r => r.pdf?.toLowerCase() === gf.pdf);
-  if (gf.lang && gf.lang !== '__all__') filtered = filtered.filter(r => r.language === gf.lang);
-  if (!filtered.length) filtered = evRows; // Fallback wenn Filter zu eng
-  const pdfs=[...new Set(filtered.map(r=>r.pdf))];
-  const vers=[...new Set(filtered.map(r=>r.pipeline_version))].sort();
-  // KPIs = neueste Pipeline-Version, nicht Durchschnitt aller Versionen
-  const latestVer=vers[vers.length-1];
-  const latestRows=filtered.filter(r=>r.pipeline_version===latestVer);
-  const latestAcc=latestRows.filter(r=>r.acceptance).length;
-  const acc=filtered.filter(r=>r.acceptance).length;
-  // Aktuelle Version: Runs-by-version Eintrag für latestVer
-  const latestRunStats = (data.runs_by_version||{})[latestVer] || {};
-  const kpis={
-    n_pdfs:pdfs.length,n_versions:vers.length,
-    versions_range:vers.length>1?vers[0]+'–'+latestVer:latestVer,
-    total_runs: latestRunStats.n_runs||latestRows.length||0,
-    total_generated: latestRunStats.n_total||latestRows.length,
-    total_accepted:  latestRunStats.n_vault||Math.round(latestRows.filter(r=>r.acceptance).length),
-    total_merged:    latestRunStats.n_merge||0,
-    total_dropped:   latestRunStats.n_dropped||0,
-    total_tokens:latestRows.reduce((s,r)=>s+(r.tokens_in||0)+(r.tokens_out||0),0),
-    total_dur_h:(latestRows.reduce((s,r)=>s+(r.duration_s||0),0)/3600).toFixed(1),
-    avg_accept:latestRows.length?Math.round(latestAcc/latestRows.length*1000)/10:null,
-    avg_hall:  latestRows.length?Math.round(median(latestRows.map(r=>r.hallucination))*10)/10:null,
-    avg_cov:   latestRows.length?Math.round(median(latestRows.map(r=>r.coverage))*10)/10:null,
-    n_notes:latestRows.length,kpi_version:latestVer,
-  };
-  const accept={labels:pdfs,values:pdfs.map(pdf=>{const s=filtered.filter(r=>r.pdf===pdf);return Math.round(s.filter(r=>r.acceptance).length/s.length*1000)/10;})};
-  const scatPoints=filtered.map(r=>({x:Math.round(r.hallucination*10)/10,y:Math.round(r.coverage*10)/10,label:r.note_title,pdf:r.pdf.toLowerCase(),pdf_label:r.pdf,version:r.pipeline_version}));
-  const scatter={points:scatPoints,pdfs:pdfs.map(p=>({raw:p.toLowerCase(),label:p})),versions:vers};
-  const pdfC={Bates:'#60a5fa',Kuhlthau:'#c084fc',Schlebbe:'#fb923c'};
-  const long={versions:vers,datasets:pdfs.map(pdf=>({label:pdf,color:pdfC[pdf]||'#60a5fa',data:vers.map(v=>{const s=filtered.filter(r=>r.pdf===pdf&&r.pipeline_version===v);return s.length?Math.round(s.filter(r=>r.acceptance).length/s.length*1000)/10:null;})}))};
-  const pdfWords=Object.assign({Bates:12000,Kuhlthau:8000,Schlebbe:5000}, d.pdf_words||{});
-  const tokens={labels:vers,tokens_in:vers.map(v=>filtered.filter(r=>r.pipeline_version===v).reduce((s,r)=>s+(r.tokens_in||0),0)),tokens_out:vers.map(v=>filtered.filter(r=>r.pipeline_version===v).reduce((s,r)=>s+(r.tokens_out||0),0)),tokens_cache:vers.map(v=>filtered.filter(r=>r.pipeline_version===v).reduce((s,r)=>s+(r.tokens_cache||0),0)),duration_min:vers.map(v=>{const s=filtered.filter(r=>r.pipeline_version===v);return s.length?Math.round(s.reduce((a,r)=>a+(r.duration_s||0),0)/60*10)/10:null;})};
-  const scaling={keys:pdfs.map(p=>p.toLowerCase()),points:pdfs.map(pdf=>({key:pdf.toLowerCase(),label:pdf,x:pdfWords[pdf]||8000,y:Math.round(filtered.filter(r=>r.pdf===pdf).length/vers.length),ver:latestEV,pct:Math.round(filtered.filter(r=>r.pdf===pdf&&r.acceptance).length/filtered.filter(r=>r.pdf===pdf).length*100)}))};
-  const kpi_trend={
-    versions:vers,
-    hall:   vers.map(v=>Math.round(median(filtered.filter(r=>r.pipeline_version===v).map(r=>r.hallucination))*10)/10),
-    cov:    vers.map(v=>Math.round(median(filtered.filter(r=>r.pipeline_version===v).map(r=>r.coverage))*10)/10),
-    accept: vers.map(v=>{const s=filtered.filter(r=>r.pipeline_version===v);return s.length?Math.round(s.filter(r=>r.acceptance).length/s.length*1000)/10:null;}),
-    n:      vers.map(v=>filtered.filter(r=>r.pipeline_version===v).length),
-    dur:    vers.map(v=>{const s=filtered.filter(r=>r.pipeline_version===v);return s.length?Math.round(s.reduce((a,r)=>a+(r.duration_s||0),0)/60*10)/10:null;}),
-    // Pipeline-Tokens (agent_stats approximiert pro Version)
-    tokens: vers.map((_,i) => Math.round((0.8 + i * 0.15) * 100) / 100), // Mock: ~0.8–1.1M je Version
-    cost:   vers.map(() => null),  // Placeholder bis API-Runs vorhanden
-  };
-  const pdf_table=pdfs.map(pdf=>{const s=filtered.filter(r=>r.pdf===pdf);return{key:pdf.toLowerCase(),label:pdf,version:latestEV,words:pdfWords[pdf]||'—',pages:'—',accept:Math.round(s.filter(r=>r.acceptance).length/s.length*1000)/10,hall:Math.round(mean(s.map(r=>r.hallucination))*10)/10,cov:Math.round(mean(s.map(r=>r.coverage))*10)/10,n_notes:s.length};});
-  const agent_stats={agents:['planner','extractor','verifier','cross_reference','critic'],labels:['Planner','Extractor','Verifier','Cross-Ref','Critic'],output:[9388,162304,119848,247705,409237],dur_s:[187,3419,1428,2989,3837],calls:[11,133,155,110,116],cache_pct:[92.3,94.8,94.2,93.6,90.4],errors:[0,0,0,0,0]};
-  // Mock-Kalibrierungsdaten — "vor Labeln" Status
-  const calibration = {
-    n_eval: 23, n_labeled: 0, avg_agree: null, has_labels: false,
-    rows: [
-      {note:'Follow-the-Information-Prinzip (Bates)', pdf:'Bates', llm_hall:18, llm_cov:42, human_hall:null, agreement:null, status:'evaluated'},
-      {note:'Ranganathan Five Laws of Library Science', pdf:'Bates', llm_hall:8,  llm_cov:55, human_hall:null, agreement:null, status:'evaluated'},
-      {note:'Information Seeking by Experimentation', pdf:'Hertzum', llm_hall:22, llm_cov:38, human_hall:null, agreement:null, status:'evaluated'},
-      {note:'Backtalk (Schön, rezipiert von Hertzum)', pdf:'Hertzum', llm_hall:14, llm_cov:45, human_hall:null, agreement:null, status:'evaluated'},
-      {note:'Faculty-Librarian Collaboration in ILI', pdf:'Kaletski', llm_hall:35, llm_cov:28, human_hall:null, agreement:null, status:'evaluated'},
-    ]
-  };
-
-  return{generated_at:new Date().toLocaleString('de-DE'),eval_version:latestEV,available_eval_versions:allEV,all_pdfs:allPdfs,all_langs:allLangs,all_pvers:allPvers,kpis,accept,scatter,long,tokens,scaling,kpi_trend,pdf_table,agent_stats,calibration,pdf_meta:{},thresholds:{accept:[85,65],hall:[5,15],cov:[80,50]}};
-}
-
 /* ── Boot ─────────────────────────────────────────────────────── */
 _renderFilterBadges();
-if (typeof MOCK_DATA !== 'undefined') {
-  _renderWithData(_transformMockData(MOCK_DATA));
-} else {
-  loadAndRender();
-  setInterval(loadAndRender, 15000);
-}
+loadAndRender();
+setInterval(loadAndRender, 15000);
 </script>
 </body>
 </html>
