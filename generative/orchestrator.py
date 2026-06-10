@@ -1559,6 +1559,7 @@ def main(argv: list[str] | None = None):
         # DB: pipeline_run persistieren
         try:
             from generative.agents.base import _RUN_ID as _db_run_id
+            from generative import config as _db_cfg
             from generative import db as _db
             with _db.get_db() as _conn:
                 _db.insert_run(_conn, {
@@ -1573,7 +1574,7 @@ def main(argv: list[str] | None = None):
                     "n_merge":          sum(1 for d in drafts if getattr(d, "action", "") == "extend"),
                     "n_dropped":        dropped_total,
                     "n_words":          word_count,
-                    "model":            getattr(__import__("config"), "MODEL_PLANNER", ""),
+                    "model":            getattr(_db_cfg, "MODEL_PLANNER", ""),
                     "cost_usd":         _cost_usd,
                     "tokens_total":     _tok_total,
                     "tokens_input":     _tok_in,

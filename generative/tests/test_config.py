@@ -13,8 +13,8 @@ import pytest
 def restore_config_defaults(monkeypatch):
     yield
     monkeypatch.delenv("ATOMIC_AGENT_CALL_TIMEOUT", raising=False)
-    if "config" in sys.modules:
-        importlib.reload(sys.modules["config"])
+    if "generative.config" in sys.modules:
+        importlib.reload(sys.modules["generative.config"])
 
 
 def test_call_timeout_defaults_to_300_seconds(monkeypatch):

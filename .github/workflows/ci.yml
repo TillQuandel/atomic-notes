@@ -12,6 +12,8 @@ jobs:
       matrix:
         os: [ubuntu-latest, windows-latest]
     runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: "1"
     steps:
       - uses: actions/checkout@v4
 
@@ -33,6 +35,12 @@ jobs:
 
       - name: pdftotext-Smoke-Test
         run: pdftotext -v
+
+      - name: Packaging-Smoke-Test (Importe, Entry-Point, Package-Data)
+        run: |
+          python -c "import generative, extractive, shared, decision_engine"
+          python -c "import importlib.resources as r; assert r.files('generative').joinpath('tag_registry.yml').is_file()"
+          atomic-notes --help
 
       # Kanonische Suite (LLM-frei). extractive- und decision_engine-Tests
       # laufen hier bewusst noch nicht: decision_engine hat vorbestehende
