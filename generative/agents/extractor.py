@@ -8,10 +8,10 @@ from __future__ import annotations
 import json
 import re
 
-from agents.base import call_claude_async
-from agents.structured_output import parse_extractor_output
-from config import MODEL_EXTRACTOR
-from schemas.atomic_note import AtomicNoteDraft, TextAnchor, ConceptPlan
+from generative.agents.base import call_claude_async
+from generative.agents.structured_output import parse_extractor_output
+from generative.config import MODEL_EXTRACTOR
+from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor, ConceptPlan
 
 _PROMPT = """Du extrahierst eine Atomic Note aus dem unten stehenden Textabschnitt — schemakonform für einen Obsidian-Vault.
 
@@ -244,7 +244,7 @@ def _format_tag_whitelist(tags: list[str] | None,
     if not tags:
         return "(keine Whitelist verfügbar — Tag-Feld leer lassen)"
     if source_text:
-        from agents.context_builder import score_tags_for_source
+        from generative.agents.context_builder import score_tags_for_source
         prio, rest = score_tags_for_source(tags, source_text)
         if prio:
             blocks = [

@@ -18,8 +18,8 @@ verhindert False-Positives bei Stage-Notes die sich gegenseitig erwähnen.
 from __future__ import annotations
 import re
 
-from schemas.atomic_note import AtomicNoteDraft
-from agents.critic import _has_overview_marker
+from generative.schemas.atomic_note import AtomicNoteDraft
+from generative.agents.critic import _has_overview_marker
 
 HUB_MIN_CROSS_MENTIONS = 3
 SUGGEST_MIN_CLUSTER = 5  # ab wievielen marker-losen Drafts mit gemeinsamem Token ein MoC vorgeschlagen wird (#4)

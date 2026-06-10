@@ -12,7 +12,7 @@ import subprocess
 import sys
 import time
 
-from config import CLAUDE_BIN, CALL_TIMEOUT_SEC
+from generative.config import CLAUDE_BIN, CALL_TIMEOUT_SEC
 
 _TRANSIENT_RC = {3221226505}
 _MAX_RETRIES = 2
@@ -42,7 +42,7 @@ def _build_argv(model: str) -> list[str]:
 
 
 def _parse_cli_json(raw: str):
-    from agents.base import CallResult
+    from generative.agents.base import CallResult
     d = json.loads(raw)
     if d.get("is_error"):
         raise RuntimeError(f"claude CLI Fehler: {d.get('result', '')[:300]}")

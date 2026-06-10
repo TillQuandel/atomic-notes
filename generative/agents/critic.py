@@ -7,11 +7,11 @@ vor dem LLM-Call (fängt 30–50% der Fails ohne Token-Verbrauch).
 from __future__ import annotations
 import re
 
-from agents.base import call_claude, trace_event
-from agents.structured_output import parse_critic_output
-import config as _config
-from config import MODEL_CRITIC
-from schemas.atomic_note import AtomicNoteDraft
+from generative.agents.base import call_claude, trace_event
+from generative.agents.structured_output import parse_critic_output
+from generative import config as _config
+from generative.config import MODEL_CRITIC
+from generative.schemas.atomic_note import AtomicNoteDraft
 
 # --- Future-Self-Regex-Pre-Check (deterministisch, kein LLM) ---
 
@@ -96,7 +96,7 @@ HUB_OVERVIEW_MARKERS = {
 # Anker. Konservativ: deckt Critic-FPs (Halluzinations-Drift wie ISP-Collection)
 # ohne legitime Quellen-Luecken durchzulassen.
 ANCHOR_COVERAGE_OVERRIDE = 0.85
-from pipeline.anchor_patterns import SENTENCE_SPLIT_RE as _SENTENCE_SPLIT_RE, PAGE_ANCHOR_RE as _PAGE_ANCHOR_RE
+from generative.pipeline.anchor_patterns import SENTENCE_SPLIT_RE as _SENTENCE_SPLIT_RE, PAGE_ANCHOR_RE as _PAGE_ANCHOR_RE
 _MIN_SUBSTANTIVE_LEN = 40  # Saetze < 40 Zeichen werden nicht als „substantiell" gezaehlt
 
 

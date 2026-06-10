@@ -4,13 +4,10 @@ import dataclasses
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 import pytest
 
-from runtime_config import load_runtime_config
+from generative.runtime_config import load_runtime_config
 
 
 def test_default_profile_preserves_legacy_behavior():
@@ -94,7 +91,7 @@ def test_negative_int_override_raises():
 
 from types import SimpleNamespace
 
-from runtime_config import RefineTrigger, refine_accepted, should_attempt_refine
+from generative.runtime_config import RefineTrigger, refine_accepted, should_attempt_refine
 
 
 def _draft(score, hard_gates=True, hint="", flags=None):
@@ -249,7 +246,7 @@ def test_synthesized_hint_alone_enables_trigger_a():
 
 from concurrent.futures import ThreadPoolExecutor
 
-from runtime_config import RunBudget
+from generative.runtime_config import RunBudget
 
 
 def test_run_budget_allows_unlimited_when_limit_is_none():
@@ -280,7 +277,7 @@ def test_run_budget_is_thread_safe():
 # Task 5: Concept cap helper
 # ---------------------------------------------------------------------------
 
-from runtime_config import cap_actionable_concepts
+from generative.runtime_config import cap_actionable_concepts
 
 
 def _concept(title, action="create", origin="primary"):
@@ -319,7 +316,7 @@ def test_cap_is_run_wide_across_multiple_chapter_plans():
     assert kept_actionable_titles == ["A1", "A2", "B1"]  # exactly 3 run-wide, not 6
 
 
-from runtime_config import count_actionable, is_actionable_concept
+from generative.runtime_config import count_actionable, is_actionable_concept
 
 
 def test_is_actionable_and_count():

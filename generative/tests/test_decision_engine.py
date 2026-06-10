@@ -3,9 +3,6 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-LIB = Path(__file__).resolve().parents[2] / "lib"
-if str(LIB) not in sys.path:
-    sys.path.insert(0, str(LIB))
 
 from decision_engine import ClaimDecision, ClaimInput, DEFAULT_CONFIG, Label, determine_decision
 from decision_engine.aggregation import aggregate

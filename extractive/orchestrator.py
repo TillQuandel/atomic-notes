@@ -9,7 +9,6 @@ import uuid
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from extractive.eval.extractive_eval import (
     compute_anchor_rate,

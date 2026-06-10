@@ -6,7 +6,7 @@ damit der Crash diagnostizierbar ist (Schritt, Exception, Prompt, roher Output, 
 """
 import json
 
-from pipeline.crash_report import write_crash_report
+from generative.pipeline.crash_report import write_crash_report
 
 
 def _payload():

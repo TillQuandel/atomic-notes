@@ -11,11 +11,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-from pipeline.pdf_chunker import (
+from generative.pipeline.pdf_chunker import (
     _CHAPTER_RE,
     _is_real_chapter_match,
     split_by_chapters,

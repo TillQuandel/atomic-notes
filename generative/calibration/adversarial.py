@@ -22,10 +22,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
-from config import AGENT_VERSION  # noqa: E402
-from eval_quality_v4 import (  # noqa: E402
+from generative.config import AGENT_VERSION  # noqa: E402
+from generative.eval_quality_v4 import (  # noqa: E402
     _QUALITY_HISTORY as HISTORY_PATH,
     eval_note,
     save_result,

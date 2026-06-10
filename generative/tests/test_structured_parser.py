@@ -9,11 +9,8 @@ import unittest
 from pathlib import Path
 
 # Direct-Import-Pattern (wie in den anderen Modulen) — Sys-Path-Patch
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-from agents.structured_output import (
+from generative.agents.structured_output import (
     _normalize_lines,
     _split_sentinels,
     _parse_header_line,

@@ -14,11 +14,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
-from config import MODEL_OPUS, CACHE_DIR, BACKEND
+from generative.config import MODEL_OPUS, CACHE_DIR, BACKEND
 
 # Re-Export für Backwards-Compat — Agenten importieren aus agents.base
-from agents.tracing import trace_event, trace_run_start, set_tracing_backend, flush_tracing  # noqa: F401
-from agents.tracing import _RUN_ID  # single source of truth for run ID
+from generative.agents.tracing import trace_event, trace_run_start, set_tracing_backend, flush_tracing  # noqa: F401
+from generative.agents.tracing import _RUN_ID  # single source of truth for run ID
 
 # OTel-Tracer für Phoenix. Bleibt None bis orchestrator._setup_phoenix_tracing()
 # ihn via set_llm_tracer() explizit setzt (nur bei ATOMIC_AGENT_TRACING=phoenix).
@@ -39,11 +39,11 @@ def set_llm_tracer(tracer) -> None:
 
 # Backend-Dispatch
 if BACKEND == "litellm":
-    from agents._litellm_backend import call_full as _backend_call_full
-    from agents._litellm_backend import call_full_async as _backend_call_full_async
+    from generative.agents._litellm_backend import call_full as _backend_call_full
+    from generative.agents._litellm_backend import call_full_async as _backend_call_full_async
 else:
-    from agents._subscription_backend import call_full as _backend_call_full
-    from agents._subscription_backend import call_full_async as _backend_call_full_async
+    from generative.agents._subscription_backend import call_full as _backend_call_full
+    from generative.agents._subscription_backend import call_full_async as _backend_call_full_async
 
 
 @dataclass
@@ -197,7 +197,7 @@ def _trace(agent: str, prompt: str, model: str, result: CallResult,
         "cached": result.cached,
         "error": error,
     }
-    from agents.tracing import _backend as _tracing_backend
+    from generative.agents.tracing import _backend as _tracing_backend
     _tracing_backend.write(entry)
 
 

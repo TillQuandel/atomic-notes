@@ -21,16 +21,15 @@ from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
 
 try:
     import fitz  # PyMuPDF
 except ImportError:
     sys.exit("PyMuPDF fehlt: pip install pymupdf")
 
-from config import AGENT_VERSION, CACHE_DIR, MDEBERTA_NLI_MODEL
-from eval_quality import _extract_page_text, _normalize, wilson_ci
-from pipeline.embeddings import _model, cosine
+from generative.config import AGENT_VERSION, CACHE_DIR, MDEBERTA_NLI_MODEL
+from generative.eval_quality import _extract_page_text, _normalize, wilson_ci
+from generative.pipeline.embeddings import _model, cosine
 
 _QUALITY_HISTORY = CACHE_DIR / "quality_history.jsonl"
 EVAL_VERSION = "2.0"

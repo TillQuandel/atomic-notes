@@ -16,28 +16,8 @@ import argparse
 import sys
 from pathlib import Path
 
-_REPO_ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(_REPO_ROOT))
-sys.path.insert(0, str(_REPO_ROOT / "generative"))
-
-# decision_engine liegt im Vault-Worktree (nicht im Repo) — optionaler Pfad
-_DE_CANDIDATES = [
-    _REPO_ROOT / "generative" / ".worktrees" / "lib",
-    Path.home() / "Obsidian_Vault" / "98-system" / "scripts" / "atomic-agent" / ".worktrees" / "lib",
-]
-for _p in _DE_CANDIDATES:
-    if (_p / "decision_engine").is_dir():
-        sys.path.insert(0, str(_p))
-        break
-else:
-    sys.exit(
-        "Fehler: decision_engine nicht gefunden.\n"
-        "Erwartet in einem dieser Pfade:\n"
-        + "\n".join(f"  {p}" for p in _DE_CANDIDATES)
-    )
-
-import db as _db
-from eval_quality_v4 import eval_note, EVAL_VERSION
+from generative import db as _db
+from generative.eval_quality_v4 import eval_note, EVAL_VERSION
 
 
 def main() -> None:

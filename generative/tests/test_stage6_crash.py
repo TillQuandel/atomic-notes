@@ -7,9 +7,9 @@ import asyncio
 import json
 from pathlib import Path
 
-import orchestrator as orch
-import agents.base as base
-from schemas.atomic_note import AtomicNoteDraft
+from generative import orchestrator as orch
+import generative.agents.base as base
+from generative.schemas.atomic_note import AtomicNoteDraft
 
 
 def _draft(title="Note", body="Body"):

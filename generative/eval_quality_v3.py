@@ -19,7 +19,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).parent))
 
 try:
     import fitz  # PyMuPDF
@@ -31,12 +30,12 @@ try:
 except ImportError:
     sys.exit("rapidfuzz fehlt: pip install rapidfuzz")
 
-from agents import base
-from config import AGENT_VERSION, CACHE_DIR, MODEL_OPUS
-from eval_quality import _extract_page_text, _normalize, wilson_ci
-from eval_quality_v2 import TOP_K, Chunk, _detect_language_pair, _expand_context, _read_note_body
-from eval_quality_v2 import build_chunks, extract_claims
-from pipeline.embeddings import _model, cosine
+from generative.agents import base
+from generative.config import AGENT_VERSION, CACHE_DIR, MODEL_OPUS
+from generative.eval_quality import _extract_page_text, _normalize, wilson_ci
+from generative.eval_quality_v2 import TOP_K, Chunk, _detect_language_pair, _expand_context, _read_note_body
+from generative.eval_quality_v2 import build_chunks, extract_claims
+from generative.pipeline.embeddings import _model, cosine
 
 _QUALITY_HISTORY = CACHE_DIR / "quality_history.jsonl"
 EVAL_VERSION = "3.2"

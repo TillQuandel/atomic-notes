@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from config import VAULT, WISSEN, SCRIPTS_DIR  # BA_DIR-Import entfernt (v31)
+from generative.config import VAULT, WISSEN, SCRIPTS_DIR  # BA_DIR-Import entfernt (v31)
 
 # Vault-Ordner die NICHT als existing_concepts zählen
 SKIP_DIRS = {"00-inbox", "98-system", "99-archive", "08-dashboards", ".obsidian", ".trash"}
@@ -151,7 +151,7 @@ def _load_registry_tags() -> set[str]:
     approved = data.get("approved") or []
     if not isinstance(approved, list):
         return set()
-    from agents.extractor import is_valid_schema_tag
+    from generative.agents.extractor import is_valid_schema_tag
     valid: set[str] = set()
     for t in approved:
         if not isinstance(t, str):

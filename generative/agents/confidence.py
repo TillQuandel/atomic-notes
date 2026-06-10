@@ -22,7 +22,7 @@ high nur bei ≥2 unabhängigen Tier-A/B-Quellen (heuristisch via QualityReport-
 """
 from __future__ import annotations
 
-from schemas.atomic_note import AtomicNoteDraft
+from generative.schemas.atomic_note import AtomicNoteDraft
 
 
 def run(draft: AtomicNoteDraft, has_vault_corroboration: bool = False,

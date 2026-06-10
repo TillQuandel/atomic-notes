@@ -3,11 +3,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-from pipeline.acronym_fix import (
+from generative.pipeline.acronym_fix import (
     _short_is_valid,
     _letter_match,
     _trim_long_form,

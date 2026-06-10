@@ -6,8 +6,8 @@ call_claude_full pro Thread den letzten Call.
 """
 import threading
 
-import agents.base as base
-from agents.base import CallResult
+import generative.agents.base as base
+from generative.agents.base import CallResult
 
 
 def test_last_call_record_set_on_success(monkeypatch):

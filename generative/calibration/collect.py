@@ -154,8 +154,7 @@ def main() -> None:
     # DB: calibration_labels pro Note aggregieren
     try:
         import sys as _sys
-        _sys.path.insert(0, str(ROOT))
-        import db as _db
+        from generative import db as _db
         import sqlite3 as _sq
         from datetime import datetime as _dt
 
@@ -179,8 +178,8 @@ def main() -> None:
         pipeline_labels: dict[tuple[str, int], str] = {}
         if per_note:
             try:
-                from calibration.kappa import extract_pipeline_labels, load_pipeline_results
-                from config import AGENT_VERSION
+                from generative.calibration.kappa import extract_pipeline_labels, load_pipeline_results
+                from generative.config import AGENT_VERSION
                 pipeline_labels = extract_pipeline_labels(load_pipeline_results())
                 if not pipeline_labels:
                     print(f"  [warn] 0 Pipeline-Labels für AGENT_VERSION={AGENT_VERSION} in "

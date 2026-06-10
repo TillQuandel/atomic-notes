@@ -9,11 +9,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-from eval_dashboard_server import _avg_agreement
+from generative.eval_dashboard_server import _avg_agreement
 
 
 def test_average_over_non_none_values():

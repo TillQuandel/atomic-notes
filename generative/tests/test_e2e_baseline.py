@@ -25,8 +25,7 @@ from pathlib import Path
 import pytest
 
 SCRIPTS_DIR = Path(__file__).parent.parent
-sys.path.insert(0, str(SCRIPTS_DIR))
-from config import LITERATURE_DIR as _LIT  # noqa: E402
+from generative.config import LITERATURE_DIR as _LIT  # noqa: E402
 
 BASELINE_PDFS = {
     "schlebbe": _LIT / "Schlebbe und Greifeneder - 2022 - Information Need, Informationsbedarf und -bedürfnis.pdf",

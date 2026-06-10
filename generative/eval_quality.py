@@ -28,7 +28,6 @@ from datetime import datetime
 from pathlib import Path
 
 # Projekt-Root für Imports
-sys.path.insert(0, str(Path(__file__).parent))
 
 try:
     import fitz  # PyMuPDF
@@ -40,7 +39,7 @@ try:
 except ImportError:
     sys.exit("rapidfuzz fehlt: pip install rapidfuzz")
 
-from config import (AGENT_VERSION, CACHE_DIR, ENABLE_MDEBERTA_NLI,
+from generative.config import (AGENT_VERSION, CACHE_DIR, ENABLE_MDEBERTA_NLI,
                     MDEBERTA_NLI_MODEL, MDEBERTA_THRESHOLD_CONFIRMED,
                     MDEBERTA_THRESHOLD_CONTRA)
 
@@ -129,7 +128,7 @@ def _page_num_from_str(page_str: str) -> int | None:
 def _semantic_score(quote: str, page_text: str) -> float:
     """Sentence-Transformers Cosine-Similarity. 0.0 wenn Modell nicht geladen."""
     try:
-        from pipeline.embeddings import _model, cosine
+        from generative.pipeline.embeddings import _model, cosine
         import numpy as np
         model = _model()
         if model is None:
@@ -581,8 +580,8 @@ def save_result(result: dict) -> None:
         f.write(json.dumps(result, ensure_ascii=False) + "\n")
 
     try:
-        import db as _db
-        from agents.base import _RUN_ID as _run_id
+        from generative import db as _db
+        from generative.agents.base import _RUN_ID as _run_id
         note_name = result.get("note", "")
         eval_id = f"{_run_id}__{note_name}"
         with _db.get_db() as _conn:

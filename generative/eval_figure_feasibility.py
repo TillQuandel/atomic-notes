@@ -171,7 +171,7 @@ def _page_visual_signals(pdf_path: Path, pages: list[tuple[int, str]]) -> list[P
 
 def analyze_pdf(pdf_path: Path) -> dict[str, Any]:
     """Analysiert ein PDF fuer Figur-Feasibility und gibt ein JSON-faehiges Dict."""
-    from pipeline import pdf_chunker
+    from generative.pipeline import pdf_chunker
 
     pages = pdf_chunker.pdf_to_pages(pdf_path)
     text = pdf_chunker.pdf_to_text(pdf_path)

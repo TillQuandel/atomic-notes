@@ -6,12 +6,9 @@ import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-from orchestrator import entity_resolution
-from schemas.atomic_note import AtomicNoteDraft
+from generative.orchestrator import entity_resolution
+from generative.schemas.atomic_note import AtomicNoteDraft
 
 @pytest.mark.anyio
 async def test_er_v35_semantic_title_accept():
@@ -37,7 +34,7 @@ async def test_er_v35_semantic_title_accept():
     )
     
     # Mocking
-    with patch("orchestrator.embeddings") as mock_emb:
+    with patch("generative.orchestrator.embeddings") as mock_emb:
         # Stage 1: Blocking
         # embed_title für d1 und d2
         mock_emb.embed_title.side_effect = ["emb1", "emb2"]
@@ -48,7 +45,7 @@ async def test_er_v35_semantic_title_accept():
         # embed_body für d1 und d2 (Stage 2)
         mock_emb.embed_body.side_effect = ["body_emb1", "body_emb2"]
         
-        with patch("orchestrator.canonicalizer.merge_cluster") as mock_merge:
+        with patch("generative.orchestrator.canonicalizer.merge_cluster") as mock_merge:
             # Simuliere Merge-Erfolg
             mock_merge.return_value = d1
             
@@ -84,7 +81,7 @@ async def test_er_v35_semantic_title_reject():
         synthesis_confidence="high"
     )
     
-    with patch("orchestrator.embeddings") as mock_emb:
+    with patch("generative.orchestrator.embeddings") as mock_emb:
         mock_emb.embed_title.side_effect = ["emb1", "emb2"]
         # Cosine 0.5 (verschieden)
         mock_emb.cosine.return_value = 0.5

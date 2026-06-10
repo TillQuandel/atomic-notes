@@ -9,12 +9,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-from agents.context_builder import score_tags_for_source
-from agents.extractor import _validate_proposed_tags, _format_tag_whitelist
+from generative.agents.context_builder import score_tags_for_source
+from generative.agents.extractor import _validate_proposed_tags, _format_tag_whitelist
 
 
 # ---- Source-Scoring (Schwäche 4a: Bias-Fix) ---------------------------------
@@ -167,8 +164,8 @@ def test_validator_accepts_numbers_in_segment():
 
 def test_render_moc_includes_proposed_tags():
     """Codex-Finding 5: render_moc rendert proposed-tags-Block."""
-    from pipeline.vault_writer import render_moc
-    from schemas.atomic_note import AtomicNoteDraft
+    from generative.pipeline.vault_writer import render_moc
+    from generative.schemas.atomic_note import AtomicNoteDraft
     note = AtomicNoteDraft(
         title="ADKAR Model", body="# Hub\n\nEinleitung.", source_anchors=[],
         related=[], tags=[], synthesis_confidence="medium",
@@ -183,8 +180,8 @@ def test_render_moc_includes_proposed_tags():
 
 
 def test_render_note_skips_proposed_block_when_empty():
-    from pipeline.vault_writer import render_note
-    from schemas.atomic_note import AtomicNoteDraft
+    from generative.pipeline.vault_writer import render_note
+    from generative.schemas.atomic_note import AtomicNoteDraft
     note = AtomicNoteDraft(
         title="Test", body="# Test\n\nBody.", source_anchors=[],
         related=[], tags=["methods"], synthesis_confidence="medium",
@@ -196,7 +193,7 @@ def test_render_note_skips_proposed_block_when_empty():
 
 def test_header_normalizes_dash_to_underscore():
     """Zusatzbefund: Modell schreibt `proposed-tags:`, Parser muss das aufnehmen."""
-    from agents.structured_output import parse_extractor_output
+    from generative.agents.structured_output import parse_extractor_output
     text = (
         "<!--NOTE-->\n"
         "title: Test\n"
@@ -212,7 +209,7 @@ def test_header_normalizes_dash_to_underscore():
 
 def test_registry_loader_handles_top_level_list():
     """Codex-Finding 7: malformed YAML (Top-Level-Liste statt Dict) → kein Crash."""
-    from agents import context_builder
+    from generative.agents import context_builder
     import tempfile
     from pathlib import Path
     with tempfile.NamedTemporaryFile("w", suffix=".yml", delete=False, encoding="utf-8") as f:
@@ -229,7 +226,7 @@ def test_registry_loader_handles_top_level_list():
 
 def test_registry_loader_validates_schema():
     """Registry-Einträge durchlaufen denselben Schema-Validator wie proposed-tags."""
-    from agents import context_builder
+    from generative.agents import context_builder
     import tempfile
     from pathlib import Path
     with tempfile.NamedTemporaryFile("w", suffix=".yml", delete=False, encoding="utf-8") as f:
@@ -277,7 +274,7 @@ def test_source_scoring_mojibake_robust():
 
 def test_inbox_reread_preserves_proposed_tags_block():
     """Codex-Finding 1: Re-Run ohne neue Vorschläge bewahrt User-Review-State."""
-    from pipeline.vault_writer import _read_proposed_tags_from_inbox
+    from generative.pipeline.vault_writer import _read_proposed_tags_from_inbox
     import tempfile
     from pathlib import Path
     content = """---
@@ -304,7 +301,7 @@ Body.
 
 
 def test_inbox_reread_handles_missing_file():
-    from pipeline.vault_writer import _read_proposed_tags_from_inbox
+    from generative.pipeline.vault_writer import _read_proposed_tags_from_inbox
     from pathlib import Path
     tags, status = _read_proposed_tags_from_inbox(Path("/nonexistent/file.md"))
     assert tags == []
@@ -312,7 +309,7 @@ def test_inbox_reread_handles_missing_file():
 
 
 def test_inbox_reread_handles_no_proposed_block():
-    from pipeline.vault_writer import _read_proposed_tags_from_inbox
+    from generative.pipeline.vault_writer import _read_proposed_tags_from_inbox
     import tempfile
     from pathlib import Path
     content = """---
@@ -334,7 +331,7 @@ Body without proposed-tags.
 
 
 def test_registry_loader_missing_file_returns_empty():
-    from agents import context_builder
+    from generative.agents import context_builder
     from pathlib import Path
     orig = context_builder.TAG_REGISTRY_PATH
     try:

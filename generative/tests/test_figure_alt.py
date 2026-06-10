@@ -12,12 +12,10 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-from schemas.atomic_note import AtomicNoteDraft, TextAnchor
+from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor
 
-from pipeline.figure_alt import (
+from generative.pipeline.figure_alt import (
     TaggedFigure,
     _sanitize_alt,
     bind_figures_to_drafts,

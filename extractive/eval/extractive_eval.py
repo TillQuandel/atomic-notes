@@ -9,7 +9,6 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from shared.db_schema import SCHEMA_SQL as _SCHEMA_MIGRATION
 
 _ANCHOR_RE = re.compile(r"\s*\(S\.\s*\d+(?:-\d+)?\)")

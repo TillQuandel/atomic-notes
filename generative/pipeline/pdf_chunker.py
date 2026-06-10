@@ -11,7 +11,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from config import CHUNK_WORDS
+from generative.config import CHUNK_WORDS
 
 
 @dataclass

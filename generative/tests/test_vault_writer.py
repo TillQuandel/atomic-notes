@@ -9,8 +9,8 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from pipeline.vault_writer import convert_inline_to_footnotes, build_quellen_block
-from schemas.atomic_note import AtomicNoteDraft, TextAnchor
+from generative.pipeline.vault_writer import convert_inline_to_footnotes, build_quellen_block
+from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor
 
 
 def _draft_with_anchors(anchors: list[TextAnchor]) -> AtomicNoteDraft:
@@ -59,7 +59,7 @@ class TestPageRange(unittest.TestCase):
 class TestWikilinkRendering(unittest.TestCase):
     """Wikilink-Variante (v30) wenn `source_file` und PDF im Vault auflösbar."""
 
-    @patch("pipeline.vault_writer.LITERATURE_DIR")
+    @patch("generative.pipeline.vault_writer.LITERATURE_DIR")
     def test_wikilink_with_existing_pdf(self, mock_lit):
         # Mock: PDF existiert
         mock_path = type("P", (), {"exists": lambda self: True})()
@@ -68,7 +68,7 @@ class TestWikilinkRendering(unittest.TestCase):
                                            source_file="Hiatt.pdf")
         self.assertIn("[[Hiatt.pdf#page=13|S. 13]]", out)
 
-    @patch("pipeline.vault_writer.LITERATURE_DIR")
+    @patch("generative.pipeline.vault_writer.LITERATURE_DIR")
     def test_wikilink_page_range_uses_first_page(self, mock_lit):
         mock_path = type("P", (), {"exists": lambda self: True})()
         mock_lit.__truediv__ = lambda self, other: mock_path
@@ -77,7 +77,7 @@ class TestWikilinkRendering(unittest.TestCase):
         # #page= zeigt auf erste Zahl, Label behält Range
         self.assertIn("[[Hiatt.pdf#page=13|S. 13–14]]", out)
 
-    @patch("pipeline.vault_writer.LITERATURE_DIR")
+    @patch("generative.pipeline.vault_writer.LITERATURE_DIR")
     def test_klartext_fallback_when_pdf_missing(self, mock_lit):
         mock_path = type("P", (), {"exists": lambda self: False})()
         mock_lit.__truediv__ = lambda self, other: mock_path
@@ -96,7 +96,7 @@ class TestWikilinkUnsafeFilenames(unittest.TestCase):
     """v31 Codex-Finding 1: Filename mit Wikilink-Sonderzeichen darf keinen
     kaputten Wikilink produzieren — Klartext-Fallback."""
 
-    @patch("pipeline.vault_writer.LITERATURE_DIR")
+    @patch("generative.pipeline.vault_writer.LITERATURE_DIR")
     def test_pipe_in_filename_falls_back(self, mock_lit):
         mock_path = type("P", (), {"exists": lambda self: True})()
         mock_lit.__truediv__ = lambda self, other: mock_path
@@ -105,7 +105,7 @@ class TestWikilinkUnsafeFilenames(unittest.TestCase):
         self.assertNotIn("[[", out)
         self.assertIn("S. 13.", out)
 
-    @patch("pipeline.vault_writer.LITERATURE_DIR")
+    @patch("generative.pipeline.vault_writer.LITERATURE_DIR")
     def test_hash_in_filename_falls_back(self, mock_lit):
         mock_path = type("P", (), {"exists": lambda self: True})()
         mock_lit.__truediv__ = lambda self, other: mock_path
@@ -113,7 +113,7 @@ class TestWikilinkUnsafeFilenames(unittest.TestCase):
                                            source_file="name#tag.pdf")
         self.assertNotIn("[[", out)
 
-    @patch("pipeline.vault_writer.LITERATURE_DIR")
+    @patch("generative.pipeline.vault_writer.LITERATURE_DIR")
     def test_bracket_in_filename_falls_back(self, mock_lit):
         # Gemini-Finding G1: einfache Klammern brechen Wikilinks ebenfalls
         mock_path = type("P", (), {"exists": lambda self: True})()
@@ -191,14 +191,14 @@ class TestRewriteMergedRelatedLinks(unittest.TestCase):
                               related=["[[Information Behavior (Bates)]]"])
         existing = {"information behavior (bates)":
                     "04-wissen/IBI Forschungsbereich Information Behavior.md"}
-        from pipeline.vault_writer import rewrite_merged_related_links
+        from generative.pipeline.vault_writer import rewrite_merged_related_links
         count = rewrite_merged_related_links([merged, sibling], existing)
         self.assertEqual(sibling.related,
                          ["[[IBI Forschungsbereich Information Behavior]]"])
         self.assertEqual(count, 1)
 
     def test_non_merged_related_untouched(self):
-        from pipeline.vault_writer import rewrite_merged_related_links
+        from generative.pipeline.vault_writer import rewrite_merged_related_links
         sibling = self._draft("A", related=["[[Some Other Note]]"])
         existing = {"information behavior (bates)":
                     "04-wissen/IBI Forschungsbereich Information Behavior.md"}
@@ -207,7 +207,7 @@ class TestRewriteMergedRelatedLinks(unittest.TestCase):
         self.assertEqual(count, 0)
 
     def test_alias_match_also_rewritten(self):
-        from pipeline.vault_writer import rewrite_merged_related_links
+        from generative.pipeline.vault_writer import rewrite_merged_related_links
         merged = self._draft("Information Behavior (Bates)",
                              aliases=["IB Bates"])
         sibling = self._draft("B", related=["[[IB Bates]]"])
@@ -218,7 +218,7 @@ class TestRewriteMergedRelatedLinks(unittest.TestCase):
                          ["[[IBI Forschungsbereich Information Behavior]]"])
 
     def test_display_alias_link_rewritten_to_canonical(self):
-        from pipeline.vault_writer import rewrite_merged_related_links
+        from generative.pipeline.vault_writer import rewrite_merged_related_links
         merged = self._draft("Information Behavior (Bates)")
         sibling = self._draft("C",
                              related=["[[Information Behavior (Bates)|IB]]"])
@@ -229,7 +229,7 @@ class TestRewriteMergedRelatedLinks(unittest.TestCase):
                          ["[[IBI Forschungsbereich Information Behavior]]"])
 
     def test_no_existing_concepts_is_noop(self):
-        from pipeline.vault_writer import rewrite_merged_related_links
+        from generative.pipeline.vault_writer import rewrite_merged_related_links
         sibling = self._draft("D", related=["[[X]]"])
         self.assertEqual(rewrite_merged_related_links([sibling], None), 0)
         self.assertEqual(sibling.related, ["[[X]]"])

@@ -6,8 +6,8 @@ from pathlib import Path
 
 import yaml
 
-from config import VAULT, WISSEN, INBOX, LITERATURE_DIR, CRITIC_AUTO_THRESHOLD
-from schemas.atomic_note import AtomicNoteDraft
+from generative.config import VAULT, WISSEN, INBOX, LITERATURE_DIR, CRITIC_AUTO_THRESHOLD
+from generative.schemas.atomic_note import AtomicNoteDraft
 
 
 # Schema-MoC Naming: `MoC-<Thema>.md` — Spaces erlaubt, nur FS-unsichere Zeichen ersetzen.

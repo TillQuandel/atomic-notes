@@ -1,7 +1,7 @@
 """Austauschbares Tracing-Backend für die atomic-agent-Pipeline.
 
 Swap-Beispiel (nach SDK-Migration):
-    from agents.tracing import set_tracing_backend
+    from generative.agents.tracing import set_tracing_backend
     set_tracing_backend(OtelBackend(endpoint="..."))
 
 LLM-call tracing in agents/base.py routet über _backend.write(); strukturierte
@@ -15,7 +15,7 @@ import time
 from pathlib import Path
 from typing import Protocol
 
-from config import CACHE_DIR
+from generative.config import CACHE_DIR
 
 
 class TracingBackend(Protocol):
@@ -84,7 +84,7 @@ def trace_run_start(model_config: dict) -> None:
 if os.getenv("ATOMIC_AGENT_TRACING") == "langfuse":
     try:
         import atexit
-        from agents.langfuse_backend import LangfuseBackend as _LF  # type: ignore[import]
+        from generative.agents.langfuse_backend import LangfuseBackend as _LF  # type: ignore[import]
         _backend = _LF()
         atexit.register(_backend.flush)
     except Exception:

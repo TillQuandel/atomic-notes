@@ -16,7 +16,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
-from schemas.atomic_note import AtomicNoteDraft
+from generative.schemas.atomic_note import AtomicNoteDraft
 
 _XREF_REF_RE = re.compile(r"^(\d+)\s+\d+\s+R$")
 _NO_ANCHOR = -1  # anchor_page-Sentinel fuer geskippte (nicht-bindbare) Figuren

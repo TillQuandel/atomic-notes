@@ -1,5 +1,5 @@
 """Tests für das origin-Feld in ConceptItem (Secondary Citation Handling)."""
-from schemas.atomic_note import ConceptItem
+from generative.schemas.atomic_note import ConceptItem
 
 
 def test_concept_item_origin_defaults():
@@ -36,7 +36,7 @@ def test_concept_item_origin_extension():
 
 def test_secondary_mention_routing_logic():
     """Konzepte mit origin=secondary_mention werden als Related Mentions gesammelt."""
-    from schemas.atomic_note import ConceptPlan
+    from generative.schemas.atomic_note import ConceptPlan
 
     plan = ConceptPlan(
         source_title="Test",

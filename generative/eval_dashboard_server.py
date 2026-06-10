@@ -20,8 +20,7 @@ from threading import Timer
 from urllib.parse import urlparse, parse_qs
 
 # Importiere alle Daten-Funktionen aus eval_dashboard.py
-sys.path.insert(0, str(Path(__file__).parent))
-import eval_dashboard as D
+from generative import eval_dashboard as D
 
 PORT = 8051
 
@@ -51,7 +50,7 @@ def _read_agent_stats(allowed_run_ids: set | None = None) -> dict:
         return {}
     # Aktuelle Pipeline-Version bestimmen + zugehörige run_ids filtern
     try:
-        import db as _db_ag
+        from generative import db as _db_ag
         db_runs = _db_ag.query_pipeline_runs()
         if db_runs:
             import re as _re
@@ -89,7 +88,7 @@ def _read_agent_stats(allowed_run_ids: set | None = None) -> dict:
                 if r.get("error"):
                     stats[a]["errors"] += 1
                 try:
-                    from config import compute_cost_per_call as _agent_cost_fn
+                    from generative.config import compute_cost_per_call as _agent_cost_fn
                     stats[a]["cost_usd"] += _agent_cost_fn(
                         model=r.get("model", ""),
                         input_tokens=r.get("input_tokens", 0) or 0,
@@ -136,7 +135,7 @@ def _avg_agreement(rows: list[dict]) -> float | None:
 def _read_calibration_data(allowed_note_paths: set | None = None) -> dict:
     """Liest Kalibrierungs-Stand: LLM-Eval (v4.1) vs. Human-Labels."""
     try:
-        import db as _db
+        from generative import db as _db
         import sqlite3
         conn = sqlite3.connect(str(_db.DB_PATH))
         conn.row_factory = sqlite3.Row
@@ -223,7 +222,7 @@ def build_data(eval_version: str | None = None,
     eval_version:      wenn None → neueste verfuegbare Version
     pipeline_version:  wenn None → alle Versionen
     """
-    import db as _db
+    from generative import db as _db
     # Qualitaets-Daten aus SQLite (primaer) mit Fallback auf JSONL
     try:
         all_quality_rows = _db.query_note_evals()
@@ -258,7 +257,7 @@ def build_data(eval_version: str | None = None,
     token_runs   = D._read_token_runs()
     # pdf_label + pipeline_version aus pipeline_runs DB in token_runs eintragen
     try:
-        import db as _db_tok
+        from generative import db as _db_tok
         _run_info = {r["run_id"]: {"pdf_label": r.get("pdf_label") or r.get("pdf_source",""),
                                     "ver":       r.get("pipeline_version") or "",
                                     "model":     r.get("model") or "",
@@ -299,7 +298,7 @@ def build_data(eval_version: str | None = None,
 
     # DB-only Runs (z.B. extractive — kein JSONL) zu token_runs hinzufuegen
     try:
-        import db as _db_only
+        from generative import db as _db_only
         _jsonl_run_ids = {tr.get("run_id") for tr in token_runs}
         _run_lang_safe = _run_lang if "_run_lang" in dir() else {}
         for r in _db_only.query_pipeline_runs():
@@ -346,7 +345,7 @@ def build_data(eval_version: str | None = None,
 
     # Wenn keine Log-Runs: pipeline_runs aus SQLite als Fallback
     if not all_log_runs:
-        import db as _db2
+        from generative import db as _db2
         db_runs = _db2.query_pipeline_runs()
         all_log_runs = []
         for r in db_runs:

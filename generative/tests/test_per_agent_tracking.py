@@ -4,8 +4,8 @@ import pytest
 
 
 def test_trace_event_writes_jsonl(tmp_path, monkeypatch):
-    from agents.tracing import JsonlBackend, trace_event
-    import agents.tracing as tracing
+    from generative.agents.tracing import JsonlBackend, trace_event
+    import generative.agents.tracing as tracing
 
     backend = JsonlBackend(run_dir=tmp_path, run_id="test-run")
     monkeypatch.setattr(tracing, "_backend", backend)
@@ -23,8 +23,8 @@ def test_trace_event_writes_jsonl(tmp_path, monkeypatch):
 
 
 def test_trace_run_start_writes_model_config(tmp_path, monkeypatch):
-    from agents.tracing import JsonlBackend, trace_run_start
-    import agents.tracing as tracing
+    from generative.agents.tracing import JsonlBackend, trace_run_start
+    import generative.agents.tracing as tracing
 
     backend = JsonlBackend(run_dir=tmp_path, run_id="test-run")
     monkeypatch.setattr(tracing, "_backend", backend)
@@ -40,7 +40,7 @@ def test_trace_run_start_writes_model_config(tmp_path, monkeypatch):
 
 
 def test_model_config_has_required_keys():
-    from config import MODEL_CONFIG
+    from generative.config import MODEL_CONFIG
     required = {"planner", "extractor", "verifier", "cross_ref", "critic", "canonicalizer"}
     assert required <= set(MODEL_CONFIG.keys())
     for k, v in MODEL_CONFIG.items():
@@ -48,12 +48,12 @@ def test_model_config_has_required_keys():
 
 
 def test_verifier_run_emits_anchor_stats(tmp_path, monkeypatch):
-    import agents.base as base
-    import agents.tracing as tracing
-    import agents.verifier as verifier
-    from schemas.atomic_note import AtomicNoteDraft
+    import generative.agents.base as base
+    import generative.agents.tracing as tracing
+    import generative.agents.verifier as verifier
+    from generative.schemas.atomic_note import AtomicNoteDraft
 
-    backend = __import__("agents.tracing", fromlist=["JsonlBackend"]).JsonlBackend(
+    backend = __import__("generative.agents.tracing", fromlist=["JsonlBackend"]).JsonlBackend(
         run_dir=tmp_path, run_id="test-run"
     )
     monkeypatch.setattr(tracing, "_backend", backend)
@@ -81,10 +81,10 @@ def test_verifier_run_emits_anchor_stats(tmp_path, monkeypatch):
 
 
 def test_critic_run_emits_score_result(tmp_path, monkeypatch):
-    import agents.tracing as tracing
-    import agents.critic as critic
-    import config as _config
-    from schemas.atomic_note import AtomicNoteDraft, TextAnchor
+    import generative.agents.tracing as tracing
+    import generative.agents.critic as critic
+    from generative import config as _config
+    from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor
 
     backend = tracing.JsonlBackend(run_dir=tmp_path, run_id="test-run")
     monkeypatch.setattr(tracing, "_backend", backend)
@@ -113,7 +113,6 @@ def test_critic_run_emits_score_result(tmp_path, monkeypatch):
 def test_eval_agent_stats_aggregates_llm_calls(tmp_path):
     import json, sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent))
 
     trace = tmp_path / "run.jsonl"
     entries = [
@@ -127,7 +126,7 @@ def test_eval_agent_stats_aggregates_llm_calls(tmp_path):
     ]
     trace.write_text("\n".join(json.dumps(e) for e in entries), encoding="utf-8")
 
-    import eval_agent_stats as eas
+    from generative import eval_agent_stats as eas
     stats = eas.aggregate(trace)
 
     assert stats["extractor"]["calls"] == 2
@@ -146,10 +145,10 @@ def test_langfuse_backend_write_does_not_crash_without_package(monkeypatch):
     monkeypatch.setitem(sys.modules, "langfuse", None)
 
     # Need to force reimport since module may be cached
-    if "agents.langfuse_backend" in sys.modules:
-        del sys.modules["agents.langfuse_backend"]
+    if "generative.agents.langfuse_backend" in sys.modules:
+        del sys.modules["generative.agents.langfuse_backend"]
 
-    from agents.langfuse_backend import LangfuseBackend
+    from generative.agents.langfuse_backend import LangfuseBackend
     backend = LangfuseBackend()
     # Kein Crash erwartet, nur no-op
     backend.write({"type": "run_start", "run_id": "test", "model_config": {}, "ts": "2026-01-01T00:00:00"})
@@ -157,7 +156,7 @@ def test_langfuse_backend_write_does_not_crash_without_package(monkeypatch):
 
 
 def test_aggregate_includes_model_config(tmp_path):
-    import eval_quality_v4 as eq
+    from generative import eval_quality_v4 as eq
 
     result = eq._aggregate(
         note_path=tmp_path / "test.md",
@@ -180,7 +179,6 @@ def test_run_totals_includes_eval_entries(tmp_path):
     Cached-Einträge werden ausgeschlossen (matcht orchestrator-Verhalten)."""
     import json, sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent))
 
     trace = tmp_path / "run.jsonl"
     entries = [
@@ -201,7 +199,7 @@ def test_run_totals_includes_eval_entries(tmp_path):
     ]
     trace.write_text("\n".join(json.dumps(e) for e in entries), encoding="utf-8")
 
-    import eval_agent_stats as eas
+    from generative import eval_agent_stats as eas
     totals = eas.run_totals(trace)
 
     # In: 1000+200+300+150 = 1650 (cached 9999 ausgeschlossen)
@@ -218,8 +216,7 @@ def test_run_totals_sums_cost_per_call(tmp_path, monkeypatch):
     """cost_usd summiert die Per-Call-Kosten via config.compute_cost_per_call."""
     import json, sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent))
-    import config
+    from generative import config
 
     monkeypatch.setattr(config, "BACKEND", "api")
     monkeypatch.setattr(config, "MODEL_PRICING",
@@ -234,7 +231,7 @@ def test_run_totals_sums_cost_per_call(tmp_path, monkeypatch):
     ]
     trace.write_text("\n".join(json.dumps(e) for e in entries), encoding="utf-8")
 
-    import eval_agent_stats as eas
+    from generative import eval_agent_stats as eas
     totals = eas.run_totals(trace)
 
     # Call 1: 3.0 + 15.0 = 18.0 ; Call 2: 3.0 → Summe 21.0
@@ -246,7 +243,6 @@ def test_run_totals_tolerates_malformed_line(tmp_path):
     abbrechen — der Rest wird weiterverarbeitet (wie die alten Inline-Schleifen)."""
     import json, sys
     from pathlib import Path
-    sys.path.insert(0, str(Path(__file__).parent.parent))
 
     trace = tmp_path / "run.jsonl"
     entries = [
@@ -257,7 +253,7 @@ def test_run_totals_tolerates_malformed_line(tmp_path):
     ]
     trace.write_text("\n".join(json.dumps(e) for e in entries), encoding="utf-8")
 
-    import eval_agent_stats as eas
+    from generative import eval_agent_stats as eas
     totals = eas.run_totals(trace)
 
     # Kaputte Zeile übersprungen, valide summiert: In 100+300=400, Out 50+80=130

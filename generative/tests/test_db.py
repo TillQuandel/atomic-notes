@@ -2,11 +2,10 @@ import sqlite3
 import tempfile
 import os
 import sys
-sys.path.insert(0, '.')
 
 
 def test_pipeline_run_has_cost_usd():
-    import db
+    from generative import db
     from pathlib import Path
     with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
         path = f.name
@@ -21,7 +20,7 @@ def test_pipeline_run_has_cost_usd():
 
 
 def test_insert_run_stores_cost_usd():
-    import db
+    from generative import db
     from pathlib import Path
     with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
         path = f.name

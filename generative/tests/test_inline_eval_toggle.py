@@ -3,12 +3,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-from orchestrator import inline_eval_enabled
-from runtime_config import load_runtime_config
+from generative.orchestrator import inline_eval_enabled
+from generative.runtime_config import load_runtime_config
 
 
 def test_inline_eval_enabled_by_default():

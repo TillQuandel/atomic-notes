@@ -3,11 +3,11 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from agents.base import call_claude
-from agents.structured_output import parse_cross_reference_output
-import config as _config
-from config import VAULT, MODEL_CROSS_REF, ENABLE_NLI_VALIDATION, NLI_MODEL_NAME, NLI_CONTRADICTION_THRESHOLD
-from schemas.atomic_note import AtomicNoteDraft
+from generative.agents.base import call_claude
+from generative.agents.structured_output import parse_cross_reference_output
+from generative import config as _config
+from generative.config import VAULT, MODEL_CROSS_REF, ENABLE_NLI_VALIDATION, NLI_MODEL_NAME, NLI_CONTRADICTION_THRESHOLD
+from generative.schemas.atomic_note import AtomicNoteDraft
 
 # Mindest-Anzahl `related`-Wikilinks für eine Schema-konforme Note (siehe Schema-Konzept §5)
 MIN_RELATED = 2
@@ -37,7 +37,7 @@ def _nli_validate_contradictions(
     global _nli_encoder
     try:
         from sentence_transformers import CrossEncoder
-        from pipeline.embeddings import embed_body, cosine as cos_sim
+        from generative.pipeline.embeddings import embed_body, cosine as cos_sim
         if _nli_encoder is None:
             with _nli_lock:
                 if _nli_encoder is None:  # Double-Checked Locking
@@ -186,7 +186,7 @@ def _rank_vault_candidates(
     # Embedding-Cosine nur wenn Modell bereits geladen (kein cold-start durch CrossRef)
     cos_scores: "np.ndarray | None" = None
     try:
-        from pipeline import embeddings as _emb_mod
+        from generative.pipeline import embeddings as _emb_mod
         if _emb_mod._MODEL is not None:
             query_emb = _emb_mod.embed_title(query_title)
             key_embs = _emb_mod._model().encode(keys, show_progress_bar=False,

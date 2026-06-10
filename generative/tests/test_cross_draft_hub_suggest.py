@@ -10,12 +10,9 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-from schemas.atomic_note import AtomicNoteDraft
-from pipeline.cross_draft_hub import suggest_unmarked_clusters
+from generative.schemas.atomic_note import AtomicNoteDraft
+from generative.pipeline.cross_draft_hub import suggest_unmarked_clusters
 
 
 def _draft(title: str, action: str = "create") -> AtomicNoteDraft:

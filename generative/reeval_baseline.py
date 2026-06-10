@@ -15,10 +15,9 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
-sys.path.insert(0, str(ROOT))
 
-import eval_quality_v4 as _eq
-import db as _db
+from generative import eval_quality_v4 as _eq
+from generative import db as _db
 
 BASELINE_DIR = ROOT / ".cache" / "eval" / "baseline"
 
@@ -76,7 +75,7 @@ def main() -> None:
     done = skip = errors = 0
 
     # Reeval-Run in pipeline_runs eintragen damit FK-Constraints erfüllt sind
-    from agents.base import _RUN_ID as _reeval_run_id
+    from generative.agents.base import _RUN_ID as _reeval_run_id
     if not args.dry_run:
         with _db.get_db() as _conn_init:
             _conn_init.execute("""

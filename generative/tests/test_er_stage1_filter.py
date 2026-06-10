@@ -10,13 +10,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-from orchestrator import er_stage1_decision
-from agents.cross_reference import _tokens
-from config import ER_MAX_TOKEN_DIFF, ER_HUB_GENERIC_TOKENS
+from generative.orchestrator import er_stage1_decision
+from generative.agents.cross_reference import _tokens
+from generative.config import ER_MAX_TOKEN_DIFF, ER_HUB_GENERIC_TOKENS
 
 
 def _decide(title_a: str, title_b: str) -> tuple[str, int]:
