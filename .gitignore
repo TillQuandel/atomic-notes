@@ -37,3 +37,6 @@ generative/calibration/labels-active-blind/
 
 # Legacy local runtime leftovers after agent/ -> generative/ rename
 agent/
+
+# Superpowers-Skill-Arbeitsdokumente (Plans/Specs) - lokal, nicht veroeffentlichen
+docs/superpowers/
