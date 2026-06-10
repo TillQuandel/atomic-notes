@@ -91,3 +91,36 @@ def test_main_exit_1_und_hint_bei_fehlschlag(monkeypatch, capsys):
     assert doctor.main() == 1
     out = capsys.readouterr().out
     assert "poppler installieren" in out
+
+
+# --- Review-Funde (Codex 2026-06-10) ---
+
+def test_vault_probe_ueberschreibt_keine_existierende_datei(tmp_path):
+    """Schreibprobe darf keine vorhandene Datei anfassen (alter fester Probe-Name)."""
+    leftover = tmp_path / ".atomic-notes-doctor-probe"
+    leftover.write_text("USER-DATEN", encoding="utf-8")
+    r = doctor.check_vault(tmp_path)
+    assert r.ok is True
+    assert leftover.read_text(encoding="utf-8") == "USER-DATEN"
+
+
+def test_optionale_deps_fuehren_nicht_zu_exit_1(monkeypatch, capsys):
+    results = [
+        doctor.CheckResult(name="pdftotext", ok=True, detail="ok"),
+        doctor.CheckResult(name="sentence_transformers", ok=False,
+                           detail="fehlt", hint="pip install ...", required=False),
+    ]
+    monkeypatch.setattr(doctor, "run_all", lambda: results)
+    assert doctor.main() == 0
+    out = capsys.readouterr().out
+    assert "WARN" in out
+
+
+def test_credentials_ok_nennt_heuristik(tmp_path):
+    cred = tmp_path / ".claude" / ".credentials.json"
+    cred.parent.mkdir()
+    cred.write_text("{}", encoding="utf-8")
+    r = doctor.check_backend(
+        "subscription", which=lambda n: "/usr/bin/claude", home=tmp_path, env={}
+    )
+    assert "nicht live verifiziert" in r.detail

@@ -16,7 +16,7 @@ PDF input and Obsidian-style Markdown are the first supported path, not the whol
 
 **generative v0.3.136** · **extractive v0.2.0** · last updated: 2026-06-10
 
-433 tests passing (CI: ubuntu + windows). An independent multi-rater project assessment
+436 tests passing (CI: ubuntu + windows). An independent multi-rater project assessment
 (2026-06-10) and the resulting roadmap live in `internal/docs/` — see
 `2026-06-10-projekt-bewertung.md` and `m1-installierbarkeit-plan.md`.
 

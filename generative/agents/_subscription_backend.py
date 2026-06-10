@@ -45,7 +45,15 @@ _RATE_PATTERNS = ("429", "rate_limit", "rate limit")
 
 
 def _fail_fast_hint(text: str) -> str | None:
-    """Auth-/Rate-Limit-Fehler erkennen — Meldung mit nächstem Schritt statt Retry."""
+    """Auth-/Rate-Limit-Fehler erkennen — Meldung mit nächstem Schritt statt Retry.
+
+    Greift auf strukturierte CLI-Errors (is_error=True) und auf rohen stderr im
+    finalen Fehlerpfad. Im Raw-Pfad sind False-Positives möglich (stderr enthält
+    zufällig "429"); Kosten: ein überflüssiger Hinweis-Satz an einem ohnehin
+    fehlschlagenden Lauf — bewusst in Kauf genommen, weil eine nicht eingeloggte
+    CLI ihre Fehler teils unstrukturiert auf stderr ausgibt. LLM-Output (rc=0,
+    is_error=False) durchläuft diese Prüfung nie.
+    """
     low = (text or "").lower()
     if any(p in low for p in _AUTH_PATTERNS):
         return (

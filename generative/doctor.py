@@ -10,6 +10,7 @@ import importlib.util
 import os
 import shutil
 import sys
+import uuid
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping
@@ -30,6 +31,7 @@ class CheckResult:
     ok: bool
     detail: str
     hint: str = ""
+    required: bool = True  # False = optionaler Check, zählt nicht in den Exit-Code
 
 
 def check_tool(tool: str, which: Callable[[str], str | None] = shutil.which) -> CheckResult:
@@ -77,7 +79,7 @@ def check_backend(
             )
         return CheckResult(
             name="backend (subscription)", ok=True,
-            detail=f"claude-CLI: {cli}, Credentials vorhanden",
+            detail=f"claude-CLI: {cli}, Credentials-Datei vorhanden (Login nicht live verifiziert)",
         )
 
     if backend == "litellm":
@@ -113,9 +115,11 @@ def check_vault(vault: Path) -> CheckResult:
                 "beliebigen Zielordner) setzen — in .env oder Umgebung."
             ),
         )
-    probe = vault / ".atomic-notes-doctor-probe"
+    # Eindeutiger Name + exklusives Erstellen ("x"): niemals vorhandene Dateien anfassen
+    probe = vault / f".atomic-notes-doctor-probe-{uuid.uuid4().hex}"
     try:
-        probe.write_text("ok", encoding="utf-8")
+        with open(probe, "x", encoding="utf-8") as fh:
+            fh.write("ok")
         probe.unlink()
     except OSError as e:
         return CheckResult(
@@ -126,11 +130,11 @@ def check_vault(vault: Path) -> CheckResult:
     return CheckResult(name="vault", ok=True, detail=str(vault))
 
 
-def check_import(module: str, hint: str) -> CheckResult:
+def check_import(module: str, hint: str, required: bool = False) -> CheckResult:
     """Modul installiert? (find_spec — importiert nicht, bleibt schnell.)"""
     if importlib.util.find_spec(module) is not None:
-        return CheckResult(name=module, ok=True, detail=f"{module} installiert")
-    return CheckResult(name=module, ok=False, detail=f"{module} fehlt", hint=hint)
+        return CheckResult(name=module, ok=True, detail=f"{module} installiert", required=required)
+    return CheckResult(name=module, ok=False, detail=f"{module} fehlt", hint=hint, required=required)
 
 
 def run_all() -> list[CheckResult]:
@@ -154,16 +158,18 @@ def main() -> int:
     results = run_all()
     width = max(len(r.name) for r in results)
     for r in results:
-        mark = "OK " if r.ok else "FEHLT"
+        mark = "OK " if r.ok else ("FEHLT" if r.required else "WARN")
         print(f"[{mark:5}] {r.name:<{width}}  {r.detail}")
         if not r.ok and r.hint:
             print(f"        -> {r.hint}")
-    failed = [r for r in results if not r.ok]
+    failed_required = [r for r in results if not r.ok and r.required]
+    warned = [r for r in results if not r.ok and not r.required]
     print()
-    if failed:
-        print(f"doctor: {len(failed)} von {len(results)} Checks fehlgeschlagen.")
+    if failed_required:
+        print(f"doctor: {len(failed_required)} von {len(results)} Checks fehlgeschlagen.")
         return 1
-    print(f"doctor: alle {len(results)} Checks ok.")
+    suffix = f" ({len(warned)} Warnung(en) bei optionalen Checks)" if warned else ""
+    print(f"doctor: alle erforderlichen Checks ok{suffix}.")
     return 0
 
 
