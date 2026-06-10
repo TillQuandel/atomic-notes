@@ -32,6 +32,35 @@ def _to_cli_model(model: str) -> str:
     return _CLI_ALIASES.get(model, model)
 
 
+_CLI_INSTALL_HINT = (
+    "Installation: `npm install -g @anthropic-ai/claude-code`, danach einmal "
+    "`claude` starten und einloggen (Pro/Max-Abo). Alternative ohne CLI: "
+    "ATOMIC_AGENT_BACKEND=litellm + API-Key. Setup prüfen: `atomic-notes doctor`."
+)
+
+# Fehlerklassen, bei denen Retries sinnlos sind: sofort mit Handlungsanleitung scheitern.
+_AUTH_PATTERNS = ("/login", "not logged in", "invalid api key", "authentication",
+                  "unauthorized", "oauth token")
+_RATE_PATTERNS = ("429", "rate_limit", "rate limit")
+
+
+def _fail_fast_hint(text: str) -> str | None:
+    """Auth-/Rate-Limit-Fehler erkennen — Meldung mit nächstem Schritt statt Retry."""
+    low = (text or "").lower()
+    if any(p in low for p in _AUTH_PATTERNS):
+        return (
+            "claude-CLI nicht eingeloggt oder Session abgelaufen — einmal `claude` "
+            "starten und einloggen. Alternative: ATOMIC_AGENT_BACKEND=litellm + "
+            "API-Key. Setup prüfen: `atomic-notes doctor`."
+        )
+    if any(p in low for p in _RATE_PATTERNS):
+        return (
+            "Subscription-Rate-Limit erreicht (5-h-Fenster, ≈8 volle Pipeline-Läufe) — "
+            "bis zum Fenster-Reset warten oder ATOMIC_AGENT_BACKEND=litellm nutzen."
+        )
+    return None
+
+
 def _build_argv(model: str) -> list[str]:
     return [
         CLAUDE_BIN, "-p",
@@ -88,6 +117,10 @@ def call_full(
                 time.sleep(10.0)
                 continue
             raise RuntimeError(f"claude CLI Timeout nach {call_timeout_sec}s ({agent}/{model})")
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                f"claude-CLI '{CLAUDE_BIN}' nicht gefunden. {_CLI_INSTALL_HINT}"
+            ) from e
         except OSError as e:
             raise RuntimeError(f"claude CLI nicht aufrufbar: {e}") from e
 
@@ -95,21 +128,31 @@ def call_full(
             print(f"      [cli-retry] {agent}/{model} rc={proc.returncode} (attempt {attempt+1}/{_MAX_RETRIES+1})", file=sys.stderr)
             time.sleep(1.0)
             continue
-        if proc.returncode == 1 and attempt < _MAX_RETRIES:
+        if proc.returncode == 1:
             try:
                 d = json.loads(proc.stdout or "")
-                if d.get("is_error"):
+            except json.JSONDecodeError:
+                d = {}
+            if d.get("is_error"):
+                hint = _fail_fast_hint(str(d.get("result", "")))
+                if hint:
+                    raise RuntimeError(
+                        f"claude CLI: {str(d.get('result', ''))[:200]} | {hint}"
+                    )
+                if attempt < _MAX_RETRIES:
                     print(f"      [cli-retry] {agent}/{model} is_error (attempt {attempt+1}/{_MAX_RETRIES+1}) — 10s Pause", file=sys.stderr)
                     time.sleep(10.0)
                     continue
-            except json.JSONDecodeError:
-                pass
         break
 
     assert proc is not None
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "")[:500]
-        raise RuntimeError(f"claude CLI fehlgeschlagen (rc={proc.returncode}): {err}")
+        hint = _fail_fast_hint(err)
+        raise RuntimeError(
+            f"claude CLI fehlgeschlagen (rc={proc.returncode}): {err}"
+            + (f" | {hint}" if hint else "")
+        )
 
     try:
         return _parse_cli_json(proc.stdout)
@@ -141,6 +184,10 @@ async def call_full_async(
                 stderr=asyncio.subprocess.PIPE,
                 env=_env,
             )
+        except FileNotFoundError as e:
+            raise RuntimeError(
+                f"claude-CLI '{CLAUDE_BIN}' nicht gefunden. {_CLI_INSTALL_HINT}"
+            ) from e
         except OSError as e:
             raise RuntimeError(f"claude CLI nicht aufrufbar: {e}") from e
         try:
@@ -168,20 +215,30 @@ async def call_full_async(
             print(f"      [cli-retry] {agent}/{model} rc={rc} (attempt {attempt+1}/{_MAX_RETRIES+1})", file=sys.stderr)
             await asyncio.sleep(1.0)
             continue
-        if rc == 1 and attempt < _MAX_RETRIES:
+        if rc == 1:
             try:
                 d = json.loads(stdout or "")
-                if d.get("is_error"):
+            except json.JSONDecodeError:
+                d = {}
+            if d.get("is_error"):
+                hint = _fail_fast_hint(str(d.get("result", "")))
+                if hint:
+                    raise RuntimeError(
+                        f"claude CLI: {str(d.get('result', ''))[:200]} | {hint}"
+                    )
+                if attempt < _MAX_RETRIES:
                     print(f"      [cli-retry] {agent}/{model} is_error (attempt {attempt+1}/{_MAX_RETRIES+1}) — 10s Pause", file=sys.stderr)
                     await asyncio.sleep(10.0)
                     continue
-            except json.JSONDecodeError:
-                pass
         break
 
     if rc != 0:
         err = (stderr or stdout or "")[:500]
-        raise RuntimeError(f"claude CLI fehlgeschlagen (rc={rc}): {err}")
+        hint = _fail_fast_hint(err)
+        raise RuntimeError(
+            f"claude CLI fehlgeschlagen (rc={rc}): {err}"
+            + (f" | {hint}" if hint else "")
+        )
 
     try:
         return _parse_cli_json(stdout)
