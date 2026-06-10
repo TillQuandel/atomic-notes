@@ -22,13 +22,12 @@ def test_run_delegates_an_orchestrator(monkeypatch):
     assert captured["argv"] == ["--source", "x.pdf", "--dry-run"]
 
 
-def test_doctor_ist_platzhalter(capsys):
-    """`atomic-notes doctor` existiert, meldet aber 'nicht implementiert' (M1-S2)."""
-    rc = cli.main(["doctor"])
-    out = capsys.readouterr().out
-    assert rc == 1
-    assert "doctor" in out
-    assert "M1-S2" in out
+def test_doctor_delegiert_an_doctor_main(monkeypatch):
+    """`atomic-notes doctor` ruft generative.doctor.main und reicht den Exit-Code durch."""
+    from generative import doctor
+
+    monkeypatch.setattr(doctor, "main", lambda: 7)
+    assert cli.main(["doctor"]) == 7
 
 
 def test_ohne_argumente_usage_und_exitcode_2(capsys):

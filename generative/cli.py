@@ -3,7 +3,7 @@
 Subkommandos:
     run     generative Pipeline: PDF → geprüfte Atomic Notes (delegiert an
             generative.orchestrator; alle Orchestrator-Flags werden durchgereicht)
-    doctor  Preflight-Checks (Platzhalter, Implementierung in M1-S2)
+    doctor  Preflight-Checks: poppler, LLM-Backend, Vault-Pfad, optionale Deps
 
 Der Orchestrator-Import passiert lazy im run-Zweig — `atomic-notes --help`
 bleibt dadurch schnell und funktioniert auch ohne schwere Dependencies.
@@ -18,7 +18,7 @@ atomic-notes — PDF → geprüfte Atomic Notes für Obsidian
 Verwendung:
   atomic-notes run --source <pdf> [Orchestrator-Flags]   Pipeline starten
   atomic-notes run --help                                alle Pipeline-Flags
-  atomic-notes doctor                                    Preflight-Checks (ab M1-S2)
+  atomic-notes doctor                                    Preflight-Checks
 """
 
 
@@ -38,8 +38,9 @@ def main(argv: list[str] | None = None) -> int:
 
         return orchestrator.main(rest) or 0
     if cmd == "doctor":
-        print("atomic-notes doctor ist noch nicht implementiert (geplant: M1-S2).")
-        return 1
+        from generative import doctor
+
+        return doctor.main()
 
     print(_USAGE)
     print(f"Unbekanntes Kommando: {cmd}", file=sys.stderr)

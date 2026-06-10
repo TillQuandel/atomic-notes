@@ -548,3 +548,78 @@ def test_dispatch_litellm_calls_litellm(monkeypatch, tmp_path):
                                            agent="test", use_cache=False)
 
     assert result.text == "lit dispatch"
+
+
+# --- M1-S2: Fehlerpfade (CLI fehlt / nicht eingeloggt / Rate-Limit) ---
+
+def test_sub_cli_fehlt_actionable_meldung():
+    with patch("generative.agents._subscription_backend.subprocess.run",
+               side_effect=FileNotFoundError(2, "No such file", "claude")):
+        with pytest.raises(RuntimeError) as exc:
+            sub_call_full("hi", model="anthropic/claude-haiku-4-5-20251001")
+    msg = str(exc.value)
+    assert "npm install -g @anthropic-ai/claude-code" in msg
+    assert "litellm" in msg
+
+
+def test_sub_auth_fehler_faellt_sofort_durch_ohne_retry():
+    calls = []
+
+    def fake_run(*a, **kw):
+        calls.append(1)
+        m = MagicMock()
+        m.returncode = 1
+        m.stdout = json.dumps({"is_error": True,
+                               "result": "Invalid API key . Please run /login"})
+        m.stderr = ""
+        return m
+
+    with patch("generative.agents._subscription_backend.subprocess.run", fake_run):
+        with pytest.raises(RuntimeError) as exc:
+            sub_call_full("hi", model="anthropic/claude-haiku-4-5-20251001")
+    assert len(calls) == 1, "Auth-Fehler darf nicht retried werden"
+    assert "einlogg" in str(exc.value).lower() or "login" in str(exc.value).lower()
+
+
+def test_sub_rate_limit_meldung_mit_fenster_hinweis():
+    calls = []
+
+    def fake_run(*a, **kw):
+        calls.append(1)
+        m = MagicMock()
+        m.returncode = 1
+        m.stdout = json.dumps({"is_error": True,
+                               "result": "API Error: 429 rate_limit_error"})
+        m.stderr = ""
+        return m
+
+    with patch("generative.agents._subscription_backend.subprocess.run", fake_run):
+        with pytest.raises(RuntimeError) as exc:
+            sub_call_full("hi", model="anthropic/claude-haiku-4-5-20251001")
+    assert len(calls) == 1, "Rate-Limit darf nicht sofort retried werden (Reset abwarten)"
+    assert "5-h" in str(exc.value) or "Fenster" in str(exc.value)
+
+
+def test_sub_async_auth_fehler_faellt_sofort_durch():
+    payload = json.dumps({"is_error": True,
+                          "result": "Not logged in. Please run /login"}).encode()
+
+    calls = []
+
+    async def run():
+        mock_proc = AsyncMock()
+        mock_proc.communicate = AsyncMock(return_value=(payload, b""))
+        mock_proc.returncode = 1
+
+        async def fake_exec(*a, **kw):
+            calls.append(1)
+            return mock_proc
+
+        with patch("generative.agents._subscription_backend.asyncio.create_subprocess_exec",
+                   fake_exec):
+            await sub_call_full_async("hi", model="anthropic/claude-haiku-4-5-20251001")
+
+    with pytest.raises(RuntimeError) as exc:
+        asyncio.run(run())
+    assert len(calls) == 1
+    assert "einlogg" in str(exc.value).lower() or "login" in str(exc.value).lower()
