@@ -9,8 +9,8 @@ It is local-first: text is extracted from the PDF, concepts are detected, and no
 ```bash
 git clone https://github.com/TillQuandel/atomic-notes
 cd atomic-notes
-pip install -r extractive/requirements.txt
-python extractive/orchestrator.py --source paper.pdf --output obsidian --out-dir ./notes
+pip install -e ".[extractive]"
+python -m extractive.orchestrator --source paper.pdf --output obsidian --out-dir ./notes
 ```
 
 ## How It Works

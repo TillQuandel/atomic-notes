@@ -16,15 +16,15 @@ It is the high-quality path for turning PDFs and later other rich sources into s
 ## Quick Start
 
 ```bash
-pip install -r requirements.txt
+pip install -e .   # from the repository root
 cp .env.example .env
 # Edit .env for local paths and model/backend settings.
-python orchestrator.py --source "path/to/paper.pdf" --dry-run
+atomic-notes run --source "path/to/paper.pdf" --dry-run
 ```
 
 ## Requirements
 
-- Python 3.11+
+- Python 3.12+
 - `pdftotext`/`pdfinfo` (poppler-utils) on PATH
 - An LLM backend (see below)
 - A writable output target for generated notes
