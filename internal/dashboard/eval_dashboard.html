@@ -8,6 +8,7 @@
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Syne:wght@500;600;700;800&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-annotation@3.0.1/dist/chartjs-plugin-annotation.min.js"></script>
 <style>
 /* ===== ATOMIC AGENT — PIPELINE EVAL ============================= */
 /* CSS from Claude Design handoff — adapted for plain HTML + Chart.js */
@@ -15,14 +16,15 @@
 :root {
   --bg: #0b1120; --bg-elev: #111827; --bg-card: #141e2e;
   --ink-1: #f0f4f8; --ink-2: #c4cdd9; --ink-3: #8fa3b8;
-  --ink-4: #566779; --ink-5: #3d4f60;
+  --ink-4: #7e92a6; --ink-5: #3d4f60;
   --amber: #e8b53b; --coral: #e07a5f; --mint: #6dbf8c;
   --teal: #5bbfbf; --violet: #8a86c8;
-  --cat-1: #60a5fa; --cat-2: #c084fc; --cat-3: #fb923c;
-  --cat-4: #38bdf8; --cat-5: #8a86c8;
+  /* Encoding-Ramp: 3 Akzent-Hues (Coral/Teal/Amber) + gedeckte Varianten */
+  --enc-1: #e07a5f; --enc-2: #5bbfbf; --enc-3: #e8b53b;
+  --enc-4: #ad8275; --enc-5: #6f9b9b; --enc-6: #b39a64;
   --hair: rgba(255,255,255,.06); --hair-strong: rgba(255,255,255,.10);
   --tint-mint: rgba(109,191,140,.10); --tint-coral: rgba(224,122,95,.10);
-  --tint-amber: rgba(232,181,59,.12); --tint-cat1: rgba(96,165,250,.16);
+  --tint-amber: rgba(232,181,59,.12);
   --f-display: "Syne", Georgia, serif;
   --f-body: "IBM Plex Sans", system-ui, sans-serif;
   --f-mono: "JetBrains Mono", ui-monospace, monospace;
@@ -30,15 +32,15 @@
 }
 body.light {
   --bg: #f4f1eb; --bg-elev: #ece7dc; --bg-card: #ffffff;
-  --ink-1: #0d0d0d; --ink-2: #333333; --ink-3: #666666;
-  --ink-4: #999999; --ink-5: #cccccc;
-  --amber: #9e6a00; --coral: #a8391e; --mint: #1e7a45;
+  --ink-1: #0d0d0d; --ink-2: #333333; --ink-3: #5c5c5c;
+  --ink-4: #6b6b6b; --ink-5: #cccccc;
+  --amber: #855900; --coral: #a8391e; --mint: #1e7a45;
   --teal: #2e7575; --violet: #5a55a3;
-  --cat-1: #2f6db3; --cat-2: #7a3fa8; --cat-3: #c45a14;
-  --cat-4: #2a87b3; --cat-5: #5a55a3;
+  --enc-1: #a8391e; --enc-2: #2e7575; --enc-3: #855900;
+  --enc-4: #7c5347; --enc-5: #4f7373; --enc-6: #6f5d34;
   --hair: rgba(0,0,0,.08); --hair-strong: rgba(0,0,0,.16);
   --tint-mint: rgba(30,122,69,.10); --tint-coral: rgba(168,57,30,.08);
-  --tint-amber: rgba(158,106,0,.10);
+  --tint-amber: rgba(133,89,0,.10);
 }
 body.collapsed { --side-w: 52px; }
 
@@ -168,7 +170,6 @@ body.collapsed .theme-toggle { padding: 6px; }
   display: flex; align-items: center; gap: 0;
   background: var(--bg); border-bottom: 1px solid var(--hair);
   min-height: 48px; padding: 0 20px;
-  backdrop-filter: blur(8px);
 }
 .filter-group {
   display: flex; align-items: center; gap: 7px;
@@ -191,8 +192,8 @@ body.collapsed .theme-toggle { padding: 6px; }
 .fselect:focus { outline: none; border-color: var(--amber); }
 .delta-pill { margin-left: auto; display: flex; align-items: center; gap: 8px; font-family: var(--f-mono); font-size: 11px; color: var(--ink-3); }
 .delta-pill .num { font-weight: 600; }
-.live { display: flex; align-items: center; gap: 6px; font-family: var(--f-mono); font-size: 10px; color: var(--mint); text-transform: uppercase; letter-spacing: .14em; margin-left: 24px; }
-.live .pulse { width: 6px; height: 6px; border-radius: 50%; background: var(--mint); animation: pulse 2s ease-out infinite; }
+.updated { display: flex; align-items: center; gap: 6px; font-family: var(--f-mono); font-size: 10px; color: var(--ink-3); letter-spacing: .08em; }
+.updated .udot { width: 6px; height: 6px; border-radius: 50%; background: var(--mint); flex-shrink: 0; }
 .filter-badges { display: none; flex-wrap: wrap; gap: 6px; padding: 6px 20px; min-height: 0; }
 .fbadge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 10px;
   background: var(--tint-amber); border: 1px solid rgba(232,181,59,.25); border-radius: 3px;
@@ -201,7 +202,9 @@ body.collapsed .theme-toggle { padding: 6px; }
 .fbadge button:hover { opacity: 1; }
 .kpi-n { display: block; font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); margin-top: 1px; }
 .kpi-n.warn-n { color: var(--amber); }
-@keyframes pulse { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--mint) 70%, transparent); } 100% { box-shadow: 0 0 0 8px transparent; } }
+/* ── Fokus (Tastatur) ─────────────────────────────────────────── */
+:focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; border-radius: 3px; }
+.fselect:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
 .eval-ver-warn { margin-left: 12px; font-size: 11px; color: var(--amber); background: var(--tint-amber); border: 1px solid rgba(232,181,59,.25); border-radius: 2px; padding: 3px 10px; display: none; font-family: var(--f-mono); }
 
 /* ── Sections ──────────────────────────────────────────────────── */
@@ -244,24 +247,19 @@ body.collapsed .theme-toggle { padding: 6px; }
 
 /* ── KPI tiles ─────────────────────────────────────────────────── */
 .kpis {
-  display: grid; grid-template-columns: repeat(6, 1fr);
+  display: grid; grid-template-columns: repeat(7, 1fr);
   margin-top: 12px; border: 1px solid var(--hair);
   background: var(--bg-card); border-radius: 4px; overflow: hidden;
 }
 .kpi {
   padding: 16px 18px 14px; border-right: 1px solid var(--hair);
   display: flex; flex-direction: column; gap: 8px; position: relative;
-  min-width: 0; cursor: pointer;
-  transition: background .2s, transform .2s, box-shadow .2s;
+  min-width: 0; cursor: pointer; text-align: left;
+  transition: background .2s;
 }
 .kpi:last-child { border-right: 0; }
-.kpi:hover {
-  background: var(--bg-elev);
-  transform: translateY(-3px);
-  box-shadow: 0 6px 20px rgba(0,0,0,.25);
-  z-index: 1;
-}
-body.light .kpi:hover { box-shadow: 0 6px 20px rgba(0,0,0,.12); }
+.kpi:hover { background: var(--bg-elev); }
+.kpi:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
 .kpi.open { background: var(--bg-elev); }
 .kpi .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .kpi .lbl { font-family: var(--f-mono); font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .12em; }
@@ -367,8 +365,10 @@ table.cmp thead th { font-family: var(--f-mono); font-size: 10px; color: var(--i
 table.cmp thead th.num { text-align: right; }
 table.cmp tbody tr { border-bottom: 1px solid var(--hair); }
 table.cmp tbody tr:last-child { border-bottom: 0; }
-table.cmp tbody tr:hover td { background: rgba(255,255,255,.02); }
-body.light table.cmp tbody tr:hover td { background: rgba(0,0,0,.02); }
+table.cmp tbody tr:nth-child(even) td { background: rgba(255,255,255,.015); }
+body.light table.cmp tbody tr:nth-child(even) td { background: rgba(0,0,0,.015); }
+table.cmp tbody tr:hover td { background: rgba(255,255,255,.035); }
+body.light table.cmp tbody tr:hover td { background: rgba(0,0,0,.03); }
 table.cmp td { font-family: var(--f-mono); font-size: 13px; color: var(--ink-1); font-feature-settings: "tnum"; }
 table.cmp td.num { text-align: right; }
 table.cmp td.pdf { font-family: var(--f-display); font-weight: 600; font-size: 14px; letter-spacing: -.01em; }
@@ -380,6 +380,57 @@ table.cmp td.dim { color: var(--ink-3); }
 .acc-bar .pct { font-weight: 600; }
 .good-t { color: var(--mint); } .bad-t { color: var(--coral); } .warn-t { color: var(--amber); }
 
+/* ── Insight-Headline pro Sektion ──────────────────────────────── */
+.insight {
+  margin: 0 0 16px; padding: 8px 12px;
+  border-left: 2px solid var(--amber);
+  background: var(--bg-card);
+  font-family: var(--f-body); font-size: 12.5px; line-height: 1.5;
+  color: var(--ink-2);
+}
+.insight strong { color: var(--ink-1); font-weight: 600; font-feature-settings: "tnum"; }
+.insight .caveat { color: var(--ink-3); font-style: italic; }
+.insight:empty { display: none; }
+
+/* ── Loading-Skeleton ──────────────────────────────────────────── */
+@keyframes shimmer { 0% { background-position: -400px 0; } 100% { background-position: 400px 0; } }
+.skel {
+  border-radius: 3px;
+  background: linear-gradient(90deg, var(--hair) 25%, var(--hair-strong) 50%, var(--hair) 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+.chart-body.loading::after {
+  content: ""; position: absolute; inset: 0; border-radius: 3px;
+  background: linear-gradient(90deg, var(--hair) 25%, var(--hair-strong) 50%, var(--hair) 75%);
+  background-size: 800px 100%;
+  animation: shimmer 1.4s linear infinite;
+}
+
+/* ── Leer-Zustände ─────────────────────────────────────────────── */
+.chart-empty {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 6px;
+  font-family: var(--f-mono); font-size: 11px; color: var(--ink-3);
+  border: 1px dashed var(--hair-strong); border-radius: 3px;
+  text-align: center; padding: 16px;
+}
+.empty-banner[hidden] { display: none; }
+.empty-banner {
+  margin: 16px 28px 0; padding: 14px 18px;
+  border: 1px solid rgba(232,181,59,.3); border-left: 3px solid var(--amber);
+  border-radius: 4px; background: var(--tint-amber);
+  display: flex; align-items: center; justify-content: space-between; gap: 16px;
+  font-family: var(--f-body); font-size: 13px; color: var(--ink-1);
+}
+.empty-banner button {
+  flex-shrink: 0; padding: 5px 12px; border: 1px solid var(--amber);
+  border-radius: 3px; color: var(--amber);
+  font-family: var(--f-mono); font-size: 11px;
+  transition: background .15s;
+}
+.empty-banner button:hover { background: var(--tint-amber); }
+
 /* ── Footer ─────────────────────────────────────────────────────── */
 .foot { padding: 26px 28px 32px; display: flex; justify-content: space-between; font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); letter-spacing: .08em; text-transform: lowercase; border-top: 1px solid var(--hair); margin-top: 28px; }
 .foot .sep { color: var(--ink-5); margin: 0 8px; }
@@ -390,9 +441,16 @@ table.cmp td.dim { color: var(--ink-3); }
 ::-webkit-scrollbar-thumb { background: var(--hair-strong); border-radius: 5px; border: 2px solid var(--bg); }
 
 /* ── Responsive ─────────────────────────────────────────────────── */
+@media (max-width: 1200px) {
+  .kpis { grid-template-columns: repeat(4, 1fr); }
+  .kpi:nth-child(4n) { border-right: 0; }
+  .kpi:nth-child(-n+4) { border-bottom: 1px solid var(--hair); }
+}
 @media (max-width: 900px) {
   .strip { grid-template-columns: repeat(4,1fr); }
   .kpis { grid-template-columns: 1fr 1fr; }
+  .kpi:nth-child(4n) { border-right: 1px solid var(--hair); }
+  .kpi:nth-child(2n) { border-right: 0; }
   .filterbar { min-height: auto; padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
   .filter-group { height: auto; padding: 4px 12px; }
 }
@@ -451,9 +509,9 @@ table.cmp td.dim { color: var(--ink-3); }
     <div class="eval-row">Eval <span class="ev-v" id="sf-ev-pill">–</span></div>
     <div id="sf-time">–</div>
     <div>auto-refresh 15 s</div>
-    <button class="theme-toggle" onclick="toggleTheme()">
+    <button class="theme-toggle" onclick="cycleTheme()" title="Theme wechseln: System → Hell → Dunkel">
       <span class="tdot" id="theme-dot"></span>
-      <span id="theme-label">Light Mode</span>
+      <span id="theme-label">System</span>
     </button>
   </div>
 </aside>
@@ -490,15 +548,20 @@ table.cmp td.dim { color: var(--ink-3); }
         <option value="__all__">Alle</option>
       </select>
     </div>
-<div class="live" style="margin-left:auto"><span class="pulse"></span><span>LIVE</span></div>
+<div class="updated" style="margin-left:auto"><span class="udot"></span><span id="updated-at">lädt…</span></div>
   </div>
   <div class="filter-badges" id="filter-badges"></div>
+  <div class="empty-banner" id="empty-banner" hidden>
+    <span>Diese Filter-Kombination ergibt <strong>0 evaluierte Notes</strong> — Kennzahlen und Charts sind leer.</span>
+    <button onclick="resetAllFilters()">Filter zurücksetzen</button>
+  </div>
 
   <!-- ── Übersicht ─────────────────────────────────────────────── -->
   <section class="section" id="s-overview">
     <div class="sec-head">
       <span class="sec-name">Übersicht</span>
     </div>
+    <p class="insight" id="ins-overview"></p>
 
     <!-- Gesamt: alle Versionen + Runs -->
     <div class="sub-head">
@@ -524,6 +587,7 @@ table.cmp td.dim { color: var(--ink-3); }
       <span class="sec-name">Qualität</span>
       <span class="sec-right">Fehlerquote + Belegrate nach Version</span>
     </div>
+    <p class="insight" id="ins-quality"></p>
     <div class="row">
       <div class="panel">
         <div class="p-head">
@@ -549,6 +613,7 @@ table.cmp td.dim { color: var(--ink-3); }
       <span class="sec-name">Kosten &amp; Performance</span>
       <span class="sec-right">Token-Verbrauch + Laufzeit</span>
     </div>
+    <p class="insight" id="ins-cost"></p>
     <div class="row">
       <div class="panel">
         <div class="p-head">
@@ -574,6 +639,7 @@ table.cmp td.dim { color: var(--ink-3); }
       <span class="sec-name">Agenten</span>
       <span class="sec-right">Token-Kosten + Laufzeit je Agent</span>
     </div>
+    <p class="insight" id="ins-agents"></p>
     <div class="row">
       <div class="panel">
         <div class="p-head">
@@ -598,6 +664,7 @@ table.cmp td.dim { color: var(--ink-3); }
       <span class="sec-name">Trade-off</span>
       <span class="sec-right">Skalierung + Verlauf</span>
     </div>
+    <p class="insight" id="ins-tradeoff"></p>
     <div class="row">
       <div class="panel">
         <div class="p-head">
@@ -624,6 +691,7 @@ table.cmp td.dim { color: var(--ink-3); }
       <span class="sec-name">Kalibrierung</span>
       <span class="sec-right">LLM-Judge (v4.1) vs. Human-Labels — wie zuverlässig ist der Eval?</span>
     </div>
+    <p class="insight" id="ins-calib"></p>
 
     <!-- KPI-Strip Kalibrierung -->
     <div id="calib-strip" style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;
@@ -672,6 +740,7 @@ table.cmp td.dim { color: var(--ink-3); }
       <span class="sec-name">Vergleich nach Quell-PDF</span>
       <span class="sec-right">↑ aufklappen für Details</span>
     </div>
+    <p class="insight" id="ins-compare"></p>
     <div class="table-wrap">
       <table class="cmp" id="cmp-table">
         <thead><tr>
@@ -696,15 +765,17 @@ table.cmp td.dim { color: var(--ink-3); }
 
 <script>
 /* ── Chart.js Defaults ────────────────────────────────────────── */
-const cssv = (v) => getComputedStyle(document.documentElement).getPropertyValue(v).trim();
+const cssv = (v) => getComputedStyle(document.body).getPropertyValue(v).trim()
+  || getComputedStyle(document.documentElement).getPropertyValue(v).trim();
 const C = () => ({
   amber: cssv('--amber'), coral: cssv('--coral'), mint: cssv('--mint'),
   teal: cssv('--teal'), violet: cssv('--violet'),
   ink1: cssv('--ink-1'), ink2: cssv('--ink-2'), ink3: cssv('--ink-3'),
   ink4: cssv('--ink-4'), ink5: cssv('--ink-5'),
   hair: cssv('--hair'), bg: cssv('--bg'), card: cssv('--bg-card'),
-  c1: cssv('--cat-1'), c2: cssv('--cat-2'), c3: cssv('--cat-3'),
-  c4: cssv('--cat-4'), c5: cssv('--cat-5'),
+  // Encoding-Ramp: max. 3 Hues (Coral/Teal/Amber) + gedeckte Varianten
+  enc: [cssv('--enc-1'), cssv('--enc-2'), cssv('--enc-3'),
+        cssv('--enc-4'), cssv('--enc-5'), cssv('--enc-6')],
 });
 
 function applyChartDefaults() {
@@ -731,19 +802,55 @@ const axisCfg = (x={}) => ({
 });
 const legendCfg = () => ({labels:{color:cssv('--ink-2'), boxWidth:10, font:{size:11}}});
 
+/* Zentrale Chart-Registry — jeder Re-Embed zerstört den alten View,
+   Fehler landen sichtbar in der Console statt still zu verschwinden
+   (Async-Chart-Init-Pattern). */
 let charts = {};
 function getOrCreate(id, cfg) {
-  if (charts[id]) charts[id].destroy();
-  charts[id] = new Chart(document.getElementById(id), cfg);
-  return charts[id];
+  try {
+    if (charts[id]) { charts[id].destroy(); delete charts[id]; }
+    const el = document.getElementById(id);
+    if (!el) return null;
+    _clearChartEmpty(id);
+    charts[id] = new Chart(el, cfg);
+    return charts[id];
+  } catch (err) {
+    console.error('[chart]', id, err);
+    return null;
+  }
+}
+
+/* Leer-Zustand pro Chart: Chart zerstören (sonst bleiben stale Daten
+   stehen) und Hinweis in den Chart-Container legen. */
+function setChartEmpty(id, msg) {
+  if (charts[id]) { try { charts[id].destroy(); } catch (e) {} delete charts[id]; }
+  const el = document.getElementById(id);
+  if (!el) return;
+  const body = el.closest('.chart-body');
+  if (!body) return;
+  let overlay = body.querySelector('.chart-empty');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.className = 'chart-empty';
+    body.appendChild(overlay);
+  }
+  overlay.textContent = msg || 'Keine Daten für diese Filter-Kombination';
+}
+function _clearChartEmpty(id) {
+  const el = document.getElementById(id);
+  const overlay = el && el.closest('.chart-body')?.querySelector('.chart-empty');
+  if (overlay) overlay.remove();
 }
 
 /* ── Sidebar ──────────────────────────────────────────────────── */
+const _SIDEBAR_TRANSITION_MS = 220;
 function toggleSidebar() {
   document.body.classList.toggle('collapsed');
   const path = document.getElementById('chev-path');
   if (path) path.setAttribute('d', document.body.classList.contains('collapsed') ? 'M6 3l4 5-4 5' : 'M10 3l-4 5 4 5');
   localStorage.setItem('sidebar-collapsed', document.body.classList.contains('collapsed'));
+  // Re-Render nach Breiten-Transition + Safety-Buffer (Async-Chart-Init-Pattern)
+  setTimeout(() => { if (window._lastData) _renderWithData(window._lastData); }, _SIDEBAR_TRANSITION_MS + 20);
 }
 if (localStorage.getItem('sidebar-collapsed') === 'true') {
   document.body.classList.add('collapsed');
@@ -763,22 +870,37 @@ if (localStorage.getItem('sidebar-collapsed') === 'true') {
   document.querySelectorAll('section[id]').forEach(s => obs.observe(s));
 })();
 
-/* ── Theme ────────────────────────────────────────────────────── */
-function applyTheme(light) {
-  document.body.classList.toggle('light', light);
+/* ── Theme (System / Hell / Dunkel) ───────────────────────────── */
+const _THEME_MODES = ['system', 'light', 'dark'];
+const _THEME_LABELS = { system: 'System', light: 'Hell', dark: 'Dunkel' };
+const _mqlDark = window.matchMedia('(prefers-color-scheme: dark)');
+let _themeMode = localStorage.getItem('theme-mode')
+  // Migration vom alten 2-Wege-Toggle (key 'theme')
+  || (localStorage.getItem('theme') === 'light' ? 'light'
+    : localStorage.getItem('theme') === 'dark' ? 'dark' : 'system');
+if (!_THEME_MODES.includes(_themeMode)) _themeMode = 'system';
+
+function _resolvedLight() {
+  if (_themeMode === 'light') return true;
+  if (_themeMode === 'dark')  return false;
+  return !_mqlDark.matches;
+}
+function applyTheme() {
+  document.body.classList.toggle('light', _resolvedLight());
   const lbl = document.getElementById('theme-label');
-  const dot  = document.getElementById('theme-dot');
-  if (lbl) lbl.textContent = light ? 'Dark Mode' : 'Light Mode';
-  if (dot) dot.style.background = light ? cssv('--ink-3') : cssv('--amber');
+  const dot = document.getElementById('theme-dot');
+  if (lbl) lbl.textContent = _THEME_LABELS[_themeMode];
+  if (dot) dot.style.background = _resolvedLight() ? cssv('--ink-3') : cssv('--amber');
   applyChartDefaults();
   if (window._lastData) _renderWithData(window._lastData);
 }
-function toggleTheme() {
-  const light = !document.body.classList.contains('light');
-  localStorage.setItem('theme', light ? 'light' : 'dark');
-  applyTheme(light);
+function cycleTheme() {
+  _themeMode = _THEME_MODES[(_THEME_MODES.indexOf(_themeMode) + 1) % _THEME_MODES.length];
+  localStorage.setItem('theme-mode', _themeMode);
+  applyTheme();
 }
-if (localStorage.getItem('theme') === 'light') applyTheme(true);
+_mqlDark.addEventListener('change', () => { if (_themeMode === 'system') applyTheme(); });
+applyTheme();
 
 /* ── Globale Filter ───────────────────────────────────────────── */
 let _globalFilters = { pver: '__all__', pdf: '__all__', lang: '__all__', model: '__all__' };
@@ -929,12 +1051,15 @@ function renderKpis(kpis, thresh, kpiTrend) {
 
   const nNotes = kpis?.n_notes ?? null;
   document.getElementById('kpis').innerHTML = kpiDefs.map((kd, i) => {
-    const showN = nNotes != null && ['hall','cov','accept'].includes(kd.key);
-    const nWarn = showN && nNotes < 20;
+    // Akzeptanzrate kommt aus Log-Runs (Stichprobe = generierte Notes),
+    // nicht aus evaluierten Notes — eigene n-Basis, sonst irreführend.
+    const nBase = kd.key === 'accept' ? (kpis?.total_generated ?? null) : nNotes;
+    const showN = nBase != null && ['hall','cov','accept'].includes(kd.key);
+    const nWarn = showN && nBase < 20;
     const nTag = showN
-      ? `<span class="kpi-n${nWarn?' warn-n':''}" title="${nWarn?'n<20 — Ziel-Marker ausgeblendet':''}">(n=${nNotes})</span>`
+      ? `<span class="kpi-n${nWarn?' warn-n':''}" title="${nWarn?'n<20 — Ziel-Marker ausgeblendet':''}">(n=${nBase})</span>`
       : '';
-    return `<div class="kpi ${kd.tone}${_openKpiIdx===i?' open':''}" id="${kd.id}" onclick="_openKpiSpark(${i})" title="Klick: Versions-Trend">
+    return `<button type="button" class="kpi ${kd.tone}${_openKpiIdx===i?' open':''}" id="${kd.id}" onclick="_openKpiSpark(${i})" title="Klick: Versions-Trend">
       <div class="top"><span class="lbl">${kd.label}</span></div>
       <div class="value-row">
         <span class="v">${kd.val != null ? kd.val : '–'}</span>
@@ -942,7 +1067,7 @@ function renderKpis(kpis, thresh, kpiTrend) {
       </div>
       ${nTag}
       ${kd.tgt && !nWarn ? `<span class="tgt">${kd.tgt}</span>` : ''}
-    </div>`;
+    </button>`;
   }).join('');
 
   _kpiData = {kpis, thresh, kpiTrend, _defs: kpiDefs};  // nach kpiDefs-Definition
@@ -1200,17 +1325,25 @@ function renderCharts(d) {
         }); ctx.restore();
       }}]
     });
+  } else {
+    setChartEmpty('ch1');
+    const ax1=document.getElementById('ax1'); if(ax1) ax1.textContent='in %';
   }
 
   // ch2 — Scatter
   if (d.scatter?.points?.length) renderScatter(d.scatter, T);
+  else {
+    setChartEmpty('ch2');
+    const ax2=document.getElementById('ax2'); if(ax2) ax2.textContent='0 evaluierte notes';
+    const l2=document.getElementById('leg2'); if(l2) l2.innerHTML='';
+  }
 
   // ch3 — Scaling
   if (d.scaling?.points?.length) {
     const keys = d.scaling.keys||[];
     getOrCreate('ch3',{type:'scatter',
       data:{datasets:keys.map(k=>{
-        const col=[t.c1,t.c2,t.c3][keys.indexOf(k)]||t.c1;
+        const col=t.enc[keys.indexOf(k)%t.enc.length];
         return{label:(d.scaling.points.find(p=>p.key===k)||{}).label||k,
           data:d.scaling.points.filter(p=>p.key===k).map(p=>({x:p.x,y:p.y,_p:p})),
           backgroundColor:col+'b0',borderColor:col,borderWidth:1,pointRadius:6,pointHoverRadius:9};
@@ -1221,16 +1354,24 @@ function renderCharts(d) {
           y:axisCfg({min:0,title:{display:true,text:'Notes pro Run',color:t.ink2,font:{size:11}},ticks:{stepSize:2}})}}
     });
     const l3=document.getElementById('leg3');
-    if(l3) l3.innerHTML=keys.map((k,i)=>{const c=[t.c1,t.c2,t.c3][i]||t.c1;const lbl=(d.scaling.points.find(p=>p.key===k)||{}).label||k;return `<span><span class="dot" style="background:${c}"></span>${lbl}</span>`;}).join('');
+    if(l3) l3.innerHTML=keys.map((k,i)=>{const c=t.enc[i%t.enc.length];const lbl=(d.scaling.points.find(p=>p.key===k)||{}).label||k;return `<span><span class="dot" style="background:${c}"></span>${lbl}</span>`;}).join('');
+  } else {
+    setChartEmpty('ch3');
+    const l3=document.getElementById('leg3'); if(l3) l3.innerHTML='';
   }
 
   // ch4 — Akzeptanzrate über Versionen (zeigt alle, hebt aktive hervor)
   if (d.long?.versions?.length) {
     const t2 = C();
-    const activePver = _globalFilters.pver;
+    // Server-Farben auf die konsolidierte Encoding-Ramp mappen — Fallback-
+    // Farben aus Python (violet/mint/slate) verletzen die 3-Hue-Palette.
+    const _KNOWN = ['#e07a5f', '#5bbfbf', '#e8b53b'];
+    const _encFor = (ds, i) => _KNOWN.includes((ds.color||'').toLowerCase())
+      ? t2.enc[_KNOWN.indexOf(ds.color.toLowerCase())] : t2.enc[i % t2.enc.length];
+    const longColors = d.long.datasets.map((ds, i) => _encFor(ds, i));
     getOrCreate('ch4',{type:'line',
-      data:{labels:d.long.versions, datasets:d.long.datasets.map(ds=>{
-        const col=ds.color;
+      data:{labels:d.long.versions, datasets:d.long.datasets.map((ds,i)=>{
+        const col=longColors[i];
         return{label:ds.label,data:ds.data,borderColor:col,backgroundColor:col,
           pointBackgroundColor:t2.card,pointBorderColor:col,pointBorderWidth:2,
           pointRadius:4,pointHoverRadius:7,borderWidth:2,tension:.35,spanGaps:true};
@@ -1240,35 +1381,40 @@ function renderCharts(d) {
         scales:{x:axisCfg({ticks:{maxRotation:45}}),
           y:axisCfg({beginAtZero:true,max:100,ticks:{callback:v=>v+' %',stepSize:25}})}}});
     const l4=document.getElementById('leg4');
-    if(l4) l4.innerHTML=d.long.datasets.map(ds=>`<span><span class="dot" style="background:${ds.color}"></span>${ds.label}</span>`).join('');
+    if(l4) l4.innerHTML=d.long.datasets.map((ds,i)=>`<span><span class="dot" style="background:${longColors[i]}"></span>${ds.label}</span>`).join('');
+  } else {
+    setChartEmpty('ch4');
+    const l4=document.getElementById('leg4'); if(l4) l4.innerHTML='';
   }
 
-  // ch5 — Tokens
+  // ch5 — Tokens (Komposition: Teal=Input, Amber=Output, Grau=Cache)
   if (d.tokens?.labels?.length) {
     const ax5=document.getElementById('ax5'); if(ax5) ax5.textContent=`${d.tokens.labels.length} Runs · chronologisch`;
     const _tokPdf = d.tokens.pdf_labels||[];
     getOrCreate('ch5',{type:'bar',data:{labels:d.tokens.labels,datasets:[
       {label:'Input', data:d.tokens.tokens_in, backgroundColor:t.teal+'aa', stack:'t'},
-      {label:'Output',data:d.tokens.tokens_out,backgroundColor:t.mint+'aa', stack:'t'},
-      {label:'Cache', data:d.tokens.tokens_cache,backgroundColor:t.violet+'77',stack:'t'},
+      {label:'Output',data:d.tokens.tokens_out,backgroundColor:t.amber+'aa', stack:'t'},
+      {label:'Cache', data:d.tokens.tokens_cache,backgroundColor:t.ink4+'66',stack:'t'},
     ]},options:{maintainAspectRatio:false,responsive:true,animation:{duration:500},
       plugins:{legend:legendCfg(),tooltip:{callbacks:{title:items=>{const i=items[0]?.dataIndex;const pdf=_tokPdf[i];return pdf?`${d.tokens.labels[i]} · ${pdf}`:d.tokens.labels[i];}}}},
       scales:{x:axisCfg({grid:{display:false},ticks:{color:t.ink3,maxRotation:45,font:{size:9}}}),
         y:{...axisCfg(),stacked:true,title:{display:true,text:'Tokens',color:t.ink4,font:{size:11}}}}}});
     const l5=document.getElementById('leg5');
-    if(l5) l5.innerHTML=[{c:t.teal,l:'Input'},{c:t.mint,l:'Output'},{c:t.violet,l:'Cache'}].map(x=>`<span><span class="dot" style="background:${x.c}"></span>${x.l}</span>`).join('');
+    if(l5) l5.innerHTML=[{c:t.teal,l:'Input'},{c:t.amber,l:'Output'},{c:t.ink4,l:'Cache'}].map(x=>`<span><span class="dot" style="background:${x.c}"></span>${x.l}</span>`).join('');
     // ch6 — Duration
     getOrCreate('ch6',{type:'line',data:{labels:d.tokens.labels,datasets:[{data:d.tokens.duration_min||[],borderColor:t.coral,backgroundColor:t.coral+'18',borderWidth:2,pointRadius:4,pointHoverRadius:7,pointBackgroundColor:t.card,pointBorderColor:t.coral,pointBorderWidth:2,tension:.3,fill:true}]},
       options:{maintainAspectRatio:false,responsive:true,animation:{duration:500},
         plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>{const i=items[0]?.dataIndex;const pdf=_tokPdf[i];return pdf?`${d.tokens.labels[i]} · ${pdf}`:d.tokens.labels[i];}}}},
         scales:{x:axisCfg({grid:{display:false},ticks:{color:t.ink3,maxRotation:45,font:{size:9}}}),y:axisCfg({beginAtZero:true,ticks:{callback:v=>v+' min'}})}}});
+  } else {
+    setChartEmpty('ch5'); setChartEmpty('ch6');
+    const l5=document.getElementById('leg5'); if(l5) l5.innerHTML='';
   }
 
   // ch7 + ch8 — Agents
   const ag = d.agent_stats;
   if (ag?.labels?.length) {
-    const agColors = [t.c1,t.c2,t.c3,t.c4,t.c5];
-    const bgC = ag.labels.map((_,i)=>agColors[i%agColors.length]+'cc');
+    const bgC = ag.labels.map((_,i)=>t.enc[i%t.enc.length]+'cc');
     const agLabelsN = ag.labels.map((l,i)=>ag.calls?.[i]?`${l} (${ag.calls[i]}×)`:l);
     const ax7=document.getElementById('ax7'); if(ax7) ax7.textContent=`kumuliert · ${ag.calls?.reduce((a,b)=>a+b,0)||0} calls`;
     getOrCreate('ch7',{type:'bar',data:{labels:agLabelsN,datasets:[{data:ag.output,backgroundColor:bgC,borderWidth:0,borderRadius:2,barPercentage:.65}]},
@@ -1279,33 +1425,41 @@ function renderCharts(d) {
       options:{indexAxis:'y',maintainAspectRatio:false,responsive:true,animation:{duration:500},
         plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const s=ctx.raw;return s>=60?`${(s/60).toFixed(1)} min`:`${s} s`;}}}},
         scales:{x:axisCfg({ticks:{callback:v=>v>=60?(v/60).toFixed(0)+'min':v+'s'}}),y:axisCfg({grid:{display:false},ticks:{color:t.ink2,font:{size:12}}})}}});
+  } else {
+    setChartEmpty('ch7'); setChartEmpty('ch8');
   }
 }
 
 /* ── Scatter ──────────────────────────────────────────────────── */
-let scatterChart=null;
 function renderScatter(scat, T) {
   const t = C();
   const pdfList=scat.pdfs||[];
   // Kein lokaler Filter — globale Filter-Bar steuert die Daten
-  const catColors=[t.c1,t.c2,t.c3,t.c4,t.c5,t.violet];
   const buildDS=()=>pdfList.map((p,i)=>({
     label:p.label,
     data:scat.points.filter(pt=>pt.pdf===p.raw),
-    backgroundColor:catColors[i%catColors.length]+'cc',
-    borderColor:catColors[i%catColors.length],
+    backgroundColor:t.enc[i%t.enc.length]+'cc',
+    borderColor:t.enc[i%t.enc.length],
     borderWidth:1,pointRadius:6,pointHoverRadius:9
   }));
   const cfg={type:'scatter',data:{datasets:buildDS()},
     options:{maintainAspectRatio:false,responsive:true,animation:{duration:300},
-      plugins:{legend:legendCfg(),tooltip:{callbacks:{label:ctx=>{const p=ctx.raw;return [p.label||'',`v: ${p.version}`,`Fehler: ${p.x} % · Belegrate: ${p.y} %`];}}}},
+      plugins:{legend:legendCfg(),tooltip:{callbacks:{label:ctx=>{const p=ctx.raw;return [p.label||'',`v: ${p.version}`,`Fehler: ${p.x} % · Belegrate: ${p.y} %`];}}},
+        // Threshold-Linie Fehlerquote 15 % (Schwelle „schlecht") — semantische
+        // Farbe nur an Threshold-Stelle (chartjs-plugin-annotation)
+        annotation:{annotations:{hallBad:{
+          type:'line', xMin:T.hall[1], xMax:T.hall[1],
+          borderColor:t.coral+'88', borderWidth:1, borderDash:[4,4],
+          label:{display:true, content:`${T.hall[1]} %`, position:'start',
+            backgroundColor:'transparent', color:t.coral,
+            font:{size:9, family:"'JetBrains Mono', monospace"}}
+        }}}},
       scales:{x:axisCfg({min:0,title:{display:true,text:'Fehlerquote % (kleiner = besser)',color:t.ink3,font:{size:11}},ticks:{callback:v=>v+' %'}}),
         y:axisCfg({min:0,title:{display:true,text:'Belegrate % (größer = besser)',color:t.ink3,font:{size:11}},ticks:{callback:v=>v+' %'}})}},
     plugins:[{id:'ideal',beforeDatasetsDraw(chart){const{ctx,scales:{x,y}}=chart;const l=x.getPixelForValue(0),r=x.getPixelForValue(T.hall[0]),top=y.getPixelForValue(y.max),b=y.getPixelForValue(T.cov[0]);ctx.save();ctx.fillStyle=cssv('--tint-mint');ctx.fillRect(l,top,r-l,b-top);ctx.strokeStyle=cssv('--mint');ctx.globalAlpha=.25;ctx.setLineDash([3,3]);ctx.lineWidth=1;ctx.strokeRect(l,top,r-l,b-top);ctx.setLineDash([]);ctx.globalAlpha=1;ctx.font='700 9px "IBM Plex Sans"';ctx.fillStyle=cssv('--mint');ctx.fillText('IDEAL',l+6,top+13);ctx.restore();}}]};
-  if(scatterChart) scatterChart.destroy();
-  scatterChart=new Chart(document.getElementById('ch2'),cfg); charts['ch2']=scatterChart;
+  getOrCreate('ch2', cfg);
   const ax2=document.getElementById('ax2'); if(ax2) ax2.textContent=scat.points.length+' evaluierte notes';
-  const l2=document.getElementById('leg2'); if(l2) l2.innerHTML=pdfList.map((p,i)=>`<span><span class="dot" style="background:${catColors[i%catColors.length]}"></span>${p.label}</span>`).join('')+`<span style="margin-left:auto"><span class="dot" style="background:color-mix(in srgb, var(--mint) 40%, transparent)"></span>Zielzone</span>`;
+  const l2=document.getElementById('leg2'); if(l2) l2.innerHTML=pdfList.map((p,i)=>`<span><span class="dot" style="background:${t.enc[i%t.enc.length]}"></span>${p.label}</span>`).join('')+`<span style="margin-left:auto"><span class="dot" style="background:color-mix(in srgb, var(--mint) 40%, transparent)"></span>Zielzone</span>`;
 }
 
 /* ── Version range (vereinfacht, kein Von/Bis mehr) ──────────── */
@@ -1357,6 +1511,93 @@ function renderCalibration(calib) {
   </tr>`).join('');
 }
 
+/* ── Insight-Headlines (aus echten Daten, mit N-Guard) ───────── */
+function _setInsight(id, html) {
+  const el = document.getElementById(id);
+  if (el) el.innerHTML = html || '';
+}
+function _fmtDE(v, digits=1) {
+  return v != null ? Number(v).toLocaleString('de-DE', {minimumFractionDigits:digits, maximumFractionDigits:digits}) : '–';
+}
+function _median(sorted) {
+  if (!sorted.length) return null;
+  const m = Math.floor(sorted.length / 2);
+  return sorted.length % 2 ? sorted[m] : (sorted[m-1] + sorted[m]) / 2;
+}
+function renderInsights(d) {
+  const esc = _escHTML;  // Labels stammen aus PDF-Dateinamen/Logs — escapen
+  const k = d.kpis || {};
+  const n = k.n_notes ?? 0;
+  const caveat = n > 0 && n < 20 ? ` <span class="caveat">(n=${n} — zu klein für Zielvergleich)</span>` : '';
+
+  // Übersicht: Stand der neuesten Pipeline-Version, rein deskriptiv bei kleinem n
+  if (n > 0 && k.avg_hall != null) {
+    _setInsight('ins-overview',
+      `Pipeline <strong>${esc(k.kpi_version||'–')}</strong>: Fehlerquote <strong>${_fmtDE(k.avg_hall)} %</strong>, ` +
+      `Belegrate <strong>${_fmtDE(k.avg_cov)} %</strong> über ${n} evaluierte Note${n===1?'':'s'}.${caveat}`);
+  } else { _setInsight('ins-overview', ''); }
+
+  // Qualität: Spannweite der Akzeptanz über PDFs
+  const acc = d.accept || {};
+  if ((acc.labels||[]).length >= 2) {
+    const pairs = acc.labels.map((l,i)=>({l, v:acc.values[i]})).filter(p=>p.v!=null);
+    if (pairs.length >= 2) {
+      const lo = pairs.reduce((a,b)=>a.v<=b.v?a:b), hi = pairs.reduce((a,b)=>a.v>=b.v?a:b);
+      _setInsight('ins-quality',
+        `Akzeptanz reicht von <strong>${_fmtDE(lo.v)} %</strong> (${esc(lo.l)}) bis ` +
+        `<strong>${_fmtDE(hi.v)} %</strong> (${esc(hi.l)}) — Spannweite ${_fmtDE(hi.v-lo.v)} Punkte über ${pairs.length} PDFs.`);
+    } else { _setInsight('ins-quality', ''); }
+  } else { _setInsight('ins-quality', ''); }
+
+  // Kosten: Gesamt-Tokens + Laufzeit der gefilterten Runs
+  const tok = d.tokens || {};
+  if ((tok.labels||[]).length) {
+    const totalTok = (tok.tokens_in||[]).reduce((a,b)=>a+(b||0),0) + (tok.tokens_out||[]).reduce((a,b)=>a+(b||0),0);
+    const medDur = _median((tok.duration_min||[]).filter(v=>v>0).sort((a,b)=>a-b));
+    _setInsight('ins-cost',
+      `<strong>${tok.labels.length}</strong> Runs verbrauchten <strong>${_fmtDE(totalTok/1e6, 2)} M</strong> Tokens` +
+      (medDur != null ? `, Median-Laufzeit <strong>${_fmtDE(medDur, 0)} min</strong> pro Run.` : '.'));
+  } else { _setInsight('ins-cost', ''); }
+
+  // Agenten: größter Output-Token-Verursacher
+  const ag = d.agent_stats || {};
+  if ((ag.labels||[]).length && (ag.output||[]).some(v=>v>0)) {
+    const total = ag.output.reduce((a,b)=>a+(b||0),0);
+    const iMax = ag.output.indexOf(Math.max(...ag.output));
+    _setInsight('ins-agents',
+      `<strong>${esc(ag.labels[iMax])}</strong> erzeugt <strong>${_fmtDE(100*ag.output[iMax]/total, 0)} %</strong> ` +
+      `der Output-Tokens (${_fmtDE(ag.output[iMax]/1000, 0)} k von ${_fmtDE(total/1000, 0)} k).`);
+  } else { _setInsight('ins-agents', ''); }
+
+  // Trade-off: Wortzahl-Spannweite vs. Notes-Spannweite (deskriptiv)
+  const sc = d.scaling || {};
+  const xs = (sc.points||[]).map(p=>p.x).filter(v=>v>0);
+  const ys = (sc.points||[]).map(p=>p.y).filter(v=>v!=null);
+  if ((sc.points||[]).length >= 3 && xs.length && ys.length) {
+    _setInsight('ins-tradeoff',
+      `${sc.points.length} Runs: PDF-Länge ${_fmtDE(Math.min(...xs)/1000, 0)}–${_fmtDE(Math.max(...xs)/1000, 0)} k Wörter ` +
+      `ergibt ${Math.min(...ys)}–${Math.max(...ys)} Notes pro Run.`);
+  } else { _setInsight('ins-tradeoff', ''); }
+
+  // Kalibrierung: Label-Fortschritt + Agreement
+  const cal = d.calibration || {};
+  if (cal.n_eval > 0) {
+    _setInsight('ins-calib',
+      `<strong>${cal.n_labeled} von ${cal.n_eval}</strong> evaluierten Notes human-gelabelt` +
+      (cal.avg_agree != null ? `, Ø Agreement <strong>${_fmtDE(cal.avg_agree)} %</strong>.` : ` — Agreement noch offen.`));
+  } else { _setInsight('ins-calib', ''); }
+
+  // Vergleich: PDF mit niedrigster Akzeptanz als Bottleneck
+  const tbl = d.pdf_table || [];
+  const withAcc = tbl.filter(r=>r.accept!=null);
+  if (withAcc.length >= 2) {
+    const worst = withAcc.reduce((a,b)=>a.accept<=b.accept?a:b);
+    _setInsight('ins-compare',
+      `Niedrigste Akzeptanz: <strong>${esc(worst.label||worst.key)}</strong> mit <strong>${_fmtDE(worst.accept)} %</strong>` +
+      (worst.n_notes ? ` (${worst.n_notes} evaluierte Notes).` : '.'));
+  } else { _setInsight('ins-compare', ''); }
+}
+
 function _renderWithData(d) {
   if(!d) return; window._lastData=d;
   const t = C();
@@ -1368,6 +1609,13 @@ function _renderWithData(d) {
   if (d.all_models?.length)  _initGlobalModelFilter(d.all_models);
   const sfTime=document.getElementById('sf-time'); if(sfTime) sfTime.textContent=d.generated_at||'–';
   const footTime=document.getElementById('foot-time'); if(footTime) footTime.textContent=d.generated_at||'–';
+  const updated=document.getElementById('updated-at'); if(updated) updated.textContent='aktualisiert '+(d.generated_at||'–').slice(11);
+  // Loading-Skeletons entfernen
+  document.querySelectorAll('.chart-body.loading').forEach(el=>el.classList.remove('loading'));
+  // Globaler Leer-Hinweis: Filter-Kombination ohne evaluierte Notes
+  const banner = document.getElementById('empty-banner');
+  const filtersActive = Object.values(_globalFilters).some(v=>v && v!=='__all__');
+  if (banner) banner.hidden = !(filtersActive && (d.kpis?.n_notes??0)===0 && !(d.scatter?.points||[]).length);
   renderStrip(d.kpis);
   const verLbl = document.getElementById('kpi-ver-label');
   if (verLbl) verLbl.textContent = d.kpis.kpi_version || '–';
@@ -1375,9 +1623,21 @@ function _renderWithData(d) {
   renderTable(d.pdf_table||[], d.thresholds||{accept:[85,65],hall:[5,15],cov:[80,50]});
   renderCharts(d);
   renderCalibration(d.calibration);
+  renderInsights(d);
 }
 
+window.resetAllFilters = function() {
+  _globalFilters = { pver: '__all__', pdf: '__all__', lang: '__all__', model: '__all__' };
+  ['global-pver','global-pdf','global-lang','global-model'].forEach(id => {
+    const sel = document.getElementById(id); if (sel) sel.value = '__all__';
+  });
+  _renderFilterBadges();
+  loadAndRender();
+};
+
+let _loadSeq = 0;
 async function loadAndRender() {
+  const seq = ++_loadSeq;
   try {
     const urlVer=_getEvalVerFromUrl(), verParam=_currentEvalVersion||urlVer||'';
     const p = new URLSearchParams();
@@ -1387,14 +1647,41 @@ async function loadAndRender() {
     if (_globalFilters.pdf   && _globalFilters.pdf   !== '__all__') p.set('pdf',               _globalFilters.pdf);
     if (_globalFilters.pver  && _globalFilters.pver  !== '__all__') p.set('pipeline_version',  _globalFilters.pver);
     const url = '/data.json' + (p.toString() ? '?' + p.toString() : '');
-    _renderWithData(await fetch(url).then(r=>r.json()));
+    const data = await fetch(url).then(r=>r.json());
+    // Antwort eines inzwischen überholten Requests nicht mehr rendern
+    if (seq === _loadSeq) _renderWithData(data);
   } catch(e) { console.warn('Ladefehler:',e); }
 }
 
-/* ── Boot ─────────────────────────────────────────────────────── */
+/* ── Boot (Async-Chart-Init-Pattern) ──────────────────────────── */
+/* Skeleton sofort zeigen, Charts erst nach window.load + doppeltem
+   requestAnimationFrame embedden — sonst rendern sie im CSS-Grid mit
+   collapsible Sidebar bei clientWidth=0 silent leer. */
+function renderSkeleton() {
+  const strip = document.getElementById('strip');
+  if (strip) strip.innerHTML = Array.from({length:8}, () =>
+    `<div class="cell"><div class="skel" style="height:10px;width:60%"></div><div class="skel" style="height:22px;width:45%;margin-top:6px"></div></div>`).join('');
+  const kpis = document.getElementById('kpis');
+  if (kpis) kpis.innerHTML = Array.from({length:7}, () =>
+    `<div class="kpi" style="cursor:default"><div class="skel" style="height:10px;width:70%"></div><div class="skel" style="height:44px;width:55%;margin-top:8px"></div></div>`).join('');
+  document.querySelectorAll('.chart-body').forEach(el=>el.classList.add('loading'));
+}
+function _debounce(fn, ms) {
+  let h; return (...args) => { clearTimeout(h); h = setTimeout(() => fn(...args), ms); };
+}
+const _debouncedRerender = _debounce(() => { if (window._lastData) _renderWithData(window._lastData); }, 200);
+
 _renderFilterBadges();
-loadAndRender();
-setInterval(loadAndRender, 15000);
+renderSkeleton();
+window.addEventListener('load', () => {
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      loadAndRender();
+      setInterval(loadAndRender, 15000);
+      window.addEventListener('resize', _debouncedRerender);
+    });
+  });
+});
 </script>
 </body>
 </html>
