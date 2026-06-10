@@ -68,8 +68,8 @@ def overview_coverage(text: str, concept_titles: list[str]) -> dict:
       exact_phrase  — Konzepte, deren normalisierter Titel als Substring im Overview steht
       missed_strict — in_fulltext-Konzepte mit cov_ov < 1.0 (kippen bei strenger Schwelle)
     """
-    from agents.cross_reference import _tokens
-    from pipeline.pdf_chunker import extract_overview
+    from generative.agents.cross_reference import _tokens
+    from generative.pipeline.pdf_chunker import extract_overview
 
     overview = extract_overview(text)
     overview_tokens = _tokens(overview)
@@ -186,8 +186,8 @@ def main(argv: list[str] | None = None) -> int:
     import sys
     from pathlib import Path
 
-    from config import CHUNK_WORDS
-    from pipeline.pdf_chunker import pdf_to_text
+    from generative.config import CHUNK_WORDS
+    from generative.pipeline.pdf_chunker import pdf_to_text
 
     p = argparse.ArgumentParser(description="Phase-A Chunk-/Planner-Recall-Messung (LLM-frei)")
     p.add_argument("pdf", type=Path, help="Pfad zum Quell-PDF")

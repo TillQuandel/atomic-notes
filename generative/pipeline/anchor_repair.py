@@ -21,7 +21,7 @@ Konservativ:
 from __future__ import annotations
 import re
 
-from pipeline.anchor_patterns import PAGE_ANCHOR_RE as _PAGE_ANCHOR_RE, SENTENCE_SPLIT_RE as _SENTENCE_SPLIT_RE
+from generative.pipeline.anchor_patterns import PAGE_ANCHOR_RE as _PAGE_ANCHOR_RE, SENTENCE_SPLIT_RE as _SENTENCE_SPLIT_RE
 
 _TRAILING_PUNCT_RE = re.compile(r"([.!?]\"?\s*)$")
 MAX_TRAILING_LEN = 240

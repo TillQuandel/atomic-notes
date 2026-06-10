@@ -7,23 +7,20 @@ from pathlib import Path
 import pytest
 
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 
 @pytest.fixture(autouse=True)
 def restore_config_defaults(monkeypatch):
     yield
     monkeypatch.delenv("ATOMIC_AGENT_CALL_TIMEOUT", raising=False)
-    if "config" in sys.modules:
-        importlib.reload(sys.modules["config"])
+    if "generative.config" in sys.modules:
+        importlib.reload(sys.modules["generative.config"])
 
 
 def test_call_timeout_defaults_to_300_seconds(monkeypatch):
     monkeypatch.delenv("ATOMIC_AGENT_CALL_TIMEOUT", raising=False)
 
-    import config
+    from generative import config
 
     importlib.reload(config)
 
@@ -33,7 +30,7 @@ def test_call_timeout_defaults_to_300_seconds(monkeypatch):
 def test_call_timeout_env_override_still_wins(monkeypatch):
     monkeypatch.setenv("ATOMIC_AGENT_CALL_TIMEOUT", "240")
 
-    import config
+    from generative import config
 
     importlib.reload(config)
 

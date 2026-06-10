@@ -5,17 +5,17 @@ import subprocess
 from unittest.mock import MagicMock, patch, AsyncMock
 import pytest
 
-from agents._subscription_backend import call_full as sub_call_full
-from agents._subscription_backend import call_full_async as sub_call_full_async
-from agents._subscription_backend import _to_cli_model
-import agents._subscription_backend as sub_backend
-from agents.base import CallResult
-from runtime_config import load_runtime_config
+from generative.agents._subscription_backend import call_full as sub_call_full
+from generative.agents._subscription_backend import call_full_async as sub_call_full_async
+from generative.agents._subscription_backend import _to_cli_model
+import generative.agents._subscription_backend as sub_backend
+from generative.agents.base import CallResult
+from generative.runtime_config import load_runtime_config
 
 
 @pytest.fixture(autouse=True)
 def clear_base_runtime_config():
-    import agents.base as base_mod
+    import generative.agents.base as base_mod
     base_mod.clear_llm_runtime_config()
     yield
     base_mod.clear_llm_runtime_config()
@@ -299,9 +299,9 @@ async def test_sub_call_full_async_uses_runtime_timeout_args(monkeypatch):
 
 # --- litellm-Backend ---
 
-from agents._litellm_backend import call_full as lit_call_full
-from agents._litellm_backend import call_full_async as lit_call_full_async
-import agents._litellm_backend as lit_backend
+from generative.agents._litellm_backend import call_full as lit_call_full
+from generative.agents._litellm_backend import call_full_async as lit_call_full_async
+import generative.agents._litellm_backend as lit_backend
 
 
 def _make_litellm_response(text: str, in_tok: int = 10, out_tok: int = 5,
@@ -439,11 +439,11 @@ def test_dispatch_subscription_calls_subprocess(monkeypatch, tmp_path):
     monkeypatch.setenv("ATOMIC_AGENT_BACKEND", "subscription")
     # config und base neu laden damit BACKEND-Env-Wert greift
     import importlib
-    import config as cfg_mod
+    from generative import config as cfg_mod
     importlib.reload(cfg_mod)
-    import agents._subscription_backend as sub_mod
+    import generative.agents._subscription_backend as sub_mod
     importlib.reload(sub_mod)
-    import agents.base as base_mod
+    import generative.agents.base as base_mod
     importlib.reload(base_mod)
 
     (tmp_path / ".cache" / "llm").mkdir(parents=True)
@@ -470,11 +470,11 @@ def test_dispatch_subscription_calls_subprocess(monkeypatch, tmp_path):
 def test_dispatch_subscription_uses_runtime_config(monkeypatch, tmp_path):
     monkeypatch.setenv("ATOMIC_AGENT_BACKEND", "subscription")
     import importlib
-    import config as cfg_mod
+    from generative import config as cfg_mod
     importlib.reload(cfg_mod)
-    import agents._subscription_backend as sub_mod
+    import generative.agents._subscription_backend as sub_mod
     importlib.reload(sub_mod)
-    import agents.base as base_mod
+    import generative.agents.base as base_mod
     importlib.reload(base_mod)
 
     (tmp_path / ".cache" / "llm").mkdir(parents=True)
@@ -510,7 +510,7 @@ def test_dispatch_subscription_uses_runtime_config(monkeypatch, tmp_path):
 
 
 def test_base_runtime_config_clear_restores_backend_defaults():
-    import agents.base as base_mod
+    import generative.agents.base as base_mod
 
     runtime_config = load_runtime_config(env={
         "ATOMIC_AGENT_CALL_TIMEOUT": "123",
@@ -530,11 +530,11 @@ def test_base_runtime_config_clear_restores_backend_defaults():
 def test_dispatch_litellm_calls_litellm(monkeypatch, tmp_path):
     monkeypatch.setenv("ATOMIC_AGENT_BACKEND", "litellm")
     import importlib
-    import config as cfg_mod
+    from generative import config as cfg_mod
     importlib.reload(cfg_mod)
-    import agents._litellm_backend as lit_mod
+    import generative.agents._litellm_backend as lit_mod
     importlib.reload(lit_mod)
-    import agents.base as base_mod
+    import generative.agents.base as base_mod
     importlib.reload(base_mod)
 
     (tmp_path / ".cache" / "llm").mkdir(parents=True)

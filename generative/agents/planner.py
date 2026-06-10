@@ -16,11 +16,11 @@ _GENERIC_BLACKLIST: frozenset[str] = frozenset({
     "results", "studies", "issues", "elements",
 })
 
-from agents.base import call_claude
-from agents.cross_reference import _tokens  # Stoppwort-gefilterte Content-Tokens
-from agents.structured_output import parse_planner_output
-from config import MODEL_PLANNER
-from schemas.atomic_note import ConceptPlan, ConceptItem
+from generative.agents.base import call_claude
+from generative.agents.cross_reference import _tokens  # Stoppwort-gefilterte Content-Tokens
+from generative.agents.structured_output import parse_planner_output
+from generative.config import MODEL_PLANNER
+from generative.schemas.atomic_note import ConceptPlan, ConceptItem
 
 _PROMPT = """Du bist ein Wissensmanagement-Assistent, der Atomic Notes in Obsidian anlegt.
 

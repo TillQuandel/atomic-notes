@@ -20,13 +20,13 @@ litellm.success_callback = []
 litellm.failure_callback = []
 litellm._async_success_callback = []  # undokumentierte interne Liste (Gemini-Finding)
 
-from config import CALL_TIMEOUT_SEC
+from generative.config import CALL_TIMEOUT_SEC
 
 _MAX_RETRIES = 2
 
 
 def _parse_response(resp, duration_ms: float):
-    from agents.base import CallResult
+    from generative.agents.base import CallResult
     usage = resp.usage
     # Anthropic: cache_read_input_tokens / cache_creation_input_tokens
     # OpenAI: usage.prompt_tokens_details.cached_tokens (kein creation-Äquivalent)

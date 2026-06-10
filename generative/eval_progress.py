@@ -12,8 +12,7 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-from config import CACHE_DIR
+from generative.config import CACHE_DIR
 
 _HISTORY = CACHE_DIR / "quality_history.jsonl"
 

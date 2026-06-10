@@ -3,9 +3,10 @@
 atomic-agent — Multi-Agenten-Pipeline: Quelle → Atomic Notes im Vault.
 
 Usage:
-    python orchestrator.py --source path/to/file.pdf
-    python orchestrator.py --source path/to/file.pdf --dry-run
-    python orchestrator.py --source path/to/file.pdf --doi 10.1234/xyz
+    atomic-notes run --source path/to/file.pdf
+    atomic-notes run --source path/to/file.pdf --dry-run
+    atomic-notes run --source path/to/file.pdf --doi 10.1234/xyz
+    (äquivalent: python -m generative.orchestrator …)
 
 Ablauf:
     1. Input-Pipeline: PDF → Text → Chunks
@@ -44,17 +45,14 @@ def _span(name: str, **attrs):
             span.set_attribute(k, str(v))
         yield span
 
-# Pfad damit relative Imports funktionieren
-sys.path.insert(0, str(Path(__file__).parent))
-
 # Windows-Terminal-Codepage ignoriert PYTHONIOENCODING für bestimmte Print-Pfade
 sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 
-from agents import context_builder, quality, planner, extractor, background_extractor, verifier, cross_reference, confidence, critic, canonicalizer
-from pipeline import pdf_chunker, vault_writer, embeddings, acronym_fix, anchor_repair, boilerplate_dedup, figure_alt
-from schemas.atomic_note import AtomicNoteDraft, ConceptPlan
-from config import (
+from generative.agents import context_builder, quality, planner, extractor, background_extractor, verifier, cross_reference, confidence, critic, canonicalizer
+from generative.pipeline import pdf_chunker, vault_writer, embeddings, acronym_fix, anchor_repair, boilerplate_dedup, figure_alt
+from generative.schemas.atomic_note import AtomicNoteDraft, ConceptPlan
+from generative.config import (
     AGENT_VERSION,
     CRITIC_AUTO_THRESHOLD,
     ER_BODY_COSINE_THRESHOLD,
@@ -71,7 +69,7 @@ from config import (
     MAX_CHUNKS_SHORT_DOC,
     MAX_PAGES_SHORT_DOC,
 )
-from runtime_config import (
+from generative.runtime_config import (
     load_runtime_config, cap_actionable_concepts, count_actionable,
     RunBudget, refine_accepted, should_attempt_refine, LEGACY,
 )
@@ -155,10 +153,10 @@ async def run_extractors_per_concept(full_text: str, concept_plan: ConceptPlan,
         # Search-Terms: Konzept-Titel + ggf. Aliase aus Title (Kuhlthau, ISP, …)
         search_terms = [c.title]
         # Heuristisch: Tokens des Titels die nicht Stoppwörter sind
-        from agents.cross_reference import _tokens
+        from generative.agents.cross_reference import _tokens
         search_terms.extend(t for t in _tokens(c.title) if len(t) >= 4)
         # Fenster sammeln
-        from pipeline.pdf_chunker import concept_text_window
+        from generative.pipeline.pdf_chunker import concept_text_window
         # window_words=400 = neue Option-D-Semantik (Fenster-Größe für Sliding-Window-Scoring),
         # nicht mehr ±expansion wie vor 2026-05-17.
         ctext = concept_text_window(full_text, search_terms, window_words=400)
@@ -244,7 +242,7 @@ async def _llm_dedup_batch(pairs: list[tuple[int, int]],
         + "\n\nYour answer:"
     )
 
-    from agents.base import call_claude_async
+    from generative.agents.base import call_claude_async
     try:
         result = await call_claude_async(prompt, model=MODEL_LLM_DEDUP)
         raw = result.text if hasattr(result, "text") else str(result)
@@ -311,7 +309,7 @@ async def entity_resolution(drafts: list[AtomicNoteDraft]) -> list[AtomicNoteDra
     Token-effizient: 1 LLM-Call pro Cluster statt N. Debugbar: jede Stage loggt
     eigene Trace-Zeile.
     """
-    from agents.cross_reference import _tokens
+    from generative.agents.cross_reference import _tokens
     n = len(drafts)
     if n <= 1:
         return drafts
@@ -473,7 +471,7 @@ def _run_note_pipeline_guarded(i, n_total, draft, *args, _run_meta=None, **kwarg
     Thread, in dem der Call-Record gesetzt wurde — einen vollständigen Crash-Payload.
     Gibt (i, draft) bei Erfolg oder _Stage6Failure(i, payload) bei Crash zurück.
     """
-    from agents.base import get_last_call_record, clear_last_call_record
+    from generative.agents.base import get_last_call_record, clear_last_call_record
     clear_last_call_record()
     _STAGE6_PHASE.value = "initial"
     try:
@@ -498,7 +496,7 @@ def _collect_stage6_results(results, failed_dir: Path):
     """Trennt Stage-6-Ergebnisse: erfolgreiche Drafts (idx-sortiert) vs. Crashes.
     Schreibt pro Crash einen JSON-Report nach failed_dir. Gibt (survived, crashes).
     """
-    from pipeline.crash_report import write_crash_report
+    from generative.pipeline.crash_report import write_crash_report
     survived_by_idx: dict[int, AtomicNoteDraft] = {}
     crashes: list[_Stage6Failure] = []
     for res in results:
@@ -737,8 +735,8 @@ async def process_all_notes_async(
                 outgoing.add(tgt_path)
         all_run_concept_links[sib_path] = outgoing
 
-    from agents.base import _RUN_ID
-    from config import CACHE_DIR, BACKEND
+    from generative.agents.base import _RUN_ID
+    from generative.config import CACHE_DIR, BACKEND
     if failed_dir is None:
         failed_dir = CACHE_DIR / "failed" / _RUN_ID
     run_meta = {"run_id": _RUN_ID, "pdf": source_path.name, "backend": BACKEND}
@@ -924,7 +922,7 @@ def _auto_version_bump() -> None:
             encoding="utf-8",
         )
         # AGENT_VERSION im laufenden Prozess aktualisieren
-        import config as _cfg
+        from generative import config as _cfg
         _cfg.AGENT_VERSION = new_ver
         print(f"  [version] Code geändert → {new_ver}")
     else:
@@ -974,7 +972,7 @@ def _setup_phoenix_tracing() -> None:
         _TRACER = trace.get_tracer("atomic-agent")
         # LLM-Call-Instrumentierung in base.py explizit aktivieren (nur hier, nur
         # bei aktivem Tracing — kein impliziter Proxy-Tracer).
-        from agents.base import set_llm_tracer
+        from generative.agents.base import set_llm_tracer
         set_llm_tracer(_TRACER)
         import atexit
         atexit.register(lambda: _PROVIDER and _PROVIDER.force_flush())
@@ -992,8 +990,8 @@ def _run_extraction_stages(args, source_path: Path, runtime_config=None):  # mai
          source_path, tag_whitelist, background_map, fb_year,
          dropped_total, word_count)
     """
-    from agents.base import trace_run_start as _trace_run_start
-    from config import MODEL_CONFIG as _MODEL_CONFIG
+    from generative.agents.base import trace_run_start as _trace_run_start
+    from generative.config import MODEL_CONFIG as _MODEL_CONFIG
     _trace_run_start(_MODEL_CONFIG)
 
     # --- Schritt 1: PDF → Text + Metadata → Chunks ---
@@ -1035,7 +1033,7 @@ def _run_extraction_stages(args, source_path: Path, runtime_config=None):  # mai
     if not (_has_author and _has_year):
         print("[0/7] PDF-Enrichment — keine Metadaten im Dateinamen erkannt…")
         try:
-            from tools.pdf_enrich import enrich as _enrich, build_filename as _build_fn
+            from generative.tools.pdf_enrich import enrich as _enrich, build_filename as _build_fn
             _enrich_meta = _enrich(source_path, dry_run=args.dry_run,
                                    llm_fallback=getattr(args, "llm_fallback", False))
             if _enrich_meta and not source_path.exists():
@@ -1232,8 +1230,8 @@ def _save_draft_state(path: str, *, drafts: list, concept_map: dict,
 
 
 def _load_draft_state(path: str):
-    from schemas.atomic_note import AtomicNoteDraft, TextAnchor, QualityReport, ConceptItem
-    from pipeline.pdf_chunker import Chunk
+    from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor, QualityReport, ConceptItem
+    from generative.pipeline.pdf_chunker import Chunk
     state = json.loads(Path(path).read_text(encoding="utf-8"))
 
     def _to_draft(d: dict) -> AtomicNoteDraft:
@@ -1257,7 +1255,7 @@ def _load_draft_state(path: str):
     )
 
 
-def main():
+def main(argv: list[str] | None = None):
     ap = argparse.ArgumentParser(description="Atomic Note Multi-Agent Pipeline")
     ap.add_argument("--source", default=None, help="Pfad zur PDF-Datei")
     ap.add_argument("--doi", default=None, help="DOI für Qualitäts-Check (optional)")
@@ -1290,7 +1288,7 @@ def main():
     ap.add_argument("--inbox-dir", default=None, metavar="PATH",
                     help="Zielordner statt 00-inbox/ (wird erstellt falls nicht vorhanden). "
                          "Nützlich für A/B-Vergleiche: --inbox-dir 00-inbox/ab-llm/")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     if not args.source and not args.load_drafts:
         ap.error("--source ist erforderlich (außer mit --load-drafts)")
 
@@ -1299,7 +1297,7 @@ def main():
     _auto_version_bump()
 
     runtime_config = load_runtime_config()
-    from agents.base import set_llm_runtime_config
+    from generative.agents.base import set_llm_runtime_config
     set_llm_runtime_config(runtime_config)
     refine_budget = RunBudget(max_refines_per_run=runtime_config.refine.max_refines_per_run)
     print(
@@ -1312,19 +1310,19 @@ def main():
     )
 
     if getattr(args, "fresh_run", False):
-        from agents.base import set_cache_namespace
-        from agents.tracing import _RUN_ID
+        from generative.agents.base import set_cache_namespace
+        from generative.agents.tracing import _RUN_ID
         set_cache_namespace(_RUN_ID)
         print(f"  [cache] --fresh-run: Namespace={_RUN_ID} (kein Hit aus alten Runs)")
 
     if getattr(args, "no_llm", False):
-        import config as _cfg
+        from generative import config as _cfg
         _cfg.ENABLE_LLM = False  # Modul-Attribut mutieren — sichtbar für alle Agents
         print("[no-llm] Stage-6-Agents im FOSS-Modus (Verifier/CrossRef/Critic ohne LLM)")
 
     import time as _time
     _run_start = _time.time()
-    from agents.base import trace_event as _trace_event
+    from generative.agents.base import trace_event as _trace_event
 
     if args.load_drafts:
         (drafts, concept_map, existing_concepts, concept_links,
@@ -1388,7 +1386,7 @@ def main():
     # weil sein existing_concepts der Vault-Index VOR dem Run ist — Stage-Notes sind
     # dort nicht. Modell-Übersichten (z.B. ADKAR-Modell mit Mentions zu seinen 5 Stages)
     # bleiben sonst fälschlich als atomic. Siehe pipeline/cross_draft_hub.py.
-    from pipeline import cross_draft_hub
+    from generative.pipeline import cross_draft_hub
     hub_resolved = cross_draft_hub.resolve(drafts)
     if hub_resolved:
         print(f"      [hub-resolution] {hub_resolved} Draft(s) als MoC erkannt (Cross-Mentions)")
@@ -1491,7 +1489,7 @@ def main():
         "inbox": inbox_count,
         "vault_rate": round(vault_count / written, 3) if written > 0 else 0.0,
     })
-    from agents.tracing import flush_tracing as _flush_tracing
+    from generative.agents.tracing import flush_tracing as _flush_tracing
     _flush_tracing()
 
     # Token + Laufzeit-Summary (Pipeline Stages 1–7) — immer gedruckt (auch dry-run).
@@ -1499,8 +1497,8 @@ def main():
     # Re-Aggregation am Run-Ende dazu (sonst unsichtbar — siehe Reporting-Quirk).
     _wall_s_early = round(_time.time() - _run_start, 1)
     try:
-        from agents.base import _RUN_ID, _RUN_DIR
-        import eval_agent_stats as _eas
+        from generative.agents.base import _RUN_ID, _RUN_DIR
+        from generative import eval_agent_stats as _eas
         _trace_path = _RUN_DIR / f"{_RUN_ID}.jsonl"
         _pipe = _eas.run_totals(_trace_path)
         print(f"   -> Zeit:   {_wall_s_early}s")
@@ -1518,14 +1516,14 @@ def main():
         return
     print(f"\n[8/8] Qualitäts-Eval…")
     try:
-        import eval_quality_v4 as _eq
-        from config import CACHE_DIR as _CACHE_DIR
+        from generative import eval_quality_v4 as _eq
+        from generative.config import CACHE_DIR as _CACHE_DIR
         # Dry-Run: Notes im Cache-Verzeichnis; Live: im Vault (00-inbox oder 04-wissen)
         if args.dry_run:
             cache_note_dir = _CACHE_DIR / "eval" / "baseline" / source_path.stem
             note_files = dry_run_eval_targets(written_targets, cache_note_dir)
         else:
-            from config import INBOX, WISSEN
+            from generative.config import INBOX, WISSEN
             note_files = []
             _eval_search_dirs = ([_inbox_dir] if _inbox_dir else []) + [INBOX, WISSEN]
             for d in drafts:
@@ -1539,8 +1537,8 @@ def main():
         # Pipeline-Tokens/Kosten (Stages 1–7, vor Eval) für run_meta + DB.
         # Charakterisiert die Note-Generierung; der Stage-8-Eval-Overhead wird
         # bewusst NICHT in run_meta/DB attribuiert, nur am Run-Ende geprintet.
-        import eval_agent_stats as _eas
-        from agents.base import _RUN_ID, _RUN_DIR
+        from generative import eval_agent_stats as _eas
+        from generative.agents.base import _RUN_ID, _RUN_DIR
         _trace_path = _RUN_DIR / f"{_RUN_ID}.jsonl"
         _wall_s = round(_time.time() - _run_start, 1)
         _pre = _eas.run_totals(_trace_path)
@@ -1560,8 +1558,9 @@ def main():
 
         # DB: pipeline_run persistieren
         try:
-            from agents.base import _RUN_ID as _db_run_id
-            import db as _db
+            from generative.agents.base import _RUN_ID as _db_run_id
+            from generative import config as _db_cfg
+            from generative import db as _db
             with _db.get_db() as _conn:
                 _db.insert_run(_conn, {
                     "run_id":           _db_run_id,
@@ -1575,7 +1574,7 @@ def main():
                     "n_merge":          sum(1 for d in drafts if getattr(d, "action", "") == "extend"),
                     "n_dropped":        dropped_total,
                     "n_words":          word_count,
-                    "model":            getattr(__import__("config"), "MODEL_PLANNER", ""),
+                    "model":            getattr(_db_cfg, "MODEL_PLANNER", ""),
                     "cost_usd":         _cost_usd,
                     "tokens_total":     _tok_total,
                     "tokens_input":     _tok_in,

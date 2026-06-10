@@ -9,11 +9,8 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-from agents import quality
+from generative.agents import quality
 
 
 def _fake_crossref(update_types: list[str] | None = None, ctype: str = "journal-article") -> dict:

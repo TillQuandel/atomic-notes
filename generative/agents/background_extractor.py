@@ -13,9 +13,9 @@ from __future__ import annotations
 import re
 import sys
 
-from agents.base import call_claude
-from schemas.atomic_note import ConceptPlan
-from config import MODEL_HAIKU
+from generative.agents.base import call_claude
+from generative.schemas.atomic_note import ConceptPlan
+from generative.config import MODEL_HAIKU
 
 # Max Claims pro Konzept — mehr als 4 wird selten benötigt und erhöht Token-Kosten
 _MAX_CLAIMS = 4

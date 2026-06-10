@@ -4,11 +4,11 @@ import re
 
 from rapidfuzz import fuzz
 
-from agents.base import call_claude, trace_event
-from agents.structured_output import parse_verifier_output
-import config as _config
-from config import MODEL_VERIFIER, SEMANTIC_PREPASS_THRESHOLD
-from schemas.atomic_note import AtomicNoteDraft, TextAnchor
+from generative.agents.base import call_claude, trace_event
+from generative.agents.structured_output import parse_verifier_output
+from generative import config as _config
+from generative.config import MODEL_VERIFIER, SEMANTIC_PREPASS_THRESHOLD
+from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor
 
 FUZZY_THRESHOLD = 85
 # Pre-Pass vor LLM-Call: hoch-konfidente deterministische Auflösung. Cutoff 98 (statt
@@ -16,7 +16,7 @@ FUZZY_THRESHOLD = 85
 # matchen sonst trivial. Cross-Model-Konsens Codex/Gemini 2026-05-11.
 FUZZY_PREPASS_THRESHOLD = 98
 MIN_QUOTE_LEN_FOR_PREPASS = 30
-from pipeline.anchor_patterns import PAGE_MARKER_RE, PAGE_ANCHOR_NUMS_RE as _NEAR_PAGE_RE
+from generative.pipeline.anchor_patterns import PAGE_MARKER_RE, PAGE_ANCHOR_NUMS_RE as _NEAR_PAGE_RE
 
 # Hebel #3: Body-Anker-Sync. Direktzitate im Body stehen typischerweise als
 # „..." gefolgt von einer Seitenangabe `(S. N)`. Opening: U+201E (vom Extractor
@@ -338,10 +338,10 @@ def _build_page_sections(chunk_text: str) -> list[tuple[str, list[str]]] | None:
     In Tests bleibt _MODEL=None → kein 3s-Download im Unit-Test.
     """
     try:
-        from pipeline import embeddings as _emb_mod
+        from generative.pipeline import embeddings as _emb_mod
         if _emb_mod._MODEL is None:
             return None  # Modell nicht geladen → Tier-3 überspringen
-        from pipeline.embeddings import _sentences as _split_sents, _model
+        from generative.pipeline.embeddings import _sentences as _split_sents, _model
         model = _model()
     except Exception:
         return None
@@ -378,7 +378,7 @@ def _semantic_find_page(quote: str, chunk_text: str,
         return None
 
     try:
-        from pipeline.embeddings import embed_title
+        from generative.pipeline.embeddings import embed_title
         page_sections = cached_sections or _build_page_sections(chunk_text)
     except Exception:
         return None

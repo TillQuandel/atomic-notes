@@ -14,14 +14,11 @@ import sqlite3
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-import db
-from calibration import collect
-from calibration import kappa
-from config import AGENT_VERSION
+from generative import db
+from generative.calibration import collect
+from generative.calibration import kappa
+from generative.config import AGENT_VERSION
 
 
 def _write_label_file(notes_dir: Path, name: str, rows: list[tuple[int, str]]) -> None:

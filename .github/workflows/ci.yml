@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Poppler installieren (Linux)
+        if: runner.os == 'Linux'
+        run: sudo apt-get update && sudo apt-get install -y poppler-utils
+
+      - name: Poppler installieren (Windows)
+        if: runner.os == 'Windows'
+        run: choco install poppler -y --no-progress
+
+      - name: Paket installieren (editable + dev)
+        run: python -m pip install -e ".[dev]"
+
+      # Nicht `pdftotext -v` direkt: Xpdf-basierte Windows-Builds exiten dabei non-zero
+      - name: pdftotext-Smoke-Test
+        run: python -c "import shutil, sys; p = shutil.which('pdftotext'); print(p); sys.exit(0 if p else 1)"
+
+      - name: Packaging-Smoke-Test (Importe, Entry-Point, Package-Data)
+        run: |
+          python -c "import generative, extractive, shared, decision_engine"
+          python -c "import importlib.resources as r; assert r.files('generative').joinpath('tag_registry.yml').is_file()"
+          atomic-notes --help
+
+      # Kanonische Suite (LLM-frei). extractive- und decision_engine-Tests
+      # laufen hier bewusst noch nicht: decision_engine hat vorbestehende
+      # Failures (342, unabhaengig vom Packaging, Stand 2026-06-10),
+      # extractive braucht den schweren GLiNER-Stack ([extractive]-Extra).
+      - name: Tests
+        run: python -m pytest generative -q

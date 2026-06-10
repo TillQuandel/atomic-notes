@@ -30,8 +30,7 @@ import subprocess
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent))
-from config import LITERATURE_DIR as _LIT  # noqa: E402
+from generative.config import LITERATURE_DIR as _LIT  # noqa: E402
 
 BASELINE_PDFS = {
     "bates":    _LIT / "Bates - 2017 - Information Behavior.pdf",

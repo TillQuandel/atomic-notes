@@ -5,8 +5,8 @@ import urllib.parse
 import urllib.request
 from typing import Optional
 
-from config import USER_AGENT
-from schemas.atomic_note import QualityReport
+from generative.config import USER_AGENT
+from generative.schemas.atomic_note import QualityReport
 
 
 def _http_json(url: str, timeout: int = 10) -> Optional[dict]:

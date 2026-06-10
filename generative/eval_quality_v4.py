@@ -20,8 +20,6 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-sys.path.insert(0, str(Path(__file__).parent))
-sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "lib"))
 
 try:
     import fitz  # PyMuPDF
@@ -33,15 +31,15 @@ try:
 except ImportError:
     sys.exit("rapidfuzz fehlt: pip install rapidfuzz")
 
-from agents import base
-from config import AGENT_VERSION, CACHE_DIR, EVAL_ADAPTIVE_K_HIGH, EVAL_ADAPTIVE_K_MID, MODEL_OPUS, MODEL_CONFIG, QUALITY_HISTORY
+from generative.agents import base
+from generative.config import AGENT_VERSION, CACHE_DIR, EVAL_ADAPTIVE_K_HIGH, EVAL_ADAPTIVE_K_MID, MODEL_OPUS, MODEL_CONFIG, QUALITY_HISTORY
 from decision_engine import ClaimDecision, ClaimInput, DEFAULT_CONFIG, Label, determine_decision
 from decision_engine.aggregation import aggregate as aggregate_decisions
 from decision_engine.models import QualityFlag
-from eval_quality import _extract_page_text, _normalize, wilson_ci
-from eval_quality_v2 import TOP_K, Chunk, _detect_language_pair, _expand_context, _read_note_body
-from eval_quality_v2 import build_chunks, extract_claims
-from pipeline.embeddings import _model, cosine
+from generative.eval_quality import _extract_page_text, _normalize, wilson_ci
+from generative.eval_quality_v2 import TOP_K, Chunk, _detect_language_pair, _expand_context, _read_note_body
+from generative.eval_quality_v2 import build_chunks, extract_claims
+from generative.pipeline.embeddings import _model, cosine
 
 _QUALITY_HISTORY = QUALITY_HISTORY  # SSoT: config.QUALITY_HISTORY; Alias für bestehende Importer (run.py, adversarial.py)
 EVAL_VERSION = "4.1"
@@ -697,8 +695,8 @@ def save_result(result: dict) -> None:
 
     # DB: note_eval persistieren
     try:
-        import db as _db
-        from agents.base import _RUN_ID as _run_id
+        from generative import db as _db
+        from generative.agents.base import _RUN_ID as _run_id
         note_name = result.get("note", "")
         eval_id = f"{_run_id}__{note_name}"
         with _db.get_db() as _conn:

@@ -9,11 +9,8 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-from pipeline.pdf_chunker import drop_frontmatter_pages, page_range_of_text, concept_text_window
+from generative.pipeline.pdf_chunker import drop_frontmatter_pages, page_range_of_text, concept_text_window
 
 
 # ---- drop_frontmatter_pages ---------------------------------------------

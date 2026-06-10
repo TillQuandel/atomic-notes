@@ -8,12 +8,9 @@ import sys
 from pathlib import Path
 from unittest.mock import patch
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
-from agents import verifier
-from schemas.atomic_note import AtomicNoteDraft, TextAnchor
+from generative.agents import verifier
+from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor
 
 
 def _draft(anchors: list[TextAnchor]) -> AtomicNoteDraft:

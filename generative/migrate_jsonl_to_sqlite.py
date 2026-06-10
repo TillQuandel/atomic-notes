@@ -13,8 +13,7 @@ import json
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
-import db
+from generative import db
 
 QUALITY_HISTORY = Path(__file__).parent / ".cache" / "quality_history.jsonl"
 RUNS_DIR        = Path(__file__).parent / ".cache" / "runs"

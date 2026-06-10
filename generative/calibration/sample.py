@@ -16,14 +16,13 @@ from collections import defaultdict
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-sys.path.insert(0, str(ROOT))
 
-from eval_quality_v2 import _detect_language_pair, _read_note_body  # noqa: E402
-from pipeline.pdf_chunker import pdf_to_text  # noqa: E402
+from generative.eval_quality_v2 import _detect_language_pair, _read_note_body  # noqa: E402
+from generative.pipeline.pdf_chunker import pdf_to_text  # noqa: E402
 
 BASELINE = ROOT / ".cache" / "eval" / "baseline"
 CALIB = ROOT / ".cache" / "eval" / "calibration"
-from config import LITERATURE_DIR as _LIT  # noqa: E402
+from generative.config import LITERATURE_DIR as _LIT  # noqa: E402
 LITERATUR_DIRS = [_LIT]
 SAMPLE_PER_PAIR = 15
 TARGET_PAIRS = ("DE→DE", "EN→DE")  # EN→EN aktuell leer (Vault primär deutsch)

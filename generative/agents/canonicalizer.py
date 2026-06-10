@@ -10,10 +10,10 @@ Anker-Listen werden konkateniert (deterministisch, kein LLM-Schreiben), nur
 der Body-Text geht durch den LLM-Merge.
 """
 from __future__ import annotations
-from agents.base import call_claude_async
-from agents.structured_output import parse_canonicalizer_output
-from config import MODEL_CANONICALIZER
-from schemas.atomic_note import AtomicNoteDraft, TextAnchor
+from generative.agents.base import call_claude_async
+from generative.agents.structured_output import parse_canonicalizer_output
+from generative.config import MODEL_CANONICALIZER
+from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor
 
 _PROMPT = """Du erhältst {n} Konzept-Note-Varianten zum SELBEN Konzept aus DERSELBEN Quelle.
 Sie sind durch Embedding-Cluster als inhaltlich äquivalent erkannt worden.

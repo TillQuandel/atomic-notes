@@ -15,10 +15,9 @@ import re
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent))
 
-from eval_quality import eval_note, save_result, print_summary
-from config import AGENT_VERSION
+from generative.eval_quality import eval_note, save_result, print_summary
+from generative.config import AGENT_VERSION
 
 BASELINE_DIR = Path(__file__).parent / ".cache" / "eval" / "baseline"
 

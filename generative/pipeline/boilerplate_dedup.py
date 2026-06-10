@@ -12,7 +12,7 @@ Hub-Draft am Ende des Bodys angehängt. Deterministisch, keine LLM-Calls.
 from __future__ import annotations
 import re
 
-from schemas.atomic_note import AtomicNoteDraft
+from generative.schemas.atomic_note import AtomicNoteDraft
 
 # Anzahl Sub-Drafts in denen ein Satz vorkommen muss, um als Boilerplate zu gelten.
 # 2 = ein einziges Duplikat reicht. Konservativ: 3 vermeidet False-Positives bei

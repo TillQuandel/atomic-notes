@@ -8,7 +8,7 @@ Tabellen:
   note_evals    — ein Eintrag pro eval_quality_v4.py-Evaluierung
 
 Verwendung:
-  from db import get_db, insert_run, insert_eval
+  from generative.db import get_db, insert_run, insert_eval
 
   with get_db() as conn:
       insert_run(conn, {...})
@@ -22,7 +22,6 @@ from contextlib import contextmanager
 from datetime import datetime
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from shared.db_schema import SCHEMA_SQL as _SCHEMA
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]

@@ -11,13 +11,10 @@ from __future__ import annotations
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-if str(ROOT) not in sys.path:
-    sys.path.insert(0, str(ROOT))
 
 import pytest
 
-from eval_chunk_recall import straddle_stats, overview_coverage, _label_concept
+from generative.eval_chunk_recall import straddle_stats, overview_coverage, _label_concept
 
 
 # ---- straddle_stats: Boundary-Loss ohne Overlap ----------------------------

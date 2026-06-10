@@ -101,7 +101,7 @@ def run_totals(trace_path: Path) -> dict:
     LLM-Call-Entries haben kein 'type'-Feld (base._trace()-Format); strukturierte
     Events (run_start, score_result, …) tragen eines und werden übersprungen.
     """
-    from config import compute_cost_per_call
+    from generative.config import compute_cost_per_call
 
     ti = to = tcr = tcc = 0
     cost = 0.0
