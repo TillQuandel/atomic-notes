@@ -285,8 +285,17 @@ def _calc_kpis(
     latest_pver = all_pvers[-1] if all_pvers else None
     latest_qrows = [r for r in quality_rows if (r.get("version") or r.get("pipeline_version")) == latest_pver] if latest_pver else quality_rows
 
-    accept_rates = [_median(vm[_latest_version(vm)]) for vm in log_data.values() if vm]
-    avg_accept   = round(statistics.mean(accept_rates), 1) if accept_rates else None
+    all_versions = sorted({r["ver"] for r in all_log_runs if r.get("ver")}, key=_ver_sort_key)
+
+    # Akzeptanz auf derselben Stichproben-Basis wie Fehlerquote/Belegrate
+    # (neueste Pipeline-Version, gepoolt) — vorher mischte der Mittelwert
+    # über die jeweils letzte Version JEDES PDFs alte und neue Versionen
+    # unter der Überschrift "Qualität — <neueste Version>".
+    accept_ver       = latest_pver or (all_versions[-1] if all_versions else None)
+    accept_runs      = [r for r in all_log_runs if r.get("ver") == accept_ver]
+    accept_generated = sum(r["n_total"] for r in accept_runs)
+    avg_accept = (round(sum(r["n_vault"] for r in accept_runs) / accept_generated * 100, 1)
+                  if accept_generated else None)
 
     hall_rates = [r["hallucination_rate"] for r in latest_qrows
                   if "hallucination_rate" in r and r["hallucination_rate"] >= 0]
@@ -295,8 +304,6 @@ def _calc_kpis(
     cov_vals = [v for r in latest_qrows
                 if (v := r.get("coverage_factual") or r.get("coverage_rate")) is not None and v >= 0]
     avg_cov  = round(_median(cov_vals) * 100, 1) if cov_vals else None
-
-    all_versions    = sorted({r["ver"] for r in all_log_runs}, key=_ver_sort_key)
     total_generated = sum(r["n_total"] for r in all_log_runs)
     total_accepted  = sum(r["n_vault"] for r in all_log_runs)
     total_merged    = sum(r.get("n_merge", 0) for r in all_log_runs)
@@ -311,6 +318,7 @@ def _calc_kpis(
         "avg_accept":      avg_accept,
         "avg_hall":        avg_hall,
         "avg_cov":         avg_cov,
+        "kpi_accept_n":    accept_generated,
         "kpi_version":     latest_pver,
         "n_notes":         len(latest_qrows),
         "total_runs":      len(all_log_runs),

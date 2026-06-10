@@ -548,6 +548,11 @@ table.cmp td.dim { color: var(--ink-3); }
         <option value="__all__">Alle</option>
       </select>
     </div>
+    <div class="filter-group">
+      <span class="filter-label">Eval</span>
+      <select class="fselect" id="eval-ver-select" onchange="onEvalVerChange()"></select>
+    </div>
+    <span class="eval-ver-warn" id="eval-ver-warn" title="Eval-Versionen haben unterschiedliche Skalen — Werte nur innerhalb einer Version vergleichen">Skalen nicht vergleichbar</span>
 <div class="updated" style="margin-left:auto"><span class="udot"></span><span id="updated-at">lädt…</span></div>
   </div>
   <div class="filter-badges" id="filter-badges"></div>
@@ -1007,7 +1012,8 @@ function _initEvalVerDropdown(available, selected) {
   sel.innerHTML = available.map(v=>`<option value="${v}"${v===selected?' selected':''}>${v}</option>`).join('');
   _currentEvalVersion = selected;
   const warn = document.getElementById('eval-ver-warn');
-  if (warn) warn.style.display = available.length > 1 ? '' : 'none';
+  // Klassen-Default ist display:none — '' fiele darauf zurück, explizit setzen
+  if (warn) warn.style.display = available.length > 1 ? 'inline-block' : 'none';
   const pill = document.getElementById('sf-ev-pill');
   if (pill) pill.textContent = selected || '–';
 }
@@ -1051,9 +1057,9 @@ function renderKpis(kpis, thresh, kpiTrend) {
 
   const nNotes = kpis?.n_notes ?? null;
   document.getElementById('kpis').innerHTML = kpiDefs.map((kd, i) => {
-    // Akzeptanzrate kommt aus Log-Runs (Stichprobe = generierte Notes),
-    // nicht aus evaluierten Notes — eigene n-Basis, sonst irreführend.
-    const nBase = kd.key === 'accept' ? (kpis?.total_generated ?? null) : nNotes;
+    // Akzeptanzrate kommt aus Log-Runs (Stichprobe = generierte Notes der
+    // KPI-Version), nicht aus evaluierten Notes — eigene n-Basis.
+    const nBase = kd.key === 'accept' ? (kpis?.kpi_accept_n ?? null) : nNotes;
     const showN = nBase != null && ['hall','cov','accept'].includes(kd.key);
     const nWarn = showN && nBase < 20;
     const nTag = showN
