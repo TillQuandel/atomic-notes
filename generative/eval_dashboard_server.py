@@ -35,7 +35,21 @@ _AGENT_LABELS = {
     "verifier":        "Verifier",
     "cross_reference": "Cross-Ref",
     "critic":          "Critic",
+    "eval":            "Eval",
 }
+
+
+def _canonical_agent(name: str) -> str | None:
+    """Trace-Agent-Name → Anzeige-Agent; None = nicht als Agent zählen.
+
+    Stage-8-Eval-Judges (eval_quality_*) sind keine Pipeline-Agenten —
+    sie werden wie in _live_run_data unter "eval" zusammengefasst.
+    """
+    if not name or name in ("unknown", "?", "orchestrator"):
+        return None
+    if name.startswith("eval_quality"):
+        return "eval"
+    return name
 
 def _read_agent_stats(allowed_run_ids: set | None = None) -> dict:
     """Aggregiert Token- und Dauer-Statistiken je Agent aus runs/*.jsonl.
@@ -76,8 +90,8 @@ def _read_agent_stats(allowed_run_ids: set | None = None) -> dict:
                 continue
             try:
                 r = json.loads(line)
-                a = r.get("agent", "")
-                if not a or a in ("unknown", "?", "orchestrator"):
+                a = _canonical_agent(r.get("agent", ""))
+                if a is None:
                     continue
                 stats[a]["calls"]   += 1
                 stats[a]["input"]   += r.get("input_tokens", 0) or 0
@@ -132,40 +146,46 @@ def _avg_agreement(rows: list[dict]) -> float | None:
     return round(sum(vals) / len(vals), 1)
 
 
-def _read_calibration_data(allowed_note_paths: set | None = None) -> dict:
-    """Liest Kalibrierungs-Stand: LLM-Eval (v4.1) vs. Human-Labels."""
+def _read_calibration_data(allowed_note_paths: set | None = None,
+                           eval_version: str = "4.1") -> dict:
+    """Liest Kalibrierungs-Stand: LLM-Eval vs. Human-Labels."""
     try:
         from generative import db as _db
         import sqlite3
         conn = sqlite3.connect(str(_db.DB_PATH))
         conn.row_factory = sqlite3.Row
 
-        # Alle v4.1-evaluierten Notes
+        # Alle evaluierten Notes — ORDER BY timestamp: bei Mehrfach-Evals
+        # derselben Note gewinnt deterministisch die neueste Zeile.
         evaluated = {
             r["note_path"]: {
                 "llm_hall": round(r["hallucination_rate"] * 100, 1) if r["hallucination_rate"] is not None and r["hallucination_rate"] >= 0 else None,
-                "llm_cov":  round((r["coverage_factual"] or 0) * 100, 1) if (r["coverage_factual"] or 0) >= 0 else None,
+                "llm_cov":  round(r["coverage_factual"] * 100, 1) if r["coverage_factual"] is not None and r["coverage_factual"] >= 0 else None,
                 "pdf":      r["pdf"],
             }
             for r in conn.execute(
                 "SELECT note_path, hallucination_rate, coverage_factual, pdf "
-                "FROM note_evals WHERE eval_version='4.1'"
+                "FROM note_evals WHERE eval_version=? ORDER BY timestamp",
+                (eval_version,),
             ).fetchall()
         }
 
-        # Human-Labels (nach collect.py)
+        # Human-Labels (nach collect.py) — llm_hall_rate ist die zum
+        # Label-Zeitpunkt gehoerende LLM-Rate (korrektes Vergleichspaar).
         labeled = {
             r["note_path"]: {
                 "human_hall":   round(r["human_hall_rate"] * 100, 1) if r["human_hall_rate"] is not None else None,
+                "llm_hall":     round(r["llm_hall_rate"] * 100, 1)   if r["llm_hall_rate"]   is not None else None,
                 "agreement":    round(r["agreement_rate"] * 100, 1)  if r["agreement_rate"]  is not None else None,
                 "n_claims":     r["n_claims"],
                 "n_supported":  r["n_supported"],
                 "n_hallucinated": r["n_hallucinated"],
             }
             for r in conn.execute(
-                "SELECT note_path, human_hall_rate, agreement_rate, "
+                "SELECT note_path, human_hall_rate, llm_hall_rate, agreement_rate, "
                 "n_claims, n_supported, n_hallucinated "
-                "FROM calibration_labels WHERE eval_version='4.1'"
+                "FROM calibration_labels WHERE eval_version=?",
+                (eval_version,),
             ).fetchall()
         }
         conn.close()
@@ -176,10 +196,13 @@ def _read_calibration_data(allowed_note_paths: set | None = None) -> dict:
                 continue
             lab = labeled.get(note, {})
             status = "labeled" if note in labeled else "evaluated"
+            # Gelabelte Notes: llm_hall aus dem Label-Paar, nicht aus der
+            # (womoeglich anderen) letzten note_evals-Zeile.
+            llm_hall = lab.get("llm_hall") if status == "labeled" else ev.get("llm_hall")
             rows.append({
                 "note":       note.replace("vault__", "").replace(".md", ""),
                 "pdf":        ev.get("pdf", ""),
-                "llm_hall":   ev.get("llm_hall"),
+                "llm_hall":   llm_hall,
                 "llm_cov":    ev.get("llm_cov"),
                 "human_hall": lab.get("human_hall"),
                 "agreement":  lab.get("agreement"),
@@ -187,8 +210,10 @@ def _read_calibration_data(allowed_note_paths: set | None = None) -> dict:
                 "status":     status,
             })
 
-        n_eval    = len(evaluated)
-        n_labeled = len(labeled)
+        # Zaehler aus den gefilterten rows — sonst zeigt der Strip die
+        # Gesamtmenge, waehrend die Tabelle gefiltert ist.
+        n_eval    = len(rows)
+        n_labeled = sum(1 for r in rows if r["status"] == "labeled")
         avg_agree = _avg_agreement(rows)
 
         return {
@@ -513,7 +538,8 @@ def build_data(eval_version: str | None = None,
                                ),
         "calibration":         _read_calibration_data(
                                    allowed_note_paths={r.get("note_path") or r.get("note") for r in quality_rows}
-                                   if (pdf or language or model) else None
+                                   if (pdf or language or model or pipeline_version) else None,
+                                   eval_version=eval_version or "4.1",
                                ),
         "pdf_meta":            {k: v for k, v in D._PDF_META.items()},
         "thresholds": {
@@ -882,98 +908,17 @@ _HTML_TEMPLATE_PATH = Path(__file__).parent.parent / "internal" / "dashboard" / 
 
 
 def _build_live_html() -> str:
-    src_path = _HTML_TEMPLATE_PATH
-    html = src_path.read_text(encoding="utf-8")
+    """Liest das Dashboard-HTML und setzt den Port in den Footer ein.
 
-    # 1) <script src="data.js"></script> entfernen
-    html = html.replace('<script src="data.js"></script>\n', '')
-    html = html.replace('<script src="data.js"></script>', '')
-
-    # 2) Mock-Boot-Block ersetzen (if/else am Ende, NICHT _transformMockData)
-    old_boot = (
-        '/* ── Boot ─────────────────────────────────────────────────────── */\n'
-        'if (typeof MOCK_DATA !== \'undefined\') {\n'
-        '  _renderWithData(_transformMockData(MOCK_DATA));\n'
-        '} else {\n'
-        '  loadAndRender();\n'
-        '  setInterval(loadAndRender, 15000);\n'
-        '}'
-    )
-    new_boot = 'loadAndRender(); setInterval(loadAndRender, 15000);'
-    html = html.replace(old_boot, new_boot)
-
-    # 2b) onGlobalFilterChange: MOCK_DATA-Branch → nur loadAndRender()
-    html = html.replace(
-        '  if (typeof MOCK_DATA !== \'undefined\') {\n'
-        '    _renderWithData(_transformMockData(MOCK_DATA, _currentEvalVersion, _globalFilters));\n'
-        '  } else {\n'
-        '    loadAndRender();\n'
-        '  }',
-        '  loadAndRender();'
-    )
-
-    # 2c) onEvalVerChange: MOCK_DATA ternary → loadAndRender()
-    html = html.replace(
-        '  typeof MOCK_DATA !== \'undefined\' ? _renderWithData(_transformMockData(MOCK_DATA, _currentEvalVersion)) : loadAndRender();',
-        '  loadAndRender();'
-    )
-
-    # 3) localhost im Footer → localhost:__PORT__
+    Das HTML ist live-only (laedt via fetch('/data.json')); der fruehere
+    Mock-Pfad (data.js/MOCK_DATA) wurde 2026-06-10 entfernt — ebenso die
+    String-Replace-Patches hier, die teils laengst ins Leere liefen.
+    """
+    html = _HTML_TEMPLATE_PATH.read_text(encoding="utf-8")
     html = html.replace(
         '<span>atomic agent <span class="sep">·</span> pipeline eval <span class="sep">·</span> localhost</span>',
         '<span>atomic agent <span class="sep">·</span> pipeline eval <span class="sep">·</span> localhost:__PORT__</span>'
     )
-
-    # 4) spark-row.open border-top: var(--amber) → var(--spark-border-color, var(--hair-strong))
-    html = html.replace(
-        '  border-top-color: var(--amber);',
-        '  border-top-color: var(--spark-border-color, var(--hair-strong));'
-    )
-
-    # 5) In _openKpiSpark beim Öffnen die CSS-Variable --spark-border-color auf Tone-Farbe setzen
-    old_open_new = (
-        '    // Neu öffnen\n'
-        '    _openKpiIdx = idx;\n'
-        '    if (_kpiData) renderKpis(_kpiData.kpis, _kpiData.thresh, _kpiData.kpiTrend);\n'
-        '    requestAnimationFrame(() => { if (row) row.classList.add(\'open\'); });'
-    )
-    new_open_new = (
-        '    // Neu öffnen\n'
-        '    _openKpiIdx = idx;\n'
-        '    if (_kpiData) renderKpis(_kpiData.kpis, _kpiData.thresh, _kpiData.kpiTrend);\n'
-        '    requestAnimationFrame(() => {\n'
-        '      if (row) {\n'
-        '        const tone = (kpiDefs[idx]||{}).tone || \'neutral\';\n'
-        '        const toneMap = {bad:\'var(--coral)\',good:\'var(--mint)\',warn:\'var(--amber)\',info:\'var(--teal)\',neutral:\'var(--hair-strong)\'};\n'
-        '        row.style.setProperty(\'--spark-border-color\', toneMap[tone] || \'var(--hair-strong)\');\n'
-        '        row.classList.add(\'open\');\n'
-        '      }\n'
-        '    });'
-    )
-    html = html.replace(old_open_new, new_open_new)
-
-    # Wechsel-Branch: auch dort --spark-border-color setzen
-    old_open_switch = (
-        '    inner.classList.add(\'switching\');\n'
-        '    setTimeout(() => {\n'
-        '      _openKpiIdx = idx;\n'
-        '      if (_kpiData) renderKpis(_kpiData.kpis, _kpiData.thresh, _kpiData.kpiTrend);\n'
-        '      inner.classList.remove(\'switching\');\n'
-        '    }, 110);'
-    )
-    new_open_switch = (
-        '    inner.classList.add(\'switching\');\n'
-        '    setTimeout(() => {\n'
-        '      _openKpiIdx = idx;\n'
-        '      if (_kpiData) renderKpis(_kpiData.kpis, _kpiData.thresh, _kpiData.kpiTrend);\n'
-        '      inner.classList.remove(\'switching\');\n'
-        '      const tone2 = (kpiDefs[idx]||{}).tone || \'neutral\';\n'
-        '      const toneMap2 = {bad:\'var(--coral)\',good:\'var(--mint)\',warn:\'var(--amber)\',info:\'var(--teal)\',neutral:\'var(--hair-strong)\'};\n'
-        '      if (row) row.style.setProperty(\'--spark-border-color\', toneMap2[tone2] || \'var(--hair-strong)\');\n'
-        '    }, 110);'
-    )
-    html = html.replace(old_open_switch, new_open_switch)
-
     return html.replace('__PORT__', str(PORT))
 
 
