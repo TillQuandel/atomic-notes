@@ -294,7 +294,10 @@ def _calc_kpis(
     accept_ver       = latest_pver or (all_versions[-1] if all_versions else None)
     accept_runs      = [r for r in all_log_runs if r.get("ver") == accept_ver]
     accept_generated = sum(r["n_total"] for r in accept_runs)
-    avg_accept = (round(sum(r["n_vault"] for r in accept_runs) / accept_generated * 100, 1)
+    # Vault-Notes der KPI-Version (nicht alle Vault-Notes) — Basis fuer den
+    # Eval-Coverage-Hinweis: der Eval bewertet nur Vault-Notes.
+    accept_vault     = sum(r["n_vault"] for r in accept_runs)
+    avg_accept = (round(accept_vault / accept_generated * 100, 1)
                   if accept_generated else None)
 
     hall_rates = [r["hallucination_rate"] for r in latest_qrows
@@ -319,6 +322,10 @@ def _calc_kpis(
         "avg_hall":        avg_hall,
         "avg_cov":         avg_cov,
         "kpi_accept_n":    accept_generated,
+        "kpi_vault_n":     accept_vault,
+        # Version-Basis von Akzeptanz/Vault-Zahl — kann von kpi_version
+        # abweichen, wenn (noch) keine Eval-Rows zur neuesten Version existieren
+        "kpi_accept_ver":  accept_ver,
         "kpi_version":     latest_pver,
         "n_notes":         len(latest_qrows),
         "total_runs":      len(all_log_runs),
