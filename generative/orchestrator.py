@@ -3,9 +3,10 @@
 atomic-agent — Multi-Agenten-Pipeline: Quelle → Atomic Notes im Vault.
 
 Usage:
-    python orchestrator.py --source path/to/file.pdf
-    python orchestrator.py --source path/to/file.pdf --dry-run
-    python orchestrator.py --source path/to/file.pdf --doi 10.1234/xyz
+    atomic-notes run --source path/to/file.pdf
+    atomic-notes run --source path/to/file.pdf --dry-run
+    atomic-notes run --source path/to/file.pdf --doi 10.1234/xyz
+    (äquivalent: python -m generative.orchestrator …)
 
 Ablauf:
     1. Input-Pipeline: PDF → Text → Chunks
@@ -1254,7 +1255,7 @@ def _load_draft_state(path: str):
     )
 
 
-def main():
+def main(argv: list[str] | None = None):
     ap = argparse.ArgumentParser(description="Atomic Note Multi-Agent Pipeline")
     ap.add_argument("--source", default=None, help="Pfad zur PDF-Datei")
     ap.add_argument("--doi", default=None, help="DOI für Qualitäts-Check (optional)")
@@ -1287,7 +1288,7 @@ def main():
     ap.add_argument("--inbox-dir", default=None, metavar="PATH",
                     help="Zielordner statt 00-inbox/ (wird erstellt falls nicht vorhanden). "
                          "Nützlich für A/B-Vergleiche: --inbox-dir 00-inbox/ab-llm/")
-    args = ap.parse_args()
+    args = ap.parse_args(argv)
     if not args.source and not args.load_drafts:
         ap.error("--source ist erforderlich (außer mit --load-drafts)")
 

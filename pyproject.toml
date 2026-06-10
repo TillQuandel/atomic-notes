@@ -37,6 +37,9 @@ dev = [
     "pytest-asyncio>=0.23",
 ]
 
+[project.scripts]
+atomic-notes = "generative.cli:main"
+
 [tool.setuptools]
 packages = [
     "generative",
