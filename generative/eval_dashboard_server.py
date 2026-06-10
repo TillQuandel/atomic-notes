@@ -473,15 +473,21 @@ def build_data(eval_version: str | None = None,
         d2["median_cov"]  = _safe_median(d2["cov"])
 
     # Trend-Daten fuer KPI-Drill-Down (sortierte Listen parallel zu sorted_pipeline_versions)
-    # Akzeptanzrate je Pipeline-Version (aus Log-Runs)
-    accept_by_ver: dict[str, list[float]] = {}
+    # Akzeptanzrate je Pipeline-Version: gepoolt (sum vault / sum total) —
+    # gleiche Metrik-Definition wie die KPI-Kachel in _calc_kpis, sonst
+    # zeigen Kachel und Sparkline verschiedene Werte.
+    accept_pairs_by_ver: dict[str, list[tuple[int, int]]] = {}
     for r in all_log_runs:
         ver = r.get("ver") or "?"
-        accept_by_ver.setdefault(ver, [])
-        total = r.get("n_total", 0)
-        vault = r.get("n_vault", 0)
-        if total > 0:
-            accept_by_ver[ver].append(round(vault / total * 100, 1))
+        accept_pairs_by_ver.setdefault(ver, []).append(
+            (r.get("n_vault", 0) or 0, r.get("n_total", 0) or 0))
+
+    def _pooled_accept(ver: str) -> float | None:
+        pairs = accept_pairs_by_ver.get(ver)
+        if not pairs:
+            return None
+        total = sum(t for _, t in pairs)
+        return round(sum(v for v, _ in pairs) / total * 100, 1) if total else None
 
     # Laufzeit + Tokens je Pipeline-Version (aus Token-Runs)
     dur_by_ver:  dict[str, list[float]] = {}
@@ -506,7 +512,7 @@ def build_data(eval_version: str | None = None,
         "hall":     [quality_by_version[v].get("median_hall") for v in sorted_pipeline_versions],
         "cov":      [quality_by_version[v].get("median_cov")  for v in sorted_pipeline_versions],
         "n":        [quality_by_version[v]["n"]               for v in sorted_pipeline_versions],
-        "accept":   [round(sum(accept_by_ver.get(v,[])) / len(accept_by_ver[v]), 1) if accept_by_ver.get(v) else None for v in sorted_pipeline_versions],
+        "accept":   [_pooled_accept(v) for v in sorted_pipeline_versions],
         "dur":      [round(sum(dur_by_ver.get(v,[])) / len(dur_by_ver[v]), 1) if dur_by_ver.get(v) else None for v in sorted_pipeline_versions],
         "tokens":   [round(sum(tok_by_ver.get(v,[])) / 1000, 1) if tok_by_ver.get(v) else None for v in sorted_pipeline_versions],  # in M-Tokens
         "cost":     [round(sum(cost_by_ver.get(v, [])), 4) if cost_by_ver.get(v) else None for v in sorted_pipeline_versions],
