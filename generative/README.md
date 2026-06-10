@@ -19,6 +19,7 @@ It is the high-quality path for turning PDFs and later other rich sources into s
 pip install -e .   # from the repository root
 cp .env.example .env
 # Edit .env for local paths and model/backend settings.
+atomic-notes doctor   # preflight: poppler, backend login, vault path
 atomic-notes run --source "path/to/paper.pdf" --dry-run
 ```
 
@@ -38,6 +39,11 @@ atomic-notes run --source "path/to/paper.pdf" --dry-run
 
 Model IDs are configured once in litellm format (e.g. `anthropic/claude-sonnet-4-6`);
 the subscription backend maps them to CLI shorthands internally.
+
+Failure behavior: if the `claude` CLI is missing, not logged in, or the rate window
+is exhausted (429), the pipeline fails fast with an actionable message (install/login
+hint, window reset, litellm alternative) instead of retrying or dumping a traceback.
+`atomic-notes doctor` checks the full setup up front.
 
 Obsidian output is currently the best-tested target, but the pipeline should not be treated as Obsidian-specific long term.
 

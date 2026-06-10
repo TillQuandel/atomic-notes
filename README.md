@@ -16,14 +16,16 @@ PDF input and Obsidian-style Markdown are the first supported path, not the whol
 
 **generative v0.3.136** · **extractive v0.2.0** · last updated: 2026-06-10
 
-413 tests passing. An independent multi-rater project assessment (2026-06-10) and the
-resulting roadmap live in `internal/docs/` — see `2026-06-10-projekt-bewertung.md`
-and `m1-installierbarkeit-plan.md`.
+433 tests passing (CI: ubuntu + windows). An independent multi-rater project assessment
+(2026-06-10) and the resulting roadmap live in `internal/docs/` — see
+`2026-06-10-projekt-bewertung.md` and `m1-installierbarkeit-plan.md`.
 
 ## Roadmap
 
-1. **M1 — installable by strangers**: packaging (`pyproject.toml`, entry points), CI,
-   preflight `doctor`, quickstart docs. Plan: `internal/docs/m1-installierbarkeit-plan.md`.
+1. **M1 — installable by strangers**: packaging (`pyproject.toml`, entry point,
+   PR #31) and preflight `doctor` + hardened backend error paths are done; CI runs
+   on ubuntu + windows. Remaining: quickstart walkthrough + bundled example (S3).
+   Plan: `internal/docs/m1-installierbarkeit-plan.md`.
 2. **M2 — trustworthy output**: gold-standard coverage measurement, threshold
    calibration, PDF text-quality gate + OCR fallback, a small reproducible benchmark.
 3. **M3 — staying power**: configurable note conventions beyond Obsidian, REST/API
@@ -54,6 +56,7 @@ Anthropic, OpenAI, Ollama, …) is available via `ATOMIC_AGENT_BACKEND=litellm`.
 
 ```bash
 pip install -e .
+atomic-notes doctor
 atomic-notes run --source <pdf> --dry-run
 atomic-notes run --source <pdf>
 ```

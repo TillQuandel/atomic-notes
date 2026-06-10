@@ -26,7 +26,7 @@ kann die Pipeline ohne API-Key nutzen:
 
 ## Arbeitspakete
 
-### S1 — Packaging + CI (eine fokussierte Session, KEINE Parallel-Agenten)
+### S1 — Packaging + CI ✅ erledigt 2026-06-10 (PR #31, CI grün ubuntu+windows)
 
 Begründung: ändert Imports global (Monorepo: `shared/` auf Root wird von `generative/`
 via sys.path-Hack importiert; `extractive/` parallel; Tests inserten Pfade selbst).
@@ -49,7 +49,11 @@ Parallel-Agenten würden auf derselben Fläche kollidieren.
 **Akzeptanz S1:** frische venv → `pip install -e .` → volle Suite grün ohne
 sys.path-Manipulation; Actions-Lauf grün auf ubuntu.
 
-### S2 — Preflight (`doctor`) + Backend-Fehlerpfade
+### S2 — Preflight (`doctor`) + Backend-Fehlerpfade ✅ erledigt 2026-06-10
+
+Umsetzung: `generative/doctor.py` (pure Checks, TDD), Fast-Fail mit Handlungsanleitung
+im Subscription-Backend (CLI fehlt / Login / 429), Rate-Limit-Doku in generative/README.
+Login-Check ist eine Heuristik (`~/.claude/.credentials.json` vorhanden).
 
 - `atomic-notes doctor`: prüft pdftotext/pdfinfo im PATH, Backend erreichbar
   (subscription: CLI vorhanden + eingeloggt; litellm: Key gesetzt), Vault-/Output-Pfad
