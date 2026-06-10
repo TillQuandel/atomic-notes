@@ -1,5 +1,7 @@
 ﻿# atomic-notes
 
+[![CI](https://github.com/TillQuandel/atomic-notes/actions/workflows/ci.yml/badge.svg)](https://github.com/TillQuandel/atomic-notes/actions/workflows/ci.yml)
+
 Atomic Notes transforms rich sources into verified atomic knowledge units.
 
 The current implementation starts with PDFs, but the project is meant to be input- and output-independent: source adapters normalize different media into a common source representation, pipelines create atomic notes, and renderers/exporters decide where those notes go.
@@ -51,9 +53,9 @@ Anthropic, OpenAI, Ollama, …) is available via `ATOMIC_AGENT_BACKEND=litellm`.
 `generative/README.md` for details and limits.
 
 ```bash
-cd generative
-python orchestrator.py --source <pdf> --dry-run
-python orchestrator.py --source <pdf>
+pip install -e .
+atomic-notes run --source <pdf> --dry-run
+atomic-notes run --source <pdf>
 ```
 
 ### Extractive
