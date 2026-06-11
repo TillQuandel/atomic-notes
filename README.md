@@ -20,11 +20,72 @@ PDF input and Obsidian-style Markdown are the first supported path, not the whol
 (2026-06-10) and the resulting roadmap live in `internal/docs/` — see
 `2026-06-10-projekt-bewertung.md` and `m1-installierbarkeit-plan.md`.
 
+## Quickstart
+
+All commands below assume you are in the repository root after cloning — the
+example file and `.env` paths are repo-relative, not part of an installed wheel.
+
+### 1. Install
+
+```bash
+git clone https://github.com/TillQuandel/atomic-notes.git
+cd atomic-notes
+pip install -e .
+```
+
+**poppler-utils** (required for PDF text extraction via `pdftotext`):
+
+| Platform | Command |
+|----------|---------|
+| Ubuntu/Debian | `sudo apt install poppler-utils` |
+| macOS | `brew install poppler` |
+| Windows | `choco install poppler` or `scoop install poppler` |
+
+### 2. Configure backend
+
+The default backend drives the **Claude Code CLI** — no API key needed. Install
+the CLI and log in once:
+
+```bash
+npm install -g @anthropic-ai/claude-code   # or follow the official install docs
+claude login
+```
+
+For an API-based backend (Anthropic, OpenAI, Ollama, …) set
+`ATOMIC_AGENT_BACKEND=litellm` and add a provider key. See
+`generative/README.md` for full backend documentation.
+
+Copy the example env file and fill in your paths:
+
+```bash
+cp generative/.env.example generative/.env
+# edit generative/.env: set ATOMIC_AGENT_VAULT_PATH to your Obsidian vault
+```
+
+Generated notes land in the Obsidian vault directory configured via
+`ATOMIC_AGENT_VAULT_PATH` in `generative/.env`.
+
+### 3. Preflight check
+
+```bash
+atomic-notes doctor
+```
+
+### 4. Run on the bundled example
+
+```bash
+# dry run — shows what would be generated without writing any files
+atomic-notes run --source examples/zettelkasten-primer.pdf --dry-run
+
+# full run — writes atomic notes to your configured vault
+atomic-notes run --source examples/zettelkasten-primer.pdf
+```
+
 ## Roadmap
 
-1. **M1 — installable by strangers**: packaging (`pyproject.toml`, entry point,
-   PR #31) and preflight `doctor` + hardened backend error paths are done; CI runs
-   on ubuntu + windows. Remaining: quickstart walkthrough + bundled example (S3).
+1. **M1 — installable by strangers**: packaging, entry point, preflight `doctor`,
+   hardened backend error paths, CI on ubuntu + windows, quickstart walkthrough,
+   and bundled example are all done. M1 complete.
    Plan: `internal/docs/m1-installierbarkeit-plan.md`.
 2. **M2 — trustworthy output**: gold-standard coverage measurement, threshold
    calibration, PDF text-quality gate + OCR fallback, a small reproducible benchmark.
