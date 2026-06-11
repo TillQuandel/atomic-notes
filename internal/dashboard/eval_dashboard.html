@@ -380,6 +380,14 @@ table.cmp td.dim { color: var(--ink-3); }
 .acc-bar .pct { font-weight: 600; }
 .good-t { color: var(--mint); } .bad-t { color: var(--coral); } .warn-t { color: var(--amber); }
 
+/* ── Kalibrierungs-Tabelle: Mehr-anzeigen-Toggle ───────────────── */
+.calib-more {
+  padding: 5px 14px; border: 1px solid var(--hair-strong); border-radius: 3px;
+  font-family: var(--f-mono); font-size: 11px; color: var(--ink-3);
+  transition: color .15s, border-color .15s;
+}
+.calib-more:hover { color: var(--ink-1); border-color: var(--amber); }
+
 /* ── Eval-Coverage-Gap unter den KPIs ──────────────────────────── */
 .kpi-gap[hidden] { display: none; }
 .kpi-gap {
@@ -996,6 +1004,7 @@ window._clearFilter = function(key) {
   const idMap = { pver: 'global-pver', pdf: 'global-pdf', lang: 'global-lang', model: 'global-model' };
   const sel = document.getElementById(idMap[key]);
   if (sel) sel.value = '__all__';
+  _calibShowAll = false;
   _renderFilterBadges();
   loadAndRender();
 };
@@ -1009,6 +1018,9 @@ function onGlobalFilterChange() {
   _globalFilters.pdf   = selPdf   ? selPdf.value   : '__all__';
   _globalFilters.lang  = selLang  ? selLang.value  : '__all__';
   _globalFilters.model = selModel ? selModel.value : '__all__';
+  // Tabellen-Toggle nur bei Filter-AKTIONEN zurücksetzen (nicht beim
+  // 15s-Refresh-Render — der würde die Nutzer-Wahl alle 15s verwerfen)
+  _calibShowAll = false;
   _renderFilterBadges();
   loadAndRender();
 }
@@ -1038,6 +1050,7 @@ function _setEvalVerInUrl(ver) { const u = new URL(window.location.href); u.sear
 function onEvalVerChange() {
   const sel = document.getElementById('eval-ver-select'); if (!sel) return;
   _currentEvalVersion = sel.value; _setEvalVerInUrl(_currentEvalVersion);
+  _calibShowAll = false;
   loadAndRender();
 }
 function _initEvalVerDropdown(available, selected) {
@@ -1337,39 +1350,47 @@ function renderCharts(d) {
   const T = d.thresholds;
   const t = C();
 
-  // ch1 — Acceptance bar (nur Einträge mit >0 Notes, Labels auf 18 Zeichen gekürzt)
+  // ch1 — Acceptance: Horizontal-Bar (Spec-Chart-Typen-Matrix: Raten pro
+  // Kategorie horizontal — Wert-Labels rechts am Balken überlappen nie,
+  // anders als vertikale 100%-Labels bei 13+ PDFs). Höhe wächst mit n.
   if (d.accept?.labels?.length) {
     const nMap = d.pdf_table ? Object.fromEntries(d.pdf_table.map(r=>[r.label||r.key, r.n_notes])) : {};
     const rawPairs = d.accept.labels.map((l,i)=>({l, v:d.accept.values[i]}))
-      .filter(p => p.v > 0 || (nMap[p.l] && nMap[p.l] > 0));
-    const truncLabel = (l) => l.length > 18 ? l.slice(0,16)+'…' : l;
+      .filter(p => p.v != null && (p.v > 0 || (nMap[p.l] && nMap[p.l] > 0)))
+      .sort((a,b)=>b.v-a.v);
+    const truncLabel = (l) => l.length > 22 ? l.slice(0,20)+'…' : l;
     const ax1 = document.getElementById('ax1');
     if (ax1) ax1.textContent = `in % · N=${rawPairs.reduce((s,p)=>s+(nMap[p.l]||0),0)} Notes`;
+    const ch1Body = document.getElementById('ch1')?.closest('.chart-body');
+    if (ch1Body) ch1Body.style.height = Math.max(280, rawPairs.length*26+50) + 'px';
     getOrCreate('ch1', {
       type:'bar',
       data:{
         labels: rawPairs.map(p=>`${truncLabel(p.l)}${nMap[p.l]?' (n='+nMap[p.l]+')':''}`),
         datasets:[{data:rawPairs.map(p=>p.v),
           backgroundColor:rawPairs.map(p=>p.v>=T.accept[0]?t.mint+'bb':p.v>=T.accept[1]?t.amber+'bb':t.coral+'bb'),
-          borderWidth:0, borderRadius:2, barPercentage:.55, categoryPercentage:.85}]
+          borderWidth:0, borderRadius:2, barPercentage:.7, categoryPercentage:.85}]
       },
-      options:{maintainAspectRatio:false,responsive:true,animation:{duration:500,easing:'easeOutQuart'},
-        clip:false,layout:{padding:{top:22}},
-        plugins:{tooltip:{callbacks:{label:ctx=>`${ctx.parsed.y.toFixed(1)} % akzeptiert`}}},
-        scales:{x:axisCfg({grid:{display:false},ticks:{color:t.ink3,font:{size:11}}}),
-          y:axisCfg({beginAtZero:true,max:100,ticks:{callback:v=>v+' %',stepSize:25}})}},
-      plugins:[{id:'top',afterDatasetsDraw(chart){
-        const {ctx,chartArea}=chart; ctx.save(); ctx.font='600 11px "IBM Plex Sans"'; ctx.textAlign='center';
-        ctx.beginPath(); ctx.rect(0,0,chart.width,chart.height); ctx.clip();
+      options:{indexAxis:'y',maintainAspectRatio:false,responsive:true,animation:{duration:500,easing:'easeOutQuart'},
+        layout:{padding:{right:52}},
+        plugins:{tooltip:{callbacks:{label:ctx=>`${ctx.parsed.x.toFixed(1)} % akzeptiert`}}},
+        scales:{x:axisCfg({beginAtZero:true,max:100,ticks:{callback:v=>v+' %',stepSize:25}}),
+          y:axisCfg({grid:{display:false},ticks:{color:t.ink3,font:{size:10.5},autoSkip:false}})}},
+      plugins:[{id:'vals',afterDatasetsDraw(chart){
+        const {ctx}=chart; ctx.save(); ctx.font='600 10.5px "IBM Plex Sans"'; ctx.textAlign='left'; ctx.textBaseline='middle';
         chart.getDatasetMeta(0).data.forEach((bar,i)=>{
           const val=rawPairs[i]?.v??0; const col=val>=T.accept[0]?t.mint:val>=T.accept[1]?t.amber:t.coral;
-          ctx.fillStyle=col; ctx.fillText(val.toFixed(1)+' %',bar.x,Math.max(bar.y-6,12));
+          ctx.fillStyle=col; ctx.fillText(val.toFixed(1)+' %', bar.x+6, bar.y);
         }); ctx.restore();
       }}]
     });
   } else {
     setChartEmpty('ch1');
     const ax1=document.getElementById('ax1'); if(ax1) ax1.textContent='in %';
+    // Höhe zurücksetzen — sonst bleibt die dynamische Höhe des vorherigen
+    // (vollen) Datensatzes am leeren Container stehen
+    const ch1Body = document.getElementById('ch1')?.closest('.chart-body');
+    if (ch1Body) ch1Body.style.height = '';
   }
 
   // ch2 — Scatter
@@ -1403,28 +1424,49 @@ function renderCharts(d) {
     const l3=document.getElementById('leg3'); if(l3) l3.innerHTML='';
   }
 
-  // ch4 — Akzeptanzrate über Versionen (zeigt alle, hebt aktive hervor)
+  // ch4 — Akzeptanzrate über Versionen. Bei >3 PDFs ist der Per-PDF-Overlay
+  // ein unlesbarer Spaghetti-Plot (Spec: ab n≥4 aggregieren) — dann eine
+  // Median-Linie über die PDFs; Einzel-Linien via PDF-Filter.
   if (d.long?.versions?.length) {
     const t2 = C();
-    // Server-Farben auf die konsolidierte Encoding-Ramp mappen — Fallback-
-    // Farben aus Python (violet/mint/slate) verletzen die 3-Hue-Palette.
-    const _KNOWN = ['#e07a5f', '#5bbfbf', '#e8b53b'];
-    const _encFor = (ds, i) => _KNOWN.includes((ds.color||'').toLowerCase())
-      ? t2.enc[_KNOWN.indexOf(ds.color.toLowerCase())] : t2.enc[i % t2.enc.length];
-    const longColors = d.long.datasets.map((ds, i) => _encFor(ds, i));
-    getOrCreate('ch4',{type:'line',
-      data:{labels:d.long.versions, datasets:d.long.datasets.map((ds,i)=>{
-        const col=longColors[i];
+    const SPAGHETTI_LIMIT = 3;
+    let datasets, legendItems;
+    if (d.long.datasets.length > SPAGHETTI_LIMIT) {
+      const med = d.long.versions.map((_, vi) => {
+        const vals = d.long.datasets.map(ds => ds.data[vi]).filter(v => v != null);
+        return vals.length ? Math.round(_median(vals.sort((a,b)=>a-b)) * 10) / 10 : null;
+      });
+      const nPdf = d.long.versions.map((_, vi) =>
+        d.long.datasets.filter(ds => ds.data[vi] != null).length);
+      datasets = [{label:'Median über PDFs', data:med, _n:nPdf,
+        borderColor:t2.teal, backgroundColor:t2.teal+'18',
+        pointBackgroundColor:t2.card, pointBorderColor:t2.teal, pointBorderWidth:2,
+        pointRadius:3.5, pointHoverRadius:7, borderWidth:2, tension:.3, spanGaps:true, fill:true}];
+      legendItems = [{c:t2.teal, l:`Median über ${d.long.datasets.length} PDFs — Einzel-Linien per PDF-Filter`}];
+    } else {
+      // Server-Farben auf die konsolidierte Encoding-Ramp mappen — Fallback-
+      // Farben aus Python (violet/mint/slate) verletzen die 3-Hue-Palette.
+      const _KNOWN = ['#e07a5f', '#5bbfbf', '#e8b53b'];
+      const _encFor = (ds, i) => _KNOWN.includes((ds.color||'').toLowerCase())
+        ? t2.enc[_KNOWN.indexOf(ds.color.toLowerCase())] : t2.enc[i % t2.enc.length];
+      datasets = d.long.datasets.map((ds,i)=>{
+        const col=_encFor(ds,i);
         return{label:ds.label,data:ds.data,borderColor:col,backgroundColor:col,
           pointBackgroundColor:t2.card,pointBorderColor:col,pointBorderWidth:2,
           pointRadius:4,pointHoverRadius:7,borderWidth:2,tension:.35,spanGaps:true};
-      })},
+      });
+      legendItems = datasets.map(ds=>({c:ds.borderColor, l:ds.label}));
+    }
+    getOrCreate('ch4',{type:'line',
+      data:{labels:d.long.versions, datasets},
       options:{maintainAspectRatio:false,responsive:true,animation:{duration:300},
-        plugins:{legend:legendCfg(),tooltip:{callbacks:{label:ctx=>`${ctx.dataset.label}: ${ctx.raw} %`}}},
-        scales:{x:axisCfg({ticks:{maxRotation:45}}),
+        plugins:{legend:legendCfg(),tooltip:{callbacks:{label:ctx=>{
+          const n=ctx.dataset._n?.[ctx.dataIndex];
+          return `${ctx.dataset.label}: ${ctx.raw} %${n?` · ${n} PDFs`:''}`;}}}},
+        scales:{x:axisCfg({ticks:{maxRotation:45,autoSkip:true,maxTicksLimit:20}}),
           y:axisCfg({beginAtZero:true,max:100,ticks:{callback:v=>v+' %',stepSize:25}})}}});
     const l4=document.getElementById('leg4');
-    if(l4) l4.innerHTML=d.long.datasets.map((ds,i)=>`<span><span class="dot" style="background:${longColors[i]}"></span>${ds.label}</span>`).join('');
+    if(l4) l4.innerHTML=legendItems.map(it=>`<span><span class="dot" style="background:${it.c}"></span>${_escHTML(it.l)}</span>`).join('');
   } else {
     setChartEmpty('ch4');
     const l4=document.getElementById('leg4'); if(l4) l4.innerHTML='';
@@ -1525,14 +1567,38 @@ function _resolveDrawer(points) {
 function renderScatter(scat, T) {
   const t = C();
   const pdfList=scat.pdfs||[];
-  // Kein lokaler Filter — globale Filter-Bar steuert die Daten
-  const buildDS=()=>pdfList.map((p,i)=>({
-    label:p.label,
-    data:scat.points.filter(pt=>pt.pdf===p.raw),
-    backgroundColor:t.enc[i%t.enc.length]+'cc',
-    borderColor:t.enc[i%t.enc.length],
-    borderWidth:1,pointRadius:6,pointHoverRadius:9
-  }));
+  // Kein lokaler Filter — globale Filter-Bar steuert die Daten.
+  // Bei vielen PDFs sind 6 Farben für 30 Kategorien Falschinformation
+  // (Kollisionen suggerieren Gruppen): Top-5 nach Punktzahl farbig,
+  // Rest als graues "Weitere" — Zuordnung steht in Tooltip + Drawer.
+  const MAX_COLORED = 5;
+  const buildDS = () => {
+    if (pdfList.length <= t.enc.length) {
+      return pdfList.map((p,i)=>({
+        label:p.label,
+        data:scat.points.filter(pt=>pt.pdf===p.raw),
+        backgroundColor:t.enc[i%t.enc.length]+'cc',
+        borderColor:t.enc[i%t.enc.length],
+        borderWidth:1,pointRadius:6,pointHoverRadius:9
+      }));
+    }
+    const counts = {};
+    scat.points.forEach(p => counts[p.pdf] = (counts[p.pdf]||0)+1);
+    const top = [...pdfList].sort((a,b)=>(counts[b.raw]||0)-(counts[a.raw]||0)).slice(0, MAX_COLORED);
+    const topSet = new Set(top.map(p=>p.raw));
+    const rest = pdfList.length - top.length;
+    return top.map((p,i)=>({
+      label:p.label,
+      data:scat.points.filter(pt=>pt.pdf===p.raw),
+      backgroundColor:t.enc[i]+'cc', borderColor:t.enc[i],
+      borderWidth:1,pointRadius:6,pointHoverRadius:9
+    })).concat([{
+      label:`Weitere (${rest} PDFs)`,
+      data:scat.points.filter(pt=>!topSet.has(pt.pdf)),
+      backgroundColor:t.ink4+'77', borderColor:t.ink4,
+      borderWidth:1,pointRadius:5,pointHoverRadius:9
+    }]);
+  };
   const cfg={type:'scatter',data:{datasets:buildDS()},
     options:{maintainAspectRatio:false,responsive:true,animation:{duration:300},
       onClick:(evt, elements, chart)=>{
@@ -1541,7 +1607,7 @@ function renderScatter(scat, T) {
         const p = chart.data.datasets[el.datasetIndex]?.data[el.index];
         if (p) _openNoteDrawer(p);
       },
-      plugins:{legend:legendCfg(),tooltip:{callbacks:{label:ctx=>{const p=ctx.raw;return [p.label||'',`v: ${p.version}`,`Fehler: ${p.x} % · Belegrate: ${p.y} %`];}}},
+      plugins:{legend:legendCfg(),tooltip:{callbacks:{label:ctx=>{const p=ctx.raw;return [p.label||'',`${p.pdf_label||''} · v: ${p.version}`,`Fehler: ${p.x} % · Belegrate: ${p.y} %`];}}},
         // Threshold-Linie Fehlerquote 15 % (Schwelle „schlecht") — semantische
         // Farbe nur an Threshold-Stelle (chartjs-plugin-annotation)
         annotation:{annotations:{hallBad:{
@@ -1554,9 +1620,13 @@ function renderScatter(scat, T) {
       scales:{x:axisCfg({min:0,title:{display:true,text:'Fehlerquote % (kleiner = besser)',color:t.ink3,font:{size:11}},ticks:{callback:v=>v+' %'}}),
         y:axisCfg({min:0,title:{display:true,text:'Belegrate % (größer = besser)',color:t.ink3,font:{size:11}},ticks:{callback:v=>v+' %'}})}},
     plugins:[{id:'ideal',beforeDatasetsDraw(chart){const{ctx,scales:{x,y}}=chart;const l=x.getPixelForValue(0),r=x.getPixelForValue(T.hall[0]),top=y.getPixelForValue(y.max),b=y.getPixelForValue(T.cov[0]);ctx.save();ctx.fillStyle=cssv('--tint-mint');ctx.fillRect(l,top,r-l,b-top);ctx.strokeStyle=cssv('--mint');ctx.globalAlpha=.25;ctx.setLineDash([3,3]);ctx.lineWidth=1;ctx.strokeRect(l,top,r-l,b-top);ctx.setLineDash([]);ctx.globalAlpha=1;ctx.font='700 9px "IBM Plex Sans"';ctx.fillStyle=cssv('--mint');ctx.fillText('IDEAL',l+6,top+13);ctx.restore();}}]};
-  getOrCreate('ch2', cfg);
+  const ch2chart = getOrCreate('ch2', cfg);
   const ax2=document.getElementById('ax2'); if(ax2) ax2.textContent=scat.points.length+' evaluierte notes';
-  const l2=document.getElementById('leg2'); if(l2) l2.innerHTML=pdfList.map((p,i)=>`<span><span class="dot" style="background:${t.enc[i%t.enc.length]}"></span>${p.label}</span>`).join('')+`<span style="margin-left:auto"><span class="dot" style="background:color-mix(in srgb, var(--mint) 40%, transparent)"></span>Zielzone</span>`;
+  // Legende aus den tatsächlichen Datasets (Top-5 + "Weitere"), nicht aus allen PDFs
+  const l2=document.getElementById('leg2');
+  if(l2 && ch2chart) l2.innerHTML=ch2chart.data.datasets.map(ds=>
+    `<span><span class="dot" style="background:${ds.borderColor}"></span>${_escHTML(ds.label)}</span>`).join('')
+    +`<span style="margin-left:auto"><span class="dot" style="background:color-mix(in srgb, var(--mint) 40%, transparent)"></span>Zielzone</span>`;
   _resolveDrawer(scat.points);
 }
 
@@ -1610,15 +1680,29 @@ function renderCalibration(calib) {
     return `<span style="font-family:var(--f-mono);font-size:10px;padding:2px 6px;background:var(--hair);color:var(--ink-3);border-radius:2px">Evaluiert</span>`;
   };
 
-  body.innerHTML = calib.rows.map(r => `<tr>
+  // Arbeitsliste: Top 20 reichen (oben stehen die lohnendsten) —
+  // 300+ Zeilen auf einmal sind keine Liste mehr, sondern eine Wand.
+  const LIMIT = 20;
+  const shown = _calibShowAll ? calib.rows : calib.rows.slice(0, LIMIT);
+  const hidden = calib.rows.length - shown.length;
+
+  body.innerHTML = shown.map(r => `<tr>
     <td style="font-family:var(--f-mono);font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_escHTML(r.note)}">${_escHTML(r.note)}</td>
     <td class="dim" style="font-size:12px">${_escHTML((r.pdf||'').split(' - ')[0]||r.pdf||'–')}</td>
     <td class="num">${fmtHall(r.llm_hall)}</td>
     <td class="num">${fmtHall(r.human_hall)}</td>
     <td class="num">${fmtAgree(r.agreement)}</td>
     <td>${fmtStatus(r.status)}</td>
-  </tr>`).join('');
+  </tr>`).join('') + (calib.rows.length > LIMIT ? `<tr><td colspan="6" style="padding:10px;text-align:center">
+    <button type="button" class="calib-more" onclick="_toggleCalibRows()">${_calibShowAll ? `Nur Top ${LIMIT} zeigen` : `Alle ${calib.rows.length} anzeigen (${hidden} weitere)`}</button>
+  </td></tr>` : '');
 }
+
+let _calibShowAll = false;
+window._toggleCalibRows = function() {
+  _calibShowAll = !_calibShowAll;
+  if (window._lastData) renderCalibration(window._lastData.calibration);
+};
 
 /* ── Insight-Headlines (aus echten Daten, mit N-Guard) ───────── */
 function _setInsight(id, html) {
@@ -1754,6 +1838,7 @@ window.resetAllFilters = function() {
   ['global-pver','global-pdf','global-lang','global-model'].forEach(id => {
     const sel = document.getElementById(id); if (sel) sel.value = '__all__';
   });
+  _calibShowAll = false;
   _renderFilterBadges();
   loadAndRender();
 };
