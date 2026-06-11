@@ -58,5 +58,6 @@ def determine_decision(inp: ClaimInput, config: RulesConfig = DEFAULT_CONFIG) ->
     default = rule_default_primary(mutated_inp, config)
     if downgrade_flags:
         merged_flags = default.flags | downgrade_flags
-        return ClaimDecision(label=default.label, flags=merged_flags, source="evidence_verification" if downgrade_flags else default.source)
+        # Kanonischer Source-Wert laut models.py-Contract: "downgrade" (#32)
+        return ClaimDecision(label=default.label, flags=merged_flags, source="downgrade" if downgrade_flags else default.source)
     return default

@@ -16,7 +16,7 @@ def test_low_cosine_beats_evidence_downgrade_and_audit():
     inp = ClaimInput(Label.SUPPORTED_EXACT, Label.CONTRADICTED, 0.1, False, False)
     decision = determine_decision(inp)
     assert decision.label == Label.RETRIEVAL_UNCERTAIN
-    assert decision.flags == frozenset({QualityFlag.LOW_COSINE})
+    assert decision.flags == frozenset({QualityFlag.RETRIEVAL_LOW_COSINE})
 
 
 def test_evidence_downgrade_does_not_block_stricter_audit():
@@ -27,7 +27,7 @@ def test_evidence_downgrade_does_not_block_stricter_audit():
     assert decision.label == Label.CONTRADICTED
     assert decision.source == "audit_override"
     assert QualityFlag.EVIDENCE_UNVERIFIED in decision.flags  # Downgrade-Flag bleibt erhalten
-    assert QualityFlag.AUDIT_OVERRODE in decision.flags
+    assert QualityFlag.AUDIT_OVERRIDDEN in decision.flags
 
 
 def test_evidence_downgrade_persists_when_audit_softer():

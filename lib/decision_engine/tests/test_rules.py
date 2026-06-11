@@ -62,7 +62,7 @@ def test_low_cosine_always_uncertain(primary, audit, cosine, evidence):
     decision = determine_decision(inp)
     assert decision.label == Label.RETRIEVAL_UNCERTAIN
     assert decision.source == "system"
-    assert QualityFlag.LOW_COSINE in decision.flags
+    assert QualityFlag.RETRIEVAL_LOW_COSINE in decision.flags
 
 
 @hypothesis_or_cases
@@ -109,7 +109,7 @@ def test_audit_stricter_actually_overrides():
     decision = determine_decision(inp)
     assert decision.label == Label.CONTRADICTED
     assert decision.source == "audit_override"
-    assert QualityFlag.AUDIT_OVERRODE in decision.flags
+    assert QualityFlag.AUDIT_OVERRIDDEN in decision.flags
 
 
 def test_audit_softer_never_overrides():
@@ -170,7 +170,7 @@ def test_evidence_downgrade_does_not_block_audit_override():
     assert decision.label == Label.CONTRADICTED
     assert decision.source == "audit_override"
     # Downgrade-Flag bleibt erhalten, plus Override-Flag
-    assert QualityFlag.AUDIT_OVERRODE in decision.flags
+    assert QualityFlag.AUDIT_OVERRIDDEN in decision.flags
     assert QualityFlag.EVIDENCE_UNVERIFIED in decision.flags
 
 

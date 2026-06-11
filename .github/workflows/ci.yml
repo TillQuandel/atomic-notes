@@ -43,9 +43,8 @@ jobs:
           python -c "import importlib.resources as r; assert r.files('generative').joinpath('tag_registry.yml').is_file()"
           atomic-notes --help
 
-      # Kanonische Suite (LLM-frei). extractive- und decision_engine-Tests
-      # laufen hier bewusst noch nicht: decision_engine hat vorbestehende
-      # Failures (342, unabhaengig vom Packaging, Stand 2026-06-10),
-      # extractive braucht den schweren GLiNER-Stack ([extractive]-Extra).
+      # Kanonische Suite (LLM-frei) + decision_engine (seit #32-Fix gruen).
+      # extractive-Tests laufen hier bewusst nicht: brauchen den schweren
+      # GLiNER-Stack ([extractive]-Extra).
       - name: Tests
-        run: python -m pytest generative -q
+        run: python -m pytest generative lib/decision_engine/tests -q
