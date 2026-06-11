@@ -22,6 +22,9 @@ PDF input and Obsidian-style Markdown are the first supported path, not the whol
 
 ## Quickstart
 
+All commands below assume you are in the repository root after cloning — the
+example file and `.env` paths are repo-relative, not part of an installed wheel.
+
 ### 1. Install
 
 ```bash

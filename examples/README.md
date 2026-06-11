@@ -4,7 +4,8 @@
 
 A self-authored introductory text on atomic note-taking (concepts: atomic note,
 Zettelkasten, progressive summarization, linking, emergence). It is an original
-work, licensed under Apache 2.0, and safe to redistribute as part of this repo.
+work created for this repository (SPDX-License-Identifier: Apache-2.0, same
+copyright holder as the project), and safe to redistribute as part of this repo.
 
 Running the pipeline on this file produces a set of atomic notes in your
 configured output directory (the Obsidian vault path set via
