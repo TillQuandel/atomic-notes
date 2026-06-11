@@ -64,7 +64,12 @@ Login-Check ist eine Heuristik (`~/.claude/.credentials.json` vorhanden).
 **Akzeptanz S2:** Auf einem System ohne pdftotext bzw. ohne `claude`-Login liefert
 `doctor` die korrekte Diagnose; Pipeline-Start bricht früh und verständlich ab.
 
-### S3 — Quickstart + Beispiel + Projekt-Basics
+### S3 — Quickstart + Beispiel + Projekt-Basics ✅ erledigt 2026-06-11 (PR #39)
+
+Umsetzung im Token-Spar-Workflow: Fable-Plan → Sonnet-Subagent (Worktree) →
+eigene Verifikation (454 Tests) → Codex-Review (4 Findings adressiert/entkräftet).
+Showcase-Notes (Beispiel-Output) bewusst offen — braucht einen echten Pipeline-Lauf,
+siehe examples/README.md.
 
 - README-Quickstart: Install → doctor → Beispiel-Lauf → wo liegen die Notes.
 - Lizenz-sicheres Beispiel-PDF (NICHT die Eval-Lehrbuch-PDFs — Urheberrecht; eigenes
