@@ -40,3 +40,6 @@ agent/
 
 # Superpowers-Skill-Arbeitsdokumente (Plans/Specs) - lokal, nicht veroeffentlichen
 docs/superpowers/
+
+# Claude-Code-Worktrees (Subagenten-Isolation)
+.claude/
