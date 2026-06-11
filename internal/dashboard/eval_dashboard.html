@@ -466,6 +466,10 @@ table.cmp td.dim { color: var(--ink-3); }
 .foot .sep { color: var(--ink-5); margin: 0 8px; }
 
 /* ── Scrollbar ──────────────────────────────────────────────────── */
+/* Standard-Properties (Firefox). Neutrales Grau statt var(--hair-strong):
+   die Light-Overrides liegen auf body, der Viewport-Scrollbalken liest html —
+   ein Theme-Var wäre im jeweils anderen Modus unsichtbar. */
+html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent; }
 ::-webkit-scrollbar { width: 10px; height: 10px; }
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--hair-strong); border-radius: 5px; border: 2px solid var(--bg); }
