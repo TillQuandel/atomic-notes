@@ -37,7 +37,7 @@ def test_unverified_exact_evidence_is_downgraded_to_not_in_context() -> None:
     )
 
     assert decision.label is Label.NOT_IN_CONTEXT
-    assert decision.source == "evidence_verification"
+    assert decision.source == "downgrade"
     assert decision.flags == frozenset(
         {QualityFlag.EVIDENCE_UNVERIFIED, QualityFlag.EVIDENCE_FABRICATED}
     )
@@ -55,7 +55,7 @@ def test_audit_can_only_override_with_stricter_judge_label() -> None:
     )
 
     assert decision.label is Label.CONTRADICTED
-    assert decision.source == "audit"
+    assert decision.source == "audit_override"
     assert QualityFlag.JUDGE_UNEINIG in decision.flags
     assert QualityFlag.AUDIT_OVERRIDDEN in decision.flags
 

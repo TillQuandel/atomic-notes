@@ -103,7 +103,7 @@ def rule_audit_stricter_override(inp: ClaimInput, config: RulesConfig = DEFAULT_
     primary_rank = STRICTNESS_RANK[primary]
     audit_rank = STRICTNESS_RANK[audit]
     if audit_rank > primary_rank:
-        return _decision(audit, {QualityFlag.JUDGE_UNEINIG, QualityFlag.AUDIT_OVERRIDDEN}, "audit")
+        return _decision(audit, {QualityFlag.JUDGE_UNEINIG, QualityFlag.AUDIT_OVERRIDDEN}, "audit_override")
     return _decision(primary, {QualityFlag.AUDIT_DISAGREES_SOFTER}, "primary")
 
 
