@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="de">
 <head>
 <meta charset="UTF-8">
@@ -380,6 +380,36 @@ table.cmp td.dim { color: var(--ink-3); }
 .acc-bar .pct { font-weight: 600; }
 .good-t { color: var(--mint); } .bad-t { color: var(--coral); } .warn-t { color: var(--amber); }
 
+/* ── Eval-Coverage-Gap unter den KPIs ──────────────────────────── */
+.kpi-gap[hidden] { display: none; }
+.kpi-gap {
+  margin-top: 8px; padding: 6px 10px;
+  font-family: var(--f-mono); font-size: 11px; color: var(--amber);
+  background: var(--tint-amber); border-radius: 3px;
+  border: 1px solid rgba(232,181,59,.2);
+}
+.kpi-gap strong { font-weight: 600; }
+.kpi-gap code { font-family: inherit; color: var(--ink-1); }
+
+/* ── Note-Drawer (Drill-Down am Scatter) ───────────────────────── */
+.note-drawer[hidden] { display: none; }
+.note-drawer {
+  margin-top: 12px; padding: 12px 14px;
+  border: 1px solid var(--hair-strong); border-left: 2px solid var(--teal);
+  border-radius: 3px; background: var(--bg-elev);
+  font-family: var(--f-mono); font-size: 11.5px; line-height: 1.7;
+  color: var(--ink-2);
+}
+.note-drawer .nd-head { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+.note-drawer .nd-title { font-family: var(--f-display); font-size: 13px; font-weight: 600; color: var(--ink-1); letter-spacing: -.01em; overflow-wrap: anywhere; }
+.note-drawer .nd-close { flex-shrink: 0; color: var(--ink-3); border: 1px solid var(--hair); border-radius: 3px; padding: 1px 7px; font-family: var(--f-mono); font-size: 10px; }
+.note-drawer .nd-close:hover { color: var(--ink-1); border-color: var(--hair-strong); }
+.note-drawer .nd-kv { color: var(--ink-3); }
+.note-drawer .nd-kv strong { color: var(--ink-1); font-weight: 500; }
+.note-drawer a { color: var(--teal); text-decoration: none; }
+.note-drawer a:hover { text-decoration: underline; }
+.note-drawer .nd-stale { color: var(--amber); font-style: italic; }
+
 /* ── Insight-Headline pro Sektion ──────────────────────────────── */
 .insight {
   margin: 0 0 16px; padding: 8px 12px;
@@ -584,6 +614,7 @@ table.cmp td.dim { color: var(--ink-3); }
     <div class="spark-row" id="spark-row">
       <div class="spark-row-inner" id="spark-inner"></div>
     </div>
+    <div class="kpi-gap" id="kpi-gap" hidden></div>
   </section>
 
   <!-- ── Qualität ──────────────────────────────────────────────── -->
@@ -603,11 +634,12 @@ table.cmp td.dim { color: var(--ink-3); }
       </div>
       <div class="panel">
         <div class="p-head">
-          <div><div class="p-title">Jede Note: Fehlerquote vs. Belegrate</div><div class="p-sub">Jeder Punkt ist eine evaluierte Note. <strong>Links oben</strong> = ideal. <em>Belegrate</em> = Anteil der Textzitate die im Original-PDF nachweisbar sind.</div></div>
+          <div><div class="p-title">Jede Note: Fehlerquote vs. Belegrate</div><div class="p-sub">Jeder Punkt ist eine evaluierte Note. <strong>Links oben</strong> = ideal. <em>Belegrate</em> = Anteil der Textzitate die im Original-PDF nachweisbar sind. Klick auf einen Punkt zeigt Details.</div></div>
           <div class="p-meta" id="ax2">evaluierte notes</div>
         </div>
         <div class="chart-body"><canvas id="ch2"></canvas></div>
         <div class="legend" id="leg2"></div>
+        <aside class="note-drawer" id="note-drawer" aria-live="polite" hidden></aside>
       </div>
     </div>
   </section>
@@ -1342,6 +1374,7 @@ function renderCharts(d) {
     setChartEmpty('ch2');
     const ax2=document.getElementById('ax2'); if(ax2) ax2.textContent='0 evaluierte notes';
     const l2=document.getElementById('leg2'); if(l2) l2.innerHTML='';
+    _resolveDrawer([]);
   }
 
   // ch3 — Scaling
@@ -1437,6 +1470,54 @@ function renderCharts(d) {
 }
 
 /* ── Scatter ──────────────────────────────────────────────────── */
+/* ── Note-Drawer (Drill-Down, Spec: Inline-Drawer statt Modal) ── */
+let _drawerKey = null;   // {note, run_id} — überlebt 15s-Refresh + Re-Render
+let _drawerLast = null;  // zuletzt gezeigter Punkt (für Stale-Anzeige)
+
+function _renderNoteDrawer(p, stale) {
+  const d = document.getElementById('note-drawer');
+  if (!d) return;
+  if (!p) { d.hidden = true; return; }
+  const vault = window._lastData?.vault_name || '';
+  const fileName = `${p.label}.md`;
+  const obsUrl = 'obsidian://open?' +
+    (vault ? `vault=${encodeURIComponent(vault)}&` : '') +
+    `file=${encodeURIComponent(p.label)}`;
+  d.innerHTML = `
+    <div class="nd-head">
+      <span class="nd-title">${_escHTML(p.label)}</span>
+      <button type="button" class="nd-close" onclick="_closeNoteDrawer()" aria-label="Drawer schließen">schließen</button>
+    </div>
+    ${stale ? `<div class="nd-stale">Note ist nicht mehr im aktuellen Filter/Datensatz — Werte vom letzten Stand.</div>` : ''}
+    <div class="nd-kv">Fehlerquote <strong>${p.x} %</strong> · Belegrate <strong>${p.y} %</strong></div>
+    <div class="nd-kv">PDF <strong>${_escHTML(p.pdf_label||p.pdf||'–')}</strong> · Pipeline <strong>${_escHTML(p.version||'–')}</strong> · Eval <strong>${_escHTML(p.eval_version||'–')}</strong></div>
+    ${p.run_id ? `<div class="nd-kv">Run <strong>${_escHTML(p.run_id)}</strong></div>` : ''}
+    <div class="nd-kv"><a href="${obsUrl}">In Obsidian öffnen</a> · <span title="Dateiname zum Suchen/Kopieren">${_escHTML(fileName)}</span></div>`;
+  d.hidden = false;
+}
+/* Key inkl. version/pdf: bei leerem run_id würden gleichnamige Notes
+   aus verschiedenen Versionen sonst den falschen Punkt rehydrieren. */
+const _drawerKeyOf = (p) =>
+  [p.label, p.run_id || '', p.version || '', p.eval_version || '', p.pdf || ''].join(' ');
+function _openNoteDrawer(p) {
+  _drawerKey = _drawerKeyOf(p);
+  _drawerLast = p;
+  _renderNoteDrawer(p, false);
+}
+window._closeNoteDrawer = function() {
+  _drawerKey = null; _drawerLast = null;
+  const d = document.getElementById('note-drawer');
+  if (d) d.hidden = true;
+};
+/* Nach jedem Scatter-Re-Render (Filter, Theme, 15s-Refresh) die Auswahl
+   in den neuen Daten auflösen — sonst zeigt der Drawer stale Werte. */
+function _resolveDrawer(points) {
+  if (!_drawerKey) return;
+  const pt = (points || []).find(p => _drawerKeyOf(p) === _drawerKey);
+  if (pt) { _drawerLast = pt; _renderNoteDrawer(pt, false); }
+  else _renderNoteDrawer(_drawerLast, true);
+}
+
 function renderScatter(scat, T) {
   const t = C();
   const pdfList=scat.pdfs||[];
@@ -1450,6 +1531,12 @@ function renderScatter(scat, T) {
   }));
   const cfg={type:'scatter',data:{datasets:buildDS()},
     options:{maintainAspectRatio:false,responsive:true,animation:{duration:300},
+      onClick:(evt, elements, chart)=>{
+        if (!elements?.length) return;
+        const el = elements[0];
+        const p = chart.data.datasets[el.datasetIndex]?.data[el.index];
+        if (p) _openNoteDrawer(p);
+      },
       plugins:{legend:legendCfg(),tooltip:{callbacks:{label:ctx=>{const p=ctx.raw;return [p.label||'',`v: ${p.version}`,`Fehler: ${p.x} % · Belegrate: ${p.y} %`];}}},
         // Threshold-Linie Fehlerquote 15 % (Schwelle „schlecht") — semantische
         // Farbe nur an Threshold-Stelle (chartjs-plugin-annotation)
@@ -1466,6 +1553,7 @@ function renderScatter(scat, T) {
   getOrCreate('ch2', cfg);
   const ax2=document.getElementById('ax2'); if(ax2) ax2.textContent=scat.points.length+' evaluierte notes';
   const l2=document.getElementById('leg2'); if(l2) l2.innerHTML=pdfList.map((p,i)=>`<span><span class="dot" style="background:${t.enc[i%t.enc.length]}"></span>${p.label}</span>`).join('')+`<span style="margin-left:auto"><span class="dot" style="background:color-mix(in srgb, var(--mint) 40%, transparent)"></span>Zielzone</span>`;
+  _resolveDrawer(scat.points);
 }
 
 /* ── Version range (vereinfacht, kein Von/Bis mehr) ──────────── */
@@ -1482,11 +1570,13 @@ function renderCalibration(calib) {
   if (el('calib-n-labeled')) el('calib-n-labeled').textContent = calib.n_labeled ?? '–';
   if (el('calib-agree'))     el('calib-agree').textContent     = calib.avg_agree != null ? calib.avg_agree + ' %' : '–';
   if (el('calib-status')) {
-    const pct = calib.n_eval > 0 ? Math.round(calib.n_labeled / calib.n_eval * 100) : 0;
-    el('calib-status').textContent = calib.has_labels
-      ? `${pct} % gelabelt`
-      : 'Labeln ausstehend';
-    el('calib-status').style.color = calib.has_labels ? cssv('--mint') : cssv('--amber');
+    // n_labeled defensiv cappen (historische Labels ohne aktuelle Eval-Zeile)
+    const nLab = Math.min(calib.n_labeled ?? 0, calib.n_eval ?? 0);
+    const pct = calib.n_eval > 0 ? Math.round(nLab / calib.n_eval * 100) : 0;
+    const col = calib.has_labels ? cssv('--mint') : cssv('--amber');
+    el('calib-status').innerHTML = `
+      <span style="color:${col}">${calib.n_eval > 0 ? `${nLab}/${calib.n_eval} gelabelt` : 'Labeln ausstehend'}</span>
+      <span class="acc-bar" style="margin-top:5px"><span class="track" style="max-width:120px"><span class="fill" style="width:${pct}%;background:${col}"></span></span></span>`;
   }
 
   // Tabelle
@@ -1503,13 +1593,22 @@ function renderCalibration(calib) {
   const fmtAgree = (v) => v != null
     ? `<span class="${v >= 80 ? 'good-t' : v >= 60 ? 'warn-t' : 'bad-t'}">${v} %</span>`
     : '<span class="dash">–</span>';
-  const fmtStatus = (s) => s === 'labeled'
-    ? `<span style="font-family:var(--f-mono);font-size:10px;padding:2px 6px;background:var(--tint-mint);color:var(--mint);border-radius:2px">Gelabelt</span>`
-    : `<span style="font-family:var(--f-mono);font-size:10px;padding:2px 6px;background:var(--tint-amber);color:var(--amber);border-radius:2px">Evaluiert</span>`;
+  // Server sortiert als Arbeitsliste (ungelabelt zuerst, hall desc) —
+  // die ersten 3 ungelabelten sind die naechsten Label-Kandidaten.
+  let nextBadges = 3;
+  const fmtStatus = (s) => {
+    if (s === 'labeled')
+      return `<span style="font-family:var(--f-mono);font-size:10px;padding:2px 6px;background:var(--tint-mint);color:var(--mint);border-radius:2px">Gelabelt</span>`;
+    if (nextBadges > 0) {
+      nextBadges--;
+      return `<span style="font-family:var(--f-mono);font-size:10px;padding:2px 6px;background:var(--tint-amber);color:var(--amber);border-radius:2px;border:1px solid rgba(232,181,59,.4);font-weight:600">Als Nächstes labeln</span>`;
+    }
+    return `<span style="font-family:var(--f-mono);font-size:10px;padding:2px 6px;background:var(--hair);color:var(--ink-3);border-radius:2px">Evaluiert</span>`;
+  };
 
   body.innerHTML = calib.rows.map(r => `<tr>
-    <td style="font-family:var(--f-mono);font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.note}">${r.note}</td>
-    <td class="dim" style="font-size:12px">${(r.pdf||'').split(' - ')[0]||r.pdf||'–'}</td>
+    <td style="font-family:var(--f-mono);font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_escHTML(r.note)}">${_escHTML(r.note)}</td>
+    <td class="dim" style="font-size:12px">${_escHTML((r.pdf||'').split(' - ')[0]||r.pdf||'–')}</td>
     <td class="num">${fmtHall(r.llm_hall)}</td>
     <td class="num">${fmtHall(r.human_hall)}</td>
     <td class="num">${fmtAgree(r.agreement)}</td>
@@ -1585,12 +1684,14 @@ function renderInsights(d) {
       `ergibt ${Math.min(...ys)}–${Math.max(...ys)} Notes pro Run.`);
   } else { _setInsight('ins-tradeoff', ''); }
 
-  // Kalibrierung: Label-Fortschritt + Agreement
+  // Kalibrierung: Label-Fortschritt + Agreement + Arbeitsanweisung
   const cal = d.calibration || {};
   if (cal.n_eval > 0) {
+    const open = cal.n_eval - Math.min(cal.n_labeled ?? 0, cal.n_eval);
     _setInsight('ins-calib',
       `<strong>${cal.n_labeled} von ${cal.n_eval}</strong> evaluierten Notes human-gelabelt` +
-      (cal.avg_agree != null ? `, Ø Agreement <strong>${_fmtDE(cal.avg_agree)} %</strong>.` : ` — Agreement noch offen.`));
+      (cal.avg_agree != null ? `, Ø Agreement <strong>${_fmtDE(cal.avg_agree)} %</strong>.` : ` — Agreement noch offen.`) +
+      (open > 0 ? ` <span class="caveat">Tabelle ist nach LLM-Fehlerquote sortiert — oben labeln lohnt zuerst (generative/calibration/collect.py).</span>` : ''));
   } else { _setInsight('ins-calib', ''); }
 
   // Vergleich: PDF mit niedrigster Akzeptanz als Bottleneck
@@ -1626,6 +1727,18 @@ function _renderWithData(d) {
   const verLbl = document.getElementById('kpi-ver-label');
   if (verLbl) verLbl.textContent = d.kpis.kpi_version || '–';
   renderKpis(d.kpis, d.thresholds||{accept:[85,65],hall:[5,15],cov:[80,50]}, d.kpi_trend);
+  // Eval-Coverage-Gap: Vault-Notes der KPI-Version ohne Eval sichtbar machen
+  const gapEl = document.getElementById('kpi-gap');
+  if (gapEl) {
+    const vaultN = d.kpis?.kpi_vault_n ?? 0, evalN = d.kpis?.n_notes ?? 0;
+    // kpi_accept_ver statt kpi_version: greift auch wenn zur neuesten
+    // Version noch GAR keine Evals existieren (kpi_version wäre dann null)
+    const gapVer = d.kpis?.kpi_accept_ver;
+    if (vaultN > evalN && gapVer) {
+      gapEl.innerHTML = `${_escHTML(gapVer)}: <strong>${evalN} von ${vaultN}</strong> Vault-Notes evaluiert — <code>reeval_baseline.py</code> für den Rest`;
+      gapEl.hidden = false;
+    } else gapEl.hidden = true;
+  }
   renderTable(d.pdf_table||[], d.thresholds||{accept:[85,65],hall:[5,15],cov:[80,50]});
   renderCharts(d);
   renderCalibration(d.calibration);

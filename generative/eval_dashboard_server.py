@@ -210,6 +210,15 @@ def _read_calibration_data(allowed_note_paths: set | None = None,
                 "status":     status,
             })
 
+        # Arbeitslisten-Sortierung: ungelabelte zuerst ("gelabelt" = Zeile in
+        # calibration_labels existiert — collect.py schreibt atomar komplett),
+        # darin nach LLM-Fehlerquote absteigend (groesster Informationsgewinn
+        # pro Label zuerst), None-Raten ans Ende. Gelabelte danach.
+        rows.sort(key=lambda r: (
+            r["status"] == "labeled",
+            -(r["llm_hall"] if r["llm_hall"] is not None else -1),
+        ))
+
         # Zaehler aus den gefilterten rows — sonst zeigt der Strip die
         # Gesamtmenge, waehrend die Tabelle gefiltert ist.
         n_eval    = len(rows)
@@ -548,12 +557,22 @@ def build_data(eval_version: str | None = None,
                                    eval_version=eval_version or "4.1",
                                ),
         "pdf_meta":            {k: v for k, v in D._PDF_META.items()},
+        "vault_name":          _vault_name(),
         "thresholds": {
             "accept": list(D.THRESH_ACCEPT),
             "hall":   list(D.THRESH_HALL),
             "cov":    list(D.THRESH_COV),
         },
     }
+
+
+def _vault_name() -> str:
+    """Vault-Name fuer obsidian://-Links — aus der Config, nie hartcodiert."""
+    try:
+        from generative.config import VAULT
+        return Path(VAULT).name
+    except Exception:
+        return ""
 
 
 def _chart_scatter_versioned(quality_rows: list[dict]) -> dict:
@@ -584,6 +603,9 @@ def _chart_scatter_versioned(quality_rows: list[dict]) -> dict:
             "pdf":       pdf,
             "pdf_label": pdf_map[pdf],
             "version":   ver,
+            # Drill-Down-Drawer: Identifikation + Refresh-Persistenz-Key
+            "run_id":       r.get("run_id", ""),
+            "eval_version": r.get("eval_version", ""),
         })
 
     pdfs = [{"raw": k, "label": v} for k, v in pdf_map.items()]
