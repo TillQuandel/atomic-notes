@@ -1033,13 +1033,22 @@ def _run_extraction_stages(args, source_path: Path, runtime_config=None):  # mai
     if not (_has_author and _has_year):
         print("[0/7] PDF-Enrichment — keine Metadaten im Dateinamen erkannt…")
         try:
-            from generative.tools.pdf_enrich import enrich as _enrich, build_filename as _build_fn
+            from generative.tools.pdf_enrich import enrich as _enrich
+            # rename=False: Die Pipeline darf die Eingabedatei nie mutieren. Das
+            # Enrichment-Ergebnis wird direkt in pdf_meta gemergt (statt über den
+            # früheren Rename-Umweg), sodass korrekte Quellen weiterhin in die Note
+            # fließen — aber ein (mit dem Title-Match-Gate verworfener) Fehltreffer
+            # die Quelldatei nicht mehr umbenennt und damit die Quelle verfälscht.
             _enrich_meta = _enrich(source_path, dry_run=args.dry_run,
-                                   llm_fallback=getattr(args, "llm_fallback", False))
-            if _enrich_meta and not source_path.exists():
-                _new_path = source_path.parent / _build_fn(_enrich_meta)
-                if _new_path.exists():
-                    source_path = _new_path
+                                   llm_fallback=getattr(args, "llm_fallback", False),
+                                   rename=False)
+            if _enrich_meta:
+                if _enrich_meta.get("title") and not pdf_meta.get("Title"):
+                    pdf_meta["Title"] = _enrich_meta["title"]
+                if _enrich_meta.get("author") and not pdf_meta.get("Author"):
+                    pdf_meta["Author"] = _enrich_meta["author"]
+                if _enrich_meta.get("year") and not pdf_meta.get("Year"):
+                    pdf_meta["Year"] = str(_enrich_meta["year"])
         except Exception as _e:
             print(f"  [warn] PDF-Enrichment fehlgeschlagen: {_e}", file=sys.stderr)
 
@@ -1421,15 +1430,29 @@ def main(argv: list[str] | None = None):
         print(f"\n[boilerplate-dedup] {stripped} geteilte Sätze aus Sub-Notes in Hubs zentralisiert")
 
     # --- Schritt 7: Vault-Writer ---
-    # F2: enriched_meta = CrossRef-Daten überschreiben pdf_metadata wo vorhanden
+    # F2: enriched_meta = CrossRef-Daten überschreiben pdf_metadata wo vorhanden.
+    # Ein per Title-RATEN gefundener CrossRef-Treffer (kein harter ID-Match) darf die
+    # Quelle nur überschreiben, wenn sein Titel zum erwarteten Titel passt — sonst
+    # verfälscht ein Fehltreffer (gleiche Klasse wie das OpenAlex-Title-Gate) Quelle,
+    # Autor, Jahr und alle Footnotes der Note.
     enriched_meta = dict(pdf_meta or {})
-    if quality_report.crossref_title:
-        enriched_meta["Title"] = quality_report.crossref_title
-    if quality_report.crossref_author:
-        enriched_meta["Author"] = quality_report.crossref_author
-    if quality_report.crossref_year and not fb_year:
-        # Filename-Year hat Vorrang (v28): CrossRef darf nur überschreiben wenn Filename kein Jahr hat
-        enriched_meta["Year"] = quality_report.crossref_year
+    from generative.tools.pdf_enrich import _title_match_confident
+    _block_crossref_override = (
+        quality_report.doi_from_title_match
+        and quality_report.crossref_title
+        and not _title_match_confident(q_title or "", quality_report.crossref_title)
+    )
+    if _block_crossref_override:
+        print(f"  [quality] CrossRef-Override verworfen (schwacher Titel-Match): "
+              f"'{quality_report.crossref_title[:60]}'")
+    else:
+        if quality_report.crossref_title:
+            enriched_meta["Title"] = quality_report.crossref_title
+        if quality_report.crossref_author:
+            enriched_meta["Author"] = quality_report.crossref_author
+        if quality_report.crossref_year and not fb_year:
+            # Filename-Year hat Vorrang (v28): CrossRef darf nur überschreiben wenn Filename kein Jahr hat
+            enriched_meta["Year"] = quality_report.crossref_year
 
     # v23: Tag-Hint via --target-tag wird allen Drafts angehängt → Auto-Note-Mover
     # routet beim Öffnen aus 00-inbox/ in den Zielordner (siehe CLAUDE.md-Mapping).

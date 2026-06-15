@@ -92,3 +92,18 @@ def test_case_insensitive_update_type():
     # CrossRef-Antworten haben gelegentlich uppercase — Lowering muss greifen
     rep = _run_check(_fake_crossref(["Retraction"]))
     assert rep.retracted is True
+
+
+def test_doi_from_title_match_flagged_true():
+    """Per Title geratener DOI wird als unsicher markiert (kein harter ID-Match)."""
+    with patch.object(quality, "_crossref_doi_lookup", return_value="10.9999/guessed"), \
+         patch.object(quality, "_crossref_meta", return_value=None), \
+         patch.object(quality, "_openalex_work", return_value=None):
+        rep = quality.check_quality(title="Some Sufficiently Long Title")
+    assert rep.doi_from_title_match is True
+
+
+def test_explicit_doi_not_title_match():
+    """Explizit übergebener DOI ist ID-basiert -> kein Title-Match-Flag."""
+    rep = _run_check(_fake_crossref())
+    assert rep.doi_from_title_match is False

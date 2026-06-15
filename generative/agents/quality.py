@@ -72,11 +72,13 @@ def check_quality(doi: Optional[str] = None, author: Optional[str] = None,
     crossref_title: Optional[str] = None
     crossref_author: Optional[str] = None
     crossref_year: Optional[str] = None
+    doi_from_title_match = False
 
     # DOI-Fallback: per Title+Author Suche wenn nicht explizit übergeben
     if not doi and title:
         doi = _crossref_doi_lookup(title, author=author, year=year)
         if doi:
+            doi_from_title_match = True
             flags.append(f"ℹ️ DOI per Title-Match gefunden: {doi}")
 
     if doi:
@@ -152,4 +154,5 @@ def check_quality(doi: Optional[str] = None, author: Optional[str] = None,
         crossref_title=crossref_title,
         crossref_author=crossref_author,
         crossref_year=crossref_year,
+        doi_from_title_match=doi_from_title_match,
     )

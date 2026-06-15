@@ -17,6 +17,7 @@ import re
 import shutil
 import subprocess
 import sys
+import unicodedata
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -309,6 +310,42 @@ def google_books_lookup(isbn: str) -> dict | None:
 
 _OPENALEX_BASE = "https://api.openalex.org/works"
 
+# Title-Match-Gate: Die OpenAlex-Titel-Suche ist der einzige Enrichment-Pfad ohne
+# harte ID (DOI/ISBN/arXiv/PMID). Ein generischer Guess matcht sonst einen fremden
+# Treffer und schreibt dessen Autor/Jahr/DOI in die Note (Fabrikation). Fail-closed.
+_MIN_SIGNIFICANT_TOKEN_LEN = 4   # kürzere Wörter (de, the, y, …) tragen keine Titel-Identität
+_MIN_TITLE_TOKEN_OVERLAP = 2     # mind. 2 bedeutungstragende Wörter müssen übereinstimmen
+_MIN_TITLE_CONTAINMENT = 0.5     # Anteil der Query-Tokens, der im Treffer vorkommen muss
+
+
+def _significant_tokens(title: str) -> set[str]:
+    """Lowercase-Wörter ab _MIN_SIGNIFICANT_TOKEN_LEN Zeichen (Satzzeichen/Ziffern raus).
+
+    Akzent-gefaltet (método==metodo), damit Sprach-/Encoding-Varianten matchen.
+    Defensiv gegen None (OpenAlex kann title=null liefern). Ziffern bleiben bewusst
+    draußen — Jahreszahlen o.ä. als Match-Token würden Fehltreffer erzeugen.
+    """
+    folded = unicodedata.normalize("NFKD", str(title or "").lower())
+    folded = "".join(c for c in folded if not unicodedata.combining(c))
+    words = re.findall(r"[^\W\d_]+", folded, flags=re.UNICODE)
+    return {w for w in words if len(w) >= _MIN_SIGNIFICANT_TOKEN_LEN}
+
+
+def _title_match_confident(query: str, result_title: str) -> bool:
+    """True wenn der OpenAlex-Treffer dem Suchtitel hinreichend ähnelt.
+
+    Kriterium: mind. _MIN_TITLE_TOKEN_OVERLAP gemeinsame bedeutungstragende Wörter
+    UND Containment (Anteil der Query-Tokens im Treffer) >= _MIN_TITLE_CONTAINMENT.
+    Sprach-/Reihenfolge-robust durch Token-Mengen-Vergleich.
+    """
+    q = _significant_tokens(query)
+    if not q:
+        return False
+    overlap = q & _significant_tokens(result_title)
+    if len(overlap) < _MIN_TITLE_TOKEN_OVERLAP:
+        return False
+    return len(overlap) / len(q) >= _MIN_TITLE_CONTAINMENT
+
 
 def openalex_title_search(title: str) -> dict | None:
     """Sucht in OpenAlex nach Titel. Gibt normalisiertes Dict oder None zurück."""
@@ -552,11 +589,14 @@ def grobid_lookup(pdf_path: Path, grobid_url: str = "http://localhost:8070", tim
         return None
 
 
-def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False) -> dict | None:
+def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False,
+           rename: bool = True) -> dict | None:
     """Haupt-Pipeline: EmbeddedMeta -> DOI -> ISBN -> arXiv -> PMID -> Titel(OpenAlex) -> LLM -> Rename.
 
     Gibt Metadaten-Dict zurueck oder None wenn nichts gefunden.
     Bei dry_run=True: kein Umbenennen, nur Metadaten zurueckgeben.
+    Bei rename=False: Eingabedatei wird nie mutiert (Umbenennen + Metadaten-Write
+    übersprungen) — für Aufrufer, die nur die Metadaten brauchen (Pipeline).
     """
     print(f"[pdf-enrich] {pdf_path.name}")
 
@@ -691,7 +731,11 @@ def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False) ->
             src = "Dateiname" if title_guess == fn_title_candidate else "Textzeile"
             print(f"  -> Kein ID, suche Titel ({src}): '{title_guess[:60]}'")
             meta = openalex_title_search(title_guess)
-            if meta:
+            if meta and not _title_match_confident(title_guess, meta.get("title", "")):
+                print(f"  -> OpenAlex-Treffer verworfen (schwacher Titel-Match): "
+                      f"'{meta.get('title', '')[:60]}'")
+                meta = None
+            elif meta:
                 print(f"  -> OpenAlex: {meta['author']} ({meta['year']}) -- {meta['title'][:60]}")
 
     # Stage 6.5: Grobid (lokaler Server, optional)
@@ -715,6 +759,9 @@ def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False) ->
     if not meta:
         print("  -> Keine Metadaten gefunden -- uebersprungen", file=sys.stderr)
         return None
+
+    if not rename:
+        return meta
 
     new_path = rename_pdf(pdf_path, meta, dry_run=dry_run)
     if dry_run:
