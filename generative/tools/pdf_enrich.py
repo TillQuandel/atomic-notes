@@ -369,6 +369,18 @@ def _title_match_confident(query: str, result_title: str) -> bool:
     r_main = _significant_tokens(_SUBTITLE_SEP_RE.split(str(result_title or ""), maxsplit=1)[0])
     if not q or not r_main:
         return False
+    # #41 (inverser R1-Fall): Treffer-Haupttitel ist eine echte Teilmenge der
+    # spezifischeren Query (r_main ⊊ q) UND die Query trägt Tokens, die im GANZEN
+    # Treffer fehlen (q - r_full ≠ ∅) — z.B. Query "Situated Learning Theory" gegen
+    # Treffer "Situated Learning" (Lave & Wenger): "theory" steht nirgends im Treffer.
+    # Forward- UND Reverse-Containment passieren beide (r_main ⊆ q → reverse = 1.0),
+    # aber der generische Kurztitel identifiziert das Werk nicht; Autor/Jahr fehlt im
+    # Title-Pfad zur Disambiguierung. OpenAlex speichert Titel praktisch immer voll
+    # (inkl. Untertitel; 21 Live-Abfragen 2026-06-16), ein echter gekürzter Treffer
+    # ist kaum legitim — fail-closed verwerfen. Die q-r_full-Bedingung schützt den
+    # legitimen Volltitel-mit-Untertitel-Fall (Query enthält den Untertitel, q ⊆ r_full).
+    if r_main < q and (q - r_full):
+        return False
     if len(q & r_main) < _MIN_TITLE_TOKEN_OVERLAP:
         return False
     if len(q & r_full) / len(q) < _MIN_TITLE_CONTAINMENT:
