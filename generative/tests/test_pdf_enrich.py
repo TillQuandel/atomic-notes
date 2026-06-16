@@ -580,3 +580,180 @@ def test_cli_renames_with_flag(tmp_path, monkeypatch):
     monkeypatch.setattr(sys, "argv", ["pdf_enrich", "--rename", str(pdf)])
     pdf_enrich.main()
     assert captured["rename"] is True
+
+
+# --- #41-Restrisiko R2 + Geschwister: ID-Stages nur aus dem Kopfbereich ---------
+# Bug-Klasse: extract_doi/isbn/arxiv/pmid nehmen alle den ersten Regex-Treffer aus
+# demselben 10-Seiten-Text. Eine ZITIERTE ID (Fußnote/Referenz auf einer späteren
+# Seite) wird so zur Dokument-Quelle. Fix: IDs nur aus dem Kopfbereich (erste Seite)
+# ziehen — für alle vier Extraktoren konsistent.
+
+def _front_matter_aware_extract(header: str, full: str):
+    """Mock für extract_text: die volle 10-Seiten-Extraktion sieht die zitierte ID,
+    die Kopfbereich-Extraktion (weniger Seiten) nicht. Simuliert eine zitierte ID, die
+    erst auf einer späteren Seite steht."""
+    def fake(path, max_pages=3):
+        return full if max_pages >= 10 else header
+    return fake
+
+
+def test_enrich_ignores_cited_doi_on_later_page(tmp_path, monkeypatch):
+    """#41-R2: eine zitierte DOI (Literaturverzeichnis, spätere Seite) darf nicht zur
+    Dokument-Quelle werden. Kopfbereich hat keine DOI -> keine Attribution."""
+    from generative.tools import pdf_enrich
+    monkeypatch.setattr(pdf_enrich, "extract_text", _front_matter_aware_extract(
+        header="Eine kurze Notiz\nVon der Autorin\nEinleitende Bemerkungen ohne Kennung.",
+        full="Eine kurze Notiz\nVon der Autorin\nEinleitende Bemerkungen ohne Kennung.\n"
+             "Literatur\n[1] Bates 2017. doi:10.1002/asi.23681"))
+    monkeypatch.setattr(pdf_enrich, "openalex_title_search", lambda *a, **k: None)
+    called = {}
+
+    def spy(doi):
+        called["doi"] = doi
+        return {"author": "Bates", "year": 2017, "title": "Information Behavior",
+                "doi": doi, "type": "journal-article"}
+    monkeypatch.setattr(pdf_enrich, "crossref_lookup", spy)
+    pdf = tmp_path / "kurze-notiz.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = pdf_enrich.enrich(pdf, dry_run=True)
+    assert meta is None
+    assert "doi" not in called  # zitierte DOI nie nachgeschlagen
+
+
+def test_enrich_ignores_cited_isbn_on_later_page(tmp_path, monkeypatch):
+    """#41-R2-Geschwister: zitierte ISBN auf späterer Seite darf nicht attribuieren."""
+    from generative.tools import pdf_enrich
+    monkeypatch.setattr(pdf_enrich, "extract_text", _front_matter_aware_extract(
+        header="Kapiteltitel\nFließtext ohne Kennung.",
+        full="Kapiteltitel\nFließtext ohne Kennung.\nLiteratur\nCrockford, ISBN 978-0-596-51774-8."))
+    monkeypatch.setattr(pdf_enrich, "openalex_title_search", lambda *a, **k: None)
+    called = {}
+
+    def spy(isbn):
+        called["isbn"] = isbn
+        return {"author": "Crockford", "year": 2008, "title": "JavaScript",
+                "doi": "", "type": "book"}
+    monkeypatch.setattr(pdf_enrich, "open_library_lookup", spy)
+    monkeypatch.setattr(pdf_enrich, "google_books_lookup", spy)
+    pdf = tmp_path / "kapitel-auszug.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = pdf_enrich.enrich(pdf, dry_run=True)
+    assert meta is None
+    assert "isbn" not in called
+
+
+def test_enrich_ignores_cited_arxiv_on_later_page(tmp_path, monkeypatch):
+    """#41-R2-Geschwister: zitierte arXiv-ID auf späterer Seite darf nicht attribuieren."""
+    from generative.tools import pdf_enrich
+    monkeypatch.setattr(pdf_enrich, "extract_text", _front_matter_aware_extract(
+        header="Seminararbeit\nÜberblick ohne Kennung.",
+        full="Seminararbeit\nÜberblick ohne Kennung.\nReferenzen\n[3] Vaswani et al., arXiv:1706.03762."))
+    monkeypatch.setattr(pdf_enrich, "openalex_title_search", lambda *a, **k: None)
+    called = {}
+
+    def spy(arxiv_id):
+        called["arxiv"] = arxiv_id
+        return {"author": "Vaswani", "year": 2017, "title": "Attention",
+                "doi": "", "type": "preprint"}
+    monkeypatch.setattr(pdf_enrich, "arxiv_lookup", spy)
+    pdf = tmp_path / "seminararbeit-text.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = pdf_enrich.enrich(pdf, dry_run=True)
+    assert meta is None
+    assert "arxiv" not in called
+
+
+def test_enrich_ignores_cited_pmid_on_later_page(tmp_path, monkeypatch):
+    """#41-R2-Geschwister: zitierte PMID auf späterer Seite darf nicht attribuieren."""
+    from generative.tools import pdf_enrich
+    monkeypatch.setattr(pdf_enrich, "extract_text", _front_matter_aware_extract(
+        header="Studienprotokoll\nMethodischer Überblick ohne Kennung.",
+        full="Studienprotokoll\nMethodischer Überblick ohne Kennung.\nReferences\n[7] Bates MJ. PMID: 30049270."))
+    monkeypatch.setattr(pdf_enrich, "openalex_title_search", lambda *a, **k: None)
+    called = {}
+
+    def spy(pmid):
+        called["pmid"] = pmid
+        return {"author": "Bates", "year": 2017, "title": "Information Behavior",
+                "doi": "", "type": "journal-article"}
+    monkeypatch.setattr(pdf_enrich, "pubmed_lookup", spy)
+    pdf = tmp_path / "studienprotokoll-text.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = pdf_enrich.enrich(pdf, dry_run=True)
+    assert meta is None
+    assert "pmid" not in called
+
+
+def test_enrich_uses_doi_from_front_matter(tmp_path, monkeypatch):
+    """Gegenprobe zu R2: eine DOI im Kopfbereich (erste Seite) wird weiterhin genutzt,
+    und zwar die Kopf-DOI — nicht eine zitierte DOI weiter unten."""
+    from generative.tools import pdf_enrich
+    monkeypatch.setattr(pdf_enrich, "extract_text", _front_matter_aware_extract(
+        header="Titel\nAutor\nhttps://doi.org/10.1002/asi.23681",
+        full="Titel\nAutor\nhttps://doi.org/10.1002/asi.23681\nLiteratur\ndoi:10.9999/cited"))
+
+    def spy(doi):
+        return {"author": "Bates", "year": 2017, "title": "Information Behavior",
+                "doi": doi, "type": "journal-article"}
+    monkeypatch.setattr(pdf_enrich, "crossref_lookup", spy)
+    pdf = tmp_path / "titel-doc.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = pdf_enrich.enrich(pdf, dry_run=True)
+    assert meta is not None
+    assert meta["doi"] == "10.1002/asi.23681"  # Kopf-DOI, nicht 10.9999/cited
+
+
+def test_enrich_book_chapter_doi_ignores_cited_isbn(tmp_path, monkeypatch):
+    """#41-R2 (Buchkapitel-Branch von Stage 1): bei einem Buchkapitel-DOI im Kopf darf
+    eine ZITIERTE ISBN (spätere Seite) nicht den ISBN-Lookup-Umweg triggern und die
+    Quelle auf das zitierte Buch verfälschen. Header hat keine ISBN -> Kapitel-Meta bleibt."""
+    from generative.tools import pdf_enrich
+    monkeypatch.setattr(pdf_enrich, "extract_text", _front_matter_aware_extract(
+        header="Buchkapitel-Titel\nAutor\ndoi:10.1007/978-3-540-chapter",
+        full="Buchkapitel-Titel\nAutor\ndoi:10.1007/978-3-540-chapter\nLiteratur\nISBN 978-0-596-51774-8."))
+    monkeypatch.setattr(pdf_enrich, "crossref_lookup",
+        lambda doi: {"author": "Kapitelautor", "year": 2010, "title": "Das Kapitel",
+                     "doi": doi, "type": "book-chapter"})
+
+    def isbn_spy(isbn):
+        return {"author": "FremderAutor", "year": 2008, "title": "Zitiertes Buch",
+                "doi": "", "type": "book"}
+    monkeypatch.setattr(pdf_enrich, "open_library_lookup", isbn_spy)
+    monkeypatch.setattr(pdf_enrich, "google_books_lookup", isbn_spy)
+    pdf = tmp_path / "buchkapitel.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = pdf_enrich.enrich(pdf, dry_run=True)
+    assert meta is not None
+    assert meta["author"] == "Kapitelautor"  # Kapitel-Meta, nicht das zitierte Buch
+
+
+def test_enrich_header_from_ocr_source(tmp_path, monkeypatch):
+    """#41-R2 (OCR-Pfad): bei einem gescannten PDF wird der Kopfbereich aus der OCR-Quelle
+    gezogen, nicht aus dem (leeren) Original. Schützt das source_path-Tracking — unter
+    dry_run=True bleibt pdf_path das Original, also muss header_text aus source_path (ocr)
+    kommen, sonst geht die Kopf-DOI verloren."""
+    from generative.tools import pdf_enrich
+    ocr_pdf = tmp_path / "scan.ocr.pdf"
+
+    def fake_extract(path, max_pages=3):
+        if str(path).endswith("scan.ocr.pdf"):
+            if max_pages >= 10:
+                return ("Titel\nAutor\nhttps://doi.org/10.1002/asi.23681\n"
+                        "Literatur\ndoi:10.9999/cited")
+            return "Titel\nAutor\nhttps://doi.org/10.1002/asi.23681"
+        return ""  # Original ist gescannt -> leer
+    monkeypatch.setattr(pdf_enrich, "extract_text", fake_extract)
+    monkeypatch.setattr(pdf_enrich, "ocr_available", lambda: True)
+    monkeypatch.setattr(pdf_enrich, "run_ocr", lambda p: ocr_pdf)
+    called = {}
+
+    def spy(doi):
+        called["doi"] = doi
+        return {"author": "Bates", "year": 2017, "title": "Information Behavior",
+                "doi": doi, "type": "journal-article"}
+    monkeypatch.setattr(pdf_enrich, "crossref_lookup", spy)
+    pdf = tmp_path / "scan.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = pdf_enrich.enrich(pdf, dry_run=True)
+    assert meta is not None
+    assert called["doi"] == "10.1002/asi.23681"  # Kopf-DOI aus OCR-Quelle, nicht 10.9999/cited

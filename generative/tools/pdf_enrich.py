@@ -48,6 +48,16 @@ def is_scanned(text: str) -> bool:
     return not text.strip()
 
 
+# #41-R2: Standard-Kennungen (DOI/ISBN/arXiv/PMID) werden NUR aus dem Kopfbereich
+# gezogen, nicht aus den vollen 10 Seiten. Dokument-eigene IDs stehen auf der Titel-/
+# Kopfseite; zitierte IDs (Fußnoten, Literaturverzeichnis) erscheinen erst im Body —
+# ohne diese Beschränkung würde die erste *zitierte* ID zur falschen Dokument-Quelle.
+# Trade-off: ISBNs auf einer separaten Impressum-/Copyright-Seite (S. 2-4 bei
+# Voll-Büchern) werden bei =1 nicht erfasst; für den Korpus (Kapitel-Auszüge, Paper)
+# vernachlässigbar, zitierte ISBNs sind selten. Bei Bedarf hochsetzen.
+_FRONT_MATTER_PAGES = 1
+
+
 _GARBAGE_AUTHORS = {
     "someauthor", "author", "unknown", "user", "administrator", "admin",
     "root", "owner", "creator", "microsoft", "adobe",
@@ -646,7 +656,9 @@ def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False,
 
     # Text-Extraktion (fuer Stages 1-6 benoetigt)
     text = None
+    header_text = ""  # Kopfbereich-Text fuer die ID-Stages 1-4 (#41-R2)
     if not meta:
+        source_path = pdf_path
         text = extract_text(pdf_path, max_pages=10)
         if is_scanned(text):
             print("  -> Gescannte PDF erkannt")
@@ -655,21 +667,24 @@ def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False,
                 ocr_path = run_ocr(pdf_path)
                 if ocr_path:
                     text = extract_text(ocr_path, max_pages=10)
+                    source_path = ocr_path
                     if not dry_run:
                         pdf_path = ocr_path
             if is_scanned(text):
                 print("  -> Kein Text extrahierbar -- uebersprungen", file=sys.stderr)
                 return None
+        # IDs nur aus dem Kopfbereich (gleiche Quelle wie text, OCR-konsistent)
+        header_text = extract_text(source_path, max_pages=_FRONT_MATTER_PAGES)
 
     # Stage 1: DOI -> CrossRef
     if not meta:
-        doi = extract_doi(text)
+        doi = extract_doi(header_text)
         if doi:
             print(f"  -> DOI gefunden: {doi}")
             cr = crossref_lookup(doi)
             if cr and _meta_complete(cr):
-                # Book-chapter DOI: ISBN-Lookup bevorzugen wenn ISBN im Text
-                if cr.get("type") in _BOOK_PART_TYPES and extract_isbn(text):
+                # Book-chapter DOI: ISBN-Lookup bevorzugen wenn ISBN im Kopfbereich
+                if cr.get("type") in _BOOK_PART_TYPES and extract_isbn(header_text):
                     print(f"  -> CrossRef Buchkapitel — versuche ISBN-Lookup")
                 else:
                     meta = cr
@@ -679,7 +694,7 @@ def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False,
 
     # Stage 2: ISBN -> Open Library -> Google Books
     if not meta:
-        isbn = extract_isbn(text)
+        isbn = extract_isbn(header_text)
         if isbn:
             print(f"  -> ISBN gefunden: {isbn}")
             meta = open_library_lookup(isbn)
@@ -692,7 +707,7 @@ def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False,
 
     # Stage 3: arXiv-ID -> arXiv API
     if not meta:
-        arxiv_id = extract_arxiv_id(text)
+        arxiv_id = extract_arxiv_id(header_text)
         if arxiv_id:
             print(f"  -> arXiv-ID gefunden: {arxiv_id}")
             meta = arxiv_lookup(arxiv_id)
@@ -701,7 +716,7 @@ def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False,
 
     # Stage 4: PMID -> PubMed
     if not meta:
-        pmid = extract_pmid(text)
+        pmid = extract_pmid(header_text)
         if pmid:
             print(f"  -> PMID gefunden: {pmid}")
             meta = pubmed_lookup(pmid)
