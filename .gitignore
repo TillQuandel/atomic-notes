@@ -28,6 +28,9 @@ output/
 *.jsonl
 tmp/
 
+# graphify Knowledge-Graph (regenerierbares Artefakt, kein Quellcode)
+graphify-out/
+
 # Agent cache + worktrees
 generative/.cache/
 generative/.worktrees/
