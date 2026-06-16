@@ -511,6 +511,21 @@ def test_title_match_confident_accepts_full_title_with_subtitle_query():
     ) is True
 
 
+def test_title_match_confident_strips_html_in_result_title():
+    """#41 Codex-MED: OpenAlex-Titel können HTML/MathML tragen (literal <i>/<span> ODER
+    HTML-entity-kodiert &lt;span&gt;). Tag-Namen mit ≥4 Zeichen ('span') landeten sonst
+    als bedeutungstragende Tokens in r_main/r_full und verfälschten Subset-/Containment-
+    Checks — hier schlüpfte der Generischer-Kurztitel-Bug durch, weil 'span' das r_main⊊q
+    unterlief. Nach HTML-Strip wird korrekt fail-closed verworfen."""
+    from generative.tools.pdf_enrich import _title_match_confident
+    assert _title_match_confident(
+        "Situated Learning Theory", "<span>Situated Learning</span>"
+    ) is False
+    assert _title_match_confident(
+        "Situated Learning Theory", "&lt;span&gt;Situated Learning&lt;/span&gt;"
+    ) is False
+
+
 def test_enrich_discards_weak_openalex_match(tmp_path, monkeypatch):
     """enrich() verwirft OpenAlex-Treffer mit schwachem Titel-Match statt fehlzuattribuieren."""
     from generative.tools.pdf_enrich import enrich

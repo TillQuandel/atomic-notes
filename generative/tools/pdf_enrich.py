@@ -12,6 +12,7 @@ Optional: ocrmypdf (für gescannte PDFs)
 """
 from __future__ import annotations
 import argparse
+import html
 import json
 import re
 import shutil
@@ -345,8 +346,15 @@ def _significant_tokens(title: str) -> set[str]:
     Akzent-gefaltet (método==metodo), damit Sprach-/Encoding-Varianten matchen.
     Defensiv gegen None (OpenAlex kann title=null liefern). Ziffern bleiben bewusst
     draußen — Jahreszahlen o.ä. als Match-Token würden Fehltreffer erzeugen.
+
+    HTML/MathML aus dem Titel entfernen (#41-MED): OpenAlex liefert Markup teils
+    literal (<i>, <span>), teils HTML-entity-kodiert (&lt;span&gt;). Tag-Namen mit
+    ≥4 Zeichen würden sonst als bedeutungstragende Tokens die Containment-/Subset-
+    Checks verfälschen (z.B. 'span' unterläuft r_main⊊q). Erst entkodieren, dann Tags
+    strippen.
     """
-    folded = unicodedata.normalize("NFKD", str(title or "").lower())
+    raw = re.sub(r"<[^>]+>", " ", html.unescape(str(title or "")))
+    folded = unicodedata.normalize("NFKD", raw.lower())
     folded = "".join(c for c in folded if not unicodedata.combining(c))
     words = re.findall(r"[^\W\d_]+", folded, flags=re.UNICODE)
     return {w for w in words if len(w) >= _MIN_SIGNIFICANT_TOKEN_LEN}
