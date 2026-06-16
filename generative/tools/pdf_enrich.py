@@ -316,6 +316,17 @@ _OPENALEX_BASE = "https://api.openalex.org/works"
 _MIN_SIGNIFICANT_TOKEN_LEN = 4   # kürzere Wörter (de, the, y, …) tragen keine Titel-Identität
 _MIN_TITLE_TOKEN_OVERLAP = 2     # mind. 2 bedeutungstragende Wörter müssen übereinstimmen
 _MIN_TITLE_CONTAINMENT = 0.5     # Anteil der Query-Tokens, der im Treffer vorkommen muss
+# Reverse-Containment: Anteil der HAUPTTITEL-Tokens (vor dem Untertitel), die aus der
+# Query stammen. Schützt gegen 2 generische Query-Wörter, die Präfix eines längeren
+# fremden Haupttitels sind ("Information Behavior" ⊂ "Information Behavior in Everyday
+# Contexts" → forward=1.0, reverse niedrig). Gemessen wird gegen den Haupttitel, NICHT
+# den ganzen String — sonst würden kanonische Werke mit langem Untertitel fälschlich
+# verworfen (Wenger "Communities of Practice: Learning, Meaning, and Identity").
+_MIN_TITLE_REVERSE_CONTAINMENT = 0.6
+# Untertitel-Trenner: Doppelpunkt (auch ohne folgendes Leerzeichen, OpenAlex
+# normalisiert nicht immer) ODER Gedankenstrich/Bindestrich nur mit Whitespace auf
+# BEIDEN Seiten — damit Komposita wie "Note-Taking"/"Self-Determination" intakt bleiben.
+_SUBTITLE_SEP_RE = re.compile(r":\s*|\s+[–—-]\s+")
 
 
 def _significant_tokens(title: str) -> set[str]:
@@ -334,17 +345,25 @@ def _significant_tokens(title: str) -> set[str]:
 def _title_match_confident(query: str, result_title: str) -> bool:
     """True wenn der OpenAlex-Treffer dem Suchtitel hinreichend ähnelt.
 
-    Kriterium: mind. _MIN_TITLE_TOKEN_OVERLAP gemeinsame bedeutungstragende Wörter
-    UND Containment (Anteil der Query-Tokens im Treffer) >= _MIN_TITLE_CONTAINMENT.
+    Kriterien (alle nötig):
+    - mind. _MIN_TITLE_TOKEN_OVERLAP gemeinsame bedeutungstragende Wörter,
+    - Forward-Containment (Anteil der Query-Tokens im vollen Treffer) >=
+      _MIN_TITLE_CONTAINMENT — Query-Wörter dürfen auch im Untertitel liegen,
+    - Reverse-Containment (Anteil der HAUPTTITEL-Tokens aus der Query) >=
+      _MIN_TITLE_REVERSE_CONTAINMENT — der Haupttitel des Treffers darf nicht
+      wesentlich mehr als die Query enthalten (sonst ist es ein längeres fremdes Werk).
     Sprach-/Reihenfolge-robust durch Token-Mengen-Vergleich.
     """
     q = _significant_tokens(query)
-    if not q:
+    r_full = _significant_tokens(result_title)
+    r_main = _significant_tokens(_SUBTITLE_SEP_RE.split(str(result_title or ""), maxsplit=1)[0])
+    if not q or not r_main:
         return False
-    overlap = q & _significant_tokens(result_title)
-    if len(overlap) < _MIN_TITLE_TOKEN_OVERLAP:
+    if len(q & r_main) < _MIN_TITLE_TOKEN_OVERLAP:
         return False
-    return len(overlap) / len(q) >= _MIN_TITLE_CONTAINMENT
+    if len(q & r_full) / len(q) < _MIN_TITLE_CONTAINMENT:
+        return False
+    return len(q & r_main) / len(r_main) >= _MIN_TITLE_REVERSE_CONTAINMENT
 
 
 def openalex_title_search(title: str) -> dict | None:
@@ -823,11 +842,14 @@ def _write_pdf_metadata(pdf_path: Path, meta: dict) -> None:
 
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="PDF Metadata Enrichment — DOI → CrossRef → Rename"
+        description="PDF Metadata Enrichment — DOI → CrossRef → Metadaten (Rename opt-in)"
     )
     parser.add_argument("pdf", nargs="+", help="PDF-Datei(en) oder Glob-Pattern")
     parser.add_argument("--dry-run", action="store_true", help="Nicht umbenennen, nur ausgeben")
     parser.add_argument("--llm-fallback", action="store_true", help="Haiku nutzen wenn CrossRef nichts findet")
+    parser.add_argument("--rename", action="store_true",
+                        help="PDF umbenennen + Metadaten in die Datei schreiben "
+                             "(Default: aus — schützt git-getrackte PDFs vor Mutation)")
     args = parser.parse_args()
 
     import glob
@@ -837,7 +859,7 @@ def main() -> None:
         sys.exit(1)
 
     for path in paths:
-        enrich(path, dry_run=args.dry_run, llm_fallback=args.llm_fallback)
+        enrich(path, dry_run=args.dry_run, llm_fallback=args.llm_fallback, rename=args.rename)
 
 
 if __name__ == "__main__":
