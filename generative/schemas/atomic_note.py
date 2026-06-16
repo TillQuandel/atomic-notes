@@ -76,3 +76,6 @@ class QualityReport:
     crossref_title: Optional[str] = None
     crossref_author: Optional[str] = None
     crossref_year: Optional[str] = None
+    # True wenn die DOI per Title-RATEN (CrossRef-Title-Match) statt per harter ID
+    # gefunden wurde → crossref_*-Override darf die Quelle nur bei Titel-Match setzen.
+    doi_from_title_match: bool = False

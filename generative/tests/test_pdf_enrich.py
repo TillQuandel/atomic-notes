@@ -393,6 +393,92 @@ def test_enrich_uses_embedded_metadata_first(tmp_path, monkeypatch):
     assert meta["title"] == "Information Behavior"
     assert meta["author"] == "Bates"
 
+def test_title_match_confident_rejects_weak_overlap():
+    """Generischer Guess matcht fremden Titel mit nur 1 gemeinsamen Wort -> verwerfen.
+    Realer Bug-Fall: 'zettelkasten primer' vs. spanischer Torres-Salinas-Titel."""
+    from generative.tools.pdf_enrich import _title_match_confident
+    assert _title_match_confident(
+        "zettelkasten primer",
+        "Curso de escritura académica. Tomar notas con el método Zettelkasten y Zotero",
+    ) is False
+
+
+def test_title_match_confident_accepts_exact():
+    from generative.tools.pdf_enrich import _title_match_confident
+    assert _title_match_confident("Information Behavior", "Information Behavior") is True
+
+
+def test_title_match_confident_accepts_subtitle_extension():
+    """Guess ist Haupttitel, Treffer hat Untertitel -> trotzdem vertrauenswürdig."""
+    from generative.tools.pdf_enrich import _title_match_confident
+    assert _title_match_confident(
+        "Information Search Process",
+        "The Information Search Process: A Cognitive Approach",
+    ) is True
+
+
+def test_title_match_confident_rejects_single_generic_token():
+    """Ein gemeinsames bedeutungstragendes Wort reicht nicht."""
+    from generative.tools.pdf_enrich import _title_match_confident
+    assert _title_match_confident("information", "Information Behavior Research") is False
+
+
+def test_title_match_confident_handles_none_result():
+    """OpenAlex kann title=null liefern -> kein Crash, sondern False."""
+    from generative.tools.pdf_enrich import _title_match_confident
+    assert _title_match_confident("Information Behavior", None) is False
+
+
+def test_title_match_confident_folds_accents():
+    """Akzent-Varianten gelten als gleich (método == metodo)."""
+    from generative.tools.pdf_enrich import _title_match_confident
+    assert _title_match_confident("Método Único", "Metodo Unico") is True
+
+
+def test_enrich_discards_weak_openalex_match(tmp_path, monkeypatch):
+    """enrich() verwirft OpenAlex-Treffer mit schwachem Titel-Match statt fehlzuattribuieren."""
+    from generative.tools.pdf_enrich import enrich
+    import urllib.request
+    from unittest.mock import MagicMock
+    mock_reader = MagicMock()
+    mock_reader.metadata = {}
+    monkeypatch.setattr("generative.tools.pdf_enrich.PdfReader", lambda *a, **kw: mock_reader)
+    monkeypatch.setattr("generative.tools.pdf_enrich.extract_text",
+                        lambda path, max_pages=3: "Zettelkasten Primer\nEine kurze Einfuehrung in atomare Notizen.")
+    fake = b'{"results":[{"title":"Curso de escritura acad\xc3\xa9mica. Tomar notas con el m\xc3\xa9todo Zettelkasten y Zotero","authorships":[{"author":{"display_name":"Daniel Torres-Salinas"}}],"publication_year":2024,"doi":"https://doi.org/10.3145/infonomy.24.055","type":"article"}]}'
+    class FakeResp:
+        def read(self): return fake
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: FakeResp())
+    pdf = tmp_path / "zettelkasten-primer.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = enrich(pdf, dry_run=True)
+    assert meta is None
+
+
+def test_enrich_rename_false_keeps_original_file(tmp_path, monkeypatch):
+    """enrich(rename=False) mutiert die Eingabedatei nicht (Pipeline-Schutz),
+    auch ohne dry_run."""
+    from generative.tools.pdf_enrich import enrich
+    import urllib.request
+    monkeypatch.setattr("generative.tools.pdf_enrich.extract_text",
+                        lambda path, max_pages=3: "See doi:10.1002/asi.23681 for details")
+    fake_cr = b'{"status":"ok","message":{"title":["Information Behavior"],"author":[{"family":"Bates"}],"published":{"date-parts":[[2017]]},"DOI":"10.1002/asi.23681","type":"journal-article"}}'
+    class FakeResp:
+        def read(self): return fake_cr
+        def __enter__(self): return self
+        def __exit__(self, *a): pass
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: FakeResp())
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = enrich(pdf, rename=False)
+    assert meta is not None
+    assert meta["author"] == "Bates"
+    assert pdf.exists()  # Original unverändert
+    assert not (tmp_path / "Bates - 2017 - Information Behavior.pdf").exists()
+
+
 def test_enrich_uses_isbn_when_no_doi(tmp_path, monkeypatch):
     """enrich() findet ISBN wenn kein DOI und keine eingebetteten Metadaten."""
     from generative.tools.pdf_enrich import enrich
