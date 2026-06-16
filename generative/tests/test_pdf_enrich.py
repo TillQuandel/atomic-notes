@@ -479,6 +479,53 @@ def test_title_match_confident_accepts_colon_subtitle_without_space():
     ) is True
 
 
+def test_title_match_confident_rejects_generic_subset_of_specific_query():
+    """#41 (inverser R1-Fall): Treffer-Haupttitel ist eine echte Teilmenge der
+    spezifischeren Query (r_main ⊊ q). 'Situated Learning' (Lave & Wenger 1991)
+    steckt in der generischeren Query 'Situated Learning Theory' — Forward- UND
+    Reverse-Containment passieren beide (r_main ⊆ q → reverse = 1.0), aber der
+    generische Kurztitel identifiziert das Werk nicht; Autor/Jahr fehlt im
+    Title-Pfad. OpenAlex speichert Titel praktisch immer voll (21 Live-Abfragen
+    2026-06-16), ein echter gekürzter Treffer ist kaum legitim. Fail-closed."""
+    from generative.tools.pdf_enrich import _title_match_confident
+    assert _title_match_confident(
+        "Situated Learning Theory", "Situated Learning"
+    ) is False
+    assert _title_match_confident(
+        "Cognitive Load Theory Foundations", "Cognitive Load"
+    ) is False
+
+
+def test_title_match_confident_accepts_full_title_with_subtitle_query():
+    """#41 Codex-HIGH-Regressionsschutz: Enthält die QUERY selbst den Untertitel
+    (Volltitel aus Dateiname/Textblock) und der OpenAlex-Treffer ist derselbe
+    Volltitel, darf der r_main⊊q-Guard NICHT verwerfen — die Query-Extra-Tokens
+    liegen vollständig im Treffer-Volltitel (q ⊆ r_full). Nur Query-Tokens, die im
+    GANZEN Treffer fehlen (q - r_full ≠ ∅), signalisieren den Generischer-Kurztitel-Bug."""
+    from generative.tools.pdf_enrich import _title_match_confident
+    full = "Communities of Practice: Learning, Meaning, and Identity"
+    assert _title_match_confident(full, full) is True
+    # Query ohne Doppelpunkt (Dateiname-Variante), Treffer mit Untertitel
+    assert _title_match_confident(
+        "Communities of Practice Learning Meaning and Identity", full
+    ) is True
+
+
+def test_title_match_confident_strips_html_in_result_title():
+    """#41 Codex-MED: OpenAlex-Titel können HTML/MathML tragen (literal <i>/<span> ODER
+    HTML-entity-kodiert &lt;span&gt;). Tag-Namen mit ≥4 Zeichen ('span') landeten sonst
+    als bedeutungstragende Tokens in r_main/r_full und verfälschten Subset-/Containment-
+    Checks — hier schlüpfte der Generischer-Kurztitel-Bug durch, weil 'span' das r_main⊊q
+    unterlief. Nach HTML-Strip wird korrekt fail-closed verworfen."""
+    from generative.tools.pdf_enrich import _title_match_confident
+    assert _title_match_confident(
+        "Situated Learning Theory", "<span>Situated Learning</span>"
+    ) is False
+    assert _title_match_confident(
+        "Situated Learning Theory", "&lt;span&gt;Situated Learning&lt;/span&gt;"
+    ) is False
+
+
 def test_enrich_discards_weak_openalex_match(tmp_path, monkeypatch):
     """enrich() verwirft OpenAlex-Treffer mit schwachem Titel-Match statt fehlzuattribuieren."""
     from generative.tools.pdf_enrich import enrich

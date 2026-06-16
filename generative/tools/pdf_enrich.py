@@ -12,6 +12,7 @@ Optional: ocrmypdf (für gescannte PDFs)
 """
 from __future__ import annotations
 import argparse
+import html
 import json
 import re
 import shutil
@@ -345,8 +346,15 @@ def _significant_tokens(title: str) -> set[str]:
     Akzent-gefaltet (método==metodo), damit Sprach-/Encoding-Varianten matchen.
     Defensiv gegen None (OpenAlex kann title=null liefern). Ziffern bleiben bewusst
     draußen — Jahreszahlen o.ä. als Match-Token würden Fehltreffer erzeugen.
+
+    HTML/MathML aus dem Titel entfernen (#41-MED): OpenAlex liefert Markup teils
+    literal (<i>, <span>), teils HTML-entity-kodiert (&lt;span&gt;). Tag-Namen mit
+    ≥4 Zeichen würden sonst als bedeutungstragende Tokens die Containment-/Subset-
+    Checks verfälschen (z.B. 'span' unterläuft r_main⊊q). Erst entkodieren, dann Tags
+    strippen.
     """
-    folded = unicodedata.normalize("NFKD", str(title or "").lower())
+    raw = re.sub(r"<[^>]+>", " ", html.unescape(str(title or "")))
+    folded = unicodedata.normalize("NFKD", raw.lower())
     folded = "".join(c for c in folded if not unicodedata.combining(c))
     words = re.findall(r"[^\W\d_]+", folded, flags=re.UNICODE)
     return {w for w in words if len(w) >= _MIN_SIGNIFICANT_TOKEN_LEN}
@@ -368,6 +376,18 @@ def _title_match_confident(query: str, result_title: str) -> bool:
     r_full = _significant_tokens(result_title)
     r_main = _significant_tokens(_SUBTITLE_SEP_RE.split(str(result_title or ""), maxsplit=1)[0])
     if not q or not r_main:
+        return False
+    # #41 (inverser R1-Fall): Treffer-Haupttitel ist eine echte Teilmenge der
+    # spezifischeren Query (r_main ⊊ q) UND die Query trägt Tokens, die im GANZEN
+    # Treffer fehlen (q - r_full ≠ ∅) — z.B. Query "Situated Learning Theory" gegen
+    # Treffer "Situated Learning" (Lave & Wenger): "theory" steht nirgends im Treffer.
+    # Forward- UND Reverse-Containment passieren beide (r_main ⊆ q → reverse = 1.0),
+    # aber der generische Kurztitel identifiziert das Werk nicht; Autor/Jahr fehlt im
+    # Title-Pfad zur Disambiguierung. OpenAlex speichert Titel praktisch immer voll
+    # (inkl. Untertitel; 21 Live-Abfragen 2026-06-16), ein echter gekürzter Treffer
+    # ist kaum legitim — fail-closed verwerfen. Die q-r_full-Bedingung schützt den
+    # legitimen Volltitel-mit-Untertitel-Fall (Query enthält den Untertitel, q ⊆ r_full).
+    if r_main < q and (q - r_full):
         return False
     if len(q & r_main) < _MIN_TITLE_TOKEN_OVERLAP:
         return False
