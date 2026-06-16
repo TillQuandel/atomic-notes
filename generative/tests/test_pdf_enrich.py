@@ -435,6 +435,50 @@ def test_title_match_confident_folds_accents():
     assert _title_match_confident("Método Único", "Metodo Unico") is True
 
 
+def test_title_match_confident_rejects_generic_two_token_in_long_foreign_title():
+    """#41-Restrisiko R1: 2 generische Query-Tokens sind Präfix eines LÄNGEREN
+    fremden Haupttitels. Forward-Containment allein (beide Wörter drin = 1.0) reicht
+    nicht — der Haupttitel des Treffers (vor dem Untertitel) darf nicht wesentlich
+    mehr als die Query-Tokens enthalten. Fail-closed."""
+    from generative.tools.pdf_enrich import _title_match_confident
+    assert _title_match_confident(
+        "Information Behavior",
+        "Information Behavior in Everyday Contexts: A Study of Organizational "
+        "Knowledge Workers and Their Information Practices",
+    ) is False
+    assert _title_match_confident(
+        "Knowledge Management",
+        "Knowledge Management Systems in Modern Enterprise Architecture Design",
+    ) is False
+
+
+def test_title_match_confident_accepts_short_main_title_long_subtitle():
+    """#41-R1-Regression-Schutz: kurzer Haupttitel + langer Untertitel ist legitim.
+    Reverse-Containment muss gegen den HAUPTTITEL (vor ':') prüfen, nicht den ganzen
+    String — sonst werden kanonische Werke fälschlich verworfen.
+    Belegte Titel: Wenger 1998 (Communities of Practice), Lave & Wenger 1991
+    (Situated Learning)."""
+    from generative.tools.pdf_enrich import _title_match_confident
+    assert _title_match_confident(
+        "Communities of Practice",
+        "Communities of Practice: Learning, Meaning, and Identity",
+    ) is True
+    assert _title_match_confident(
+        "Situated Learning",
+        "Situated Learning: Legitimate Peripheral Participation",
+    ) is True
+
+
+def test_title_match_confident_accepts_colon_subtitle_without_space():
+    """#41-R1: Untertitel-Trenner ':' wird auch ohne folgendes Leerzeichen erkannt
+    (OpenAlex normalisiert ': ' nicht immer)."""
+    from generative.tools.pdf_enrich import _title_match_confident
+    assert _title_match_confident(
+        "Communities of Practice",
+        "Communities of Practice:Learning, Meaning, and Identity",
+    ) is True
+
+
 def test_enrich_discards_weak_openalex_match(tmp_path, monkeypatch):
     """enrich() verwirft OpenAlex-Treffer mit schwachem Titel-Match statt fehlzuattribuieren."""
     from generative.tools.pdf_enrich import enrich
@@ -501,3 +545,38 @@ def test_enrich_uses_isbn_when_no_doi(tmp_path, monkeypatch):
     assert meta is not None
     assert meta["author"] == "Crockford"
     assert meta["type"] == "book"
+
+
+def test_cli_does_not_rename_by_default(tmp_path, monkeypatch):
+    """#41-Restrisiko R3: Standalone-CLI mutiert getrackte PDFs nicht mehr.
+    Umbenennen + In-PDF-Metadaten-Write ist jetzt Opt-in (rename=False per Default)."""
+    from generative.tools import pdf_enrich
+    captured = {}
+
+    def fake_enrich(path, dry_run=False, llm_fallback=False, rename=True):
+        captured["rename"] = rename
+        return {"author": "X", "year": 2020, "title": "Y"}
+
+    monkeypatch.setattr(pdf_enrich, "enrich", fake_enrich)
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF")
+    monkeypatch.setattr(sys, "argv", ["pdf_enrich", str(pdf)])
+    pdf_enrich.main()
+    assert captured["rename"] is False
+
+
+def test_cli_renames_with_flag(tmp_path, monkeypatch):
+    """--rename aktiviert das Umbenennen explizit (Opt-in)."""
+    from generative.tools import pdf_enrich
+    captured = {}
+
+    def fake_enrich(path, dry_run=False, llm_fallback=False, rename=True):
+        captured["rename"] = rename
+        return {"author": "X", "year": 2020, "title": "Y"}
+
+    monkeypatch.setattr(pdf_enrich, "enrich", fake_enrich)
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF")
+    monkeypatch.setattr(sys, "argv", ["pdf_enrich", "--rename", str(pdf)])
+    pdf_enrich.main()
+    assert captured["rename"] is True
