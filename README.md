@@ -81,6 +81,61 @@ atomic-notes run --source examples/zettelkasten-primer.pdf --dry-run
 atomic-notes run --source examples/zettelkasten-primer.pdf
 ```
 
+## Example output
+
+Below is a real note the generative pipeline produced from the bundled
+`examples/zettelkasten-primer.pdf`. Every claim carries a footnote anchored to a
+source page, the source block is rendered deterministically from metadata (not
+free-generated), and quality concerns are surfaced as `quality-flags` rather than
+hidden. Exact output varies with the notes already in your vault and the metadata
+the source exposes.
+
+````markdown
+---
+title: "Atomic Note"
+aliases:
+  - "Atomare Note"
+  - "atomic note"
+  - "Zettelkasten-Grundeinheit"
+type: atomic
+synthesis-confidence: low
+confidence-rationale: "nicht peer-reviewed (Methodische Limits); nur 1 Anker (Relevance)"
+auto-vault-recommended: true
+source-file: "zettelkasten-primer.pdf"
+claude-generated: true
+quality-flags:
+  - "⚠️ kein DOI — Qualität nicht automatisch prüfbar"
+  - "⚠️ Duplikat-Risiko hoch — prüfe: Atomic Notes"
+created: 2026-06-17
+tags:
+  - zettelkasten
+  - knowledge-management
+related:
+  - "[[Atomic Notes]]"
+  - "[[Schema-Konzept]]"
+---
+# Atomic Note: Kleinstmögliche eigenständige Wissenseinheit mit genau einer Idee
+
+Eine Atomic Note hält genau eine Idee fest und ist die kleinste Gedankeneinheit, die noch für sich allein verständlich ist[^1]. Der Begriff ist der Chemie entlehnt: wie ein Atom die kleinste Einheit mit den Eigenschaften eines Elements ist, ist eine Atomic Note die kleinste Informationseinheit, die noch ohne äußeren Kontext bedeutsam bleibt[^2].
+
+Die Beschränkung auf eine Idee pro Note ist keine Einschränkung, sondern eine Design-Entscheidung[^4]. Wenn jede Note einen einzigen kohärenten Gedanken trägt, wird Retrieval (Wiederfinden) präzise und Rekombination möglich[^5].
+
+> [!quote]- Zettelkasten-Primer 2026, S. 1
+> „A note that mixes three ideas is hard to link to anything because it is always half-relevant."
+
+[^1]: zettelkasten-primer, S. 1.
+[^2]: zettelkasten-primer, S. 1.
+[^4]: zettelkasten-primer, S. 1.
+[^5]: zettelkasten-primer, S. 1.
+
+## Quellen
+
+*Quelle: zettelkasten-primer 2026: zettelkasten-primer, S. 1*
+````
+
+The body above is abridged for the README; a full run emits the complete note
+(all paragraphs and page anchors) to your configured vault.
+
 ## Roadmap
 
 1. **M1 — installable by strangers**: packaging, entry point, preflight `doctor`,

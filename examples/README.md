@@ -24,6 +24,6 @@ python examples/generate_example_pdf.py
 
 ### Showcase notes
 
-Example output notes produced by running the pipeline on this file are not yet
-included. They will be added in a future milestone so that new contributors can
-see what the pipeline produces without running it themselves.
+An example note produced by running the pipeline on this file is shown in the
+top-level `README.md` under "Example output", so new contributors can see what
+the pipeline produces without running it themselves.
