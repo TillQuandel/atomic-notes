@@ -19,6 +19,12 @@ Verwendung:
   atomic-notes run --source <pdf> [Orchestrator-Flags]   Pipeline starten
   atomic-notes run --help                                alle Pipeline-Flags
   atomic-notes doctor                                    Preflight-Checks
+
+Umgebung:
+  ATOMIC_AGENT_BACKEND   LLM-Backend: 'subscription' (Default, Claude-Code-CLI,
+                         kein API-Key) oder 'litellm' (Anthropic/OpenAI per
+                         API-Key; lokales Ollama via OLLAMA_API_BASE).
+                         Setup prüfen mit: atomic-notes doctor
 """
 
 
