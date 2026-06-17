@@ -423,6 +423,12 @@ def render_note(note: AtomicNoteDraft, source_file: str,
     if note.auto_vault_recommended is not None:
         auto_vault_line = f"\nauto-vault-recommended: {'true' if note.auto_vault_recommended else 'false'}"
 
+    # #45: schmales fail-closed-Flag, wenn die Quelle nicht aufgelöst werden konnte.
+    # Nur gesetzt → gerendert (kein leeres Metadatum bei aufgelösten Quellen).
+    source_status_line = ""
+    if note.source_status:
+        source_status_line = f"\nsource-status: {note.source_status}"
+
     # Bootstrap-Schwäche 4b: proposed-tags + tag-review-status nur wenn nicht leer.
     # KEIN Auto-Note-Mover-Routing — User entscheidet beim Inbox-Review ob Tag
     # in tag_registry.yml wandert. Helper auch in render_moc() genutzt (Codex Fix 5).
@@ -433,7 +439,7 @@ title: "{title_esc}"
 aliases:
 {aliases_yaml}
 type: atomic
-synthesis-confidence: {note.synthesis_confidence}{rationale_line}{auto_vault_line}
+synthesis-confidence: {note.synthesis_confidence}{rationale_line}{auto_vault_line}{source_status_line}
 source-file: "{source_file}"
 claude-generated: true
 quality-flags:

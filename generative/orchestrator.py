@@ -50,7 +50,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 sys.stderr.reconfigure(encoding='utf-8')
 
 from generative.agents import context_builder, quality, planner, extractor, background_extractor, verifier, cross_reference, confidence, critic, canonicalizer
-from generative.pipeline import pdf_chunker, vault_writer, embeddings, acronym_fix, anchor_repair, boilerplate_dedup, figure_alt
+from generative.pipeline import pdf_chunker, vault_writer, embeddings, acronym_fix, anchor_repair, boilerplate_dedup, figure_alt, routing_report
 from generative.schemas.atomic_note import AtomicNoteDraft, ConceptPlan
 from generative.config import (
     AGENT_VERSION,
@@ -684,12 +684,9 @@ def _run_note_pipeline(
                 print(f"      [refine] Score {refined.critic_score}/{refined.hard_gates_pass} ≤ "
                       f"{draft.critic_score}/{draft.hard_gates_pass}, Original behalten")
 
-    auto, reason = vault_writer.auto_write_decision(draft)
-    status = "[Vault]" if auto else f"[Inbox: {reason}]"
-    if draft.action == "hub":
-        status = f"[MoC] {status}"
-    gates = "OK" if draft.hard_gates_pass else "fail"
-    print(f"      Score: {draft.critic_score}/5 | Hard-Gates: {gates} | Confidence: {draft.synthesis_confidence} {status}")
+    # #45: Routing-Grund + konkrete Quality-Flags auch im echten Lauf sichtbar
+    # (bisher erschienen die Flags nur im --dry-run).
+    print(f"      {routing_report.routing_status_line(draft)}")
 
     return i, draft
 
@@ -1454,6 +1451,29 @@ def main(argv: list[str] | None = None):
             # Filename-Year hat Vorrang (v28): CrossRef darf nur überschreiben wenn Filename kein Jahr hat
             enriched_meta["Year"] = quality_report.crossref_year
 
+    # #45: fail-closed sichtbar machen — wenn die Quelle nicht zuverlässig
+    # aufgelöst werden konnte (CrossRef-Override verworfen ODER Autor/Jahr nach
+    # Enrichment weiter unbekannt), die create-Notes mit source-status: unresolved
+    # markieren und eine ehrliche NL-Zeile drucken. Friction nur auf diesem Pfad —
+    # aufgelöste Quellen bleiben frictionless.
+    # Resolved-Check nutzt dieselbe Quellen-SSoT wie Renderer/Quality-Check:
+    # enriched_meta ODER der Filename-Fallback `fb` (fb["Author"] landet nicht in
+    # pdf_meta, sonst würden Zotero-benannte Dateien fälschlich als unresolved
+    # markiert). Nur create-Notes werden markiert (extend/hub bewusst out-of-scope).
+    _author_resolved = bool(enriched_meta.get("Author") or enriched_meta.get("author") or fb.get("Author"))
+    _year_resolved = bool(enriched_meta.get("Year") or enriched_meta.get("year") or fb.get("Year"))
+    _source_unresolved = _block_crossref_override or not (_author_resolved and _year_resolved)
+    if _source_unresolved:
+        _marked = 0
+        for draft in drafts:
+            if draft.action == "create":
+                draft.source_status = "unresolved"
+                _marked += 1
+        if _marked:
+            _framing = routing_report.source_status_framing("unresolved", source_path.name)
+            if _framing:
+                print(_framing)
+
     # v23: Tag-Hint via --target-tag wird allen Drafts angehängt → Auto-Note-Mover
     # routet beim Öffnen aus 00-inbox/ in den Zielordner (siehe CLAUDE.md-Mapping).
     if args.target_tag:
@@ -1501,10 +1521,13 @@ def main(argv: list[str] | None = None):
             written += 1
 
     print(f"\n=== Fertig: {written} Notes {'(dry-run)' if args.dry_run else 'geschrieben'} ===")
-    vault_count = sum(1 for d in drafts if vault_writer.auto_write_decision(d)[0])
-    inbox_count = written - vault_count
-    print(f"   -> Vault:  {vault_count}")
-    print(f"   -> Inbox:  {inbox_count} (manuell pruefen)")
+    # #45: Final-Report um Gründe-Aggregat erweitern (Routing-Verteilung +
+    # "0 PDFs verändert"-Zusicherung sichtbar machen).
+    _summary = routing_report.summarize_routing(drafts)
+    for _line in routing_report.final_report_lines(drafts):
+        print(_line)
+    vault_count = _summary["vault"]
+    inbox_count = _summary["inbox"]
 
     _trace_event("orchestrator", "plan_stats", {
         "written": written,
