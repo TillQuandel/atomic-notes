@@ -73,8 +73,14 @@ atomic-notes doctor
 
 ### 4. Run on the bundled example
 
+**Start with `--dry-run`.** It shows what would be generated — including a slim
+Markdown diff of any note that a re-run would overwrite — without writing or
+changing a single file. Once the preview looks right, drop the flag for the real
+run.
+
 ```bash
-# dry run — shows what would be generated without writing any files
+# recommended first run — shows what would be generated (and what a re-run would
+# overwrite, as a diff) without writing any files
 atomic-notes run --source examples/zettelkasten-primer.pdf --dry-run
 
 # full run — writes atomic notes to your configured vault
