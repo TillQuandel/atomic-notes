@@ -42,6 +42,10 @@ class AtomicNoteDraft:
                                                             # nächsten Run regulär nutzbar.
     tag_review_status: Optional[str] = None  # "needs-review" wenn proposed_tags nicht leer
     refine_key: Optional[str] = None         # concept plan title für concept_map-Lookup nach ER (Bug #5)
+    source_status: Optional[str] = None      # #45: "unresolved" wenn die Quelle (Autor/Jahr/DOI)
+                                              # nicht zuverlässig aufgelöst werden konnte (Enrichment
+                                              # leer ODER CrossRef-Override fail-closed verworfen).
+                                              # Schmales Frontmatter-Flag, kein Erklär-Absatz.
 
 
 @dataclass
