@@ -118,6 +118,32 @@ class TestSourceStatusFraming:
         assert source_status_framing("resolved", "x.pdf") is None
 
 
+class TestIsSourceUnresolved:
+    def test_resolved_from_enriched_meta(self):
+        from generative.pipeline.routing_report import is_source_unresolved
+        assert is_source_unresolved(
+            {"Author": "Müller", "Year": "2020"}, {}, False) is False
+
+    def test_resolved_from_filename_fallback(self):
+        # fb["Author"] landet nicht in enriched_meta — darf trotzdem nicht
+        # fälschlich als unresolved gelten (Zotero-Schema).
+        from generative.pipeline.routing_report import is_source_unresolved
+        assert is_source_unresolved(
+            {}, {"Author": "Müller", "Year": "2020"}, False) is False
+
+    def test_unresolved_when_author_or_year_missing(self):
+        from generative.pipeline.routing_report import is_source_unresolved
+        assert is_source_unresolved({"Author": "Müller"}, {}, False) is True
+        assert is_source_unresolved({"Year": "2020"}, {}, False) is True
+        assert is_source_unresolved({}, {}, False) is True
+
+    def test_unresolved_when_crossref_override_blocked(self):
+        # selbst bei aufgelöstem Autor/Jahr: verworfener CrossRef-Override = unsicher
+        from generative.pipeline.routing_report import is_source_unresolved
+        assert is_source_unresolved(
+            {"Author": "Müller", "Year": "2020"}, {}, True) is True
+
+
 class TestSourceStatusFrontmatter:
     def test_unresolved_rendered_as_frontmatter_flag(self):
         from generative.pipeline.vault_writer import render_note
