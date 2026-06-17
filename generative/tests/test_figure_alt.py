@@ -170,3 +170,16 @@ def test_embed_alt_figures_noop_on_untagged_pdf():
 
     assert report.bound == []
     assert draft.body == original
+
+
+def test_untagged_pdf_flagged_for_reporting():
+    # #50/M11: untagged-PDF wird als untagged markiert, damit der Lauf den
+    # Abbildungen-Skip einmal melden kann (statt stumm zu überspringen).
+    report = embed_alt_figures(FIXTURES / "untagged_plain.pdf", [])
+    assert report.untagged is True
+
+
+def test_tagged_pdf_not_flagged_as_untagged():
+    report = embed_alt_figures(FIXTURES / "tagged_one_figure.pdf",
+                               [_draft("Konzept A", ["S. 1"])])
+    assert report.untagged is False
