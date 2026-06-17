@@ -45,3 +45,11 @@ def test_help_exitcode_0(capsys):
     rc = cli.main(["--help"])
     assert rc == 0
     assert "atomic-notes" in capsys.readouterr().out
+
+
+def test_help_mentions_backend_env_and_doctor(capsys):
+    # #49/M9: ATOMIC_AGENT_BACKEND im --help auffindbar (bisher nur README/doctor)
+    cli.main(["--help"])
+    out = capsys.readouterr().out
+    assert "ATOMIC_AGENT_BACKEND" in out
+    assert "doctor" in out

@@ -55,6 +55,11 @@ For an API-based backend (Anthropic, OpenAI, Ollama, …) set
 `ATOMIC_AGENT_BACKEND=litellm` and add a provider key. See
 `generative/README.md` for full backend documentation.
 
+> **Privacy:** the `litellm` backend sends PDF text to the configured external API
+> (e.g. Anthropic/OpenAI). For a fully local path that never leaves your machine,
+> use the `extractive` pipeline (see Pipelines below) or a local `litellm` provider
+> such as Ollama. The default `subscription` backend uses your own Claude account.
+
 Copy the example env file and fill in your paths:
 
 ```bash
@@ -141,6 +146,19 @@ Die Beschränkung auf eine Idee pro Note ist keine Einschränkung, sondern eine 
 
 The body above is abridged for the README; a full run emits the complete note
 (all paragraphs and page anchors) to your configured vault.
+
+### Frontmatter fields
+
+| Field | Meaning |
+|-------|---------|
+| `type` | Note kind (`atomic`, `merge-stub`, …). |
+| `synthesis-confidence` | Pipeline's confidence in the synthesis: `high` / `medium` / `low`. |
+| `confidence-rationale` | Short reason for a `low`/`medium` confidence (only when set). |
+| `quality-flags` | Concerns surfaced for review (e.g. no DOI, duplicate risk) — not hidden. |
+| `source-file` | The source PDF the note was generated from. |
+| `source-status` | `unresolved` when the source identity (author/year) could not be confirmed — e.g. enrichment found none or a weak CrossRef match was rejected; the file is left untouched and the note flagged for review. |
+| `auto-vault-recommended` | Whether the critic deems the note vault-ready; routing itself is tag-based via Auto Note Mover. |
+| `pipeline-content-hash` | Checksum of the generated note — lets a re-run detect manual edits and avoid overwriting them. |
 
 ## Roadmap
 
