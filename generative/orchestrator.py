@@ -996,6 +996,11 @@ def _run_extraction_stages(args, source_path: Path, runtime_config=None):  # mai
     text = pdf_chunker.pdf_to_text(source_path)
     word_count = len(text.split())
     print(f"      {word_count} Wörter")
+    # #48/M4: gescanntes/textloses PDF aktiv melden (sonst leerer/dünner Output
+    # ohne Erklärung) + handlungsanleitender OCR-Hinweis.
+    if not text.strip():
+        from generative.pipeline.error_hints import scanned_pdf_hint
+        print(scanned_pdf_hint(source_path.name))
     chunks = pdf_chunker.split_by_chapters(text)
     pdf_meta_early = pdf_chunker.pdf_metadata(source_path) or {}
     try:
@@ -1499,6 +1504,10 @@ def main(argv: list[str] | None = None):
     if fig_report.bound or fig_report.skipped:
         print(f"[figures] {len(fig_report.bound)} Alt-Text-Figur(en) eingebettet, "
               f"{len(fig_report.skipped)} ohne eindeutige Bindung übersprungen")
+    elif fig_report.untagged:
+        # #50/M11: untagged-PDF einmal melden statt stumm zu überspringen.
+        print("[figures] PDF nicht PDF-UA-getaggt — Abbildungen (falls vorhanden) "
+              "werden übersprungen (nur getaggte PDFs liefern Alt-Text).")
 
     print(f"\n[7/7] Vault-Writer…")
     written = 0

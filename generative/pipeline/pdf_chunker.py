@@ -29,12 +29,18 @@ _PAGE_MARKER_RE = re.compile(r"\n*\[S\.\s*(\d+)\]\n*", re.MULTILINE)
 
 def pdf_to_pages(pdf_path: Path) -> list[tuple[int, str]]:
     """Liefert [(page_num, page_text), ...] via pdftotext + \\f-Split."""
-    result = subprocess.run(
-        ["pdftotext", str(pdf_path), "-"],
-        capture_output=True, text=True, encoding="utf-8", errors="replace",
-    )
+    from generative.pipeline.error_hints import pdftotext_error_hint
+    try:
+        result = subprocess.run(
+            ["pdftotext", str(pdf_path), "-"],
+            capture_output=True, text=True, encoding="utf-8", errors="replace",
+        )
+    except OSError as e:
+        # pdftotext-Binary fehlt/nicht ausführbar → genau der Setup-Fall, der den
+        # handlungsanleitenden Hinweis (+ doctor) am meisten braucht.
+        sys.exit(pdftotext_error_hint(f"{e} (pdftotext nicht gefunden?)"))
     if result.returncode != 0:
-        sys.exit(f"pdftotext fehlgeschlagen: {result.stderr}")
+        sys.exit(pdftotext_error_hint(result.stderr))
     pages_raw = result.stdout.split("\f")
     # letzte page kann leer sein (pdftotext hängt oft \f am Ende an)
     pages_raw = [p for p in pages_raw if p.strip()]

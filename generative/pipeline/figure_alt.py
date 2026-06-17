@@ -40,6 +40,7 @@ class SkippedFigure:
 class BindReport:
     bound: list[tuple[TaggedFigure, str]] = field(default_factory=list)  # (figure, draft_title)
     skipped: list[SkippedFigure] = field(default_factory=list)
+    untagged: bool = False  # #50/M11: PDF nicht PDF-UA-getaggt → Abbildungen-Skip melden
 
 
 def _figure_bullet(fig: TaggedFigure) -> str:
@@ -82,7 +83,9 @@ def embed_alt_figures(pdf_path: Path, drafts: list[AtomicNoteDraft]) -> BindRepo
 
     raw = extract_tagged_figures(pdf_path)
     if not raw:
-        return BindReport()
+        # leeres raw = untagged ODER getaggt-ohne-Figuren → unterscheiden, damit
+        # M11 nur bei wirklich untagged PDFs den Skip meldet (kein Falsch-Alarm).
+        return BindReport(untagged=not is_tagged_pdf(pdf_path))
 
     with fitz.open(str(pdf_path)) as doc:
         page_count = doc.page_count
@@ -153,6 +156,16 @@ def _sanitize_alt(text: str) -> str:
     text = text.replace("[[", r"\[\[").replace("]]", r"\]\]")
     text = text.replace("|", r"\|")
     return text
+
+
+def is_tagged_pdf(pdf_path: Path) -> bool:
+    """True wenn das PDF PDF-UA-getaggt ist (StructTreeRoot im Catalog)."""
+    import fitz  # PyMuPDF
+    try:
+        with fitz.open(str(pdf_path)) as doc:
+            return doc.xref_get_key(doc.pdf_catalog(), "StructTreeRoot")[0] == "xref"
+    except Exception:
+        return False
 
 
 def extract_tagged_figures(pdf_path: Path) -> list[tuple[int, str]]:
