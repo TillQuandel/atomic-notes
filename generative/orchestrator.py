@@ -1456,13 +1456,12 @@ def main(argv: list[str] | None = None):
     # Enrichment weiter unbekannt), die create-Notes mit source-status: unresolved
     # markieren und eine ehrliche NL-Zeile drucken. Friction nur auf diesem Pfad —
     # aufgelöste Quellen bleiben frictionless.
-    # Resolved-Check nutzt dieselbe Quellen-SSoT wie Renderer/Quality-Check:
-    # enriched_meta ODER der Filename-Fallback `fb` (fb["Author"] landet nicht in
-    # pdf_meta, sonst würden Zotero-benannte Dateien fälschlich als unresolved
-    # markiert). Nur create-Notes werden markiert (extend/hub bewusst out-of-scope).
-    _author_resolved = bool(enriched_meta.get("Author") or enriched_meta.get("author") or fb.get("Author"))
-    _year_resolved = bool(enriched_meta.get("Year") or enriched_meta.get("year") or fb.get("Year"))
-    _source_unresolved = _block_crossref_override or not (_author_resolved and _year_resolved)
+    # Resolved-Check via pure Helper (testbar). fb wird hier in main-Scope neu
+    # geparst (deterministisch, idempotent — dieselbe Funktion wie in der
+    # Extraction-Stage). Nur create-Notes werden markiert (extend/hub out-of-scope).
+    _fb = vault_writer._parse_filename_fallback(source_path.name)
+    _source_unresolved = routing_report.is_source_unresolved(
+        enriched_meta, _fb, _block_crossref_override)
     if _source_unresolved:
         _marked = 0
         for draft in drafts:

@@ -81,6 +81,20 @@ def final_report_lines(drafts: list[AtomicNoteDraft]) -> list[str]:
     ]
 
 
+def is_source_unresolved(enriched_meta: dict, fb: dict,
+                         block_crossref_override: bool) -> bool:
+    """True wenn die Quelle nicht zuverlässig aufgelöst werden konnte.
+
+    Nutzt dieselbe Quellen-SSoT wie Renderer/Quality-Check: enriched_meta ODER
+    den Filename-Fallback `fb` (fb["Author"] landet nicht in enriched_meta, sonst
+    würden Zotero-benannte Dateien fälschlich als unresolved markiert). Ein
+    fail-closed verworfener CrossRef-Override gilt immer als unsicher.
+    """
+    author = enriched_meta.get("Author") or enriched_meta.get("author") or fb.get("Author")
+    year = enriched_meta.get("Year") or enriched_meta.get("year") or fb.get("Year")
+    return bool(block_crossref_override) or not (author and year)
+
+
 def source_status_framing(source_status: str | None, source_name: str) -> str | None:
     """First-person-NL-Zeile bei unsicherer Quelle — sonst None.
 
