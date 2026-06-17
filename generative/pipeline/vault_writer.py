@@ -1,6 +1,7 @@
 """Schreibt genehmigte AtomicNoteDraft-Objekte als .md-Dateien in den Vault."""
 from __future__ import annotations
 import re
+import difflib
 from datetime import date
 from pathlib import Path
 
@@ -652,6 +653,30 @@ def rewrite_merged_related_links(drafts: list[AtomicNoteDraft],
     return rewritten
 
 
+def markdown_overwrite_diff(old_text: str, new_text: str, filename: str = "",
+                            max_lines: int = 60) -> str:
+    """Schlanker unified Markdown-Diff old→new (#46). Leer wenn keine Änderung.
+
+    Begrenzt auf den Overwrite-Fall — kein Voll-Diff-UI. Lange Diffs werden auf
+    max_lines gekappt (mit Kürzungs-Hinweis), damit der Preview schlank bleibt.
+    """
+    diff = list(difflib.unified_diff(
+        old_text.splitlines(), new_text.splitlines(),
+        fromfile=f"{filename} (bestehend)" if filename else "bestehend",
+        tofile=f"{filename} (neu)" if filename else "neu",
+        n=2, lineterm=""))
+    if not diff:
+        return ""
+    truncated = False
+    if len(diff) > max_lines:
+        diff = diff[:max_lines]
+        truncated = True
+    body = "\n".join(diff)
+    if truncated:
+        body += "\n… (Diff gekürzt — voller Vergleich beim echten Lauf)"
+    return body
+
+
 def write_note(note: AtomicNoteDraft, source_file: str, dry_run: bool = False,
                source_meta: dict[str, str] | None = None,
                existing_concepts: dict[str, str] | None = None,
@@ -748,6 +773,23 @@ def write_note(note: AtomicNoteDraft, source_file: str, dry_run: bool = False,
         print(f"    Score: {note.critic_score}/5 | Hard-Gates: {'pass' if note.hard_gates_pass else 'fail'} | Confidence: {note.synthesis_confidence}")
         if note.quality_flags:
             print(f"    Flags: {safe(', '.join(note.quality_flags))}")
+        # #46: Overwrite-Fall — target.exists() ⟺ Idempotenz-Re-Run überschreibt
+        # eine bestehende Datei. Schlanker Markdown-Diff zeigt, WAS sich ändert.
+        if target.exists():
+            try:
+                _old = target.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                _old = ""
+            _diff = markdown_overwrite_diff(_old, content, target.name)
+            if _diff:
+                print(f"    [Overwrite-Diff] {target.name}:")
+                for _l in _diff.splitlines():
+                    # Diff in voller UTF-8-Treue (Umlaute/⚠️) drucken; nur wenn die
+                    # Konsole das Encoding nicht kann, auf ASCII-safe zurückfallen.
+                    try:
+                        print(f"      {_l}")
+                    except UnicodeEncodeError:
+                        print(f"      {safe(_l)}")
         eval_dir = Path(__file__).resolve().parents[1] / ".cache" / "eval" / "baseline" / Path(source_file).stem
         eval_dir.mkdir(parents=True, exist_ok=True)
         prefix = "merge" if is_merge_stub else ("vault" if auto else "inbox")
