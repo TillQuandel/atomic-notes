@@ -15,10 +15,12 @@ def _draft(title="Test Note", body="neuer body"):
 class TestDryRunOverwriteWiring:
     def test_dry_run_prints_diff_when_overwriting_existing_inbox(self, tmp_path, capsys):
         from generative.pipeline import vault_writer
-        # Bestehende Inbox-Note, die find_existing_in_inbox matcht (source-file + title)
+        # Bestehende, PRISTINE Pipeline-Note (mit gültigem content-hash, sonst greift
+        # der #47-Überschreib-Schutz und es käme zu keinem Overwrite/Diff).
         existing = tmp_path / "test-note.md"
         existing.write_text(
-            '---\ntitle: "Test Note"\nsource-file: "src.pdf"\n---\nalter body\n',
+            vault_writer.inject_content_hash(
+                '---\ntitle: "Test Note"\nsource-file: "src.pdf"\n---\nalter body\n'),
             encoding="utf-8")
         vault_writer.write_note(_draft(body="komplett neuer body"),
                                 source_file="src.pdf", dry_run=True,

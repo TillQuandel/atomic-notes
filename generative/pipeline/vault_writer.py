@@ -2,6 +2,7 @@
 from __future__ import annotations
 import re
 import difflib
+import hashlib
 from datetime import date
 from pathlib import Path
 
@@ -395,7 +396,8 @@ sub-concepts:
     # Footnote-Renumbering: nach Body-Layout-Refactor können verwaiste Defs
     # zurückbleiben (z.B. wenn redundanter Aufzählungs-Absatz gestrippt wurde).
     body_combined = renumber_footnotes("\n\n".join(sections))
-    return frontmatter + "\n" + body_combined + "\n\n" + build_quellen_block(note, source_file, source_meta).rstrip() + "\n"
+    rendered = frontmatter + "\n" + body_combined + "\n\n" + build_quellen_block(note, source_file, source_meta).rstrip() + "\n"
+    return inject_content_hash(rendered)  # #47: auch Hubs hashen (Idempotenz bei Re-Run)
 
 
 def render_note(note: AtomicNoteDraft, source_file: str,
@@ -469,7 +471,10 @@ related:
     sections: list[str] = [body]
     sections.append(build_quellen_block(note, source_file, source_meta).rstrip())
 
-    return frontmatter + "\n" + "\n\n".join(sections) + "\n"
+    rendered = frontmatter + "\n" + "\n\n".join(sections) + "\n"
+    # #47: content-hash ins Frontmatter, damit ein Re-Run erkennt, ob die Datei
+    # seither vom Nutzer editiert wurde (dann nicht still überschreiben).
+    return inject_content_hash(rendered)
 
 
 def auto_write_decision(note: AtomicNoteDraft) -> tuple[bool, str]:
@@ -526,6 +531,7 @@ def find_existing_in_inbox(source_file: str, title: str,
     if not search_dir.exists():
         return None
     title_norm = title.strip().lower()
+    matches: list[tuple[Path, str]] = []
     for f in search_dir.glob("*.md"):
         try:
             text = f.read_text(encoding="utf-8", errors="replace")
@@ -542,7 +548,16 @@ def find_existing_in_inbox(source_file: str, title: str,
             continue
         if (fm.get("source-file") == source_file
                 and str(fm.get("title", "")).strip().lower() == title_norm):
+            matches.append((f, text))
+    if not matches:
+        return None
+    # #47: bei mehreren Treffern (editiertes Original + pristine Variante aus einem
+    # früheren Schutz-Lauf) die pristine Datei wählen — deterministisch, sonst
+    # erzeugt jeder Re-Run je nach glob-Reihenfolge eine neue Variante (Churn).
+    for f, text in matches:
+        if is_pristine_pipeline_note(text):
             return f
+    return matches[0][0]
     return None
 
 
@@ -614,7 +629,8 @@ tags:
         "",
         build_quellen_block(note, source_file, source_meta).rstrip(),
     ]
-    return frontmatter + "\n" + "\n".join(body_parts) + "\n"
+    rendered = frontmatter + "\n" + "\n".join(body_parts) + "\n"
+    return inject_content_hash(rendered)  # #47: Merge-Stubs hashen → editierte Stubs schützen
 
 
 def rewrite_merged_related_links(drafts: list[AtomicNoteDraft],
@@ -651,6 +667,93 @@ def rewrite_merged_related_links(drafts: list[AtomicNoteDraft],
                 d.related[i] = f"[[{new_stem}]]"
                 rewritten += 1
     return rewritten
+
+
+_CONTENT_HASH_FIELD = "pipeline-content-hash"
+_CONTENT_HASH_RE = re.compile(rf"^{_CONTENT_HASH_FIELD}:.*\n?", re.MULTILINE)
+
+
+def _strip_content_hash_line(text: str) -> str:
+    """Entfernt die pipeline-content-hash-Zeile NUR aus dem Frontmatter.
+
+    Dokumentweit zu strippen würde eine identische Zeile im Body unsichtbar machen
+    (Body-Edit würde nicht als Änderung erkannt). Symmetrisch zur Injektion, die
+    ausschließlich im Frontmatter einfügt.
+    """
+    if not text.startswith("---"):
+        return text
+    end = text.find("\n---", 3)
+    if end == -1:
+        return text
+    return _CONTENT_HASH_RE.sub("", text[:end]) + text[end:]
+
+
+def compute_content_hash(text: str) -> str:
+    """Stabiler Hash über den Note-Inhalt OHNE die Hash-Zeile selbst.
+
+    Idempotent w.r.t. der Hash-Zeile: hash(text) == hash(text mit injizierter
+    Hash-Zeile), sodass Write-Zeit- und Check-Zeit-Hash übereinstimmen.
+    """
+    base = _strip_content_hash_line(text)
+    return hashlib.sha256(base.encode("utf-8")).hexdigest()[:16]
+
+
+def inject_content_hash(rendered: str) -> str:
+    """Fügt `pipeline-content-hash: <hash>` ins Frontmatter ein (#47).
+
+    Der Hash wird über den gerenderten Inhalt (ohne Hash-Zeile) berechnet und als
+    eigene Zeile direkt nach dem öffnenden `---` eingefügt — mit trailing Newline,
+    damit `_strip_content_hash_line` exakt invers ist (Write-Hash == Check-Hash).
+    """
+    h = compute_content_hash(rendered)
+    if not rendered.startswith("---\n"):
+        return rendered
+    return f"---\n{_CONTENT_HASH_FIELD}: {h}\n{rendered[4:]}"
+
+
+def extract_content_hash(text: str) -> str | None:
+    """Liest den gespeicherten pipeline-content-hash aus dem Frontmatter."""
+    if not text.startswith("---"):
+        return None
+    end = text.find("\n---", 3)
+    if end == -1:
+        return None
+    m = re.search(rf"^{_CONTENT_HASH_FIELD}:\s*(\S+)\s*$", text[:end], re.MULTILINE)
+    return m.group(1) if m else None
+
+
+def is_pristine_pipeline_note(text: str) -> bool:
+    """True wenn die Note seit dem Pipeline-Write unverändert ist (#47).
+
+    Kein gespeicherter Hash (z. B. alte Note vor #47) → konservativ False:
+    im Zweifel schützen statt überschreiben.
+    """
+    stored = extract_content_hash(text)
+    if stored is None:
+        return False
+    return compute_content_hash(text) == stored
+
+
+def _is_pristine_inbox_file(path: Path) -> bool:
+    """is_pristine_pipeline_note auf eine Datei angewendet; unlesbar → schützen."""
+    try:
+        return is_pristine_pipeline_note(path.read_text(encoding="utf-8", errors="replace"))
+    except OSError:
+        return False
+
+
+def _free_variant(target_dir: Path, stem: str) -> Path:
+    """Erster nicht-existierender `<stem>-<i>.md`-Pfad — garantiert kollisionsfrei.
+
+    Verhindert (anders als der frühere `range(2,20)`-Loop) einen stillen
+    Overwrite bei erschöpften Suffixen: Bei echter Erschöpfung wird hart
+    abgebrochen statt eine fremde Datei zu überschreiben.
+    """
+    for i in range(2, 1000):
+        candidate = target_dir / f"{stem}-{i}.md"
+        if not candidate.exists():
+            return candidate
+    raise RuntimeError(f"Keine freie Variante für '{stem}' in {target_dir} (1000 belegt)")
 
 
 def markdown_overwrite_diff(old_text: str, new_text: str, filename: str = "",
@@ -725,33 +828,38 @@ def write_note(note: AtomicNoteDraft, source_file: str, dry_run: bool = False,
         target = target_dir / filename
         # Idempotenz auch für merge-stubs: gleicher source_file + title → überschreiben
         existing_stub = find_existing_in_inbox(source_file, f"MERGE: {note.title}", inbox_dir)
-        if existing_stub is not None:
-            target = existing_stub
+        if existing_stub is not None and _is_pristine_inbox_file(existing_stub):
+            target = existing_stub  # unveränderter Stub → idempotent überschreiben
+        elif existing_stub is not None:
+            # #47: editierter Merge-Stub → nicht überschreiben, neue Version daneben
+            target = _free_variant(target_dir, Path(filename).stem)
+            print(f"  [overwrite-schutz] '{existing_stub.name}' wurde seit dem "
+                  f"letzten Lauf editiert — neue Version als '{target.name}' "
+                  f"geschrieben, deine Edits bleiben erhalten.")
         elif target.exists():
-            base = target.stem
-            for i in range(2, 20):
-                candidate = target_dir / f"{base}-{i}.md"
-                if not candidate.exists():
-                    target = candidate
-                    break
+            target = _free_variant(target_dir, target.stem)
         content = render_merge_stub(note, source_file, existing_vault,
                                     source_meta=source_meta)
     else:
         # Idempotenz: eigener früherer Run derselben PDF → überschreibe
         existing_inbox = find_existing_in_inbox(source_file, note.title, inbox_dir)
-        if existing_inbox is not None:
+        _base_name = (moc_filename(note.title) if note.action == "hub"
+                      else slugify(note.title) + ".md")
+        if existing_inbox is not None and _is_pristine_inbox_file(existing_inbox):
+            # unveränderte Pipeline-Note → idempotent überschreiben (wie bisher)
             target = existing_inbox
+        elif existing_inbox is not None:
+            # #47: seit dem letzten Lauf editiert → NICHT überschreiben, neue
+            # Version daneben; die User-Edits bleiben unangetastet.
+            target = _free_variant(target_dir, Path(_base_name).stem)
+            print(f"  [overwrite-schutz] '{existing_inbox.name}' wurde seit dem "
+                  f"letzten Lauf editiert — neue Version als '{target.name}' "
+                  f"geschrieben, deine Edits bleiben erhalten.")
+            existing_inbox = None  # kein Overwrite → kein proposed-tags-Erhalt
         else:
-            filename = (moc_filename(note.title) if note.action == "hub"
-                        else slugify(note.title) + ".md")
-            target = target_dir / filename
+            target = target_dir / _base_name
             if target.exists():
-                base = target.stem
-                for i in range(2, 20):
-                    candidate = target_dir / f"{base}-{i}.md"
-                    if not candidate.exists():
-                        target = candidate
-                        break
+                target = _free_variant(target_dir, target.stem)
         # Codex-Finding 1: bei Re-Run mit existing Inbox-Datei UND ohne neue
         # Vorschläge bestehenden Review-Block bewahren (sonst verschwindet
         # User-State stillschweigend). Neue Vorschläge überschreiben — der
