@@ -15,6 +15,23 @@ class TestScannedPdfHint:
         assert "gescannt" in msg.lower() or "kein text" in msg.lower()
 
 
+class TestScannedHintThinVariant:
+    def test_thin_text_says_kaum_not_keinen(self):
+        # Dünner (nicht leerer) Text: die "enthält keinen Text"-Formulierung wäre
+        # sachlich falsch (G6/#27). words_per_page wird genannt, OCR-Schritt bleibt.
+        from generative.pipeline.error_hints import scanned_pdf_hint
+        msg = scanned_pdf_hint("Scan.pdf", words_per_page=12.0)
+        assert "kaum" in msg.lower()
+        assert "12" in msg
+        assert "ocrmypdf" in msg
+
+    def test_empty_default_unchanged(self):
+        # Ohne words_per_page bleibt die bestehende "keinen Text"-Meldung.
+        from generative.pipeline.error_hints import scanned_pdf_hint
+        msg = scanned_pdf_hint("Scan.pdf")
+        assert "keinen extrahierbaren text" in msg.lower()
+
+
 class TestPdftotextErrorHint:
     def test_actionable_with_doctor_pointer(self):
         from generative.pipeline.error_hints import pdftotext_error_hint

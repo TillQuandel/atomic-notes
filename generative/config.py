@@ -53,6 +53,14 @@ CRITIC_AUTO_THRESHOLD = 4   # von 5 Tests, siehe Schema-Konzept Milestone 1.1
 # Chunk-Größe Fallback (Wörter)
 CHUNK_WORDS = 3000
 
+# Textqualitäts-Gate (G6/#27): mittlere Wörter pro nichtleerer Seite, unter denen
+# der extrahierte Text als zu dünn gilt (gescannt/kaputt/copy-protected) → OCR-Warnung.
+# Bewusst KONSERVATIV und UNKALIBRIERT: eine normale Buch-Textseite hat 250–500 Wörter,
+# ein un-OCR'tes Scan-PDF ~0. 50 trennt das mit großem Sicherheitsabstand und minimalem
+# False-Positive-Risiko. Das Gate warnt nur (fail-open), blockiert nie. Echte
+# Schwellen-Kalibrierung gegen Gold-Labels ist Issue #29/G3, nicht hier.
+MIN_WORDS_PER_PAGE = 50
+
 # Maximale Chunk-Anzahl für kurze Dokumente (< 50 Seiten).
 # Verhindert Chapter-Split-Explosion bei Review-Artikeln die viele Section-Header haben
 # aber kein echtes Buch sind. 28 Chunks bei 12-Seiten-Paper war der v35-Bug.

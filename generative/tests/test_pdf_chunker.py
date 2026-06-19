@@ -219,3 +219,61 @@ def test_single_chunk_oversize_still_returned():
     out = concept_text_window(text, ["TARGET"], window_words=400, max_chars=100)
     assert len(out) > 100  # bewusster Bypass
     assert "TARGET" in out
+
+
+# ---- assess_text_quality (G6/#27 — Textqualitäts-Gate) -------------------
+
+def test_empty_text_is_empty_not_thin():
+    from generative.pipeline.pdf_chunker import assess_text_quality
+    q = assess_text_quality("")
+    assert q.is_empty is True
+    assert q.is_thin is False
+    assert q.total_words == 0
+
+
+def test_thin_scanned_text_flagged():
+    # Gescanntes PDF ohne OCR: viele Seiten, kaum extrahierter Text (Rauschen).
+    from generative.pipeline.pdf_chunker import assess_text_quality, pages_to_marked_text
+    pages = [(n, "3 7") for n in range(1, 11)]  # 10 Seiten, je 2 "Wörter"
+    text = pages_to_marked_text(pages)
+    q = assess_text_quality(text)
+    assert q.is_thin is True
+    assert q.is_empty is False
+    assert q.words_per_page < 50
+
+
+def test_normal_dense_text_not_thin():
+    from generative.pipeline.pdf_chunker import assess_text_quality, pages_to_marked_text
+    body = " ".join(["wort"] * 300)  # 300 Wörter/Seite — normaler Fließtext
+    pages = [(1, body), (2, body)]
+    text = pages_to_marked_text(pages)
+    q = assess_text_quality(text)
+    assert q.is_thin is False
+    assert q.is_empty is False
+    assert q.words_per_page >= 50
+
+
+def test_page_markers_not_counted_as_words():
+    # Die `[S. N]`-Marker dürfen die Wortzahl nicht aufblähen (sonst sähe ein
+    # leeres PDF mit 40 Seiten-Markern "wortreich" aus).
+    from generative.pipeline.pdf_chunker import assess_text_quality, pages_to_marked_text
+    pages = [(n, "") for n in range(1, 41)]  # 40 leere Seiten → nur Marker
+    text = pages_to_marked_text(pages)
+    q = assess_text_quality(text)
+    assert q.total_words == 0
+    assert q.is_empty is True
+
+
+def test_inline_page_refs_not_counted_as_pages():
+    # Codex-Review G6/#27: Inline-Quellenverweise "[S. 12]" im Fließtext (deutsche
+    # Zitierweise) dürfen NICHT als eigene Seiten gezählt werden — sonst wird
+    # words_per_page künstlich gedrückt und ein gutes kurzes PDF fälschlich als
+    # is_thin (False-Positive-Warnung) markiert. Nur zeilen-isolierte Pipeline-Marker
+    # zählen als echte Seiten.
+    from generative.pipeline.pdf_chunker import assess_text_quality, pages_to_marked_text
+    body = "Mustertext " * 100 + "vgl. dazu [S. 12] sowie [S. 34] in der Literatur."
+    pages = [(1, body)]
+    text = pages_to_marked_text(pages)
+    q = assess_text_quality(text)
+    assert q.pages == 1        # nur der eine echte Pipeline-Marker
+    assert q.is_thin is False  # ~100 Wörter auf 1 Seite ist nicht dünn

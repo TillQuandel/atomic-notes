@@ -13,12 +13,22 @@ _AUTH_MARKERS = ("auth", "api key", "api_key", "apikey", "401", "403",
                  "unauthorized", "permission", "credential", "invalid key")
 
 
-def scanned_pdf_hint(pdf_name: str) -> str:
-    """Gescanntes/textloses PDF — erklärt das Problem + OCR-Schritt."""
+def scanned_pdf_hint(pdf_name: str, words_per_page: float | None = None) -> str:
+    """Gescanntes/textloses PDF — erklärt das Problem + OCR-Schritt.
+
+    ``words_per_page`` gesetzt → dünner (nicht leerer) Text: die Meldung sagt
+    „kaum extrahierbaren Text (nur ~N Wörter/Seite)" statt „keinen" (G6/#27).
+    """
     out_name = (pdf_name[:-4] if pdf_name.lower().endswith(".pdf") else pdf_name) + ".ocr.pdf"
+    if words_per_page is not None:
+        problem = (
+            f"enthält kaum extrahierbaren Text (nur ~{words_per_page:.0f} Wörter/Seite) — "
+            f"vermutlich ein gescanntes oder schlecht extrahierbares PDF"
+        )
+    else:
+        problem = "enthält keinen extrahierbaren Text — vermutlich ein gescanntes PDF"
     return (
-        f"  [Warnung] '{pdf_name}' enthält keinen extrahierbaren Text — "
-        f"vermutlich ein gescanntes PDF. Die Pipeline braucht Text und liefert "
+        f"  [Warnung] '{pdf_name}' {problem}. Die Pipeline braucht Text und liefert "
         f"sonst leere/dünne Notes.\n"
         f"  Nächster Schritt: OCR in eine neue Datei ausführen, z. B. "
         f"`ocrmypdf '{pdf_name}' '{out_name}'`, dann mit '{out_name}' erneut starten."
