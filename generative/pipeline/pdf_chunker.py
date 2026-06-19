@@ -11,7 +11,7 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from generative.config import CHUNK_WORDS
+from generative.config import CHUNK_WORDS, MIN_WORDS_PER_PAGE
 
 
 @dataclass
@@ -25,6 +25,13 @@ class Chunk:
 
 # Marker den Extractor/Verifier sehen: leere Zeile + [S. N] + leere Zeile
 _PAGE_MARKER_RE = re.compile(r"\n*\[S\.\s*(\d+)\]\n*", re.MULTILINE)
+
+# Zeilen-isolierte Variante NUR für die Seitenzählung (assess_text_quality):
+# echte Pipeline-Marker stehen via `pages_to_marked_text` allein auf einer Zeile
+# (`\n\n[S. N]\n\n`). Inline-Quellenverweise wie „vgl. [S. 12]" im Fließtext stehen
+# NICHT allein und dürfen nicht als Seite zählen (sonst künstlich gedrückte
+# words_per_page → falsch is_thin; Codex-Review G6/#27).
+_PAGE_MARKER_LINE_RE = re.compile(r"^\s*\[S\.\s*\d+\]\s*$", re.MULTILINE)
 
 
 def pdf_to_pages(pdf_path: Path) -> list[tuple[int, str]]:
@@ -149,6 +156,43 @@ def page_range_of_text(text: str) -> tuple[int | None, int | None]:
     if not nums:
         return None, None
     return min(nums), max(nums)
+
+
+@dataclass
+class TextQuality:
+    """Ergebnis des Textqualitäts-Gates (G6/#27)."""
+    total_words: int
+    pages: int
+    words_per_page: float
+    is_empty: bool   # gar kein extrahierbarer Text
+    is_thin: bool    # Text vorhanden, aber unter MIN_WORDS_PER_PAGE (gescannt/kaputt)
+
+
+def assess_text_quality(text: str) -> TextQuality:
+    """Bewertet die Dichte des extrahierten PDF-Texts.
+
+    Zählt Wörter (ohne die `[S. N]`-Seiten-Marker) gegen die Seitenzahl (Anzahl
+    Marker; ohne Marker, aber mit Text → mindestens 1 Seite). `is_thin` greift,
+    wenn Text vorhanden ist, aber im Mittel weniger als ``MIN_WORDS_PER_PAGE``
+    Wörter pro Seite liefert — typisch für gescannte/kaputte/copy-protected PDFs,
+    bei denen sonst stiller dünner Text Coverage UND Halluzinationsrate verfälscht.
+
+    Pure Funktion (fail-open): bewertet nur, löst nichts aus. Der Caller warnt.
+    """
+    page_count = len(_PAGE_MARKER_LINE_RE.findall(text))
+    body = _PAGE_MARKER_RE.sub(" ", text)
+    total_words = len(body.split())
+    pages = max(page_count, 1) if total_words else page_count
+    words_per_page = total_words / pages if pages else 0.0
+    is_empty = total_words == 0
+    is_thin = not is_empty and words_per_page < MIN_WORDS_PER_PAGE
+    return TextQuality(
+        total_words=total_words,
+        pages=pages,
+        words_per_page=words_per_page,
+        is_empty=is_empty,
+        is_thin=is_thin,
+    )
 
 
 def concept_text_window(full_text: str, search_terms: list[str],

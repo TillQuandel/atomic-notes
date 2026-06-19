@@ -996,11 +996,16 @@ def _run_extraction_stages(args, source_path: Path, runtime_config=None):  # mai
     text = pdf_chunker.pdf_to_text(source_path)
     word_count = len(text.split())
     print(f"      {word_count} Wörter")
-    # #48/M4: gescanntes/textloses PDF aktiv melden (sonst leerer/dünner Output
-    # ohne Erklärung) + handlungsanleitender OCR-Hinweis.
-    if not text.strip():
+    # #48/M4 + #27/G6: gescanntes/textloses ODER zu dünnes PDF aktiv melden (sonst
+    # leerer/dünner Output ohne Erklärung) + handlungsanleitender OCR-Hinweis.
+    # Das Gate warnt nur (fail-open) und bricht den Lauf nicht ab.
+    quality = pdf_chunker.assess_text_quality(text)
+    if quality.is_empty or quality.is_thin:
         from generative.pipeline.error_hints import scanned_pdf_hint
-        print(scanned_pdf_hint(source_path.name))
+        print(scanned_pdf_hint(
+            source_path.name,
+            words_per_page=quality.words_per_page if quality.is_thin else None,
+        ))
     chunks = pdf_chunker.split_by_chapters(text)
     pdf_meta_early = pdf_chunker.pdf_metadata(source_path) or {}
     try:
