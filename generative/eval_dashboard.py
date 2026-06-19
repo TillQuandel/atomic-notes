@@ -436,6 +436,31 @@ def _chart_longitudinal(log_data: dict) -> dict:
     return {"versions": versions, "datasets": datasets}
 
 
+_DELTA_MIN_N = 20  # unter N=20 kein Besser/Schlechter-Urteil (Apophenie-Schutz)
+
+
+def version_delta(kpi_trend: dict, metric: str) -> dict:
+    """Delta neueste-vs-Vorversion fuer eine KPI-Metrik.
+
+    `kpi_trend["versions"]` ist aufsteigend sortiert (neueste = letzte Position),
+    die Metrik-Arrays laufen parallel dazu. `reliable` ist nur True, wenn beide
+    beteiligten Versionen n>=20 haben — sonst ist das Delta Rauschen (N-Guard).
+    """
+    values = kpi_trend.get(metric) or []
+    ns     = kpi_trend.get("n") or []
+    latest = values[-1] if values else None
+    prev   = values[-2] if len(values) >= 2 else None
+    n_latest = ns[-1] if ns else None
+    n_prev   = ns[-2] if len(ns) >= 2 else None
+    delta = None if (latest is None or prev is None) else round(latest - prev, 4)
+    reliable = (
+        delta is not None
+        and (n_latest or 0) >= _DELTA_MIN_N
+        and (n_prev or 0) >= _DELTA_MIN_N
+    )
+    return {"latest": latest, "prev": prev, "delta": delta, "reliable": reliable}
+
+
 def _chart_tokens(runs: list[dict]) -> dict:
     return {
         "labels":       [r["date"]         for r in runs],
@@ -445,6 +470,20 @@ def _chart_tokens(runs: list[dict]) -> dict:
         "tokens_cache": [r["tokens_cache"] for r in runs],
         "duration_min": [r["duration_min"] for r in runs],
     }
+
+
+_SCALING_RECENT_KEEP = 10  # juengste N Versionen ungedimmt (#36 P2)
+
+
+def mark_scaling_recency(points: list[dict], keep: int = _SCALING_RECENT_KEEP) -> list[dict]:
+    """Gibt eine neue Punktliste zurueck, in der die Punkte der juengsten `keep`
+    Versionen `recent=True` tragen, aeltere `recent=False`. So kann der Client
+    kaputte Frueh-Versions-Aeren dimmen, statt sie ungefiltert in die
+    PDF-Laengen-Skalierung zu mischen (#36 P2). Mutiert die Eingabe nicht.
+    """
+    versions = sorted({p["ver"] for p in points if p.get("ver")}, key=_ver_sort_key)
+    recent_set = set(versions[-keep:]) if keep > 0 else set()
+    return [{**p, "recent": p.get("ver") in recent_set} for p in points]
 
 
 def _chart_scaling(all_log_runs: list[dict]) -> dict:
@@ -462,6 +501,7 @@ def _chart_scaling(all_log_runs: list[dict]) -> dict:
         for r in all_log_runs
         if r["words"] is not None
     ]
+    points = mark_scaling_recency(points)
     keys = sorted({p["key"] for p in points})
     return {"points": points, "keys": keys}
 

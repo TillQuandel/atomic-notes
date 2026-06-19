@@ -526,6 +526,11 @@ def build_data(eval_version: str | None = None,
         "tokens":   [round(sum(tok_by_ver.get(v,[])) / 1000, 1) if tok_by_ver.get(v) else None for v in sorted_pipeline_versions],  # in M-Tokens
         "cost":     [round(sum(cost_by_ver.get(v, [])), 4) if cost_by_ver.get(v) else None for v in sorted_pipeline_versions],
     }
+    # Delta neueste-vs-Vorversion pro KPI (mit N-Guard, #36 P4)
+    kpi_trend["deltas"] = {
+        m: D.version_delta(kpi_trend, m)
+        for m in ("hall", "cov", "n", "accept", "dur", "tokens", "cost")
+    }
 
     return {
         "generated_at":        datetime.now().strftime("%Y-%m-%d %H:%M:%S"),

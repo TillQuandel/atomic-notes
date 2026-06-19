@@ -717,7 +717,7 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     <div class="row">
       <div class="panel">
         <div class="p-head">
-          <div><div class="p-title">Skaliert die Pipeline mit der PDF-Länge?</div><div class="p-sub">Lange Papers erzeugen <strong>nicht</strong> linear mehr Notes.</div></div>
+          <div><div class="p-title">Skaliert die Pipeline mit der PDF-Länge?</div><div class="p-sub">Lange Papers erzeugen <strong>nicht</strong> linear mehr Notes. Ältere Versionen <span style="opacity:.4">gedimmt</span>.</div></div>
           <div class="p-meta">Notes vs. Wörter</div>
         </div>
         <div class="chart-body"><canvas id="ch3"></canvas></div>
@@ -1134,15 +1134,22 @@ function renderKpis(kpis, thresh, kpiTrend) {
     const vers = kpiTrend?.versions || [];
     const sparkColor = toneColor(kd.tone);
     const sparkSvg = _trendChart(vals, vers, sparkColor, kd.u);
-    const validVals = vals.filter(v=>v!=null);
-    const delta = validVals.length >= 2 ? (validVals[validVals.length-1] - validVals[0]).toFixed(1) : null;
-    const dClass = delta!=null ? (parseFloat(delta)>0 ? (kd.key==='hall'?'dneg':'dpos') : (kd.key==='hall'?'dpos':'dneg')) : '';
-    const sign = delta!=null && parseFloat(delta)>0 ? '+' : '';
+    // #36 P4: Delta neueste-vs-Vorversion (server-berechnet) mit N-Guard statt
+    // neueste-vs-erste. Ohne reliable (n<20 in einer der beiden Versionen) kein
+    // Besser/Schlechter-Farbcode — nur neutrale Anzeige (Rausch-Schutz).
+    const vd = kpiTrend?.deltas?.[kd.key] || null;
+    const dval = (vd && vd.delta != null) ? vd.delta.toFixed(1) : null;
+    const prevVer = vers.length >= 2 ? vers[vers.length-2] : null;
+    const dClass = (dval!=null && vd.reliable) ? (parseFloat(dval)>0 ? (kd.key==='hall'?'dneg':'dpos') : (kd.key==='hall'?'dpos':'dneg')) : '';
+    const sign = dval!=null && parseFloat(dval)>0 ? '+' : '';
+    const deltaHtml = dval!=null
+      ? `Δ vs. ${prevVer}: <span class="${dClass}">${sign}${dval} ${kd.u}</span>${vd.reliable ? '' : ' (n&lt;20)'}`
+      : `${vers.length} Pipeline-Versionen`;
     const inner = document.getElementById('spark-inner');
     if (inner) inner.innerHTML = `
       <div class="spark-row-head">
         <strong>${kd.label} — Versions-Trend</strong>
-        <div class="spark-delta">${delta!=null ? `Δ <span class="${dClass}">${sign}${delta} ${kd.u}</span> · ${vers.length} Versionen` : `${vers.length} Pipeline-Versionen`}</div>
+        <div class="spark-delta">${deltaHtml}</div>
       </div>
       <div class="spark-chart-wrap">${sparkSvg}</div>`;
   }
@@ -1410,7 +1417,9 @@ function renderCharts(d) {
         const col=t.enc[keys.indexOf(k)%t.enc.length];
         return{label:(d.scaling.points.find(p=>p.key===k)||{}).label||k,
           data:d.scaling.points.filter(p=>p.key===k).map(p=>({x:p.x,y:p.y,_p:p})),
-          backgroundColor:col+'b0',borderColor:col,borderWidth:1,pointRadius:6,pointHoverRadius:9};
+          backgroundColor:ctx=>ctx.raw?._p?.recent===false?col+'33':col+'b0',
+          borderColor:ctx=>ctx.raw?._p?.recent===false?col+'55':col,
+          borderWidth:1,pointRadius:ctx=>ctx.raw?._p?.recent===false?3:6,pointHoverRadius:9};
       })},
       options:{maintainAspectRatio:false,responsive:true,animation:{duration:500},
         plugins:{legend:legendCfg(),tooltip:{callbacks:{label:ctx=>{const p=ctx.raw._p||{};return [`${p.label} ${p.ver}`,`${(p.x||0).toLocaleString('de-DE')} Wörter · ${p.y} Notes`];}}}},
