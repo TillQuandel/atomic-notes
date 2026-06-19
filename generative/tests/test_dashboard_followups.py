@@ -8,7 +8,9 @@ from __future__ import annotations
 
 import pytest
 
-from generative.eval_dashboard import version_delta, mark_scaling_recency
+from generative.eval_dashboard import (
+    version_delta, mark_scaling_recency, is_foss_version, _chart_tokens_by_version,
+)
 
 
 # ---------------------------------------------------------------- P4 fixtures
@@ -102,3 +104,47 @@ def test_mark_scaling_recency_does_not_mutate_input():
     pts = [_pt("v0.1.0")]
     mark_scaling_recency(pts, keep=10)
     assert "recent" not in pts[0]
+
+
+# ----------------------------------------------------- foss/generative-Trennung
+def test_is_foss_version_detects_foss_prefix():
+    assert is_foss_version("foss-v0.1.1") is True
+    assert is_foss_version("foss-v0.2.0") is True
+
+
+def test_is_foss_version_false_for_generative_and_edge_cases():
+    assert is_foss_version("v0.3.139") is False
+    assert is_foss_version("v0.1.0") is False     # generativ, trotz kleiner Zahl
+    assert is_foss_version("") is False
+    assert is_foss_version(None) is False
+
+
+# ------------------------------------------ Token/Duration pro Version (statt chronologisch)
+def test_chart_tokens_by_version_sums_and_medians_excluding_foss():
+    runs = [
+        {"ver": "v0.3.1", "tokens_in": 100, "tokens_out": 50, "tokens_cache": 10, "duration_min": 5.0},
+        {"ver": "v0.3.1", "tokens_in": 200, "tokens_out": 50, "tokens_cache": 10, "duration_min": 7.0},
+        {"ver": "v0.3.2", "tokens_in": 300, "tokens_out": 60, "tokens_cache": 20, "duration_min": 10.0},
+        {"ver": "foss-v0.1.0", "tokens_in": 999, "tokens_out": 999, "tokens_cache": 999, "duration_min": 99.0},
+    ]
+    out = _chart_tokens_by_version(runs)
+    assert out["labels"] == ["v0.3.1", "v0.3.2"]   # foss raus, aufsteigend (neueste rechts)
+    assert out["tokens_in"] == [300, 300]          # v0.3.1: 100+200
+    assert out["tokens_out"] == [100, 60]
+    assert out["tokens_cache"] == [20, 20]
+    assert out["duration_min"] == [6.0, 10.0]      # median([5,7])=6
+
+
+def test_chart_tokens_by_version_empty():
+    out = _chart_tokens_by_version([])
+    assert out["labels"] == [] and out["tokens_in"] == []
+
+
+def test_chart_tokens_by_version_skips_versionless_runs():
+    runs = [
+        {"ver": "v0.3.1", "tokens_in": 100, "tokens_out": 10, "tokens_cache": 0, "duration_min": 5.0},
+        {"ver": "", "tokens_in": 999, "tokens_out": 999, "tokens_cache": 0, "duration_min": 9.0},
+        {"tokens_in": 888, "tokens_out": 0, "tokens_cache": 0, "duration_min": 3.0},
+    ]
+    out = _chart_tokens_by_version(runs)
+    assert out["labels"] == ["v0.3.1"]   # versionslose raus, kein "?"-Bucket

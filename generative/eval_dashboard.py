@@ -106,6 +106,12 @@ _PDF_META: dict[str, dict] = {
 def _ver_sort_key(v: str) -> tuple:
     return tuple(int(n) for n in re.findall(r"\d+", v))
 
+def is_foss_version(version) -> bool:
+    """True fuer foss/extractive-Pipeline-Versionen (Praefix 'foss-'). Die foss-
+    Pipeline ist eine andere Architektur als die generative — ihre Versionen
+    gehoeren nicht in denselben Versions-Trend (#36)."""
+    return str(version or "").startswith("foss-")
+
 def _latest_version(ver_map: dict) -> str:
     return sorted(ver_map.keys(), key=_ver_sort_key)[-1]
 
@@ -484,6 +490,33 @@ def mark_scaling_recency(points: list[dict], keep: int = _SCALING_RECENT_KEEP) -
     versions = sorted({p["ver"] for p in points if p.get("ver")}, key=_ver_sort_key)
     recent_set = set(versions[-keep:]) if keep > 0 else set()
     return [{**p, "recent": p.get("ver") in recent_set} for p in points]
+
+
+def _chart_tokens_by_version(runs: list[dict]) -> dict:
+    """Token-Komposition (Summe) + Median-Duration pro Pipeline-Version,
+    aufsteigend sortiert (neueste rechts), foss-frei. Ersetzt die chronologische
+    Pro-Run-Achse, die bei vielen Runs unlesbar war und keinen Vergleich trug
+    (#36, E6)."""
+    by_ver: dict = {}
+    for r in runs:
+        ver = r.get("ver") or r.get("pipeline_version")
+        if not ver or is_foss_version(ver):
+            continue
+        b = by_ver.setdefault(ver, {"in": 0, "out": 0, "cache": 0, "dur": []})
+        b["in"]    += r.get("tokens_in", 0) or 0
+        b["out"]   += r.get("tokens_out", 0) or 0
+        b["cache"] += r.get("tokens_cache", 0) or 0
+        if r.get("duration_min") is not None:
+            b["dur"].append(r["duration_min"])
+    versions = sorted(by_ver, key=_ver_sort_key)
+    return {
+        "labels":       versions,
+        "tokens_in":    [by_ver[v]["in"]    for v in versions],
+        "tokens_out":   [by_ver[v]["out"]   for v in versions],
+        "tokens_cache": [by_ver[v]["cache"] for v in versions],
+        "duration_min": [round(_median(by_ver[v]["dur"]), 1) if by_ver[v]["dur"] else None
+                         for v in versions],
+    }
 
 
 def _chart_scaling(all_log_runs: list[dict]) -> dict:

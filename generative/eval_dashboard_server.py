@@ -409,8 +409,10 @@ def build_data(eval_version: str | None = None,
 
     # ── all_log_runs Dropdown-Optionen VOR all_log_runs-Filtern ──────
     _all_pdfs_opts  = sorted({r["label"] for r in all_log_runs if r.get("label")})
-    _all_pvers_opts = sorted({r["ver"]   for r in all_log_runs if r.get("ver")},
-                              key=lambda v: [int(x) for x in __import__("re").findall(r"\d+", v)])
+    _all_pvers_opts = sorted({r["ver"]   for r in all_log_runs
+                              if r.get("ver") and not D.is_foss_version(r["ver"])},
+                              key=lambda v: [int(x) for x in __import__("re").findall(r"\d+", v)],
+                              reverse=True)  # neueste generative Version oben (foss raus, #36)
 
     # PDF + Language + Version + Model-Filter auf all_log_runs (nach DB-Fallback)
     if model:
@@ -431,6 +433,16 @@ def build_data(eval_version: str | None = None,
                             if (r.get("label","")).lower() in _lang_pdfs
                             or (r.get("key","")).lower() in _lang_pdfs]
             log_data = D._build_log_data(all_log_runs)
+
+    # foss-Pipeline (gliner/extractive) nicht mit generativer mischen:
+    # im ungefilterten Default-View foss ausschliessen — ueber Modell-/Versions-
+    # Filter bleibt foss einsehbar (#36, User-Wunsch 2026-06-19)
+    if not (model or pipeline_version):
+        all_log_runs = [r for r in all_log_runs if not D.is_foss_version(r.get("ver"))]
+        log_data = D._build_log_data(all_log_runs)
+        quality_rows = [r for r in quality_rows
+                        if not D.is_foss_version(r.get("version") or r.get("pipeline_version"))]
+        token_runs = [tr for tr in token_runs if not D.is_foss_version(tr.get("ver"))]
 
     # Log-Runs nach Version gruppiert
     runs_by_version: dict = {}
@@ -541,7 +553,7 @@ def build_data(eval_version: str | None = None,
         "accept":              D._chart_acceptance(log_data),
         "scatter":             _chart_scatter_versioned(quality_rows),
         "long":                D._chart_longitudinal(log_data),
-        "tokens":              D._chart_tokens(token_runs),
+        "tokens":              D._chart_tokens_by_version(token_runs),
         "scaling":             D._chart_scaling(all_log_runs),
         "quality_by_version":  quality_by_version,
         "runs_by_version":     runs_by_version,
