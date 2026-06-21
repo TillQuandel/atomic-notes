@@ -44,6 +44,11 @@ from generative.pipeline.embeddings import _model, cosine
 
 _QUALITY_HISTORY = QUALITY_HISTORY  # SSoT: config.QUALITY_HISTORY; Alias für bestehende Importer (run.py, adversarial.py)
 EVAL_VERSION = "4.1"
+# Eval-Judge-Cache ist content-adressiert und vom --fresh-run-Run-Salt entkoppelt:
+# eine inhaltlich unveraenderte Note wird nicht erneut evaluiert, auch wenn die uebrige
+# Pipeline frisch generiert. Versions-gescoped (kein _RUN_ID): run-unabhaengig, aber ein
+# EVAL_VERSION-Bump invalidiert den Eval-Cache automatisch (Schutz gegen stille Staleness).
+EVAL_CACHE_NAMESPACE = f"eval-v{EVAL_VERSION}"
 _ENGINE_FLAG_VALUES = {flag.value for flag in QualityFlag}
 
 SUPPORTED_EXACT = Label.SUPPORTED_EXACT.value
@@ -345,7 +350,7 @@ Gib ausschliesslich JSON zurueck.
 TEXT:
 {raw_text}
 """
-    repaired = base.call_llm_full(prompt, model=MODEL_OPUS, agent="eval_quality_v3_json_repair", use_cache=use_cache)
+    repaired = base.call_llm_full(prompt, model=MODEL_OPUS, agent="eval_quality_v3_json_repair", use_cache=use_cache, cache_namespace=EVAL_CACHE_NAMESPACE)
     return _json_array_from_text(repaired.text)
 
 
@@ -412,7 +417,7 @@ def _call_judge(note_title: str, items: list[RetrievedContext], *, variant: str,
     meta = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cached_calls": 0, "quality_flags": []}
     for batch in _split_for_prompt(note_title, items, variant=variant):
         prompt = _build_prompt(note_title, batch, variant=variant)
-        result = base.call_llm_full(prompt, model=MODEL_OPUS, agent=f"eval_quality_v3_{variant}", use_cache=use_cache)
+        result = base.call_llm_full(prompt, model=MODEL_OPUS, agent=f"eval_quality_v3_{variant}", use_cache=use_cache, cache_namespace=EVAL_CACHE_NAMESPACE)
         meta["calls"] += 1
         meta["input_tokens"] += result.input_tokens
         meta["output_tokens"] += result.output_tokens
