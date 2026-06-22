@@ -274,7 +274,7 @@ function updateModeHint() {
   btn.textContent = dry ? "Vorschau starten" : "In Vault schreiben";
   btn.classList.toggle("danger", !dry);
   $("mode-hint").textContent = dry
-    ? "Vorschau: erzeugt Notes, schreibt nichts. Ergebnis erscheint unter „Erzeugte Notes“."
+    ? "Vorschau: erzeugt Notes, schreibt nichts in den Vault (nur lokale .cache-Kopien). Durchläuft die volle Pipeline inkl. Qualitäts-Eval — verursacht also LLM-Aufrufe/Kosten. Ergebnis erscheint unter „Erzeugte Notes“."
     : "Schreibt Notes nach 00-inbox im Vault. Frischer Lauf — Scores können von einer vorherigen Vorschau leicht abweichen.";
 }
 

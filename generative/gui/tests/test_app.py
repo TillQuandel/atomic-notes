@@ -264,6 +264,64 @@ def test_preview_returns_body_for_existing_eval_copy(tmp_path):
     assert r.json()["body"] == "# Konzept\nKörper"
 
 
+def test_run_rejects_cross_origin(client):
+    # #1: Ein Cross-Origin-POST (CSRF aus fremdem Browser-Tab) wird abgelehnt,
+    # bevor irgendein Lauf startet — auch wenn der Browser den Request absetzt.
+    c, pdf = client
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True},
+               headers={"Origin": "http://evil.example"})
+    assert r.status_code == 403
+
+
+def test_run_allows_same_origin(client):
+    # Same-Origin (127.0.0.1) bleibt erlaubt.
+    c, pdf = client
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True},
+               headers={"Origin": "http://127.0.0.1:8052"})
+    assert r.status_code == 200
+
+
+def test_upload_rejects_cross_origin(client):
+    c, _ = client
+    r = c.post("/api/upload",
+               files={"file": ("x.pdf", b"%PDF-1.4", "application/pdf")},
+               headers={"Origin": "http://evil.example"})
+    assert r.status_code == 403
+
+
+def test_cancel_rejects_cross_origin(client):
+    c, _ = client
+    r = c.post("/api/cancel", headers={"Origin": "http://evil.example"})
+    assert r.status_code == 403
+
+
+def test_run_rejects_pdf_outside_allowed_dirs(tmp_path):
+    # #2: Ein existierender Pfad ausserhalb pdf_dirs/uploads_dir (z.B. beliebige
+    # lokale Datei via CSRF/abgelaufenem Client-State) wird serverseitig abgelehnt.
+    allowed = tmp_path / "pdfs"
+    allowed.mkdir()
+    outside = tmp_path / "geheim.pdf"
+    outside.write_bytes(b"%PDF-1.4")
+    app = create_app(run_factory=fake_run, pdf_dirs=[allowed],
+                     vault_path=tmp_path, backend="subscription",
+                     uploads_dir=tmp_path / "uploads", doctor_fn=fake_doctor)
+    r = TestClient(app).post("/api/run", json={"pdf": str(outside), "dry_run": True})
+    assert r.status_code == 400
+
+
+def test_run_accepts_pdf_from_uploads_dir(tmp_path):
+    # Hochgeladene PDFs (in uploads_dir) bleiben gültige Lauf-Quellen.
+    uploads = tmp_path / "uploads"
+    uploads.mkdir()
+    up = uploads / "doc.pdf"
+    up.write_bytes(b"%PDF-1.4")
+    app = create_app(run_factory=fake_run, pdf_dirs=[tmp_path / "pdfs"],
+                     vault_path=tmp_path, backend="subscription",
+                     uploads_dir=uploads, doctor_fn=fake_doctor)
+    r = TestClient(app).post("/api/run", json={"pdf": str(up), "dry_run": True})
+    assert r.status_code == 200
+
+
 def test_status_reports_no_active_run_initially(client):
     c, _ = client
     body = c.get("/api/status").json()

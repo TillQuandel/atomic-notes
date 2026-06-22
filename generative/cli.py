@@ -31,6 +31,24 @@ Umgebung:
 """
 
 
+def _parse_gui_args(rest: list[str]) -> tuple[int, bool]:
+    """`gui`-Argumente robust parsen. ValueError bei ungültigem `--port`."""
+    open_browser = "--no-browser" not in rest
+    port = 8052
+    if "--port" in rest:
+        idx = rest.index("--port")
+        if idx + 1 >= len(rest):
+            raise ValueError("--port erwartet eine Portnummer")
+        raw = rest[idx + 1]
+        try:
+            port = int(raw)
+        except ValueError:
+            raise ValueError(f"--port erwartet eine Zahl, nicht '{raw}'")
+        if not (1 <= port <= 65535):
+            raise ValueError(f"--port außerhalb 1–65535: {port}")
+    return port, open_browser
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
 
@@ -51,12 +69,11 @@ def main(argv: list[str] | None = None) -> int:
 
         return doctor.main()
     if cmd == "gui":
-        port = 8052
-        open_browser = True
-        if "--no-browser" in rest:
-            open_browser = False
-        if "--port" in rest:
-            port = int(rest[rest.index("--port") + 1])
+        try:
+            port, open_browser = _parse_gui_args(rest)
+        except ValueError as exc:
+            print(f"Ungültiges Argument: {exc}", file=sys.stderr)
+            return 2
         try:
             from generative.gui.app import serve
         except ImportError:

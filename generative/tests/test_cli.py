@@ -47,6 +47,31 @@ def test_help_exitcode_0(capsys):
     assert "atomic-notes" in capsys.readouterr().out
 
 
+def test_gui_invalid_port_returns_2_no_crash(capsys):
+    # #5: `gui --port abc` darf nicht mit ValueError crashen, sondern sauber abbrechen.
+    rc = cli.main(["gui", "--port", "abc"])
+    assert rc == 2
+    assert "port" in capsys.readouterr().err.lower()
+
+
+def test_gui_missing_port_value_returns_2_no_crash(capsys):
+    # #5: `gui --port` ohne Wert darf nicht mit IndexError crashen.
+    rc = cli.main(["gui", "--port"])
+    assert rc == 2
+    assert "port" in capsys.readouterr().err.lower()
+
+
+def test_gui_parses_valid_args(monkeypatch):
+    # Gültige Argumente werden korrekt an serve() durchgereicht.
+    import generative.gui.app as gui_app
+    captured = {}
+    monkeypatch.setattr(gui_app, "serve",
+                        lambda **kw: captured.update(kw))
+    rc = cli.main(["gui", "--port", "9001", "--no-browser"])
+    assert rc == 0
+    assert captured == {"port": 9001, "open_browser": False}
+
+
 def test_help_mentions_backend_env_and_doctor(capsys):
     # #49/M9: ATOMIC_AGENT_BACKEND im --help auffindbar (bisher nur README/doctor)
     cli.main(["--help"])

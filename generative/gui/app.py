@@ -25,6 +25,28 @@ _STATIC = Path(__file__).parent / "static"
 # Endungen, die als „PDF-Kandidat" gelistet werden.
 _PDF_GLOB = "*.pdf"
 
+# Same-Origin-Hosts: Die GUI bindet nur an 127.0.0.1. Ein Browser sendet bei
+# Cross-Origin-POSTs einen `Origin`-Header — fehlt er (curl/TestClient/Beacon
+# same-origin), ist es kein CSRF-Vektor.
+_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _is_same_origin(request: Request) -> bool:
+    """CSRF-Schutz: Cross-Origin-Browser-Requests an mutierende Endpunkte abweisen."""
+    origin = request.headers.get("origin")
+    if origin is None:
+        return True
+    from urllib.parse import urlparse
+    return urlparse(origin).hostname in _LOCAL_HOSTS
+
+
+def _is_within(path: str, root: Path) -> bool:
+    """True, wenn `path` (aufgelöst) innerhalb von `root` liegt."""
+    try:
+        return Path(path).resolve().is_relative_to(root)
+    except (OSError, ValueError):
+        return False
+
 
 class RunSession:
     """Ein laufender (oder abgeschlossener) Pipeline-Lauf. Single-Run zur Zeit."""
@@ -111,6 +133,9 @@ def create_app(
         import tempfile
         uploads_dir = Path(tempfile.gettempdir()) / "atomic-notes-gui-uploads"
     uploads_dir = Path(uploads_dir)
+    # #2: Lauf-Quellen auf gelistete PDF-Verzeichnisse + Upload-Ablage begrenzen —
+    # ein existierender Pfad allein genügt nicht (sonst beliebige lokale Datei).
+    _allowed_roots = [d.resolve() for d in pdf_dirs] + [uploads_dir.resolve()]
 
     app = FastAPI(title="atomic-notes GUI")
     app.state.session = None
@@ -140,13 +165,15 @@ def create_app(
         return JSONResponse({"pdfs": [{"name": n, "path": p} for n, p in seen.items()]})
 
     @app.post("/api/upload")
-    async def upload(file: UploadFile = File(...)) -> JSONResponse:
+    async def upload(request: Request, file: UploadFile = File(...)) -> JSONResponse:
         """Per Drag-and-Drop/Dialog hochgeladenes PDF server-seitig ablegen.
 
         Der Originalname (Basename, ohne Traversal) bleibt erhalten — die
         Pipeline leitet Metadaten u.a. aus dem Dateinamen ab. `--source` fährt
         anschliessend gegen den zurückgegebenen Pfad.
         """
+        if not _is_same_origin(request):
+            return JSONResponse({"error": "Cross-Origin-Request abgelehnt."}, status_code=403)
         raw = file.filename or "upload.pdf"
         safe_name = Path(raw.replace("\\", "/")).name
         if not safe_name.lower().endswith(".pdf"):
@@ -183,11 +210,18 @@ def create_app(
 
     @app.post("/api/run")
     async def start_run(request: Request) -> JSONResponse:
+        if not _is_same_origin(request):
+            return JSONResponse({"error": "Cross-Origin-Request abgelehnt."}, status_code=403)
         body = await request.json()
         pdf = body.get("pdf", "")
         dry_run = bool(body.get("dry_run", True))
         if not pdf or not Path(pdf).exists():
             return JSONResponse({"error": f"PDF nicht gefunden: {pdf}"}, status_code=400)
+        # #2: Quelle muss unter einem erlaubten Root liegen (gelistet/hochgeladen).
+        if not any(_is_within(pdf, root) for root in _allowed_roots):
+            return JSONResponse(
+                {"error": "PDF liegt ausserhalb der erlaubten Verzeichnisse."},
+                status_code=400)
         # Server-seitige Revalidierung (Client-Gate könnte umgangen/veraltet sein):
         # der Vault wird auch im Dry-Run gebraucht (Context-Builder scannt ihn).
         if not Path(vault_path).exists():
@@ -219,7 +253,9 @@ def create_app(
                              "dry_run": getattr(s, "dry_run", None)})
 
     @app.post("/api/cancel")
-    def cancel_run() -> JSONResponse:
+    def cancel_run(request: Request) -> JSONResponse:
+        if not _is_same_origin(request):
+            return JSONResponse({"error": "Cross-Origin-Request abgelehnt."}, status_code=403)
         session = app.state.session
         if session is None or not session.active:
             return JSONResponse({"error": "Kein aktiver Lauf."}, status_code=409)
