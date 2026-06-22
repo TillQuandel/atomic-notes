@@ -92,6 +92,21 @@ atomic-notes run --source examples/zettelkasten-primer.pdf --dry-run
 atomic-notes run --source examples/zettelkasten-primer.pdf
 ```
 
+### 5. Optional: web GUI
+
+A local web GUI wraps the same pipeline: pick a configured PDF or drag-and-drop
+(or upload) any PDF from your machine, watch live per-stage progress, and in
+dry-run mode preview each generated note (routing, critic score, confidence)
+before any write. It runs the CLI as a subprocess and streams progress over
+SSE — no React/npm, no telemetry, fully offline.
+
+```bash
+pip install -e '.[gui]'   # FastAPI + uvicorn + python-multipart
+atomic-notes gui          # opens http://127.0.0.1:8052
+```
+
+It stands beside the read-only eval dashboard, not replacing it.
+
 ## Example output
 
 Below is a real note the generative pipeline produced from the bundled

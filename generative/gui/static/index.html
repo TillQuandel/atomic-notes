@@ -1,0 +1,65 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>atomic-notes — Pipeline-GUI</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+  <header class="topbar">
+    <h1>atomic-notes</h1>
+    <p id="doctor" class="doctor" role="status">Preflight wird geladen…</p>
+  </header>
+
+  <main>
+    <div id="error-banner" class="error-banner" role="alert" hidden></div>
+
+    <section class="panel" aria-labelledby="run-h">
+      <h2 id="run-h">Lauf starten</h2>
+      <form id="run-form">
+        <label for="pdf">Quell-PDF</label>
+        <select id="pdf" name="pdf" required></select>
+
+        <div id="dropzone" class="dropzone" tabindex="0" role="button"
+             aria-label="PDF per Drag-and-Drop ablegen oder zum Auswählen klicken">
+          <p>PDF hierher ziehen <span class="muted">oder</span></p>
+          <button type="button" id="upload-btn">Datei auswählen…</button>
+          <input type="file" id="file-input" accept=".pdf,application/pdf" hidden>
+          <p id="upload-status" class="hint" aria-live="polite"></p>
+        </div>
+
+        <label class="check">
+          <input type="checkbox" id="dry-run" checked>
+          Vorschau (Dry-Run — schreibt nichts in den Vault)
+        </label>
+
+        <div class="actions">
+          <button type="submit" id="start-btn">Lauf starten</button>
+          <button type="button" id="stop-btn" class="danger" hidden>Abbrechen</button>
+        </div>
+        <p id="mode-hint" class="hint"></p>
+      </form>
+    </section>
+
+    <section class="panel" aria-labelledby="steps-h">
+      <h2 id="steps-h">Pipeline</h2>
+      <ol id="stepper" class="stepper"></ol>
+      <p id="note-progress" class="note-progress" aria-live="polite"></p>
+    </section>
+
+    <section class="panel" aria-labelledby="preview-h">
+      <h2 id="preview-h">Erzeugte Notes</h2>
+      <p id="preview-empty" class="hint">Noch keine Notes — starte einen Lauf.</p>
+      <ul id="preview-list" class="preview-list" role="log" aria-live="polite"></ul>
+    </section>
+
+    <section class="panel" aria-labelledby="log-h">
+      <h2 id="log-h">Log</h2>
+      <pre id="log" class="log" aria-live="polite"></pre>
+    </section>
+  </main>
+
+  <script src="/app.js"></script>
+</body>
+</html>
