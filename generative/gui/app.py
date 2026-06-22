@@ -33,6 +33,8 @@ class RunSession:
         self.events: list[dict] = []
         self.finished = False
         self.cancelled = False
+        self.pdf: str | None = None
+        self.dry_run: bool | None = None
         self._proc = None  # vom Runner registriertes Popen-Handle (für Cancel)
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
@@ -187,12 +189,25 @@ def create_app(
                 return JSONResponse({"error": "Es läuft bereits ein Pipeline-Lauf."},
                                     status_code=409)
             session = RunSession()
+            session.pdf = pdf
+            session.dry_run = dry_run
             # Iterator MIT der Proc-Registrierung der Session erzeugen → Cancel
             # kann den Subprocess später terminieren.
             run_iter = run_factory(pdf, dry_run, session.register_proc)
             app.state.session = session
             session.start(run_iter)
         return JSONResponse({"status": "started", "pdf": pdf, "dry_run": dry_run})
+
+    @app.get("/api/status")
+    def status() -> JSONResponse:
+        """Erlaubt einer frisch geladenen Seite, einen bereits laufenden Lauf zu
+        erkennen und sich anzuhängen (Stop-Button + Stream-Reattach)."""
+        s = app.state.session
+        if s is None or not s.active:
+            return JSONResponse({"active": False})
+        return JSONResponse({"active": True,
+                             "pdf": getattr(s, "pdf", None),
+                             "dry_run": getattr(s, "dry_run", None)})
 
     @app.post("/api/cancel")
     def cancel_run() -> JSONResponse:

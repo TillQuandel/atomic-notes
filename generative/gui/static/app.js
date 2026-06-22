@@ -239,12 +239,29 @@ function updateModeHint() {
     : "Schreibt in den Vault (00-inbox). Frischer Lauf — Scores können von einer vorherigen Vorschau leicht abweichen.";
 }
 
+async function attachIfRunActive() {
+  // Lädt die Seite, während (woanders) bereits ein Lauf aktiv ist: anhängen
+  // statt in die 409-Sackgasse zu laufen — Stop-Button + Stream-Reattach.
+  try {
+    const s = await (await fetch("/api/status")).json();
+    if (s.active) {
+      resetRun();
+      running = true; userCancelled = false;
+      $("stop-btn").hidden = false; $("start-btn").disabled = true;
+      currentPdfStem = (s.pdf || "").split(/[\\/]/).pop().replace(/\.pdf$/i, "");
+      logLine("» Laufender Pipeline-Lauf erkannt — angehängt.");
+      startStream();
+    }
+  } catch { }
+}
+
 document.addEventListener("DOMContentLoaded", () => {
   renderStepper();
   loadPdfs();
   loadDoctor();
   updateModeHint();
   wireUpload();
+  attachIfRunActive();
   $("dry-run").addEventListener("change", updateModeHint);
 
   $("run-form").addEventListener("submit", async (e) => {

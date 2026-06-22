@@ -216,3 +216,32 @@ def test_cancel_terminates_active_run(tmp_path):
 def test_cancel_without_active_run_409(client):
     c, _ = client
     assert c.post("/api/cancel").status_code == 409
+
+
+def test_status_reports_no_active_run_initially(client):
+    c, _ = client
+    body = c.get("/api/status").json()
+    assert body["active"] is False
+
+
+def test_status_reports_active_run(tmp_path):
+    import threading
+    gate = threading.Event()
+
+    def slow_run(pdf, dry_run, register=None):
+        yield {"type": "started", "argv": ["slow"]}
+        gate.wait(timeout=5)
+        yield {"type": "exited", "returncode": 0}
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(run_factory=slow_run, pdf_dirs=[tmp_path],
+                     vault_path=tmp_path, backend="subscription",
+                     uploads_dir=tmp_path / "u")
+    cc = TestClient(app)
+    cc.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    body = cc.get("/api/status").json()
+    assert body["active"] is True
+    assert body["pdf"].endswith("x.pdf")
+    assert body["dry_run"] is True
+    gate.set()
