@@ -13,6 +13,15 @@ from generative.schemas.atomic_note import AtomicNoteDraft
 MIN_RELATED = 2
 MAX_RELATED = 4
 
+
+def _clean_wikilink(s: str) -> str:
+    """Reiner innerer Titel eines (evtl. verschachtelten) Wikilink-Strings, ohne
+    eckige Klammern: '[[[[A]]]]' -> 'A', '[[A]]' -> 'A', 'A' -> 'A', '[[A|x]]' -> 'A|x'.
+
+    Härtet gegen vom LLM gelieferte oder doppelt gewrappte Strings, die sonst zu
+    '[[[[..]]]]' führen (Muster wie vault_writer.rewrite_merged_related_links)."""
+    return (s or "").strip().strip("[]").strip()
+
 # Lazy-loaded NLI CrossEncoder — wird nur bei ENABLE_NLI_VALIDATION=1 geladen
 _nli_encoder = None
 _nli_lock = __import__("threading").Lock()  # Thread-Safety bei parallelem Stage-6-Load
@@ -371,7 +380,10 @@ def run(draft: AtomicNoteDraft, existing_concepts: dict[str, str],
             draft.quality_flags.append(f"⚠️ Widerspruch: {contradiction}")
 
     dup_risk = data.get("duplicate_risk", "none")
-    dup_path = data.get("duplicate_path") or ""
+    # LLM liefert duplicate_path gelegentlich als "[[Titel]]" oder "Titel|alias" statt
+    # reinem Pfad/Titel — normalisieren, sonst entsteht unten "[[[[Titel]]]]" und ein
+    # verklammertes Duplikat-Flag (beobachtet im Ebner-Run 2026-06-22).
+    dup_path = _clean_wikilink(data.get("duplicate_path") or "").split("|", 1)[0].strip()
     if dup_risk == "high":
         # Duplikat ist der stärkste mögliche Vault-Beleg — confidence NICHT runter,
         # stattdessen action='extend' setzen + Duplikat als related-Link aufnehmen,
@@ -387,8 +399,17 @@ def run(draft: AtomicNoteDraft, existing_concepts: dict[str, str],
             if dup_link not in data["related"]:
                 data["related"].insert(0, dup_link)
 
-    # related-Links setzen (nicht nur ergänzen — Cross-Reference ist die Autorität dafür)
-    related = [link for link in data.get("related", []) if link.startswith("[[")]
+    # related-Links setzen (nicht nur ergänzen — Cross-Reference ist die Autorität dafür).
+    # Defense-in-depth: überschüssige Klammern normalisieren, damit nachträglich (nach
+    # parse_cross_reference_output, das _WIKILINK_RE prüft) injizierte Links nie als
+    # "[[[[..]]]]" durchrutschen.
+    related = []
+    for link in data.get("related", []):
+        if not link.strip().startswith("[["):
+            continue
+        inner = _clean_wikilink(link)
+        if inner:
+            related.append(f"[[{inner}]]")
     draft.related = related[:MAX_RELATED]
 
     if len(draft.related) < MIN_RELATED:
