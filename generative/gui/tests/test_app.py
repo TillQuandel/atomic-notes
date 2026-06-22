@@ -13,7 +13,17 @@ from fastapi.testclient import TestClient
 from generative.gui.app import create_app
 
 
-def fake_run(pdf, dry_run):
+def fake_doctor():
+    from generative.doctor import CheckResult
+    return [
+        CheckResult(name="pdftotext", ok=True, detail="pdftotext: /usr/bin"),
+        CheckResult(name="backend (subscription)", ok=True, detail="CLI ok"),
+        CheckResult(name="vault", ok=True, detail="/vault"),
+        CheckResult(name="pypdf", ok=True, detail="ok", required=False),
+    ]
+
+
+def fake_run(pdf, dry_run, register=None):
     yield {"type": "started", "argv": ["fake"]}
     yield {"type": "stage", "num": 1, "total": 7, "label": "PDF & Chunking"}
     yield {"type": "preview", "name": "a.md", "routing": "vault", "score": 5,
@@ -29,7 +39,7 @@ def client(tmp_path):
     uploads = tmp_path / "uploads"
     app = create_app(run_factory=fake_run, pdf_dirs=[tmp_path],
                      vault_path=tmp_path / "vault", backend="subscription",
-                     uploads_dir=uploads)
+                     uploads_dir=uploads, doctor_fn=fake_doctor)
     c = TestClient(app)
     c._uploads = uploads  # für Upload-Tests
     return c, pdf
@@ -51,14 +61,33 @@ def test_list_pdfs(client):
     assert "beispiel.pdf" in names
 
 
-def test_doctor_reports_backend_and_vault(client):
+def test_doctor_runs_real_checks(client):
     c, _ = client
     r = c.get("/api/doctor")
     assert r.status_code == 200
     body = r.json()
     assert body["backend"] == "subscription"
     assert "vault" in body
-    assert "vault_exists" in body
+    assert body["ok"] is True  # alle required-Checks grün
+    names = [chk["name"] for chk in body["checks"]]
+    assert "vault" in names and "pdftotext" in names
+    assert all({"name", "ok", "detail", "hint", "required"} <= set(chk) for chk in body["checks"])
+
+
+def test_doctor_ok_false_when_required_check_fails(tmp_path):
+    from generative.doctor import CheckResult
+
+    def failing_doctor():
+        return [
+            CheckResult(name="backend (subscription)", ok=False,
+                        detail="CLI nicht eingeloggt", hint="claude login"),
+            CheckResult(name="pypdf", ok=True, detail="ok", required=False),
+        ]
+    app = create_app(run_factory=fake_run, pdf_dirs=[tmp_path],
+                     vault_path=tmp_path, backend="subscription",
+                     uploads_dir=tmp_path / "u", doctor_fn=failing_doctor)
+    body = TestClient(app).get("/api/doctor").json()
+    assert body["ok"] is False  # required-Fehler → Start sperren
 
 
 def test_run_rejects_unknown_pdf(client):
@@ -137,7 +166,7 @@ def test_run_rejected_while_active(client, monkeypatch):
     import threading
     gate = threading.Event()
 
-    def slow_run(pdf, dry_run):
+    def slow_run(pdf, dry_run, register=None):
         yield {"type": "started", "argv": ["slow"]}
         gate.wait(timeout=5)
         yield {"type": "done", "written": 0, "dry_run": dry_run}
@@ -150,3 +179,40 @@ def test_run_rejected_while_active(client, monkeypatch):
     r2 = cc.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     assert r2.status_code == 409  # bereits ein Lauf aktiv
     gate.set()
+
+
+def test_cancel_terminates_active_run(tmp_path):
+    import threading
+    gate = threading.Event()
+    terminated = {"v": False}
+
+    class FakeProc:
+        def poll(self):
+            return 1 if terminated["v"] else None
+
+        def terminate(self):
+            terminated["v"] = True
+            gate.set()  # entsperrt den Lauf, simuliert Subprocess-Tod
+
+    def slow_run(pdf, dry_run, register=None):
+        if register:
+            register(FakeProc())
+        yield {"type": "started", "argv": ["slow"]}
+        gate.wait(timeout=5)
+        yield {"type": "exited", "returncode": 1}
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(run_factory=slow_run, pdf_dirs=[tmp_path],
+                     vault_path=tmp_path, backend="subscription",
+                     uploads_dir=tmp_path / "u")
+    cc = TestClient(app)
+    assert cc.post("/api/run", json={"pdf": str(pdf), "dry_run": True}).status_code == 200
+    r = cc.post("/api/cancel")
+    assert r.status_code == 200
+    assert terminated["v"] is True  # Subprocess wurde terminiert
+
+
+def test_cancel_without_active_run_409(client):
+    c, _ = client
+    assert c.post("/api/cancel").status_code == 409

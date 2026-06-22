@@ -1,0 +1,35 @@
+=== Atomic Agent: zettelkasten-primer.pdf ===
+
+[1/7] PDF extrahieren und chunken…
+      328 Wörter
+      1 Chunks
+[2/7] Context-Builder: Vault scannen…
+      57 existierende Konzepte gefunden
+[3/7] Quality-Agent: Quellen-Qualität prüfen…
+      Keine Qualitäts-Warnungen
+[4/7] Planner: Konzept-Plan erstellen…
+      4 Konzepte geplant (5 total)
+[4.5/7] Background-Extractor: deaktiviert (ENABLE_BACKGROUND_EXTRACTOR=0)
+
+[5/7] Extractor: 4 Konzepte parallel verarbeiten…
+      4 Draft-Notes extrahiert
+
+[6/7] Verifier + Cross-Reference + Critic für 4 Notes…
+  [1/4] Atomic Note
+  [2/4] Zettelkasten
+  [3/4] Progressive Summarization
+  [4/4] Link as Claim
+
+[7/7] Vault-Writer…
+  [DRY-RUN] -> Inbox: Zettelkasten.md  [Vault-Empf.]
+    Score: 5/5 | Hard-Gates: pass | Confidence: medium
+  [DRY-RUN] -> Inbox: schwache-note.md  [Inbox-Review: critic-score 2 < 4]
+    Score: 2/5 | Hard-Gates: fail | Confidence: low
+    Flags: ?? kein DOI ? Qualitaet nicht automatisch pruefbar
+  [DRY-RUN] -> Inbox: Atomic Note.md  [Merge-Stub -> 04-wissen/Atomic Notes.md]
+    Score: 4/5 | Hard-Gates: pass | Confidence: medium
+
+=== Fertig: 4 Notes (dry-run) ===
+
+[8/8] Qualitäts-Eval…
+   -> Stage-8-Eval: +0 Out-Tok (0% des Out-Totals)

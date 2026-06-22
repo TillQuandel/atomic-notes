@@ -30,14 +30,23 @@ def iter_run_events(
     *,
     env: dict | None = None,
     cwd: str | None = None,
+    on_proc=None,
 ) -> Iterator[dict]:
-    """Startet den Subprocess und yieldet geparste Events (inkl. started/error)."""
+    """Startet den Subprocess und yieldet geparste Events (inkl. started/error).
+
+    on_proc: optionaler Callback, der mit dem Popen-Handle aufgerufen wird, sobald
+    der Subprocess läuft — erlaubt dem Aufrufer (RunSession), den Lauf zu canceln.
+    """
     yield {"type": "started", "argv": argv}
     run_env = {**os.environ, **(env or {})}
     # Unbuffered Python-Subprocess, damit stdout live ankommt; UTF-8 erzwingen
     # (Umlaute/⚠️ in den Notes-Titeln und Dry-Run-Flags).
     run_env.setdefault("PYTHONUNBUFFERED", "1")
     run_env.setdefault("PYTHONIOENCODING", "utf-8")
+    # Markiert den Lauf als GUI-getrieben → der Orchestrator unterdrückt seine
+    # schreibenden Auto-Aktionen (Version-Bump in config.py, Eval-Dashboard-Spawn
+    # auf :8051). Ein Vorschau-Lauf darf weder Quellcode mutieren noch Prozesse leaken.
+    run_env["ATOMIC_AGENT_GUI"] = "1"
     proc = subprocess.Popen(
         argv,
         stdout=subprocess.PIPE,
@@ -49,6 +58,8 @@ def iter_run_events(
         env=run_env,
         cwd=cwd,
     )
+    if on_proc is not None:
+        on_proc(proc)
     parser = RunParser()
     assert proc.stdout is not None
     try:

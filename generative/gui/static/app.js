@@ -9,6 +9,8 @@ const STAGES = [
 
 const $ = (id) => document.getElementById(id);
 let currentPdfStem = "";
+let running = false;
+let userCancelled = false;
 
 function renderStepper() {
   const ol = $("stepper");
@@ -36,6 +38,18 @@ function resetRun() {
   $("preview-empty").style.display = "block";
   $("note-progress").textContent = "";
   $("log").textContent = "";
+  const b = $("error-banner"); b.hidden = true; b.textContent = "";
+}
+
+function showBanner(text) {
+  const b = $("error-banner");
+  b.hidden = false;
+  // mehrere Hinweise sammeln, Duplikate vermeiden
+  if (![...b.children].some((c) => c.textContent === text)) {
+    const p = document.createElement("div");
+    p.textContent = "⚠ " + text;
+    b.appendChild(p);
+  }
 }
 
 function addPreview(ev) {
@@ -43,6 +57,7 @@ function addPreview(ev) {
   const li = document.createElement("li");
   li.className = "preview-card";
   const routingLabel = { vault: "Vault-Empfehlung", inbox: "Inbox-Review", merge: "Merge-Stub" }[ev.routing] || ev.routing;
+  const confClass = { high: "ok", low: "warn" }[ev.confidence] || "";
   const flags = (ev.flags || "").trim();
   li.innerHTML = `
     <div class="title">${escapeHtml(ev.name)}</div>
@@ -50,11 +65,24 @@ function addPreview(ev) {
       <span class="badge ${ev.routing}">${routingLabel}</span>
       <span class="badge">Score ${ev.score ?? "?"}/5</span>
       <span class="badge">Hard-Gates ${ev.hard_gates ? "pass" : "fail"}</span>
-      <span class="badge">Confidence ${escapeHtml(ev.confidence || "?")}</span>
+      <span class="badge ${confClass}">Confidence ${escapeHtml(ev.confidence || "?")}</span>
       ${ev.reason ? `<span class="badge">${escapeHtml(ev.reason)}</span>` : ""}
       ${ev.merge_target ? `<span class="badge">→ ${escapeHtml(ev.merge_target)}</span>` : ""}
     </div>
-    ${flags ? `<div class="flags">⚠ ${escapeHtml(flags)}</div>` : ""}`;
+    ${flags ? `<div class="flags">⚠ ${escapeHtml(flags)}</div>` : ""}
+    <details class="note-body"><summary>Note-Text anzeigen</summary><pre class="body-content muted">…</pre></details>`;
+  // Body lazy laden beim ersten Aufklappen (nur im Dry-Run vorhanden).
+  const det = li.querySelector("details");
+  const body = li.querySelector(".body-content");
+  det.addEventListener("toggle", async () => {
+    if (!det.open || det.dataset.loaded) return;
+    det.dataset.loaded = "1";
+    try {
+      const r = await fetch(`/api/preview?pdf_stem=${encodeURIComponent(currentPdfStem)}&name=${encodeURIComponent(ev.name)}`);
+      if (r.ok) { const d = await r.json(); body.textContent = d.body; body.classList.remove("muted"); }
+      else { body.textContent = "(Note-Text nur nach einem Vorschau-Lauf verfügbar.)"; }
+    } catch { body.textContent = "(Konnte Note-Text nicht laden.)"; }
+  });
   $("preview-list").appendChild(li);
 }
 
@@ -79,16 +107,21 @@ function startStream() {
   });
   es.addEventListener("preview", (e) => addPreview(JSON.parse(e.data)));
   es.addEventListener("log", (e) => { try { logLine(JSON.parse(e.data).text); } catch { } });
+  es.addEventListener("error_hint", (e) => { try { showBanner(JSON.parse(e.data).text); } catch { } });
   // `done` = Pipeline hat geschrieben; der Lauf macht ggf. noch Stage-8-Eval.
   // NICHT schließen — erst `exited` beendet den Stream.
   es.addEventListener("done", (e) => {
     try { const d = JSON.parse(e.data); logLine(`✓ Pipeline fertig: ${d.written} Notes ${d.dry_run ? "(Dry-Run)" : "geschrieben"}`); } catch { }
   });
-  const close = () => { es.close(); $("start-btn").disabled = false; };
+  const close = () => {
+    es.close(); running = false; userCancelled = false;
+    $("start-btn").disabled = false; $("stop-btn").hidden = true; applyStartGate();
+  };
   es.addEventListener("exited", (e) => {
     let rc = 0;
     try { rc = JSON.parse(e.data).returncode; } catch { }
-    if (rc === 0) { setStage(99); logLine("● Lauf beendet."); }
+    if (userCancelled) { logLine("■ Lauf abgebrochen."); }
+    else if (rc === 0) { setStage(99); logLine("● Lauf beendet."); }
     else { logLine(`✗ Lauf mit Fehlercode ${rc} beendet.`); }
     close();
   });
@@ -162,12 +195,41 @@ function wireUpload() {
   });
 }
 
+let doctorOk = true;
+
 async function loadDoctor() {
-  const r = await fetch("/api/doctor");
-  const d = await r.json();
   const el = $("doctor");
-  el.textContent = `Backend: ${d.backend} · Vault: ${d.vault} ${d.vault_exists ? "✓" : "✗ (nicht gefunden)"}`;
-  el.classList.toggle("bad", !d.vault_exists);
+  try {
+    const d = await (await fetch("/api/doctor")).json();
+    doctorOk = d.ok;
+    const fails = (d.checks || []).filter((c) => !c.ok);
+    const summary = `Backend: ${d.backend} · Vault: ${d.vault}`;
+    if (d.ok) {
+      el.textContent = `${summary} ✓`;
+      el.classList.remove("bad");
+    } else {
+      const probleme = fails.map((c) => `${c.name}${c.required ? "" : " (optional)"}`).join(", ");
+      el.innerHTML = `${escapeHtml(summary)} <strong>✗ Preflight: ${escapeHtml(probleme)}</strong>` +
+        fails.filter((c) => c.hint).map((c) => `<br><span class="muted">→ ${escapeHtml(c.hint)}</span>`).join("");
+      el.classList.toggle("bad", fails.some((c) => c.required));
+    }
+  } catch {
+    el.textContent = "Preflight konnte nicht geladen werden.";
+  }
+  applyStartGate();
+}
+
+function applyStartGate() {
+  // Start sperren, wenn ein required-Preflight-Check rot ist (Fehler vermeiden
+  // statt mitten im Lauf scheitern).
+  const btn = $("start-btn");
+  if (!doctorOk) {
+    btn.disabled = true;
+    btn.title = "Preflight fehlgeschlagen — siehe Statuszeile oben.";
+  } else if (btn.title) {
+    btn.disabled = false;
+    btn.title = "";
+  }
 }
 
 function updateModeHint() {
@@ -187,6 +249,7 @@ document.addEventListener("DOMContentLoaded", () => {
 
   $("run-form").addEventListener("submit", async (e) => {
     e.preventDefault();
+    if (!doctorOk) { logLine("✗ Preflight fehlgeschlagen — bitte oben beheben."); return; }
     const pdf = $("pdf").value;
     if (!pdf) return;
     resetRun();
@@ -199,9 +262,24 @@ document.addEventListener("DOMContentLoaded", () => {
       const err = await r.json().catch(() => ({}));
       logLine("✗ " + (err.error || `Start fehlgeschlagen (${r.status})`));
       $("start-btn").disabled = false;
+      applyStartGate();
       return;
     }
     currentPdfStem = pdf.split(/[\\/]/).pop().replace(/\.pdf$/i, "");
+    running = true; userCancelled = false; $("stop-btn").hidden = false;
     startStream();
+  });
+
+  $("stop-btn").addEventListener("click", async () => {
+    userCancelled = true;
+    $("stop-btn").disabled = true;
+    logLine("■ Abbruch angefordert…");
+    try { await fetch("/api/cancel", { method: "POST" }); } catch { }
+    $("stop-btn").disabled = false;
+  });
+
+  // Tab/Fenster wird während eines Laufs geschlossen → Subprocess nicht verwaisen lassen.
+  window.addEventListener("pagehide", () => {
+    if (running && navigator.sendBeacon) navigator.sendBeacon("/api/cancel");
   });
 });

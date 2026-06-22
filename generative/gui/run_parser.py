@@ -43,6 +43,14 @@ _FLAGS_RE = re.compile(r"^\s+Flags:\s*(.+)$")
 # Abschluss (orchestrator.py:1536).
 _DONE_RE = re.compile(r"^=== Fertig:\s*(\d+)\s*Notes\s*(\(dry-run\)|geschrieben)\s*===")
 
+# Bekannte Backend-/Setup-Fehlersignaturen (Kleinschreibung-Substrings) — Quelle:
+# _subscription_backend.py (_fail_fast_hint), error_hints.py, doctor.py.
+_ERROR_SIGNATURES = (
+    "nicht eingeloggt", "session abgelaufen", "rate-limit", "rate limit", "429",
+    "pdftotext nicht gefunden", "poppler", "kein api-key", "api_key", "not found",
+    "nicht gefunden:", "nicht aufrufbar", "→ doctor", "-> doctor",
+)
+
 
 def _parse_marker(marker: str) -> dict:
     """`[Vault-Empf.]` / `[Inbox-Review: reason]` / `[Merge-Stub -> path]` → dict."""
@@ -123,7 +131,15 @@ class RunParser:
             return prefix + [{"type": "done", "written": int(m.group(1)),
                               "dry_run": m.group(2) == "(dry-run)"}]
 
-        # 7) Sonst: roher Log.
+        # 7) Bekannte Backend-/Setup-Fehlersignaturen prominent als error_hint
+        # hochziehen (sonst gehen sie in hunderten Log-Zeilen unter) — zusätzlich
+        # zum normalen Log.
+        low = line.lower()
+        if any(sig in low for sig in _ERROR_SIGNATURES):
+            return prefix + [{"type": "error_hint", "text": line.strip()},
+                             {"type": "log", "text": line}]
+
+        # 8) Sonst: roher Log.
         return prefix + [{"type": "log", "text": line}]
 
     def flush(self) -> list[dict]:

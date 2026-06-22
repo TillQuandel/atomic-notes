@@ -29,14 +29,32 @@ _PDF_GLOB = "*.pdf"
 class RunSession:
     """Ein laufender (oder abgeschlossener) Pipeline-Lauf. Single-Run zur Zeit."""
 
-    def __init__(self, run_iter: Iterator[dict]) -> None:
+    def __init__(self) -> None:
         self.events: list[dict] = []
         self.finished = False
+        self.cancelled = False
+        self._proc = None  # vom Runner registriertes Popen-Handle (für Cancel)
         self._lock = threading.Lock()
-        self._thread = threading.Thread(target=self._consume, args=(run_iter,), daemon=True)
+        self._thread: threading.Thread | None = None
 
-    def start(self) -> None:
+    def register_proc(self, proc) -> None:
+        """Vom Runner aufgerufen, sobald der Subprocess läuft — ermöglicht Cancel."""
+        with self._lock:
+            self._proc = proc
+
+    def start(self, run_iter: Iterator[dict]) -> None:
+        self._thread = threading.Thread(target=self._consume, args=(run_iter,), daemon=True)
         self._thread.start()
+
+    def cancel(self) -> None:
+        """Laufenden Subprocess beenden (Stop-Button / Tab-Close). Best-effort."""
+        self.cancelled = True
+        proc = self._proc
+        if proc is not None and proc.poll() is None:
+            try:
+                proc.terminate()
+            except Exception:  # pragma: no cover - Prozess schon weg
+                pass
 
     def _consume(self, run_iter: Iterator[dict]) -> None:
         try:
@@ -55,8 +73,8 @@ class RunSession:
         return not self.finished
 
 
-def _default_run_factory(pdf: str, dry_run: bool) -> Iterator[dict]:
-    yield from runner.iter_run_events(runner.build_argv(pdf, dry_run=dry_run))
+def _default_run_factory(pdf: str, dry_run: bool, register=None) -> Iterator[dict]:
+    yield from runner.iter_run_events(runner.build_argv(pdf, dry_run=dry_run), on_proc=register)
 
 
 def create_app(
@@ -66,8 +84,11 @@ def create_app(
     vault_path: Path | None = None,
     backend: str | None = None,
     uploads_dir: Path | None = None,
+    doctor_fn: Callable[[], list] | None = None,
 ) -> FastAPI:
     run_factory = run_factory or _default_run_factory
+    if doctor_fn is None:
+        from generative.doctor import run_all as doctor_fn
 
     if pdf_dirs is None or vault_path is None or backend is None:
         from generative import config as _cfg
@@ -137,11 +158,21 @@ def create_app(
 
     @app.get("/api/doctor")
     def doctor() -> JSONResponse:
-        vp = Path(vault_path)
+        checks = []
+        for chk in doctor_fn():
+            checks.append({
+                "name": getattr(chk, "name", "?"),
+                "ok": bool(getattr(chk, "ok", False)),
+                "detail": getattr(chk, "detail", ""),
+                "hint": getattr(chk, "hint", ""),
+                "required": bool(getattr(chk, "required", True)),
+            })
+        ok = all(c["ok"] for c in checks if c["required"])
         return JSONResponse({
             "backend": backend,
-            "vault": str(vp),
-            "vault_exists": vp.exists(),
+            "vault": str(Path(vault_path)),
+            "ok": ok,
+            "checks": checks,
         })
 
     @app.post("/api/run")
@@ -155,10 +186,21 @@ def create_app(
             if app.state.session is not None and app.state.session.active:
                 return JSONResponse({"error": "Es läuft bereits ein Pipeline-Lauf."},
                                     status_code=409)
-            session = RunSession(run_factory(pdf, dry_run))
+            session = RunSession()
+            # Iterator MIT der Proc-Registrierung der Session erzeugen → Cancel
+            # kann den Subprocess später terminieren.
+            run_iter = run_factory(pdf, dry_run, session.register_proc)
             app.state.session = session
-            session.start()
+            session.start(run_iter)
         return JSONResponse({"status": "started", "pdf": pdf, "dry_run": dry_run})
+
+    @app.post("/api/cancel")
+    def cancel_run() -> JSONResponse:
+        session = app.state.session
+        if session is None or not session.active:
+            return JSONResponse({"error": "Kein aktiver Lauf."}, status_code=409)
+        session.cancel()
+        return JSONResponse({"status": "cancelling"})
 
     @app.get("/api/stream")
     def stream() -> StreamingResponse:

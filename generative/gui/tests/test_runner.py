@@ -48,3 +48,13 @@ def test_iter_run_events_nonzero_exit_is_exited_with_returncode():
 def test_iter_run_events_emits_started_first():
     evs = list(iter_run_events([sys.executable, "-c", "pass"]))
     assert evs[0]["type"] == "started"
+
+
+def test_iter_run_events_sets_gui_env_flag():
+    # Der GUI-Subprocess markiert sich via ATOMIC_AGENT_GUI=1, damit der
+    # Orchestrator seine schreibenden Auto-Aktionen (Version-Bump, Dashboard-
+    # Spawn) unterdrückt — ein Vorschau-Lauf darf nichts mutieren.
+    script = "import os; print('[1/7] flag=' + os.environ.get('ATOMIC_AGENT_GUI', 'UNSET'))"
+    evs = list(iter_run_events([sys.executable, "-c", script]))
+    logs = [e.get("label", "") + e.get("text", "") for e in evs]
+    assert any("flag=1" in s for s in logs)

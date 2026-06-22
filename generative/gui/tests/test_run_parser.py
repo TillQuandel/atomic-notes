@@ -148,3 +148,40 @@ def test_stages_table_covers_1_to_8():
     # Der Stepper braucht stabile Labels fuer alle 8 Stufen.
     assert [s["num"] for s in STAGES] == [1, 2, 3, 4, 5, 6, 7, 8]
     assert all(s["label"] for s in STAGES)
+
+
+def test_golden_real_stdout_sample_parses_full_run():
+    # Kopplungstest: ein Sample ECHTER Orchestrator-stdout (fixtures/run_stdout_sample.txt,
+    # bei Print-Format-Änderungen aus einem realen Lauf neu erzeugen) muss die erwartete
+    # Eventfolge liefern. Fängt stillen Format-Drift, den synthetische Einzeltests nicht sehen.
+    from pathlib import Path
+    sample = (Path(__file__).parent / "fixtures" / "run_stdout_sample.txt").read_text(encoding="utf-8")
+    evs = _events(sample.splitlines())
+    stages = sorted({e["num"] for e in evs if e["type"] == "stage"})
+    assert stages == [1, 2, 3, 4, 5, 6, 7, 8]  # alle Stufen erkannt
+    notes = [e["title"] for e in evs if e["type"] == "note_progress"]
+    assert notes == ["Atomic Note", "Zettelkasten", "Progressive Summarization", "Link as Claim"]
+    previews = [e for e in evs if e["type"] == "preview"]
+    assert [p["routing"] for p in previews] == ["vault", "inbox", "merge"]
+    assert previews[1]["score"] == 2 and previews[1]["confidence"] == "low"
+    assert previews[2]["merge_target"] == "04-wissen/Atomic Notes.md"
+    done = [e for e in evs if e["type"] == "done"]
+    assert done and done[0]["written"] == 4 and done[0]["dry_run"] is True
+
+
+def test_error_hint_for_known_backend_failures():
+    p = RunParser()
+    login = p.feed("  claude-CLI nicht eingeloggt oder Session abgelaufen — einmal `claude` starten")
+    assert any(e["type"] == "error_hint" for e in login)
+    p2 = RunParser()
+    rate = p2.feed("  [subscription] Rate-Limit (429) erreicht — 5-Stunden-Fenster")
+    assert any(e["type"] == "error_hint" for e in rate)
+    p3 = RunParser()
+    pop = p3.feed("  pdftotext nicht gefunden — poppler installieren → doctor")
+    assert any(e["type"] == "error_hint" for e in pop)
+
+
+def test_normal_line_no_error_hint():
+    p = RunParser()
+    evs = p.feed("      57 existierende Konzepte gefunden")
+    assert not any(e["type"] == "error_hint" for e in evs)

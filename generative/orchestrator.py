@@ -1309,8 +1309,14 @@ def main(argv: list[str] | None = None):
         ap.error("--source ist erforderlich (außer mit --load-drafts)")
 
     _setup_phoenix_tracing()
-    _auto_start_dashboard()
-    _auto_version_bump()
+    # Im GUI-Modus (ATOMIC_AGENT_GUI=1, gesetzt vom GUI-Subprocess-Runner) die
+    # schreibenden Auto-Aktionen unterdrücken: _auto_version_bump() mutiert den
+    # getrackten Quellcode (config.py) und _auto_start_dashboard() spawnt ein
+    # zweites Dashboard auf :8051 — beides bricht den „Vorschau schreibt nichts"-
+    # Vertrag bzw. überrascht im GUI-Kontext.
+    if not os.getenv("ATOMIC_AGENT_GUI"):
+        _auto_start_dashboard()
+        _auto_version_bump()
 
     runtime_config = load_runtime_config()
     from generative.agents.base import set_llm_runtime_config

@@ -13,6 +13,8 @@
   </header>
 
   <main>
+    <div id="error-banner" class="error-banner" role="alert" hidden></div>
+
     <section class="panel" aria-labelledby="run-h">
       <h2 id="run-h">Lauf starten</h2>
       <form id="run-form">
@@ -32,7 +34,10 @@
           Vorschau (Dry-Run — schreibt nichts in den Vault)
         </label>
 
-        <button type="submit" id="start-btn">Lauf starten</button>
+        <div class="actions">
+          <button type="submit" id="start-btn">Lauf starten</button>
+          <button type="button" id="stop-btn" class="danger" hidden>Abbrechen</button>
+        </div>
         <p id="mode-hint" class="hint"></p>
       </form>
     </section>
@@ -46,7 +51,7 @@
     <section class="panel" aria-labelledby="preview-h">
       <h2 id="preview-h">Erzeugte Notes</h2>
       <p id="preview-empty" class="hint">Noch keine Notes — starte einen Lauf.</p>
-      <ul id="preview-list" class="preview-list"></ul>
+      <ul id="preview-list" class="preview-list" role="log" aria-live="polite"></ul>
     </section>
 
     <section class="panel" aria-labelledby="log-h">
