@@ -86,6 +86,10 @@ button:disabled { opacity: 0.55; cursor: progress; }
 .badge.inbox { color: var(--warn); border-color: var(--warn); }
 .badge.merge { color: var(--accent); border-color: var(--accent); }
 .badge.flag { color: var(--bad); border-color: var(--bad); }
+.preview-card .flags {
+  font-size: 0.8rem; color: var(--warn); line-height: 1.4;
+  border-top: 1px solid var(--border); padding-top: 0.3rem;
+}
 
 .log {
   margin: 0; max-height: 16rem; overflow: auto; font-size: 0.8rem;

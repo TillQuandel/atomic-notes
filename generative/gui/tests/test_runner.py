@@ -31,14 +31,17 @@ def test_iter_run_events_streams_parsed_events():
     evs = list(iter_run_events([sys.executable, "-c", script]))
     types = [e["type"] for e in evs]
     assert "stage" in types
-    assert evs[-1]["type"] == "done"
-    assert evs[-1]["written"] == 1
+    assert "done" in types
+    # Terminal-Event ist IMMER `exited` (nicht `done`) — der Orchestrator druckt
+    # nach `=== Fertig ===` noch Routing-Report + Stage-8-Eval.
+    assert evs[-1]["type"] == "exited"
+    assert evs[-1]["returncode"] == 0
 
 
-def test_iter_run_events_reports_nonzero_exit_as_error():
+def test_iter_run_events_nonzero_exit_is_exited_with_returncode():
     script = "import sys; print('[1/7] x'); sys.exit(3)"
     evs = list(iter_run_events([sys.executable, "-c", script]))
-    assert evs[-1]["type"] == "error"
+    assert evs[-1]["type"] == "exited"
     assert evs[-1]["returncode"] == 3
 
 

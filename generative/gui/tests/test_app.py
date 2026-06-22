@@ -16,8 +16,9 @@ def fake_run(pdf, dry_run):
     yield {"type": "started", "argv": ["fake"]}
     yield {"type": "stage", "num": 1, "total": 7, "label": "PDF & Chunking"}
     yield {"type": "preview", "name": "a.md", "routing": "vault", "score": 5,
-           "hard_gates": True, "confidence": "high", "flags": []}
+           "hard_gates": True, "confidence": "high", "flags": ""}
     yield {"type": "done", "written": 1, "dry_run": dry_run}
+    yield {"type": "exited", "returncode": 0}
 
 
 @pytest.fixture
@@ -74,10 +75,20 @@ def test_run_then_stream_yields_events(client):
     assert "event: stage" in body
     assert "event: preview" in body
     assert "event: done" in body
-    # Letztes Event korrekt durchgereicht.
-    done_payloads = [ln for ln in body.splitlines() if ln.startswith("data:") and "done" in ln]
+    # Stream endet erst auf `exited` (nicht auf `done`).
+    assert "event: exited" in body
+    assert body.rstrip().endswith('data: {"type": "exited", "returncode": 0}')
+    # Letztes Note-Event korrekt durchgereicht.
+    done_payloads = [ln for ln in body.splitlines() if ln.startswith("data:") and '"done"' in ln]
     assert any(json.loads(ln[len("data:"):].strip()).get("written") == 1
                for ln in done_payloads)
+
+
+def test_preview_rejects_path_traversal(client):
+    c, _ = client
+    r = c.get("/api/preview", params={"pdf_stem": "../../../etc", "name": "../secret.md"})
+    # Traversal darf nicht in einen Lesezugriff ausserhalb des Cache-Roots münden.
+    assert r.status_code in (400, 404)
 
 
 def test_run_rejected_while_active(client, monkeypatch):

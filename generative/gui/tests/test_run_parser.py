@@ -71,14 +71,18 @@ def test_dryrun_vault_recommended_preview():
     assert pv["score"] == 5
     assert pv["hard_gates"] is True
     assert pv["confidence"] == "high"
-    assert pv["flags"] == []
+    assert pv["flags"] == ""
 
 
 def test_dryrun_inbox_review_preview_with_reason_and_flags():
+    # Die Flags-Zeile wird quellseitig (vault_writer) mit ", " gejoint UND
+    # ASCII-safe gedruckt; einzelne Flags (Critic-Hints) enthalten selbst Kommas.
+    # Es gibt also keinen verlässlichen Delimiter → der Parser hält die Flags als
+    # Roh-String, statt fälschlich an Kommas zu zersplittern.
     lines = [
         "  [DRY-RUN] -> Inbox: schwache-note.md  [Inbox-Review: critic-score 2 < 4]",
         "    Score: 2/5 | Hard-Gates: fail | Confidence: low",
-        "    Flags: ⚠️ retracted, ⚠️ no peer-review",
+        "    Flags: ?? retracted, Critic: Titel zu generisch, sollte praeziser sein",
     ]
     evs = _events(lines)
     pv = [e for e in evs if e["type"] == "preview"][0]
@@ -87,7 +91,8 @@ def test_dryrun_inbox_review_preview_with_reason_and_flags():
     assert pv["score"] == 2
     assert pv["hard_gates"] is False
     assert pv["confidence"] == "low"
-    assert pv["flags"] == ["⚠️ retracted", "⚠️ no peer-review"]
+    # Roh-String, NICHT an den eingebetteten Kommas zersplittert.
+    assert pv["flags"] == "?? retracted, Critic: Titel zu generisch, sollte praeziser sein"
 
 
 def test_dryrun_merge_stub_preview():

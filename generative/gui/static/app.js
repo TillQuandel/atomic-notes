@@ -43,7 +43,7 @@ function addPreview(ev) {
   const li = document.createElement("li");
   li.className = "preview-card";
   const routingLabel = { vault: "Vault-Empfehlung", inbox: "Inbox-Review", merge: "Merge-Stub" }[ev.routing] || ev.routing;
-  const flags = (ev.flags || []).map((f) => `<span class="badge flag">${escapeHtml(f)}</span>`).join("");
+  const flags = (ev.flags || "").trim();
   li.innerHTML = `
     <div class="title">${escapeHtml(ev.name)}</div>
     <div class="meta">
@@ -53,8 +53,8 @@ function addPreview(ev) {
       <span class="badge">Confidence ${escapeHtml(ev.confidence || "?")}</span>
       ${ev.reason ? `<span class="badge">${escapeHtml(ev.reason)}</span>` : ""}
       ${ev.merge_target ? `<span class="badge">→ ${escapeHtml(ev.merge_target)}</span>` : ""}
-      ${flags}
-    </div>`;
+    </div>
+    ${flags ? `<div class="flags">⚠ ${escapeHtml(flags)}</div>` : ""}`;
   $("preview-list").appendChild(li);
 }
 
@@ -79,13 +79,23 @@ function startStream() {
   });
   es.addEventListener("preview", (e) => addPreview(JSON.parse(e.data)));
   es.addEventListener("log", (e) => { try { logLine(JSON.parse(e.data).text); } catch { } });
-  const finish = (e) => {
-    try { const d = JSON.parse(e.data); logLine(`✓ Fertig: ${d.written} Notes ${d.dry_run ? "(Dry-Run)" : "geschrieben"}`); } catch { }
-    setStage(99); es.close(); $("start-btn").disabled = false;
-  };
-  es.addEventListener("done", finish);
+  // `done` = Pipeline hat geschrieben; der Lauf macht ggf. noch Stage-8-Eval.
+  // NICHT schließen — erst `exited` beendet den Stream.
+  es.addEventListener("done", (e) => {
+    try { const d = JSON.parse(e.data); logLine(`✓ Pipeline fertig: ${d.written} Notes ${d.dry_run ? "(Dry-Run)" : "geschrieben"}`); } catch { }
+  });
+  const close = () => { es.close(); $("start-btn").disabled = false; };
+  es.addEventListener("exited", (e) => {
+    let rc = 0;
+    try { rc = JSON.parse(e.data).returncode; } catch { }
+    if (rc === 0) { setStage(99); logLine("● Lauf beendet."); }
+    else { logLine(`✗ Lauf mit Fehlercode ${rc} beendet.`); }
+    close();
+  });
   es.addEventListener("error", (e) => {
-    logLine("✗ Fehler im Lauf."); es.close(); $("start-btn").disabled = false;
+    // Eigenes error-Event (RunSession-Exception) ODER EventSource-Verbindungsende.
+    if (e.data) { logLine("✗ Fehler im Lauf."); }
+    close();
   });
 }
 

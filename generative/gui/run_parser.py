@@ -81,7 +81,7 @@ class RunParser:
             out = self._flush_pending()
             self._pending = {
                 "type": "preview", "name": m.group(1).strip(),
-                "score": None, "hard_gates": None, "confidence": None, "flags": [],
+                "score": None, "hard_gates": None, "confidence": None, "flags": "",
                 **_parse_marker(m.group(2)),
             }
             return out
@@ -94,10 +94,11 @@ class RunParser:
             self._pending["confidence"] = m.group(3)
             return []
 
-        # 3) Flags-Zeile (optional) fuellt den laufenden Preview-Block.
+        # 3) Flags-Zeile (optional) fuellt den laufenden Preview-Block. Roh-String:
+        # die Quelle joint mit ", " und ASCII-safed → kein verlässlicher Split.
         m = _FLAGS_RE.match(line)
         if m and self._pending is not None:
-            self._pending["flags"] = [f.strip() for f in m.group(1).split(",") if f.strip()]
+            self._pending["flags"] = m.group(1).strip()
             return []
 
         # Ab hier endet ein etwaiger Preview-Block — zuerst abschliessen.

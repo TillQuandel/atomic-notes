@@ -51,11 +51,24 @@ def iter_run_events(
     )
     parser = RunParser()
     assert proc.stdout is not None
-    for line in proc.stdout:
-        for ev in parser.feed(line):
+    try:
+        for line in proc.stdout:
+            for ev in parser.feed(line):
+                yield ev
+        for ev in parser.flush():
             yield ev
-    for ev in parser.flush():
-        yield ev
-    rc = proc.wait()
-    if rc != 0:
-        yield {"type": "error", "returncode": rc}
+        rc = proc.wait()
+        # Terminal-Event: IMMER `exited` (auch bei rc==0). `done` aus
+        # `=== Fertig ===` ist NICHT das Ende — der Orchestrator druckt danach
+        # noch Routing-Report + Stage-8-Eval. Erst `exited` schliesst den Stream.
+        yield {"type": "exited", "returncode": rc}
+    finally:
+        # Generator vorzeitig geschlossen (SSE-Client trennt, Lauf abgebrochen):
+        # Child nicht verwaisen lassen.
+        if proc.poll() is None:
+            proc.terminate()
+            try:
+                proc.wait(timeout=5)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()

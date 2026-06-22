@@ -142,12 +142,23 @@ def create_app(
 
     @app.get("/api/preview")
     def preview(pdf_stem: str, name: str) -> JSONResponse:
-        """Gerenderten Markdown-Body einer Dry-Run-Note liefern (eval-Kopie)."""
-        eval_dir = Path(__file__).resolve().parents[1] / ".cache" / "eval" / "baseline" / pdf_stem
+        """Gerenderten Markdown-Body einer Dry-Run-Note liefern (eval-Kopie).
+
+        pdf_stem/name werden auf reine Dateinamen reduziert (kein Traversal); der
+        aufgelöste Pfad muss innerhalb des baseline-Roots liegen.
+        """
+        base = (Path(__file__).resolve().parents[1] / ".cache" / "eval" / "baseline").resolve()
+        safe_stem = Path(pdf_stem).name
+        safe_name = Path(name).name
+        if not safe_stem or not safe_name:
+            return JSONResponse({"error": "ungültiger Pfad"}, status_code=400)
+        eval_dir = (base / safe_stem).resolve()
+        if not eval_dir.is_relative_to(base):
+            return JSONResponse({"error": "ungültiger Pfad"}, status_code=400)
         for prefix in ("vault", "inbox", "merge"):
-            f = eval_dir / f"{prefix}__{name}"
-            if f.exists():
-                return JSONResponse({"name": name, "body": f.read_text(encoding="utf-8")})
+            f = (eval_dir / f"{prefix}__{safe_name}").resolve()
+            if f.is_relative_to(base) and f.exists():
+                return JSONResponse({"name": safe_name, "body": f.read_text(encoding="utf-8")})
         return JSONResponse({"error": "nicht gefunden"}, status_code=404)
 
     return app
@@ -161,7 +172,10 @@ def _event_stream(session: RunSession) -> Iterator[str]:
             ev = session.events[i]
             i += 1
             yield f"event: {ev['type']}\ndata: {json.dumps(ev, ensure_ascii=False)}\n\n"
-            if ev["type"] in ("done", "error"):
+            # NICHT auf `done` enden — der Orchestrator druckt danach noch
+            # Routing-Report + Stage-8-Eval. Terminal ist `exited` (Subprocess
+            # beendet) bzw. `error` (RunSession-Exception).
+            if ev["type"] in ("exited", "error"):
                 return
         if session.finished and i >= len(session.events):
             return
