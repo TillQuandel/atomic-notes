@@ -930,11 +930,91 @@ def _auto_version_bump() -> None:
     state_file.write_text(_json.dumps(state, indent=2))
 
 
+def _phoenix_exe(venv: Path) -> Path:
+    """Pfad zum Phoenix-Server-Binary im venv (Windows: Scripts/, POSIX: bin/)."""
+    win = Path(venv) / "Scripts" / "phoenix.exe"
+    posix = Path(venv) / "bin" / "phoenix"
+    if win.exists():
+        return win
+    if posix.exists():
+        return posix
+    # Default nach Plattform, auch wenn (noch) nicht vorhanden — Aufrufer prüft .exists().
+    return win if os.name == "nt" else posix
+
+
+def _phoenix_server_running(port: int) -> bool:
+    """True wenn auf localhost:port ein Server lauscht."""
+    import socket
+    try:
+        with socket.create_connection(("localhost", port), timeout=0.5):
+            return True
+    except OSError:
+        return False
+
+
+def _ensure_phoenix_server(port: int | None = None, venv: Path | None = None,
+                           timeout: float | None = None) -> bool:
+    """Startet den Phoenix-Server (detached) falls er nicht auf `port` lauscht.
+
+    Idempotent bei sequentiellen Läufen: läuft der Server schon, passiert nichts
+    (Folgeläufe zahlen 0s). Gibt True zurück sobald der Port erreichbar ist, sonst
+    False (venv/Binary fehlt oder Start-Timeout). Fehler bleiben graceful — die
+    Pipeline läuft dann ohne Traces weiter.
+
+    Timeout default 60s (ENV ATOMIC_AGENT_PHOENIX_TIMEOUT): Phoenix braucht warm
+    ~10s, kalt (DB-Migration) und unter der CPU-Last der gleichzeitig startenden
+    Pipeline messbar länger — 30s schnitt den ersten Lauf zu früh ab.
+
+    Nicht concurrent-safe (best effort): starten zwei Läufe exakt gleichzeitig mit
+    totem Port, spawnen beide ein `phoenix serve`; der zweite scheitert am Port-bind
+    und beendet sich, beide sehen am Ende den offenen Port. Für ein Tracing-Hilfsmittel
+    akzeptabel — ein File-Lock wäre unverhältnismäßig.
+    """
+    import subprocess, time
+    from generative import config
+    port = config.PHOENIX_PORT if port is None else port
+    venv = config.PHOENIX_VENV if venv is None else venv
+    if timeout is None:
+        timeout = float(os.environ.get("ATOMIC_AGENT_PHOENIX_TIMEOUT", "60"))
+    if _phoenix_server_running(port):
+        return True
+    exe = _phoenix_exe(venv)
+    if not exe.exists():
+        print(f"[phoenix] Server-Binary nicht gefunden ({exe}) — Pipeline läuft ohne Traces")
+        return False
+    flags = 0
+    kwargs = {}
+    if os.name == "nt":
+        # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP → Server überlebt den Pipe-Prozess.
+        flags = 0x00000008 | subprocess.CREATE_NEW_PROCESS_GROUP
+        kwargs["creationflags"] = flags
+    else:
+        kwargs["start_new_session"] = True
+    try:
+        subprocess.Popen(
+            [str(exe), "serve"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kwargs,
+        )
+    except OSError as e:
+        # z.B. WinError 193 bei beschädigtem Binary trotz exists() — graceful bleiben.
+        print(f"[phoenix] Server-Start fehlgeschlagen ({e}) — Pipeline läuft ohne Traces")
+        return False
+    print(f"  [phoenix] Server wird gestartet (Port {port})…")
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _phoenix_server_running(port):
+            print(f"  [phoenix] Server bereit → http://localhost:{port}")
+            return True
+        time.sleep(0.5)
+    print(f"[phoenix] Server-Start-Timeout ({timeout:.0f}s) — Pipeline läuft ohne Traces")
+    return False
+
+
 def _setup_phoenix_tracing() -> None:
-    """Sendet OTel-Traces an laufenden Phoenix-Server (http://localhost:6006).
+    """Startet (falls nötig) den Phoenix-Server und sendet OTel-Traces an ihn.
 
     Nur aktiv bei ENV ATOMIC_AGENT_TRACING=phoenix. Kein Fehler wenn Phoenix
-    nicht läuft — Pipeline startet normal ohne Traces.
+    nicht startbar ist — Pipeline läuft normal ohne Traces.
 
     Die LLM-Calls werden manuell in agents/base.py instrumentiert (gilt für
     beide Backends: claude-CLI-Subprocess UND litellm). Daher KEIN
@@ -943,6 +1023,10 @@ def _setup_phoenix_tracing() -> None:
     """
     global _TRACER, _PROVIDER
     if os.getenv("ATOMIC_AGENT_TRACING") != "phoenix":
+        return
+    # Server sicherstellen, BEVOR Spans verdrahtet werden — ein toter OTLP-Endpoint
+    # ließe den SimpleSpanProcessor pro LLM-Call einen fehlschlagenden POST feuern.
+    if not _ensure_phoenix_server():
         return
     try:
         # Rohes OpenTelemetry statt phoenix.otel.register: Die Pipeline läuft im
