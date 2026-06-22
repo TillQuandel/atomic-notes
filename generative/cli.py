@@ -4,6 +4,8 @@ Subkommandos:
     run     generative Pipeline: PDF → geprüfte Atomic Notes (delegiert an
             generative.orchestrator; alle Orchestrator-Flags werden durchgereicht)
     doctor  Preflight-Checks: poppler, LLM-Backend, Vault-Pfad, optionale Deps
+    gui     lokale Web-GUI: PDF wählen, Lauf live verfolgen, Notes-Preview
+            (FastAPI; benötigt das Extra `[gui]`)
 
 Der Orchestrator-Import passiert lazy im run-Zweig — `atomic-notes --help`
 bleibt dadurch schnell und funktioniert auch ohne schwere Dependencies.
@@ -19,6 +21,7 @@ Verwendung:
   atomic-notes run --source <pdf> [Orchestrator-Flags]   Pipeline starten
   atomic-notes run --help                                alle Pipeline-Flags
   atomic-notes doctor                                    Preflight-Checks
+  atomic-notes gui [--port N] [--no-browser]             lokale Web-GUI
 
 Umgebung:
   ATOMIC_AGENT_BACKEND   LLM-Backend: 'subscription' (Default, Claude-Code-CLI,
@@ -47,6 +50,21 @@ def main(argv: list[str] | None = None) -> int:
         from generative import doctor
 
         return doctor.main()
+    if cmd == "gui":
+        port = 8052
+        open_browser = True
+        if "--no-browser" in rest:
+            open_browser = False
+        if "--port" in rest:
+            port = int(rest[rest.index("--port") + 1])
+        try:
+            from generative.gui.app import serve
+        except ImportError:
+            print("GUI-Dependencies fehlen. Installation: pip install -e '.[gui]'",
+                  file=sys.stderr)
+            return 1
+        serve(port=port, open_browser=open_browser)
+        return 0
 
     print(_USAGE)
     print(f"Unbekanntes Kommando: {cmd}", file=sys.stderr)
