@@ -5,6 +5,7 @@ Dependency-Injection durch eine `fake_run`-Generator-Funktion ersetzt, die
 echte Event-Dicts yieldet — keine Mock-Bibliothek.
 """
 import json
+from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
@@ -25,9 +26,13 @@ def fake_run(pdf, dry_run):
 def client(tmp_path):
     pdf = tmp_path / "beispiel.pdf"
     pdf.write_bytes(b"%PDF-1.4 fake")
+    uploads = tmp_path / "uploads"
     app = create_app(run_factory=fake_run, pdf_dirs=[tmp_path],
-                     vault_path=tmp_path / "vault", backend="subscription")
-    return TestClient(app), pdf
+                     vault_path=tmp_path / "vault", backend="subscription",
+                     uploads_dir=uploads)
+    c = TestClient(app)
+    c._uploads = uploads  # für Upload-Tests
+    return c, pdf
 
 
 def test_index_serves_html(client):
@@ -89,6 +94,40 @@ def test_preview_rejects_path_traversal(client):
     r = c.get("/api/preview", params={"pdf_stem": "../../../etc", "name": "../secret.md"})
     # Traversal darf nicht in einen Lesezugriff ausserhalb des Cache-Roots münden.
     assert r.status_code in (400, 404)
+
+
+def test_upload_pdf_saves_and_returns_path(client):
+    c, _ = client
+    r = c.post("/api/upload",
+               files={"file": ("Mein Dokument.pdf", b"%PDF-1.4 echtes", "application/pdf")})
+    assert r.status_code == 200
+    body = r.json()
+    assert body["name"] == "Mein Dokument.pdf"
+    saved = Path(body["path"])
+    assert saved.exists()
+    assert saved.read_bytes() == b"%PDF-1.4 echtes"
+    # Liegt im uploads_dir — und der Originalname (Stem) bleibt erhalten
+    # (Pipeline nutzt den Dateinamen für Metadaten-Fallback).
+    assert saved.parent == c._uploads
+    assert saved.stem == "Mein Dokument"
+
+
+def test_upload_rejects_non_pdf(client):
+    c, _ = client
+    r = c.post("/api/upload",
+               files={"file": ("notiz.txt", b"kein pdf", "text/plain")})
+    assert r.status_code == 400
+
+
+def test_upload_sanitizes_filename_no_traversal(client):
+    c, _ = client
+    r = c.post("/api/upload",
+               files={"file": ("../../evil.pdf", b"%PDF-1.4", "application/pdf")})
+    assert r.status_code == 200
+    saved = Path(r.json()["path"])
+    # Kein Entkommen aus uploads_dir.
+    assert saved.parent == c._uploads
+    assert saved.name == "evil.pdf"
 
 
 def test_run_rejected_while_active(client, monkeypatch):

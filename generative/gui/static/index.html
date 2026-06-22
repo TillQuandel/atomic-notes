@@ -19,6 +19,14 @@
         <label for="pdf">Quell-PDF</label>
         <select id="pdf" name="pdf" required></select>
 
+        <div id="dropzone" class="dropzone" tabindex="0" role="button"
+             aria-label="PDF per Drag-and-Drop ablegen oder zum Auswählen klicken">
+          <p>PDF hierher ziehen <span class="muted">oder</span></p>
+          <button type="button" id="upload-btn">Datei auswählen…</button>
+          <input type="file" id="file-input" accept=".pdf,application/pdf" hidden>
+          <p id="upload-status" class="hint" aria-live="polite"></p>
+        </div>
+
         <label class="check">
           <input type="checkbox" id="dry-run" checked>
           Vorschau (Dry-Run — schreibt nichts in den Vault)

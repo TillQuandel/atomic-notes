@@ -39,14 +39,16 @@ dev = [
     "pytest-asyncio>=0.23",
     # test_phoenix_span braucht den OTel-SDK (Runtime-Tracing selbst ist lazy/optional)
     "opentelemetry-sdk>=1.25",
-    # GUI-Tests (TestClient) brauchen fastapi/httpx auch im dev-Lauf
+    # GUI-Tests (TestClient) brauchen fastapi/httpx/multipart auch im dev-Lauf
     "fastapi>=0.110",
     "httpx>=0.27",
+    "python-multipart>=0.0.9",
 ]
 # Live-Web-GUI (atomic-notes gui) — FastAPI + uvicorn, kein React/npm
 gui = [
     "fastapi>=0.110",
     "uvicorn>=0.27",
+    "python-multipart>=0.0.9",   # Datei-Upload (Drag-and-Drop)
 ]
 
 [project.scripts]

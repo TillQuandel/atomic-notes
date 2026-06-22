@@ -115,6 +115,53 @@ async function loadPdfs() {
   }
 }
 
+function selectUploadedPdf(path, name) {
+  const sel = $("pdf");
+  // bestehende Upload-Option (falls vorhanden) entfernen, neue oben einfügen
+  [...sel.options].filter((o) => o.dataset.uploaded).forEach((o) => o.remove());
+  const o = document.createElement("option");
+  o.value = path; o.textContent = `${name} (hochgeladen)`; o.dataset.uploaded = "1";
+  sel.insertBefore(o, sel.firstChild);
+  sel.value = path;
+}
+
+async function uploadFile(file) {
+  const status = $("upload-status");
+  if (!file) return;
+  if (!/\.pdf$/i.test(file.name)) { status.textContent = "Nur PDF-Dateien."; return; }
+  status.textContent = `Lade „${file.name}“ hoch…`;
+  const fd = new FormData();
+  fd.append("file", file, file.name);
+  try {
+    const r = await fetch("/api/upload", { method: "POST", body: fd });
+    const d = await r.json();
+    if (!r.ok) { status.textContent = "✗ " + (d.error || "Upload fehlgeschlagen"); return; }
+    selectUploadedPdf(d.path, d.name);
+    status.textContent = `✓ „${d.name}“ bereit — Lauf starten.`;
+  } catch {
+    status.textContent = "✗ Upload fehlgeschlagen.";
+  }
+}
+
+function wireUpload() {
+  const dz = $("dropzone");
+  const input = $("file-input");
+  $("upload-btn").addEventListener("click", () => input.click());
+  dz.addEventListener("click", (e) => { if (e.target === dz) input.click(); });
+  dz.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); }
+  });
+  input.addEventListener("change", () => uploadFile(input.files[0]));
+  ["dragenter", "dragover"].forEach((ev) =>
+    dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("dragover"); }));
+  ["dragleave", "drop"].forEach((ev) =>
+    dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.remove("dragover"); }));
+  dz.addEventListener("drop", (e) => {
+    const f = e.dataTransfer?.files?.[0];
+    if (f) uploadFile(f);
+  });
+}
+
 async function loadDoctor() {
   const r = await fetch("/api/doctor");
   const d = await r.json();
@@ -135,6 +182,7 @@ document.addEventListener("DOMContentLoaded", () => {
   loadPdfs();
   loadDoctor();
   updateModeHint();
+  wireUpload();
   $("dry-run").addEventListener("change", updateModeHint);
 
   $("run-form").addEventListener("submit", async (e) => {

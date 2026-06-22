@@ -15,7 +15,7 @@ import threading
 from collections.abc import Iterator, Callable
 from pathlib import Path
 
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from generative.gui import runner
@@ -65,6 +65,7 @@ def create_app(
     pdf_dirs: list[Path] | None = None,
     vault_path: Path | None = None,
     backend: str | None = None,
+    uploads_dir: Path | None = None,
 ) -> FastAPI:
     run_factory = run_factory or _default_run_factory
 
@@ -79,6 +80,10 @@ def create_app(
         if backend is None:
             backend = _cfg.BACKEND
     pdf_dirs = [Path(d) for d in pdf_dirs if d]
+    if uploads_dir is None:
+        import tempfile
+        uploads_dir = Path(tempfile.gettempdir()) / "atomic-notes-gui-uploads"
+    uploads_dir = Path(uploads_dir)
 
     app = FastAPI(title="atomic-notes GUI")
     app.state.session = None
@@ -106,6 +111,29 @@ def create_app(
                 for p in sorted(d.glob(_PDF_GLOB)):
                     seen.setdefault(p.name, str(p))
         return JSONResponse({"pdfs": [{"name": n, "path": p} for n, p in seen.items()]})
+
+    @app.post("/api/upload")
+    async def upload(file: UploadFile = File(...)) -> JSONResponse:
+        """Per Drag-and-Drop/Dialog hochgeladenes PDF server-seitig ablegen.
+
+        Der Originalname (Basename, ohne Traversal) bleibt erhalten — die
+        Pipeline leitet Metadaten u.a. aus dem Dateinamen ab. `--source` fährt
+        anschliessend gegen den zurückgegebenen Pfad.
+        """
+        raw = file.filename or "upload.pdf"
+        safe_name = Path(raw.replace("\\", "/")).name
+        if not safe_name.lower().endswith(".pdf"):
+            return JSONResponse({"error": "Nur PDF-Dateien werden akzeptiert."},
+                                status_code=400)
+        data = await file.read()
+        if not data:
+            return JSONResponse({"error": "Leere Datei."}, status_code=400)
+        uploads_dir.mkdir(parents=True, exist_ok=True)
+        target = (uploads_dir / safe_name).resolve()
+        if not target.is_relative_to(uploads_dir.resolve()):
+            return JSONResponse({"error": "ungültiger Dateiname"}, status_code=400)
+        target.write_bytes(data)
+        return JSONResponse({"name": safe_name, "path": str(target)})
 
     @app.get("/api/doctor")
     def doctor() -> JSONResponse:
