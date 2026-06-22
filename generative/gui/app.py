@@ -63,7 +63,7 @@ class RunSession:
             for ev in run_iter:
                 with self._lock:
                     self.events.append(ev)
-        except Exception as exc:  # pragma: no cover - Defensive: Lauf-Crash sichtbar machen
+        except Exception as exc:  # Lauf-Crash als error-Event sichtbar machen
             with self._lock:
                 self.events.append({"type": "error", "message": str(exc)})
         finally:
@@ -87,10 +87,14 @@ def create_app(
     backend: str | None = None,
     uploads_dir: Path | None = None,
     doctor_fn: Callable[[], list] | None = None,
+    preview_root: Path | None = None,
 ) -> FastAPI:
     run_factory = run_factory or _default_run_factory
     if doctor_fn is None:
         from generative.doctor import run_all as doctor_fn
+    if preview_root is None:
+        preview_root = Path(__file__).resolve().parents[1] / ".cache" / "eval" / "baseline"
+    preview_root = Path(preview_root)
 
     if pdf_dirs is None or vault_path is None or backend is None:
         from generative import config as _cfg
@@ -184,6 +188,11 @@ def create_app(
         dry_run = bool(body.get("dry_run", True))
         if not pdf or not Path(pdf).exists():
             return JSONResponse({"error": f"PDF nicht gefunden: {pdf}"}, status_code=400)
+        # Server-seitige Revalidierung (Client-Gate könnte umgangen/veraltet sein):
+        # der Vault wird auch im Dry-Run gebraucht (Context-Builder scannt ihn).
+        if not Path(vault_path).exists():
+            return JSONResponse({"error": f"Vault nicht gefunden: {vault_path}"},
+                                status_code=400)
         with app.state.session_lock:
             if app.state.session is not None and app.state.session.active:
                 return JSONResponse({"error": "Es läuft bereits ein Pipeline-Lauf."},
@@ -232,7 +241,7 @@ def create_app(
         pdf_stem/name werden auf reine Dateinamen reduziert (kein Traversal); der
         aufgelöste Pfad muss innerhalb des baseline-Roots liegen.
         """
-        base = (Path(__file__).resolve().parents[1] / ".cache" / "eval" / "baseline").resolve()
+        base = preview_root.resolve()
         safe_stem = Path(pdf_stem).name
         safe_name = Path(name).name
         if not safe_stem or not safe_name:

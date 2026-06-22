@@ -185,3 +185,17 @@ def test_normal_line_no_error_hint():
     p = RunParser()
     evs = p.feed("      57 existierende Konzepte gefunden")
     assert not any(e["type"] == "error_hint" for e in evs)
+
+
+def test_enrichment_stage_zero_marker():
+    # [0/7] = optionales PDF-Enrichment (Vor-Stufe) → stage num=0.
+    p = RunParser()
+    evs = p.feed("[0/7] PDF-Enrichment — keine Metadaten im Dateinamen erkannt…")
+    assert evs[0]["type"] == "stage" and evs[0]["num"] == 0
+
+
+def test_done_written_real_run():
+    # dry_run=False: „geschrieben" statt „(dry-run)".
+    p = RunParser()
+    evs = p.feed("=== Fertig: 3 Notes geschrieben ===")
+    assert evs == [{"type": "done", "written": 3, "dry_run": False}]

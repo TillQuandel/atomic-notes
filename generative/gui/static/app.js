@@ -11,6 +11,9 @@ const $ = (id) => document.getElementById(id);
 let currentPdfStem = "";
 let running = false;
 let userCancelled = false;
+let activeStage = 0;
+let stageStartedAt = 0;
+let elapsedTimer = null;
 
 function renderStepper() {
   const ol = $("stepper");
@@ -18,22 +21,51 @@ function renderStepper() {
   for (const [num, label] of STAGES) {
     const li = document.createElement("li");
     li.id = `step-${num}`;
-    li.innerHTML = `<span class="dot" aria-hidden="true"></span><span>${num}. ${label}</span>`;
+    li.innerHTML = `<span class="dot" aria-hidden="true"></span><span class="step-label">${num}. ${label}</span><span class="elapsed" aria-hidden="true"></span>`;
     ol.appendChild(li);
   }
 }
 
 function setStage(num) {
+  if (num !== activeStage) { activeStage = num; stageStartedAt = Date.now(); }
   for (const [n] of STAGES) {
     const li = $(`step-${n}`);
     if (!li) continue;
     li.classList.toggle("done", n < num);
     li.classList.toggle("active", n === num);
+    li.classList.remove("error");
+    if (n !== num) { const e = li.querySelector(".elapsed"); if (e) e.textContent = ""; }
   }
+}
+
+function markStageError(num) {
+  const li = $(`step-${num}`);
+  if (li) { li.classList.remove("active"); li.classList.add("error"); }
+}
+
+function tickElapsed() {
+  // NN/g: bei der laufenden Stufe ab ~1s die verstrichene Zeit zeigen (Systemstatus).
+  const li = $(`step-${activeStage}`);
+  if (!li || !running) return;
+  const s = Math.floor((Date.now() - stageStartedAt) / 1000);
+  const e = li.querySelector(".elapsed");
+  if (e) e.textContent = s >= 1 ? `${s}s` : "";
+}
+
+function startElapsed() {
+  $("stepper").setAttribute("aria-busy", "true");
+  stopElapsed();
+  elapsedTimer = setInterval(tickElapsed, 1000);
+}
+
+function stopElapsed() {
+  if (elapsedTimer) { clearInterval(elapsedTimer); elapsedTimer = null; }
+  $("stepper").removeAttribute("aria-busy");
 }
 
 function resetRun() {
   renderStepper();
+  activeStage = 0;
   $("preview-list").innerHTML = "";
   $("preview-empty").style.display = "block";
   $("note-progress").textContent = "";
@@ -98,7 +130,9 @@ function escapeHtml(s) {
 
 function startStream() {
   const es = new EventSource("/api/stream");
-  const onStage = (e) => { const d = JSON.parse(e.data); setStage(d.num); };
+  startElapsed();
+  // [0/7] = optionales Enrichment (Vor-Stufe) → keinen Step markieren.
+  const onStage = (e) => { const d = JSON.parse(e.data); if (d.num >= 1) setStage(d.num); };
   es.addEventListener("started", (e) => logLine("» Lauf gestartet"));
   es.addEventListener("stage", onStage);
   es.addEventListener("note_progress", (e) => {
@@ -114,20 +148,20 @@ function startStream() {
     try { const d = JSON.parse(e.data); logLine(`✓ Pipeline fertig: ${d.written} Notes ${d.dry_run ? "(Dry-Run)" : "geschrieben"}`); } catch { }
   });
   const close = () => {
-    es.close(); running = false; userCancelled = false;
+    es.close(); stopElapsed(); running = false; userCancelled = false;
     $("start-btn").disabled = false; $("stop-btn").hidden = true; applyStartGate();
   };
   es.addEventListener("exited", (e) => {
     let rc = 0;
     try { rc = JSON.parse(e.data).returncode; } catch { }
-    if (userCancelled) { logLine("■ Lauf abgebrochen."); }
+    if (userCancelled) { markStageError(activeStage); logLine("■ Lauf abgebrochen."); }
     else if (rc === 0) { setStage(99); logLine("● Lauf beendet."); }
-    else { logLine(`✗ Lauf mit Fehlercode ${rc} beendet.`); }
+    else { markStageError(activeStage); logLine(`✗ Lauf mit Fehlercode ${rc} beendet.`); }
     close();
   });
   es.addEventListener("error", (e) => {
     // Eigenes error-Event (RunSession-Exception) ODER EventSource-Verbindungsende.
-    if (e.data) { logLine("✗ Fehler im Lauf."); }
+    if (e.data) { markStageError(activeStage); logLine("✗ Fehler im Lauf."); }
     close();
   });
 }
@@ -234,9 +268,14 @@ function applyStartGate() {
 
 function updateModeHint() {
   const dry = $("dry-run").checked;
+  const btn = $("start-btn");
+  // Den einzigen irreversiblen Schritt visuell klar absetzen (Label + Warnfarbe),
+  // statt nur als unscheinbare Checkbox (kein Modal — Vorschau ist der Gate).
+  btn.textContent = dry ? "Vorschau starten" : "In Vault schreiben";
+  btn.classList.toggle("danger", !dry);
   $("mode-hint").textContent = dry
     ? "Vorschau: erzeugt Notes, schreibt nichts. Ergebnis erscheint unter „Erzeugte Notes“."
-    : "Schreibt in den Vault (00-inbox). Frischer Lauf — Scores können von einer vorherigen Vorschau leicht abweichen.";
+    : "Schreibt Notes nach 00-inbox im Vault. Frischer Lauf — Scores können von einer vorherigen Vorschau leicht abweichen.";
 }
 
 async function attachIfRunActive() {

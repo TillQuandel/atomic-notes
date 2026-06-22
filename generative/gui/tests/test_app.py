@@ -37,8 +37,10 @@ def client(tmp_path):
     pdf = tmp_path / "beispiel.pdf"
     pdf.write_bytes(b"%PDF-1.4 fake")
     uploads = tmp_path / "uploads"
+    vault = tmp_path / "vault"
+    vault.mkdir()
     app = create_app(run_factory=fake_run, pdf_dirs=[tmp_path],
-                     vault_path=tmp_path / "vault", backend="subscription",
+                     vault_path=vault, backend="subscription",
                      uploads_dir=uploads, doctor_fn=fake_doctor)
     c = TestClient(app)
     c._uploads = uploads  # für Upload-Tests
@@ -216,6 +218,50 @@ def test_cancel_terminates_active_run(tmp_path):
 def test_cancel_without_active_run_409(client):
     c, _ = client
     assert c.post("/api/cancel").status_code == 409
+
+
+def test_run_revalidates_vault_server_side(tmp_path):
+    # B: Auch wenn der Client das Gate umgeht, lehnt der Server einen Lauf ohne
+    # existierenden Vault ab (Fehlervermeidung statt Mid-Run-Crash).
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(run_factory=fake_run, pdf_dirs=[tmp_path],
+                     vault_path=tmp_path / "nicht-da", backend="subscription",
+                     uploads_dir=tmp_path / "u", doctor_fn=fake_doctor)
+    r = TestClient(app).post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    assert r.status_code == 400
+    assert "vault" in r.json()["error"].lower()
+
+
+def test_run_factory_exception_surfaces_as_error_event(tmp_path):
+    # E: Wirft der Lauf, muss das als error-Event im Stream ankommen (schliesst
+    # den bisher ungetesteten _consume-Exception-Pfad).
+    def boom(pdf, dry_run, register=None):
+        yield {"type": "started", "argv": ["boom"]}
+        raise RuntimeError("kaputt")
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(run_factory=boom, pdf_dirs=[tmp_path], vault_path=tmp_path,
+                     backend="subscription", uploads_dir=tmp_path / "u")
+    cc = TestClient(app)
+    assert cc.post("/api/run", json={"pdf": str(pdf), "dry_run": True}).status_code == 200
+    body = cc.get("/api/stream").text
+    assert "event: error" in body
+    assert "kaputt" in body
+
+
+def test_preview_returns_body_for_existing_eval_copy(tmp_path):
+    # F: erfolgreicher Lesepfad von /api/preview (eval-Kopie vorhanden).
+    base = tmp_path / "baseline"
+    (base / "meinpdf").mkdir(parents=True)
+    (base / "meinpdf" / "vault__Konzept.md").write_text("# Konzept\nKörper", encoding="utf-8")
+    app = create_app(run_factory=fake_run, pdf_dirs=[tmp_path], vault_path=tmp_path,
+                     backend="subscription", uploads_dir=tmp_path / "u",
+                     preview_root=base)
+    r = TestClient(app).get("/api/preview", params={"pdf_stem": "meinpdf", "name": "Konzept.md"})
+    assert r.status_code == 200
+    assert r.json()["body"] == "# Konzept\nKörper"
 
 
 def test_status_reports_no_active_run_initially(client):

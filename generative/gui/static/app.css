@@ -88,6 +88,10 @@ button.danger { background: var(--bad); border-color: var(--bad); }
 .stepper li.active .dot { border-color: var(--accent); }
 .stepper li.done { color: var(--ink); }
 .stepper li.done .dot { background: var(--ok); border-color: var(--ok); }
+.stepper li.error { color: var(--bad); background: #fdecea; font-weight: 600; }
+.stepper li.error .dot { background: var(--bad); border-color: var(--bad); }
+.stepper li .step-label { flex: 1 1 auto; }
+.stepper li .elapsed { font-variant-numeric: tabular-nums; font-size: 0.8rem; color: var(--muted); }
 .note-progress { margin: 0.6rem 0 0; color: var(--muted); font-size: 0.9rem; }
 
 /* Preview-Notes */
