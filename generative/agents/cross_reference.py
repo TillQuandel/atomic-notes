@@ -22,6 +22,34 @@ def _clean_wikilink(s: str) -> str:
     '[[[[..]]]]' führen (Muster wie vault_writer.rewrite_merged_related_links)."""
     return (s or "").strip().strip("[]").strip()
 
+
+def _resolve_vault_path(dup_path: str, existing_concepts: dict[str, str] | None) -> Path | None:
+    """Löst einen vom LLM gelieferten duplicate_path auf eine reale Vault-Datei auf.
+
+    Kandidaten werden dem LLM als `Path(p).stem` präsentiert (siehe Prompt-Bau), daher
+    kommt dup_path meist als Datei-Stem zurück (z.B. 'ba-lit-ebner-gegenfurtner-2019'),
+    gelegentlich als Titel. Beide Wege werden gegen existing_concepts (Titel/Alias→Pfad)
+    aufgelöst. None, wenn kein Vault-Treffer (z.B. Intra-Run-Sibling — bisheriges Verhalten).
+    """
+    from generative.agents.context_builder import resolve_vault_relpath
+    rel = resolve_vault_relpath(dup_path, existing_concepts)
+    return VAULT / rel if rel else None
+
+
+def _dup_target_eligible(dup_path: str, existing_concepts: dict[str, str] | None) -> bool:
+    """False, wenn dup_path auf eine Note zeigt, deren Typ per Vault-Design mit
+    Konzept-Notes KOEXISTIERT (literature/moc/merge-stub) → kein echtes Duplikat.
+
+    Verhindert den False-Positive „Konzept-Note ist Dup ihrer eigenen Lit-Note"
+    (Ebner-Run 2026-06-23). Unauflösbarer/nicht-Vault dup_path → True (bisheriges
+    Verhalten bleibt; Intra-Run-Siblings regelt resolve_sibling_dups).
+    """
+    target = _resolve_vault_path(dup_path, existing_concepts)
+    if target is None:
+        return True
+    from generative.agents.context_builder import is_dedup_eligible
+    return is_dedup_eligible(target)
+
 # Lazy-loaded NLI CrossEncoder — wird nur bei ENABLE_NLI_VALIDATION=1 geladen
 _nli_encoder = None
 _nli_lock = __import__("threading").Lock()  # Thread-Safety bei parallelem Stage-6-Load
@@ -384,7 +412,17 @@ def run(draft: AtomicNoteDraft, existing_concepts: dict[str, str],
     # reinem Pfad/Titel — normalisieren, sonst entsteht unten "[[[[Titel]]]]" und ein
     # verklammertes Duplikat-Flag (beobachtet im Ebner-Run 2026-06-22).
     dup_path = _clean_wikilink(data.get("duplicate_path") or "").split("|", 1)[0].strip()
-    if dup_risk == "high":
+    # Typ-bewusstes Blocking: ein Dup-Treffer gegen eine koexistierende Lit-/MoC-/Stub-Note
+    # ist KEIN echtes Duplikat (Schema-Lit ≠ Schema-Konzept) — sonst würde eine Konzept-Note
+    # fälschlich in ihre eigene Lit-Note gemergt (Ebner-Run 2026-06-23). Dann: kein
+    # action=extend, aber den Bezug als related-Link erhalten (Konzept SOLL auf Quelle linken).
+    if dup_risk == "high" and not _dup_target_eligible(dup_path, existing_concepts):
+        draft.quality_flags.append(f"ℹ️ Verwandte Quelle/Note (kein Konzept-Duplikat): {dup_path}")
+        if dup_path:
+            dup_link = f"[[{Path(dup_path).stem}]]"
+            if dup_link not in data["related"]:
+                data["related"].insert(0, dup_link)
+    elif dup_risk == "high":
         # Duplikat ist der stärkste mögliche Vault-Beleg — confidence NICHT runter,
         # stattdessen action='extend' setzen + Duplikat als related-Link aufnehmen,
         # damit Confidence-Agent has_vault_corroboration=True erkennt

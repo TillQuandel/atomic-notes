@@ -19,7 +19,7 @@ _GENERIC_BLACKLIST: frozenset[str] = frozenset({
 from generative.agents.base import call_claude
 from generative.agents.cross_reference import _tokens  # Stoppwort-gefilterte Content-Tokens
 from generative.agents.structured_output import parse_planner_output
-from generative.config import MODEL_PLANNER
+from generative.config import MODEL_PLANNER, TITLE_PRESENCE_COSINE_THRESHOLD
 from generative.schemas.atomic_note import ConceptPlan, ConceptItem
 
 _PROMPT = """Du bist ein Wissensmanagement-Assistent, der Atomic Notes in Obsidian anlegt.
@@ -214,24 +214,70 @@ def run(overview: str, relevance_profile: dict,
 
 
 
+_SENT_EMB_CACHE: dict[tuple[int, int], object] = {}
+_SENT_EMB_CACHE_MAX = 16  # Deckel gegen unbounded growth in Langläufern (GUI/Batch)
+
+
+def _default_semantic_presence(title: str, full_text: str) -> float:
+    """MAX-Cosine zwischen Titel-Embedding und den Satz-Embeddings des Volltexts.
+
+    Cross-lingualer Präsenz-Check via multilinguales MiniLM (bereits für ER geladen).
+    MAX statt Mean: ein kurzer Titel trifft EINEN Absatz, nicht den Dokument-Durchschnitt
+    (Mean-Pooling verwässert den lokalen Treffer). Satz-Embeddings werden pro Volltext
+    gecacht (mehrere verworfene Konzepte → ein Encode). Fail-open: fehlt
+    sentence-transformers oder schlägt das Encoding fehl → 1.0 (kein zusätzliches Reject;
+    der lexikalische Filter bleibt die einzige Linie). 0.0 nur bei leerem Text.
+    """
+    try:
+        from generative.pipeline.embeddings import embed_title, _sentences, _model
+        import numpy as np
+    except Exception:
+        return 1.0
+    sents = [s for s in _sentences(full_text) if len(s) > 15]
+    if not sents:
+        return 0.0
+    try:
+        key = (len(full_text), hash(full_text))
+        embs = _SENT_EMB_CACHE.get(key)
+        if embs is None:
+            embs = np.asarray(_model().encode(
+                sents, show_progress_bar=False, normalize_embeddings=True, batch_size=64))
+            # Cache deckt mehrere verworfene Konzepte DESSELBEN Laufs ab (ein Encode statt N).
+            # Kleiner LRU-artiger Deckel, damit ein Langläufer (GUI-Server, Batch-Eval über
+            # viele PDFs) nicht unbounded wächst (~600 KB pro Volltext).
+            if len(_SENT_EMB_CACHE) >= _SENT_EMB_CACHE_MAX:
+                _SENT_EMB_CACHE.pop(next(iter(_SENT_EMB_CACHE)))
+            _SENT_EMB_CACHE[key] = embs
+        te = embed_title(title)
+        return float(embs.dot(te).max())
+    except Exception:
+        return 1.0
+
+
 def filter_hallucinated(plan: ConceptPlan, full_text: str,
-                        min_coverage: float = 0.5) -> tuple[ConceptPlan, list[str]]:
-    """Verwirft Konzepte deren Titel-Tokens nur teilweise im PDF-Volltext vorkommen.
+                        min_coverage: float = 0.5,
+                        semantic_presence_fn=None) -> tuple[ConceptPlan, list[str]]:
+    """Verwirft Konzepte deren Titel im PDF weder lexikalisch noch semantisch vorkommen.
 
-    Coverage-Filter: |Title-Tokens ∩ Text-Tokens| / |Title-Tokens| ≥ min_coverage
+    Lexikalischer Coverage-Filter: |Title-Tokens ∩ Text-Tokens| / |Title-Tokens| ≥ min_coverage.
 
-    Ergänzt durch Planner-Prompt-Instruktion (Self-Filter: action="skip" für
-    konzepte die nur aus Trainingswissen bekannt sind). Kein domain-spezifischer
-    Code-Filter — neutral für alle Themenbereiche.
+    Cross-lingualer Rettungsanker (Ebner-Run 2026-06-23): der reine Token-Schnitt ist
+    sprachblind — ein deutscher (paraphrasierter) Titel hat null wörtlichen Overlap mit
+    einer englischen Quelle und würde fälschlich verworfen (so starb der Paper-Kernbefund
+    „Lern-Zufriedenheits-Dissoziation"). Scheitert die lexikalische Coverage, wird daher
+    ZUSÄTZLICH die semantische Präsenz geprüft (MAX-Cosine, multilinguales Embedding);
+    liegt sie ≥ TITLE_PRESENCE_COSINE_THRESHOLD, wird das Konzept gerettet. Reiner
+    OR-Kanal: kann nur retten, nie zusätzlich verwerfen.
 
     Beispiele (min_coverage=0.5):
-    - "Maslow Bedürfnishierarchie" → Coverage 2/2 → kept
-    - "Blockchain für Information Retrieval" → Coverage 1/3 < 0.5 → rejected
+    - "Maslow Bedürfnishierarchie" → Coverage 2/2 → kept (lexikalisch)
+    - "Lern-Zufriedenheits-Dissoziation" (EN-Quelle) → Coverage 0, aber max-cos 0.83 → gerettet
+    - "Blockchain für Information Retrieval" → Coverage 1/3 UND max-cos 0.36 → rejected
 
     Returns: (gefilterter Plan, Liste verworfener Konzept-Titel)
     """
     text_tokens = _tokens(full_text)
-    full_text_lower = full_text.lower()
+    sem_fn = semantic_presence_fn or _default_semantic_presence
     rejected: list[str] = []
     kept: list[ConceptItem] = []
     for c in plan.concepts:
@@ -241,8 +287,12 @@ def filter_hallucinated(plan: ConceptPlan, full_text: str,
             continue
         coverage = len(title_tokens & text_tokens) / len(title_tokens)
         if coverage < min_coverage:
-            rejected.append(c.title)
-            continue
+            # Sprachblindheit abfangen: bevor verworfen wird, cross-lingualen
+            # semantischen Präsenz-Check als Rettungsanker.
+            if sem_fn(c.title, full_text) < TITLE_PRESENCE_COSINE_THRESHOLD:
+                rejected.append(c.title)
+                continue
+            # sonst gerettet → weiter zur Blacklist-Prüfung
         # Blacklist-Check: generische Einzel-Konzepte verwerfen (portiert aus extractive).
         # Normalisierung auf lowercase nötig da LLM Title-Case ausgibt.
         if c.title.strip().lower() in _GENERIC_BLACKLIST:

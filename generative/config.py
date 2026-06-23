@@ -63,6 +63,29 @@ MODEL_SUMMARY = MODEL_HAIKU         # Map-Reduce-Summary für lange PDFs (Backlo
 # Critic-Schwelle: Auto-Write nur bei Score >= Schwelle UND alle Hard-Gates pass
 CRITIC_AUTO_THRESHOLD = 4   # von 5 Tests, siehe Schema-Konzept Milestone 1.1
 
+# Cross-lingualer Rettungsanker für filter_hallucinated (planner.py): der lexikalische
+# Token-Coverage-Filter ist sprachblind — ein deutscher (paraphrasierter) Konzept-Titel
+# hat null wörtlichen Overlap mit einer englischen Quelle und würde fälschlich als
+# „halluziniert" verworfen (Ebner-Run 2026-06-23: der Paper-Kernbefund „Lern-Zufriedenheits-
+# Dissoziation" starb genau so). Geprüft wird dann die semantische Präsenz: MAX-Cosine des
+# Titel-Embeddings gegen die Satz-Embeddings des Volltexts (multilinguales MiniLM, bereits
+# geladen). Schwelle gemessen auf der Ebner-EN-Quelle (n=1, NICHT voll kalibriert): echte
+# Konzepte 0.575–0.825, echte Halluzinationen 0.357/0.358 → 0.50 trennt mit großem Abstand.
+# Reiner OR-RETTUNGSANKER: greift nur, wenn der lexikalische Filter ablehnt — kann ein
+# Konzept also nur RETTEN, nie zusätzlich verwerfen. ENV-überschreibbar für Kalibrierung.
+TITLE_PRESENCE_COSINE_THRESHOLD = float(os.getenv("ATOMIC_AGENT_TITLE_PRESENCE_COSINE", "0.50"))
+
+# Typ-bewusstes Dedup-Blocking: Note-Typen, die per Vault-Design mit Konzept-Notes
+# KOEXISTIEREN und daher nie Duplikat-Kandidaten sind. Eine `type: literature`-Note ist die
+# Note ÜBER ein Paper, eine `type: atomic`-Note die Note ÜBER ein Konzept DARIN — beide
+# existieren gleichzeitig (Schema-Lit vs. Schema-Konzept); `moc`/`merge-stub` sind Pointer-
+# bzw. Zwischen-Notes. Ohne diesen Filter flaggt cross_reference eine Konzept-Note fälschlich
+# als Duplikat ihrer eigenen Lit-Note (Ebner-Run 2026-06-23: „Webinar" → Dup von
+# ba-lit-ebner-gegenfurtner-2019). related-LINKS über Typgrenzen bleiben erlaubt (eine
+# Konzept-Note SOLL auf ihre Quelle verlinken) — nur der Dup/extend- und Merge-Stub-Pfad
+# wird typ-bewusst.
+DEDUP_EXCLUDE_TYPES = frozenset({"literature", "moc", "merge-stub"})
+
 # Chunk-Größe Fallback (Wörter)
 CHUNK_WORDS = 3000
 
