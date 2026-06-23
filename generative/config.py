@@ -2,7 +2,10 @@ import os
 from pathlib import Path
 from dotenv import load_dotenv
 
-load_dotenv()
+# Explizit generative/.env (neben dieser Datei) laden — CWD-unabhängig. Ein
+# nacktes load_dotenv() sucht CWD-relativ und verfehlt generative/.env beim
+# dokumentierten Start aus dem Repo-Root.
+load_dotenv(Path(__file__).resolve().parent / ".env")
 
 BACKEND = os.getenv("ATOMIC_AGENT_BACKEND", "subscription")
 
@@ -28,6 +31,16 @@ LITERATURE_DIR = Path(os.environ.get(
 
 _contact = os.environ.get("ATOMIC_AGENT_CONTACT", "atomic-agent-user")
 USER_AGENT = f"AtomicAgent/1.0 (mailto:{_contact})"
+
+# Phoenix-Observability: OTLP-Ziel + Server-venv für den Auto-Start.
+# Nur relevant bei ATOMIC_AGENT_TRACING=phoenix. Beide per ENV überschreibbar,
+# damit der Server-venv-Pfad nicht hartkodiert ist (fremde Installs ohne
+# .venv-phoenix bleiben unberührt, weil Tracing per Default aus ist).
+PHOENIX_PORT = int(os.environ.get("ATOMIC_AGENT_PHOENIX_PORT", "6006"))
+PHOENIX_VENV = Path(os.environ.get(
+    "ATOMIC_AGENT_PHOENIX_VENV",
+    str(SCRIPTS_DIR.parent / ".venv-phoenix")
+))
 
 # Claude-Aufruf via CLI-Subprocess (Pro/Max-Subscription, OAuth)
 CLAUDE_BIN = "claude"
