@@ -9,7 +9,7 @@ import unittest
 from unittest.mock import patch
 from pathlib import Path
 
-from generative.pipeline.vault_writer import convert_inline_to_footnotes, build_quellen_block
+from generative.pipeline.vault_writer import convert_inline_to_footnotes, build_quellen_block, render_merge_stub, VAULT
 from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor
 
 
@@ -233,6 +233,28 @@ class TestRewriteMergedRelatedLinks(unittest.TestCase):
         sibling = self._draft("D", related=["[[X]]"])
         self.assertEqual(rewrite_merged_related_links([sibling], None), 0)
         self.assertEqual(sibling.related, ["[[X]]"])
+
+
+class TestMergeStubSourceStatus(unittest.TestCase):
+    """Geschwister von Befund D ([[Ungelesenes-Pipeline-Signal]], Codex-Hunt 2026-06-23):
+    `render_merge_stub` ließ das fail-closed-Flag `source_status` fallen, das `render_note`
+    rendert (#45). Eine create-Note mit unauflösbarer Quelle, die zufällig einen Vault-
+    Title/Alias-Treffer hat, rendert als Merge-Stub und verlor das Flag still."""
+
+    def _stub(self, source_status=None):
+        note = AtomicNoteDraft(
+            title="Webinar-Wirksamkeit", body="Body", source_anchors=[], related=[],
+            tags=[], synthesis_confidence="high", action="create",
+            source_status=source_status,
+        )
+        return render_merge_stub(note, "Ebner 2019.pdf",
+                                 VAULT / "04-wissen" / "Webinar Bestehend.md")
+
+    def test_unresolved_source_status_rendered_on_stub(self):
+        self.assertIn("source-status: unresolved", self._stub("unresolved"))
+
+    def test_no_source_status_line_when_unset(self):
+        self.assertNotIn("source-status:", self._stub(None))
 
 
 if __name__ == "__main__":
