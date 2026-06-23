@@ -831,6 +831,145 @@ def dedup_exact(drafts: list[AtomicNoteDraft],
     return result
 
 
+def resolve_sibling_dups(drafts: list[AtomicNoteDraft],
+                         existing_concepts: dict[str, str] | None = None
+                         ) -> tuple[list[AtomicNoteDraft], int]:
+    """Intra-Run-Sibling-Dedup (Befund D).
+
+    cross_reference erkennt zwei Near-Dup-Drafts EINES Laufs (dup_risk=high) und setzt
+    action=extend + extend_path=<Sibling-Titel>. Da der Sibling keine Vault-Datei ist,
+    verpufft das Signal beim Writer (write_note routet nur über find_existing_in_vault,
+    nicht über extend_path) und BEIDE Notes werden als Vollnoten geschrieben. Diese
+    Funktion wertet genau dieses bereits gesetzte extend-Signal aus und kollabiert solche
+    Geschwister deterministisch zu EINER Note — VOR dem Schreiben.
+
+    Bewusst KEIN Eingriff ins Title-Blocking von entity_resolution: hier wird nur das vom
+    LLM bereits gefällte Dup-Urteil interpretiert, kein neuer Body-Cosine-Pass (der echte,
+    distinkt betitelte Geschwister fälschlich mergen könnte) und kein zusätzlicher LLM-Call.
+
+    Survivor pro Cluster: höchster critic_score, Tie → längerer Body, Tie → norm-Titel
+    (ordnungsunabhängig deterministisch). Verlustarm: related-Links + source_anchors der
+    gedroppten Drafts wandern in den Survivor (related auf MAX_RELATED gedeckelt); gedroppte
+    Titel/Aliase werden Survivor-Aliase, sodass [[…]]-Links auf den gedroppten Titel auf den
+    Survivor auflösen (kein Dead-Link).
+
+    Vault-Erhalt (Cross-Model-Review Codex 2026-06-23, HIGH#2): hat IRGENDEIN Cluster-Member
+    eine Vault-Dublette (action=extend mit extend_path auf eine reale Vault-Note), erbt der
+    Survivor diesen Bezug (action=extend + Vault-Stem als Alias → title-/alias-basierter
+    Writer findet die Vault-Note). Sonst wird ein dangling Intra-Run-extend auf 'create'
+    zurückgesetzt.
+
+    Präkondition: dedup_exact lief vorher → alle Drafts haben unique normalisierte Titel
+    (keine norm-Title-Kollisionen, Codex MED#3).
+    """
+    from generative.agents.cross_reference import MAX_RELATED
+    n = len(drafts)
+    if n <= 1:
+        return drafts, 0
+
+    norm_title = [_normalize(d.title) for d in drafts]
+    title_to_idx = {nt: i for i, nt in enumerate(norm_title)}
+
+    # Vault-Index normalisieren (Keys = Titel, Values = Pfade) — für Vault-Dubletten-Erkennung
+    ec = existing_concepts or {}
+    vault_norms = {_normalize(k) for k in ec} | {_normalize(Path(v).stem) for v in ec.values()}
+
+    def _vault_target(ep: str | None) -> bool:
+        """True wenn extend_path auf eine reale Vault-Note zeigt (Titel- ODER Stem-Match)."""
+        if not ep:
+            return False
+        return _normalize(ep) in vault_norms or _normalize(Path(ep).stem) in vault_norms
+
+    def _match_idx(ep: str, self_i: int) -> int | None:
+        """In-Run-Draft, dessen Titel zu extend_path passt — per direkt-normalize ODER
+        Path-Stem (Codex MED#4: bare Titel mit '/' dürfen nicht über stem zerlegt werden)."""
+        for key in (_normalize(ep), _normalize(Path(ep).stem)):
+            j = title_to_idx.get(key)
+            if j is not None and j != self_i:
+                return j
+        return None
+
+    # Union-Find über Intra-Run-extend-Kanten (gleiches Cluster-Pattern wie entity_resolution)
+    parent = list(range(n))
+
+    def find(x: int) -> int:
+        while parent[x] != x:
+            parent[x] = parent[parent[x]]
+            x = parent[x]
+        return x
+
+    def union(a: int, b: int) -> None:
+        ra, rb = find(a), find(b)
+        if ra != rb:
+            parent[rb] = ra
+
+    for i, d in enumerate(drafts):
+        if d.action != "extend" or not d.extend_path:
+            continue
+        j = _match_idx(d.extend_path, i)
+        if j is not None:  # extend_path trifft einen anderen In-Run-Draft → Geschwister
+            union(i, j)
+
+    clusters: dict[int, list[int]] = {}
+    for i in range(n):
+        clusters.setdefault(find(i), []).append(i)
+
+    def _link_norm(link: str) -> str:
+        s = link.strip()
+        if s.startswith("[[") and s.endswith("]]"):
+            s = s[2:-2]
+        s = s.split("|", 1)[0].split("#", 1)[0].strip()  # Alias- und Heading-Anker abtrennen
+        return _normalize(Path(s).stem)
+
+    drop_idx: set[int] = set()
+    for members in clusters.values():
+        if len(members) <= 1:  # Multi-Member-Cluster entsteht nur durch eine Sibling-Kante
+            continue
+        survivor = max(members, key=lambda m: (drafts[m].critic_score,
+                                               len(drafts[m].body or ""),
+                                               norm_title[m]))
+        s = drafts[survivor]
+        alias_norms = {_normalize(a) for a in s.aliases} | {norm_title[survivor]}
+
+        def _absorb_alias(name: str) -> None:
+            if name and _normalize(name) not in alias_norms:
+                s.aliases.append(name)
+                alias_norms.add(_normalize(name))
+
+        for m in members:
+            if m == survivor:
+                continue
+            d = drafts[m]
+            drop_idx.add(m)
+            for alias in [d.title, *d.aliases]:
+                _absorb_alias(alias)
+            s.source_anchors.extend(d.source_anchors)
+            for link in d.related:
+                if link not in s.related:
+                    s.related.append(link)
+
+        # Vault-Erhalt: hat ein Cluster-Member eine reale Vault-Dublette, erbt der Survivor
+        # sie. Das eigene Vault-Ziel des Survivors hat Vorrang (Mistral-Review 2026-06-23),
+        # sonst der erste Member in Index-Reihenfolge.
+        _vault_order = [survivor] + [m for m in sorted(members) if m != survivor]
+        vault_ep = next((drafts[m].extend_path for m in _vault_order
+                         if drafts[m].action == "extend" and _vault_target(drafts[m].extend_path)),
+                        None)
+        if vault_ep is not None:
+            s.action = "extend"
+            s.extend_path = vault_ep
+            _absorb_alias(Path(vault_ep).stem)  # Writer findet Vault-Note via Alias
+        elif s.action == "extend" and s.extend_path:  # dangling Intra-Run-extend
+            s.action = "create"
+            s.extend_path = None
+
+        # Self-Links (auf Survivor-Titel oder absorbierte Aliase) entfernen, dann deckeln
+        s.related = [l for l in s.related if _link_norm(l) not in alias_norms][:MAX_RELATED]
+
+    kept = [d for i, d in enumerate(drafts) if i not in drop_idx]
+    return kept, len(drop_idx)
+
+
 def _auto_start_dashboard() -> None:
     """Startet den Dashboard-Server im Hintergrund falls er noch nicht läuft."""
     import socket, subprocess
@@ -1523,6 +1662,16 @@ def main(argv: list[str] | None = None):
             runtime_config=runtime_config,
             refine_budget=refine_budget,
         ))
+
+    # --- Dedup Stage C: Intra-Run-Sibling-Dedup (Befund D) ---
+    # cross_reference setzt bei dup_risk=high action=extend + extend_path=<Sibling-Titel>.
+    # Zeigt das auf einen Draft DESSELBEN Laufs (keine Vault-Datei), verpufft es beim
+    # Writer und beide Notes würden geschrieben. Hier auf das vorhandene Signal reagieren
+    # und Geschwister eines Laufs deterministisch zu EINER Note kollabieren — nach den
+    # per-Draft-Calls (Signal steht erst jetzt fest), vor boilerplate_dedup und Writer.
+    drafts, n_sib = resolve_sibling_dups(drafts, existing_concepts)
+    if n_sib:
+        print(f"      [sibling-dedup] {n_sib} Intra-Run-Near-Dup(s) in Geschwister-Note(s) gemergt")
 
     # --- Hebel #5: Boilerplate-Dedup zwischen Hub-Drafts und Sub-Konzept-Drafts ---
     drafts, stripped = boilerplate_dedup.dedup_hub_subconcepts(drafts)
