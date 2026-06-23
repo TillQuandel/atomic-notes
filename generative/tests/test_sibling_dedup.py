@@ -8,6 +8,7 @@ Schreiben — ohne Eingriff ins Title-Blocking (kein False-Positive-Risiko).
 """
 from generative.orchestrator import resolve_sibling_dups
 from generative.agents.cross_reference import MAX_RELATED
+from generative.pipeline.vault_writer import write_note
 from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor
 
 
@@ -178,3 +179,26 @@ def test_heading_self_link_removed():
     assert dropped == 1
     assert not any("affektiver zugang" in l.lower() for l in kept[0].related)
     assert "[[Keep]]" in kept[0].related
+
+
+def test_e2e_two_near_dups_write_one_note(tmp_path):
+    # Akzeptanzkriterium e2e (deterministisch): zwei Near-Dup-Drafts EINES Laufs mit dem
+    # realen cross_reference-Signal (B.action=extend, extend_path=<A-Titel>) ergeben nach
+    # resolve_sibling_dups + Writer GENAU EINE Note-Datei (ohne Fix wären es zwei).
+    anchors = [TextAnchor(quote="Webinare wirken vergleichbar", page="S. 5")]
+    d_a = _draft("Webinar-Wirksamkeit", body="Webinare zeigen vergleichbare Lerneffekte. " * 4,
+                 source_anchors=list(anchors), critic_score=4)
+    d_b = _draft("Wirksamkeit von Webinaren", body="Webinare sind ähnlich wirksam. " * 3,
+                 source_anchors=list(anchors), action="extend",
+                 extend_path="Webinar-Wirksamkeit", critic_score=2)
+
+    kept, dropped = resolve_sibling_dups([d_a, d_b], existing_concepts={})
+    assert dropped == 1 and len(kept) == 1
+
+    src = "Ebner und Gegenfurtner - 2019.pdf"
+    meta = {"Author": "Ebner & Gegenfurtner", "Year": "2019", "Title": "Webinar Meta-Analysis"}
+    for note in kept:
+        write_note(note, src, source_meta=meta, existing_concepts={}, inbox_dir=tmp_path)
+
+    written = list(tmp_path.glob("*.md"))
+    assert len(written) == 1, f"erwartet 1 Note, geschrieben: {[p.name for p in written]}"
