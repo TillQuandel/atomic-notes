@@ -591,13 +591,17 @@ def render_merge_stub(note: AtomicNoteDraft, source_file: str,
     rel_existing = str(existing_path.relative_to(VAULT)).replace("\\", "/")
     existing_link = existing_path.stem
     flags_yaml = _yaml_list(["merge-pending"] + note.quality_flags)
+    # Geschwister von Befund D (#45): fail-closed source_status auch auf dem Merge-Pfad
+    # rendern — render_note tut es, render_merge_stub ließ es sonst still fallen, sodass
+    # eine create-Note mit unauflösbarer Quelle + Vault-Titel-Treffer das Flag verlor.
+    source_status_line = f"\nsource-status: {note.source_status}" if note.source_status else ""
 
     frontmatter = f"""---
 title: "MERGE: {title_esc}"
 type: merge-stub
 merge-target: "[[{existing_link}]]"
 merge-target-path: "{rel_existing}"
-source-file: "{source_file}"
+source-file: "{source_file}"{source_status_line}
 claude-generated: true
 quality-flags:
 {flags_yaml}
