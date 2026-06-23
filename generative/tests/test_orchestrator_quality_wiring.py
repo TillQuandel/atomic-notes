@@ -60,3 +60,6 @@ def test_quality_module_not_shadowed_by_text_quality_gate(monkeypatch):
     assert calls["n"] == 1
     # quality_report wandert an Tupel-Position 7.
     assert isinstance(result[7], QualityReport)
+    # q_title (erwarteter Quell-Titel) muss als LETZTER Wert mitkommen, sonst
+    # crasht main() beim CrossRef-Override-Check mit NameError (Ebner-Run-Regression).
+    assert result[-1] == "Titel"

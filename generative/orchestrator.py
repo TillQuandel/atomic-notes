@@ -1215,7 +1215,7 @@ def _run_extraction_stages(args, source_path: Path, runtime_config=None):  # mai
     return (drafts, concept_map, existing_concepts, concept_links,
             text, chunks, acronym_dict, quality_report, pdf_meta,
             source_path, tag_whitelist, background_map, fb.get("Year"),
-            dropped_total, word_count, related_mentions)
+            dropped_total, word_count, related_mentions, q_title)
 
 
 def _save_draft_state(path: str, *, drafts: list, concept_map: dict,
@@ -1352,6 +1352,9 @@ def main(argv: list[str] | None = None):
          _src_name, tag_whitelist, background_map,
          fb_year, related_mentions) = _load_draft_state(args.load_drafts)
         source_path = Path(_src_name)
+        # q_title wird im Normalpfad von _run_extraction_stages durchgereicht;
+        # der load-drafts-Pfad überspringt Stage 1–5, daher hier aus pdf_meta ableiten.
+        q_title = (pdf_meta or {}).get("Title")
         word_count = len(text.split())
         dropped_total = 0
         print(f"\n=== Atomic Agent (load-drafts): {source_path.name} ===\n")
@@ -1364,7 +1367,7 @@ def main(argv: list[str] | None = None):
         (drafts, concept_map, existing_concepts, concept_links,
          text, chunks, acronym_dict, quality_report, pdf_meta,
          source_path, tag_whitelist, background_map, fb_year,
-         dropped_total, word_count, related_mentions) = _run_extraction_stages(args, source_path, runtime_config)
+         dropped_total, word_count, related_mentions, q_title) = _run_extraction_stages(args, source_path, runtime_config)
         if args.save_drafts:
             _save_draft_state(
                 args.save_drafts, drafts=drafts, concept_map=concept_map,
