@@ -1135,7 +1135,7 @@ function renderKpis(kpis, thresh, kpiTrend) {
     const vd = kpiTrend?.deltas?.[kd.key] || null;
     const dval = (vd && vd.delta != null) ? vd.delta.toFixed(1) : null;
     const prevVer = vers.length >= 2 ? vers[vers.length-2] : null;
-    const dClass = (dval!=null && vd.reliable) ? (parseFloat(dval)>0 ? (kd.key==='hall'?'dneg':'dpos') : (kd.key==='hall'?'dpos':'dneg')) : '';
+    const dClass = (dval!=null && vd.reliable && parseFloat(dval)!==0) ? (parseFloat(dval)>0 ? (kd.key==='hall'?'dneg':'dpos') : (kd.key==='hall'?'dpos':'dneg')) : '';  // 0.0 = neutral, keine Farbe
     const sign = dval!=null && parseFloat(dval)>0 ? '+' : '';
     const deltaHtml = dval!=null
       ? `Δ vs. ${prevVer}: <span class="${dClass}">${sign}${dval} ${kd.u}</span>${vd.reliable ? '' : ' (n&lt;20)'}`
@@ -1748,14 +1748,15 @@ function renderInsights(d) {
     } else { _setInsight('ins-quality', ''); }
   } else { _setInsight('ins-quality', ''); }
 
-  // Kosten: Gesamt-Tokens + Laufzeit der gefilterten Runs
+  // Kosten: Gesamt-Tokens + Laufzeit der gefilterten Versionen (d.tokens ist seit
+  // _chart_tokens_by_version pro Version aggregiert, nicht mehr pro Run — Label angepasst)
   const tok = d.tokens || {};
   if ((tok.labels||[]).length) {
     const totalTok = (tok.tokens_in||[]).reduce((a,b)=>a+(b||0),0) + (tok.tokens_out||[]).reduce((a,b)=>a+(b||0),0);
     const medDur = _median((tok.duration_min||[]).filter(v=>v>0).sort((a,b)=>a-b));
     _setInsight('ins-cost',
-      `<strong>${tok.labels.length}</strong> Runs verbrauchten <strong>${_fmtDE(totalTok/1e6, 2)} M</strong> Tokens` +
-      (medDur != null ? `, Median-Laufzeit <strong>${_fmtDE(medDur, 0)} min</strong> pro Run.` : '.'));
+      `<strong>${tok.labels.length}</strong> Versionen verbrauchten <strong>${_fmtDE(totalTok/1e6, 2)} M</strong> Tokens` +
+      (medDur != null ? `, Median-Laufzeit <strong>${_fmtDE(medDur, 0)} min</strong> pro Version.` : '.'));
   } else { _setInsight('ins-cost', ''); }
 
   // Agenten: größter Output-Token-Verursacher
