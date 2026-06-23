@@ -110,6 +110,12 @@ def test_mark_scaling_recency_does_not_mutate_input():
 def test_is_foss_version_detects_foss_prefix():
     assert is_foss_version("foss-v0.1.1") is True
     assert is_foss_version("foss-v0.2.0") is True
+    # Realer Prefix der nicht-generativen Pipeline ist `extractive-`
+    # (extractive/orchestrator.py: EXTRACTIVE_VERSION = "extractive-v0.2.0"),
+    # NICHT `foss-` (das taggt nirgends real). Muss ebenfalls erkannt werden,
+    # sonst ist die ganze Trennung ein No-op (Cross-Model-Review Codex 2026-06-23).
+    assert is_foss_version("extractive-v0.2.0") is True
+    assert is_foss_version("extractive-1.0") is True
 
 
 def test_is_foss_version_false_for_generative_and_edge_cases():

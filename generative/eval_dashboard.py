@@ -107,10 +107,13 @@ def _ver_sort_key(v: str) -> tuple:
     return tuple(int(n) for n in re.findall(r"\d+", v))
 
 def is_foss_version(version) -> bool:
-    """True fuer foss/extractive-Pipeline-Versionen (Praefix 'foss-'). Die foss-
-    Pipeline ist eine andere Architektur als die generative — ihre Versionen
-    gehoeren nicht in denselben Versions-Trend (#36)."""
-    return str(version or "").startswith("foss-")
+    """True fuer nicht-generative Pipeline-Versionen. Realer Prefix ist `extractive-`
+    (extractive/orchestrator.py: EXTRACTIVE_VERSION = "extractive-v0.2.0"); `foss-`
+    wird als Forward-Compat-Alias mit erkannt. Diese Pipelines sind eine andere
+    Architektur als die generative — ihre Versionen gehoeren nicht in denselben
+    Versions-Trend (#36). NB: `foss-` allein matchte nichts Reales → Trennung war
+    ein No-op (Cross-Model-Review 2026-06-23)."""
+    return str(version or "").startswith(("extractive-", "foss-"))
 
 def _latest_version(ver_map: dict) -> str:
     return sorted(ver_map.keys(), key=_ver_sort_key)[-1]
