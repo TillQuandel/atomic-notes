@@ -6,6 +6,7 @@ dort en passant vorkommen — Hiatt 2026-05-10 ADKAR-Eval-Bug. Siehe
 [[Atomic-Agent-Pipeline]] v24.
 """
 from __future__ import annotations
+import re
 import sys
 from pathlib import Path
 
@@ -219,6 +220,76 @@ def test_single_chunk_oversize_still_returned():
     out = concept_text_window(text, ["TARGET"], window_words=400, max_chars=100)
     assert len(out) > 100  # bewusster Bypass
     assert "TARGET" in out
+
+
+# ---- concept_text_window: Seiten-Marker-Reinjektion (#4 Anker-Clustering) ----
+# Bug: concept_text_window klebt Top-Fenster aus dem ganzen Dokument zusammen.
+# Beginnt ein Fenster mitten auf einer Seite, fehlt ihm der [S. N]-Marker (der
+# stand am Seitenanfang, vor dem Fenster). Downstream (Extractor-LLM, Verifier,
+# Renderer) leitet die Seite über "letzter [S. N]-Marker vor der Fundstelle" ab
+# und erbt dann die Seite eines früheren Snippets → falsche Fußnoten-Seite.
+# Merrill-Run 2026-06-24: Integration-Detail (echt S.8) bekam pauschal "S.3".
+
+def _page_before(text: str, needle: str) -> str | None:
+    """Letzter [S. N]-Marker vor `needle` — exakt wie Downstream die Seite ableitet."""
+    pos = text.find(needle)
+    if pos < 0:
+        return None
+    last = None
+    for m in re.finditer(r"\[S\.\s*(\d+)\]", text):
+        if m.start() > pos:
+            break
+        last = m.group(1)
+    return last
+
+
+def test_snippet_retains_correct_page_marker_when_window_starts_mid_page():
+    """Ein Fenster, das mitten auf einer Seite beginnt, muss seinen korrekten
+    [S. N]-Marker tragen — sonst erbt die Seitenableitung den Marker eines
+    früheren Snippets (der reproduzierte #4-Bug). Marker line-isoliert wie aus
+    pages_to_marked_text (`\\n\\n[S. N]\\n\\n`)."""
+    pad = " ".join(["filler"] * 500)
+    # S.1: Overview-Fenster mit Titel+Tokens (rankt hoch, trägt eigenen Marker)
+    overview = "\n\n[S. 1]\n\nTARGET alpha beta gamma " + pad
+    # S.2–S.4: Marker vorhanden, aber kein Token → nicht selektiert
+    mid = "\n\n[S. 2]\n\n" + pad + "\n\n[S. 3]\n\n" + pad + "\n\n[S. 4]\n\n" + pad
+    # S.5: Marker, dann >window_words filler, dann der Detail-Cluster → das
+    # selektierte Detail-Fenster beginnt NACH dem [S. 5]-Marker.
+    detail = "\n\n[S. 5]\n\n" + " ".join(["filler"] * 550) + " TARGET alpha beta delta DETAILNEEDLE"
+    text = f"{overview}{mid}{detail}"
+
+    out = concept_text_window(
+        text, ["TARGET", "alpha", "beta"], window_words=400, max_chars=8000
+    )
+
+    assert "DETAILNEEDLE" in out, "Detail-Fenster muss selektiert sein"
+    assert _page_before(out, "DETAILNEEDLE") == "5", (
+        "Detail-Snippet muss seinen eigenen Seitenmarker S.5 tragen, "
+        "nicht den S.1 des früheren Snippets erben"
+    )
+
+
+def test_inline_page_ref_not_treated_as_page_start():
+    """Inline-Quellenverweis „vgl. [S. 12]" im Fließtext darf NICHT als
+    Seitenanfang gelten — ein folgendes markerloses Snippet erbt die echte
+    Seite (S.7), nicht die inline zitierte (S.12). (Codex-Review #4 MED.)"""
+    # Echter Seitenanfang S.7 (line-isoliert), dann ein Inline-Ref im Fließtext,
+    # dann >window_words filler, dann der Detail-Cluster.
+    text = (
+        "\n\n[S. 7]\n\nvgl. dazu [S. 12] in der Literatur "
+        + " ".join(["filler"] * 550)
+        + " TARGET alpha beta DETAILNEEDLE"
+    )
+
+    out = concept_text_window(
+        text, ["TARGET", "alpha", "beta"], window_words=400, max_chars=8000
+    )
+
+    assert "DETAILNEEDLE" in out, "Detail-Fenster muss selektiert sein"
+    assert _page_before(out, "DETAILNEEDLE") == "7", (
+        "markerloses Detail-Snippet muss die echte Seite S.7 erben, "
+        "nicht die inline zitierte S.12"
+    )
 
 
 # ---- assess_text_quality (G6/#27 — Textqualitäts-Gate) -------------------
