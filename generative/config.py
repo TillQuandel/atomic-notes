@@ -86,6 +86,17 @@ TITLE_PRESENCE_COSINE_THRESHOLD = float(os.getenv("ATOMIC_AGENT_TITLE_PRESENCE_C
 # wird typ-bewusst.
 DEDUP_EXCLUDE_TYPES = frozenset({"literature", "moc", "merge-stub"})
 
+# #8 Body-Redundanz-Detektion: Schwelle, ab der zwei DISTINKTE create-Notes EINES Laufs
+# als inhaltlich stark überlappend geflaggt werden (seiteneffekt-freier Review-Hinweis, kein
+# Merge, kein Strip). Zwei empirische Gates (Ebner-Audit 2026-06-23) zeigten: solche
+# Geschwister sind weder mergebar (distinkte Konzepte) noch satz-strippbar (Redundanz
+# paraphrasiert: exakt 0/10, fuzzy≥0.93 nur 1/10 Sätze) — der einzige verlustfreie Eingriff
+# ist ein Flag für den menschlichen Reviewer. Default 0.90 liegt deutlich über typischer
+# Distinkt-Note-Cosine, unter dem gemessenen #8-Paar (0.967). Tiefer als der ER-Hard-Merge-
+# Gate (0.985), weil ein Flag risikolos ist; ENV-überschreibbar für Kalibrierung.
+REDUNDANT_SIBLING_COSINE_THRESHOLD = float(
+    os.getenv("ATOMIC_AGENT_REDUNDANT_SIBLING_COSINE", "0.90"))
+
 # Chunk-Größe Fallback (Wörter)
 CHUNK_WORDS = 3000
 

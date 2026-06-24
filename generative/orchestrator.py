@@ -68,6 +68,7 @@ from generative.config import (
     MODEL_LLM_DEDUP,
     MAX_CHUNKS_SHORT_DOC,
     MAX_PAGES_SHORT_DOC,
+    REDUNDANT_SIBLING_COSINE_THRESHOLD,
 )
 from generative.runtime_config import (
     load_runtime_config, cap_actionable_concepts, count_actionable,
@@ -970,6 +971,64 @@ def resolve_sibling_dups(drafts: list[AtomicNoteDraft],
     return kept, len(drop_idx)
 
 
+def flag_redundant_siblings(drafts: list[AtomicNoteDraft],
+                            threshold: float | None = None,
+                            body_cosine_fn=None,
+                            ) -> tuple[list[AtomicNoteDraft], int]:
+    """#8: seiteneffekt-freier Flag bei hoher Body-Überlappung zwischen DISTINKTEN Notes.
+
+    Zwei empirische Gates (Ebner-Audit 2026-06-23) zeigten: Geschwister-Notes EINES Laufs
+    mit hoher Body-Cosine (gemessen 0.967) sind weder mergebar (distinkte Konzepte:
+    Kirkpatrick-Modell = Theorie vs. Satisfaction-Learning-Dissoziation = Befund) noch
+    satz-strippbar (Redundanz paraphrasiert, nicht dupliziert — exakt 0/10, fuzzy≥0.93 nur
+    1/10 Sätze). Der einzige verlustfreie Eingriff ist ein Flag, der den menschlichen
+    Reviewer auf die Überlappung hinweist ("Kontext kürzen/verlinken"). KEIN Merge, KEIN
+    Strip, KEIN Kollabieren — die Notes bleiben unverändert, nur quality_flags wächst.
+
+    Läuft NACH resolve_sibling_dups + dedup_hub_subconcepts (echte Dups und Hub→Sub schon
+    behandelt) und VOR dem Writer (Flag landet via _yaml_list im Frontmatter, im Inbox-
+    Review sichtbar). Nur create-Drafts werden paarweise verglichen: extend-Drafts gehören
+    dem Merge-Pfad (resolve_sibling_dups / write_note) und werden hier nicht doppelt geflaggt.
+
+    body_cosine_fn(i, j) ist injizierbar (deterministische Tests, vgl. filter_hallucinated);
+    Default berechnet Body-Embeddings einmal und nutzt embeddings.cosine.
+    """
+    if threshold is None:
+        threshold = REDUNDANT_SIBLING_COSINE_THRESHOLD
+
+    # Nur create-Drafts mit nicht-leerem Body: extend gehört dem Merge-Pfad; ein leerer Body
+    # kann nicht redundant sein (Cosine 0) und würde nur das Embedding-Modell unnötig laden.
+    candidates = [i for i, d in enumerate(drafts)
+                  if d.action == "create" and (d.body or "").strip()]
+    if len(candidates) < 2:
+        return drafts, 0
+
+    if body_cosine_fn is None:
+        body_embs = {i: embeddings.embed_body(drafts[i].body or "") for i in candidates}
+
+        def body_cosine_fn(i, j):
+            return embeddings.cosine(body_embs[i], body_embs[j])
+
+    def _add_flag(draft: AtomicNoteDraft, other_title: str, cos: float) -> None:
+        marker = f"Überlappung mit [[{other_title}]]"
+        if any(marker in f for f in draft.quality_flags):  # idempotent
+            return
+        draft.quality_flags.append(
+            f"⚠️ Hohe inhaltliche {marker} (Body-cos={cos:.2f}) — "
+            f"beim Review Kontext kürzen/verlinken")
+
+    n_pairs = 0
+    for a in range(len(candidates)):
+        for b in range(a + 1, len(candidates)):
+            i, j = candidates[a], candidates[b]
+            cos = body_cosine_fn(i, j)
+            if cos >= threshold:
+                _add_flag(drafts[i], drafts[j].title, cos)
+                _add_flag(drafts[j], drafts[i].title, cos)
+                n_pairs += 1
+    return drafts, n_pairs
+
+
 def _auto_start_dashboard() -> None:
     """Startet den Dashboard-Server im Hintergrund falls er noch nicht läuft."""
     import socket, subprocess
@@ -1677,6 +1736,15 @@ def main(argv: list[str] | None = None):
     drafts, stripped = boilerplate_dedup.dedup_hub_subconcepts(drafts)
     if stripped:
         print(f"\n[boilerplate-dedup] {stripped} geteilte Sätze aus Sub-Notes in Hubs zentralisiert")
+
+    # --- #8: Body-Redundanz-Flag zwischen DISTINKTEN Geschwister-Notes ---
+    # Nach den Dedup-Stages (echte Dups/Hub→Sub schon behandelt): distinkte create-Notes mit
+    # hoher Body-Cosine sind weder mergebar noch satz-strippbar (2 empirische Gates,
+    # Ebner-Audit) → seiteneffekt-freier Flag für den menschlichen Reviewer, kein Eingriff.
+    drafts, n_redund = flag_redundant_siblings(drafts)
+    if n_redund:
+        print(f"[redundanz-flag] {n_redund} Note-Paar(e) mit hoher Body-Überlappung markiert "
+              f"(Review-Hinweis, kein Merge)")
 
     # --- Schritt 7: Vault-Writer ---
     # F2: enriched_meta = CrossRef-Daten überschreiben pdf_metadata wo vorhanden.
