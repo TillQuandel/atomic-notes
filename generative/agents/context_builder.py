@@ -35,6 +35,49 @@ def _read_frontmatter(path: Path) -> dict:
         return {}
 
 
+def note_type(path: Path) -> str:
+    """`type:`-Frontmatter-Wert einer Note (lowercase, gestrippt). '' wenn fehlt/unlesbar."""
+    return str(_read_frontmatter(path).get("type", "")).strip().lower()
+
+
+def is_dedup_eligible(path: Path) -> bool:
+    """True wenn die Note als Duplikat-/Merge-Kandidat einer Konzept-Note zählt.
+
+    `type: literature`/`moc`/`merge-stub` koexistieren per Vault-Design mit Konzept-Notes
+    (Schema-Lit vs. Schema-Konzept) und sind nie deren Duplikat — sie werden hier
+    ausgeschlossen. Quelle der Liste: config.DEDUP_EXCLUDE_TYPES.
+    """
+    from generative.config import DEDUP_EXCLUDE_TYPES
+    return note_type(path) not in DEDUP_EXCLUDE_TYPES
+
+
+def resolve_vault_relpath(ref: str, existing_concepts: dict[str, str] | None) -> str | None:
+    """Löst einen Titel-/Alias-/Datei-Stem-Verweis auf den relativen Vault-Pfad auf.
+
+    cross_reference präsentiert dem LLM Kandidaten als `Path(p).stem`, daher kommt ein
+    duplicate_path/extend_path meist als Datei-Stem zurück (z.B. 'ba-lit-…'), gelegentlich
+    als Titel. Beide Wege werden gegen existing_concepts (Titel/Alias→relpath bzw. dessen
+    Stems) aufgelöst. None, wenn kein Vault-Treffer (z.B. Intra-Run-Sibling).
+
+    Gibt den RELATIVEN Pfad zurück (kein VAULT-Join) — jeder Caller joint mit seinem
+    eigenen VAULT (testbar pro Modul).
+    """
+    if not ref or not existing_concepts:
+        return None
+    key = ref.strip().strip("[]").split("|", 1)[0].split("#", 1)[0].strip()
+    rel = existing_concepts.get(key.lower())
+    if rel:
+        return rel
+    # Stem-Fallback: nur EINDEUTIG auflösen. Teilen mehrere Vault-Notes denselben
+    # Datei-Stem (gleichnamige Dateien in verschiedenen Ordnern), ist die Zuordnung
+    # mehrdeutig → konservativ None (kein willkürlicher Treffer → kein Fehl-Merge).
+    stem = Path(key).stem.lower()
+    matches = {v for v in existing_concepts.values() if Path(v).stem.lower() == stem}
+    if len(matches) == 1:
+        return next(iter(matches))
+    return None
+
+
 def build_existing_concepts(scan_dirs: list[Path] | None = None) -> dict[str, str]:
     """Gibt {concept_title: file_path} für alle Notes im Vault zurück (ohne SKIP_DIRS).
 

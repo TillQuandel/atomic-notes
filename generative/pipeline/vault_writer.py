@@ -512,12 +512,19 @@ def find_existing_in_vault(title: str, aliases: list[str],
     excludiert bereits 00-inbox/98-system/99-archive/08-dashboards (siehe SKIP_DIRS).
     Match-Reihenfolge: exakter Title, dann jeder Alias. Erster Treffer gewinnt.
     """
+    from generative.agents.context_builder import is_dedup_eligible
     candidates = [title.strip().lower()]
     candidates.extend(a.strip().lower() for a in aliases if a)
     for c in candidates:
         rel_path = existing_concepts.get(c)
         if rel_path:
-            return VAULT / rel_path
+            target = VAULT / rel_path
+            # Typ-bewusst: eine `type: literature`/`moc`/`merge-stub`-Note koexistiert per
+            # Design mit Konzept-Notes und ist kein Merge-Ziel — überspringen, damit ein
+            # weiterer (Alias-)Kandidat noch eine echte Konzept-Note treffen kann.
+            if not is_dedup_eligible(target):
+                continue
+            return target
     return None
 
 
@@ -814,6 +821,21 @@ def write_note(note: AtomicNoteDraft, source_file: str, dry_run: bool = False,
     existing_vault: Path | None = None
     if existing_concepts:
         existing_vault = find_existing_in_vault(note.title, note.aliases, existing_concepts)
+
+    # #2b: cross_reference setzt bei einem echten Konzept-Dup mit ABWEICHENDEM Titel
+    # action=extend + extend_path=<Vault-Stem> (z.B. Draft „Information Need" → Vault-Note
+    # „Wilson Information Need"). find_existing_in_vault matcht das nicht (Titel/Alias-only),
+    # das Signal verpuffte bisher → Vault-Dublette ([[Ungelesenes-Pipeline-Signal]]). extend_path
+    # wird jetzt als Merge-Ziel honoriert — typ-sicher: is_dedup_eligible schließt literature/
+    # moc/merge-stub aus (das #2a-Gate setzt extend_path ohnehin nur noch für Konzept-Notes).
+    # resolve_sibling_dups regelt Intra-Run-Siblings vorher; diese Auflösung greift nur, wenn
+    # dort kein Vault-Treffer als Alias hinterlegt wurde.
+    if (existing_vault is None and existing_concepts
+            and note.action == "extend" and note.extend_path):
+        from generative.agents.context_builder import resolve_vault_relpath, is_dedup_eligible
+        _rel = resolve_vault_relpath(note.extend_path, existing_concepts)
+        if _rel and is_dedup_eligible(VAULT / _rel):
+            existing_vault = VAULT / _rel
 
     if existing_vault is not None:
         # Pre-Merge Source-Check (MVP): Prüfe ob bestehende Note dieselbe Quelle hat.
