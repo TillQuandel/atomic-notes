@@ -226,6 +226,28 @@ def concept_text_window(full_text: str, search_terms: list[str],
     if not words:
         return ""
 
+    # Seite pro Wort-Index tracken: damit ein selektiertes Fenster, das mitten auf
+    # einer Seite beginnt (der `[S. N]`-Marker stand am Seitenanfang, vor dem
+    # Fenster), seinen korrekten Marker vorangestellt bekommt. Sonst erbt die
+    # Downstream-Seitenableitung ("letzter [S. N]-Marker vor der Fundstelle":
+    # Extractor-LLM, Verifier, Renderer) die Seite eines früheren Snippets →
+    # falsche Fußnoten-Seite (#4 Anker-Clustering, Merrill-Run 2026-06-24).
+    # NUR line-isolierte Pipeline-Marker (`\n\n[S. N]\n\n` aus pages_to_marked_text)
+    # zählen als Seitenanfang — Inline-Quellenverweise wie „vgl. [S. 12]" im
+    # Fließtext NICHT (sonst erbt Folgetext die zitierte statt der echten Seite;
+    # Codex-Review 2026-06-24). re.finditer(r"\S+") liefert dieselbe Token-Folge
+    # wie full_text.split() oben, plus Positionen fürs Marker-Mapping.
+    _real_markers = [(m.start(), m.group(1)) for m in
+                     re.finditer(r"(?m)^[ \t]*\[S\.\s*(\d+)\][ \t]*$", full_text)]
+    page_at_word: list[str | None] = []
+    _cur_page: str | None = None
+    _mi = 0
+    for _tok in re.finditer(r"\S+", full_text):
+        while _mi < len(_real_markers) and _real_markers[_mi][0] <= _tok.start():
+            _cur_page = _real_markers[_mi][1]
+            _mi += 1
+        page_at_word.append(_cur_page)
+
     # Title normalisieren auf gleiche Whitespace-Form wie `chunk` (single-space-join)
     # — sonst matcht z.B. "Multi-Agent\n\nSystem" nicht im normalisierten Chunk.
     title = " ".join((search_terms[0] or "").split())
@@ -284,7 +306,17 @@ def concept_text_window(full_text: str, search_terms: list[str],
         else:
             merged.append((s, e))
 
-    snippets = [" ".join(words[s:e]) for s, e in merged]
+    # Snippet-Bau: jedem markerlosen Snippet seinen gültigen Seitenmarker
+    # voranstellen (s.o.). Das addiert ~"[S. N] " (≤ ~10 Zeichen) je injiziertem
+    # Snippet — die max_chars-Aussage oben ist damit nicht mehr strikt, der
+    # Overhead ist aber vernachlässigbar gegen das ohnehin unterausgenutzte Budget.
+    snippets: list[str] = []
+    for s, e in merged:
+        snip = " ".join(words[s:e])
+        page = page_at_word[s]
+        if page is not None and not snip.lstrip().startswith("[S."):
+            snip = f"[S. {page}] {snip}"
+        snippets.append(snip)
     return "\n\n[...]\n\n".join(snippets)
 
 
