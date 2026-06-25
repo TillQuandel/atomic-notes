@@ -24,6 +24,8 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from shared.author_norm import drop_institutional_coauthors
+
 try:
     from pypdf import PdfReader
 except ImportError:
@@ -529,6 +531,7 @@ def _parse_filename_dynamic(pdf_path: Path) -> dict | None:
     if m:
         author_raw, year, title = m.group(1).strip(), int(m.group(2)), m.group(3).strip()
         author = re.sub(r'\s+et al\.?$', '', author_raw, flags=re.IGNORECASE).strip()
+        author = drop_institutional_coauthors(author)
         return {"title": title, "author": author, "year": year, "doi": "", "type": ""}
 
     # Jahr-Anker mit automatischer Separator-Erkennung (Unterstrich, Bindestrich)
@@ -547,6 +550,7 @@ def _parse_filename_dynamic(pdf_path: Path) -> dict | None:
             author_raw = re.sub(r'[_]', ' ', before).strip()
             title = re.sub(r'[_]', ' ', after).strip()
             author = re.sub(r'\s+et al\.?$', '', author_raw, flags=re.IGNORECASE).strip()
+            author = drop_institutional_coauthors(author)
             return {"title": title, "author": author.split()[-1] if author else "",
                     "year": year, "doi": "", "type": ""}
 
@@ -555,6 +559,7 @@ def _parse_filename_dynamic(pdf_path: Path) -> dict | None:
     if m2:
         author_raw, title = m2.group(1).strip(), m2.group(2).strip()
         author = re.sub(r'\s+et al\.?$', '', author_raw, flags=re.IGNORECASE).strip()
+        author = drop_institutional_coauthors(author)
         return {"title": title, "author": author, "year": None, "doi": "", "type": ""}
 
     return None
