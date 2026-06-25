@@ -348,3 +348,40 @@ def test_inline_page_refs_not_counted_as_pages():
     q = assess_text_quality(text)
     assert q.pages == 1        # nur der eine echte Pipeline-Marker
     assert q.is_thin is False  # ~100 Wörter auf 1 Seite ist nicht dünn
+
+
+# ---- pdf_metadata: Info-Dict-Autor/Jahr sind NICHT zitierfähig -----------
+# Universelle Regel (nicht quellen-spezifisch): pdfinfo-`Author` (= Datei-
+# Ersteller) und das Jahr aus `CreationDate` (= Speicher-/Abtipp-Zeitpunkt)
+# identifizieren NICHT Werk-Autor bzw. Publikationsjahr. Sie dürfen nie als
+# Zitier-Autor/-Jahr durchgereicht werden — sonst systematische Fehlattribution
+# bei abgetippten/gescannten/neu-gespeicherten PDFs (realer Fall: ein in Word
+# abgetipptes Knowles-Kapitel trug `Author: Pierre Landry` / CreationDate 2019
+# → alle Notes zitierten "Landry 2019" statt Knowles).
+from generative.pipeline.pdf_chunker import _parse_pdfinfo_output
+
+_PDFINFO_RETYPED = (
+    "Title:          What Is Andragogy?\n"
+    "Author:         Pierre Landry\n"
+    "Creator:        Microsoft Word 2016\n"
+    "CreationDate:   Wed Mar 20 18:27:09 2019 CET\n"
+    "Pages:          25\n"
+)
+
+
+def test_pdfinfo_author_not_exposed_as_citation_author():
+    meta = _parse_pdfinfo_output(_PDFINFO_RETYPED)
+    assert "Author" not in meta
+    assert meta.get("InfoDictAuthor") == "Pierre Landry"
+
+
+def test_pdfinfo_creationdate_not_exposed_as_citation_year():
+    meta = _parse_pdfinfo_output(_PDFINFO_RETYPED)
+    assert "Year" not in meta
+    assert meta.get("InfoDictCreationYear") == "2019"
+
+
+def test_pdfinfo_keeps_title_and_pages():
+    meta = _parse_pdfinfo_output(_PDFINFO_RETYPED)
+    assert meta.get("Title") == "What Is Andragogy?"
+    assert meta.get("Pages") == "25"

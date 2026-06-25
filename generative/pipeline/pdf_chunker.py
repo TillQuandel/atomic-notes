@@ -320,29 +320,57 @@ def concept_text_window(full_text: str, search_terms: list[str],
     return "\n\n[...]\n\n".join(snippets)
 
 
+def _parse_pdfinfo_output(stdout: str) -> dict[str, str]:
+    """Parst pdfinfo-stdout zu Metadaten-dict (pure, testbar).
+
+    Quellen-Treue (universell, nicht quellen-spezifisch): pdfinfo-`Author`
+    (= Datei-Ersteller) und das Jahr aus `CreationDate` (= Speicher-/Abtipp-
+    Zeitpunkt) sind NICHT zitierfähig — sie identifizieren weder Werk-Autor noch
+    Publikationsjahr und führen bei abgetippten/gescannten/neu-gespeicherten PDFs
+    zu systematischer Fehlattribution. Deshalb werden sie NICHT als `Author`/`Year`
+    exportiert, sondern nur diagnostisch als `InfoDictAuthor`/`InfoDictCreationYear`
+    (für Logging, nie für Zitate). Zitier-Autor/-Jahr kommen ausschließlich aus
+    Dateiname, CrossRef/DOI oder validierter Titelseiten-Extraktion (Orchestrator).
+    `Title`/`Pages`/`Subject` bleiben zitierfähig.
+    """
+    keep = {"Title", "Subject", "Pages"}
+    meta: dict[str, str] = {}
+    info_author = ""
+    info_creationdate = ""
+    for line in stdout.splitlines():
+        if ":" not in line:
+            continue
+        key, val = line.split(":", 1)
+        key, val = key.strip(), val.strip()
+        if not val:
+            continue
+        if key in keep:
+            meta[key] = val
+        elif key == "Author":
+            info_author = val
+        elif key == "CreationDate":
+            info_creationdate = val
+    # Info-Dict-Autor + Year aus CreationDate nur diagnostisch ablegen (Format
+    # z.B. "Mon Mar 15 14:23:01 2019 CET") — nie als zitierfähige Quelle.
+    if info_author:
+        meta["InfoDictAuthor"] = info_author
+    if info_creationdate:
+        m = re.search(r"\b(19|20)\d{2}\b", info_creationdate)
+        if m:
+            meta["InfoDictCreationYear"] = m.group(0)
+    return meta
+
+
 def pdf_metadata(pdf_path: Path) -> dict[str, str]:
-    """Liest pdfinfo-Metadaten als dict (Title, Author, Subject, Pages, Year aus CreationDate)."""
+    """Liest pdfinfo-Metadaten als dict (Title, Subject, Pages zitierfähig;
+    Info-Dict-Autor/-CreationDate nur diagnostisch — siehe _parse_pdfinfo_output)."""
     result = subprocess.run(
         ["pdfinfo", str(pdf_path)],
         capture_output=True, text=True, encoding="utf-8", errors="replace"
     )
     if result.returncode != 0:
         return {}
-    keep = {"Title", "Author", "Subject", "Pages", "CreationDate"}
-    meta: dict[str, str] = {}
-    for line in result.stdout.splitlines():
-        if ":" not in line:
-            continue
-        key, val = line.split(":", 1)
-        key, val = key.strip(), val.strip()
-        if key in keep and val:
-            meta[key] = val
-    # Year aus CreationDate extrahieren (Format z.B. "Mon Mar 15 14:23:01 2019 CET")
-    if "CreationDate" in meta:
-        m = re.search(r"\b(19|20)\d{2}\b", meta["CreationDate"])
-        if m:
-            meta["Year"] = m.group(0)
-    return meta
+    return _parse_pdfinfo_output(result.stdout)
 
 
 # Kapitel-Heading-Pattern. Erkennt:

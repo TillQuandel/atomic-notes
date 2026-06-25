@@ -71,6 +71,29 @@ def _parse_filename_fallback(source_file: str) -> dict[str, str]:
     return {}
 
 
+def apply_filename_citation_metadata(pdf_meta: dict, fb: dict) -> None:
+    """Befüllt zitierfähige `Author`/`Year` in ``pdf_meta`` aus dem Dateiname-
+    Fallback ``fb`` — mutiert ``pdf_meta`` in place.
+
+    Hintergrund: ``pdf_metadata`` liefert keinen (unzuverlässigen) Info-Dict-Autor
+    bzw. kein CreationDate-Jahr mehr als Zitier-Quelle. Damit Extractor-Prompt,
+    Planner und Quellen-Block einen korrekten Autor/Jahr sehen (statt Platzhalter
+    „Autor"), wird der Dateiname-Autor hier vor der Extraktion gemergt.
+
+    Präzedenz:
+    - **Author**: fill-if-missing — ein bereits vorhandener (stärkerer) Autor aus
+      CrossRef/DOI-Enrichment wird NICHT vom Dateiname überschrieben.
+    - **Year**: Filename-Year ist autoritativ für die vorliegende Edition und
+      überschreibt ein abweichendes meta-Year (dokumentierte v28/Hiatt-Regel:
+      CrossRef gibt bei Mehrfachauflagen oft das Jahr der jüngsten Auflage).
+    - Fehlt der Autor überall, bleibt er leer — ehrlich unresolved statt geraten.
+    """
+    if fb.get("Author") and not pdf_meta.get("Author"):
+        pdf_meta["Author"] = fb["Author"]
+    if fb.get("Year"):
+        pdf_meta["Year"] = fb["Year"]
+
+
 _PAGE_PREFIX_RE = re.compile(r"^\s*S\.\s*", re.IGNORECASE)
 
 
