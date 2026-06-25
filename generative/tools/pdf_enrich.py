@@ -561,13 +561,26 @@ def _parse_filename_dynamic(pdf_path: Path) -> dict | None:
 
 
 def _zotero_author_matches_embedded(pdf_path: Path, embedded_author: str) -> bool:
-    """Prueft ob embedded Author mit dem Autor aus dem Dateinamen uebereinstimmt."""
+    """Prueft ob der eingebettete Info-Dict-Autor durch den Dateinamen POSITIV
+    bestaetigt wird (Gate: darf der embedded Author als zitierfaehig dienen?).
+
+    Der Info-Dict-`/Author` ist der Datei-Ersteller, nicht zwingend der Werk-Autor
+    (abgetippte/gescannte PDFs). Er wird daher nur akzeptiert, wenn der Dateiname
+    ihn bestaetigt. Ein nicht parsbarer Dateiname kann den embedded Author NICHT
+    bestaetigen -> False (zuvor faelschlich True/"kein Widerspruch", wodurch der
+    Datei-Ersteller als Zitierautor durchrutschte; Codex-Review 2026-06-25)."""
     parsed = _parse_filename_dynamic(pdf_path)
     if not parsed:
-        return True  # Kein erkennbares Format -> kein Widerspruch
+        return False  # Kein bestaetigendes Signal -> embedded Author nicht zitierfaehig
     fn_author = parsed["author"].split()[-1].lower()
-    emb_author = embedded_author.strip().lower()
-    return fn_author in emb_author or emb_author in fn_author
+    emb_tokens = embedded_author.strip().split()
+    if not emb_tokens:
+        return False
+    emb_author = emb_tokens[-1].lower()
+    # Nachname-Gleichheit, KEIN Substring: ein kurzer Dateiname-Nachname ("Li") darf
+    # nicht zufaellig einen unverwandten embedded Autor ("Williams") bestaetigen
+    # (Substring-Falle, Codex-Pass-2 2026-06-25).
+    return fn_author == emb_author
 
 
 def _meta_complete(meta: dict) -> bool:

@@ -1353,8 +1353,10 @@ def _run_extraction_stages(args, source_path: Path, runtime_config=None):  # mai
     q_title = pdf_meta.get("Title")
     if not q_title or vault_writer._TITLE_LOOKS_BAD.match(q_title or ""):
         q_title = fb.get("Title") or q_title
-    if fb.get("Year"):
-        pdf_meta["Year"] = fb["Year"]
+    # Zitier-Autor/-Jahr aus dem Dateiname befüllen (Info-Dict liefert keinen
+    # zitierfähigen Autor/CreationDate-Jahr mehr — pdf_metadata). Muss vor dem
+    # Extractor laufen, sonst stünde der Platzhalter "Autor" im Body.
+    vault_writer.apply_filename_citation_metadata(pdf_meta, fb)
     quality_report = quality.check_quality(
         doi=args.doi,
         title=q_title,

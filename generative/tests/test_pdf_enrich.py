@@ -380,13 +380,16 @@ def test_pubmed_lookup_returns_none_on_missing_result(monkeypatch):
 
 
 def test_enrich_uses_embedded_metadata_first(tmp_path, monkeypatch):
-    """enrich() nutzt eingebettete PDF-Metadaten wenn Author + Title vorhanden."""
+    """enrich() nutzt eingebettete PDF-Metadaten wenn Author + Title vorhanden
+    UND der Dateiname den eingebetteten Autor bestaetigt (Info-Dict-Autor ist sonst
+    der Datei-Ersteller, nicht der Werk-Autor — Codex-Review 2026-06-25)."""
     from generative.tools.pdf_enrich import enrich
     from unittest.mock import MagicMock
     mock_reader = MagicMock()
     mock_reader.metadata = {"/Title": "Information Behavior", "/Author": "Marcia Bates", "/Subject": "2017"}
     monkeypatch.setattr("generative.tools.pdf_enrich.PdfReader", lambda *a, **kw: mock_reader)
-    pdf = tmp_path / "paper.pdf"
+    # Dateiname bestaetigt den eingebetteten Autor (Bates) -> embedded akzeptiert.
+    pdf = tmp_path / "Bates - Information Behavior.pdf"
     pdf.write_bytes(b"%PDF")
     meta = enrich(pdf, dry_run=True)
     assert meta is not None
@@ -804,3 +807,43 @@ def test_enrich_header_from_ocr_source(tmp_path, monkeypatch):
     meta = pdf_enrich.enrich(pdf, dry_run=True)
     assert meta is not None
     assert called["doi"] == "10.1002/asi.23681"  # Kopf-DOI aus OCR-Quelle, nicht 10.9999/cited
+
+
+# Zweiter Info-Dict-Autor-Kanal (Codex-Review 2026-06-25): enrich() Stage-0 zieht
+# `/Author` aus dem Info-Dict und akzeptiert ihn als zitierfähig, sofern der Guard
+# _zotero_author_matches_embedded True liefert. Bisher gab der Guard bei nicht-
+# parsbarem Dateiname True ("kein Widerspruch") → ein Info-Dict-Autor (= Datei-
+# Ersteller) konnte ungeprüft als Zitierautor durchrutschen. Korrekt: nur positive
+# Bestätigung durch den Dateiname akzeptiert den eingebetteten Autor.
+from pathlib import Path as _Path
+from generative.tools.pdf_enrich import _zotero_author_matches_embedded
+
+
+def test_filename_author_confirms_embedded():
+    assert _zotero_author_matches_embedded(
+        _Path("Knowles - From Pedagogy to Andragogy.pdf"), "Knowles") is True
+
+
+def test_filename_author_contradicts_embedded():
+    assert _zotero_author_matches_embedded(
+        _Path("Knowles - From Pedagogy to Andragogy.pdf"), "Landry") is False
+
+
+def test_unparseable_filename_does_not_confirm_embedded_author():
+    # Kein Autor im Dateiname → Info-Dict-Autor ist nicht positiv bestätigt →
+    # darf NICHT als zitierfähig akzeptiert werden.
+    assert _zotero_author_matches_embedded(_Path("scan001.pdf"), "Landry") is False
+
+
+def test_short_filename_surname_does_not_falsely_confirm_unrelated_embedded():
+    # Substring-Falle (Codex-Pass-2 2026-06-25): Dateiname-Nachname "Li" ist Substring
+    # von embedded "Williams" → darf NICHT als Bestätigung gelten. Zotero-Format mit
+    # Jahr, damit der Dateiname PARSBAR ist (sonst greift der not-parsed→False-Pfad).
+    assert _zotero_author_matches_embedded(
+        _Path("Li - 2020 - Some Title.pdf"), "Williams") is False
+
+
+def test_exact_surname_confirms_embedded():
+    # Gegenprobe: exakter Nachname-Match bestätigt weiterhin korrekt.
+    assert _zotero_author_matches_embedded(
+        _Path("Bates - 2017 - Information Behavior.pdf"), "Bates") is True

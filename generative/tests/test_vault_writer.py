@@ -259,3 +259,39 @@ class TestMergeStubSourceStatus(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# ---- apply_filename_citation_metadata: Dateiname/CrossRef als Zitier-Quelle ----
+# Nach dem pdf_metadata-Fix trägt pdf_meta keinen (unzuverlässigen) Info-Dict-
+# Autor/Jahr mehr. Zitier-Autor/-Jahr müssen vor dem Extractor aus dem Dateiname
+# (bzw. davor schon CrossRef) befüllt werden — sonst stünde "Autor 2019, S. N"
+# im Body. Präzedenz: CrossRef (stärker) > Dateiname; Filename-Year autoritativ.
+from generative.pipeline.vault_writer import apply_filename_citation_metadata
+
+
+def test_filename_author_fills_missing_citation_author():
+    meta = {"Title": "From Pedagogy to Andragogy"}
+    fb = {"Author": "Knowles", "Title": "From Pedagogy to Andragogy"}
+    apply_filename_citation_metadata(meta, fb)
+    assert meta["Author"] == "Knowles"
+
+
+def test_crossref_author_not_overridden_by_filename():
+    meta = {"Author": "Knowles, Malcolm S."}
+    fb = {"Author": "Knowles"}
+    apply_filename_citation_metadata(meta, fb)
+    assert meta["Author"] == "Knowles, Malcolm S."
+
+
+def test_filename_year_overrides_meta_year():
+    meta = {"Year": "2023"}
+    fb = {"Year": "2006"}
+    apply_filename_citation_metadata(meta, fb)
+    assert meta["Year"] == "2006"
+
+
+def test_no_author_anywhere_stays_unresolved():
+    meta = {"Title": "Some Title"}
+    fb = {}
+    apply_filename_citation_metadata(meta, fb)
+    assert "Author" not in meta
