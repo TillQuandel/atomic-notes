@@ -23,6 +23,25 @@ def _clean_wikilink(s: str) -> str:
     return (s or "").strip().strip("[]").strip()
 
 
+def _clean_dup_targets(raw: str | None) -> list[str]:
+    """Zerlegt ein `duplicate_path`-Feld in saubere Einzelziel-Stems.
+
+    `duplicate_path` ist als EIN Duplikat-Ziel modelliert; das LLM liefert aber
+    gelegentlich mehrere kommaseparierte Titel in einem Feld. Würde das ungeprüft
+    zu `[[Titel]]` gewrappt, entstünde ein kaputter Sammel-Wikilink
+    `[[A, B, C, D]]` (Knowles-Run 2026-06-25). Splittet daher an Kommas, entfernt
+    Wikilink-Klammern/Alias-Pipe und `.md`/Pfad, droppt Leersegmente.
+    """
+    cleaned = _clean_wikilink(raw or "")
+    targets: list[str] = []
+    for seg in cleaned.split(","):
+        seg = seg.split("|", 1)[0].strip()
+        stem = Path(seg).stem if seg else ""
+        if stem:
+            targets.append(stem)
+    return targets
+
+
 def _resolve_vault_path(dup_path: str, existing_concepts: dict[str, str] | None) -> Path | None:
     """Löst einen vom LLM gelieferten duplicate_path auf eine reale Vault-Datei auf.
 
@@ -408,34 +427,50 @@ def run(draft: AtomicNoteDraft, existing_concepts: dict[str, str],
             draft.quality_flags.append(f"⚠️ Widerspruch: {contradiction}")
 
     dup_risk = data.get("duplicate_risk", "none")
-    # LLM liefert duplicate_path gelegentlich als "[[Titel]]" oder "Titel|alias" statt
-    # reinem Pfad/Titel — normalisieren, sonst entsteht unten "[[[[Titel]]]]" und ein
-    # verklammertes Duplikat-Flag (beobachtet im Ebner-Run 2026-06-22).
-    dup_path = _clean_wikilink(data.get("duplicate_path") or "").split("|", 1)[0].strip()
-    # Typ-bewusstes Blocking: ein Dup-Treffer gegen eine koexistierende Lit-/MoC-/Stub-Note
-    # ist KEIN echtes Duplikat (Schema-Lit ≠ Schema-Konzept) — sonst würde eine Konzept-Note
-    # fälschlich in ihre eigene Lit-Note gemergt (Ebner-Run 2026-06-23). Dann: kein
-    # action=extend, aber den Bezug als related-Link erhalten (Konzept SOLL auf Quelle linken).
-    if dup_risk == "high" and not _dup_target_eligible(dup_path, existing_concepts):
-        draft.quality_flags.append(f"ℹ️ Verwandte Quelle/Note (kein Konzept-Duplikat): {dup_path}")
-        if dup_path:
-            dup_link = f"[[{Path(dup_path).stem}]]"
-            if dup_link not in data["related"]:
-                data["related"].insert(0, dup_link)
-    elif dup_risk == "high":
-        # Duplikat ist der stärkste mögliche Vault-Beleg — confidence NICHT runter,
-        # stattdessen action='extend' setzen + Duplikat als related-Link aufnehmen,
-        # damit Confidence-Agent has_vault_corroboration=True erkennt
-        draft.quality_flags.append(f"⚠️ Duplikat-Risiko hoch — prüfe: {dup_path}")
-        draft.action = "extend"
-        if dup_path:
-            draft.extend_path = dup_path
-            # Wikilink-Form aus dem Pfad bauen (Stem ohne .md)
-            from pathlib import Path as _P
-            stem = _P(dup_path).stem
+    # duplicate_path ist als EIN Ziel modelliert. Das LLM liefert gelegentlich
+    # mehrere kommaseparierte Titel in einem Feld → ungeprüft entstünde ein kaputter
+    # Sammel-Wikilink "[[A, B, C, D]]" (Knowles-Run 2026-06-25). Mehrfachziele werden
+    # daher als Review-Hinweis + saubere Einzel-Links behandelt, OHNE action=extend
+    # (man kann nicht in mehrere Notes mergen).
+    dup_targets = _clean_dup_targets(data.get("duplicate_path"))
+    if dup_risk == "high" and len(dup_targets) > 1:
+        # Mehrere Dup-Kandidaten in einem Feld → kein einzelnes Merge-Ziel ableitbar.
+        # Review-Hinweis + jeden Kandidaten als SAUBEREN Einzel-Link aufnehmen, OHNE
+        # action=extend (man kann nicht in mehrere Notes mergen). Mutually exclusive
+        # zum Einzel-Target-Pfad unten (elif), damit der Roh-String nie als ein
+        # Merge-Ziel verwendet wird.
+        draft.quality_flags.append(
+            "⚠️ Mehrere Duplikat-Kandidaten — prüfe: " + ", ".join(dup_targets))
+        for stem in dup_targets:
             dup_link = f"[[{stem}]]"
             if dup_link not in data["related"]:
                 data["related"].insert(0, dup_link)
+    elif dup_risk == "high":
+        # Einzel-Target. LLM liefert duplicate_path gelegentlich als "[[Titel]]" oder
+        # "Titel|alias" statt reinem Pfad/Titel — normalisieren, sonst entsteht unten
+        # "[[[[Titel]]]]" und ein verklammertes Duplikat-Flag (Ebner-Run 2026-06-22).
+        dup_path = _clean_wikilink(data.get("duplicate_path") or "").split("|", 1)[0].strip()
+        # Typ-bewusstes Blocking: ein Dup-Treffer gegen eine koexistierende Lit-/MoC-/
+        # Stub-Note ist KEIN echtes Duplikat (Schema-Lit ≠ Schema-Konzept) — sonst würde
+        # eine Konzept-Note fälschlich in ihre eigene Lit-Note gemergt (Ebner 2026-06-23).
+        # Dann: kein action=extend, aber den Bezug als related-Link erhalten.
+        if not _dup_target_eligible(dup_path, existing_concepts):
+            draft.quality_flags.append(f"ℹ️ Verwandte Quelle/Note (kein Konzept-Duplikat): {dup_path}")
+            if dup_path:
+                dup_link = f"[[{Path(dup_path).stem}]]"
+                if dup_link not in data["related"]:
+                    data["related"].insert(0, dup_link)
+        else:
+            # Duplikat ist der stärkste mögliche Vault-Beleg — confidence NICHT runter,
+            # stattdessen action='extend' setzen + Duplikat als related-Link aufnehmen,
+            # damit Confidence-Agent has_vault_corroboration=True erkennt
+            draft.quality_flags.append(f"⚠️ Duplikat-Risiko hoch — prüfe: {dup_path}")
+            draft.action = "extend"
+            if dup_path:
+                draft.extend_path = dup_path
+                dup_link = f"[[{Path(dup_path).stem}]]"
+                if dup_link not in data["related"]:
+                    data["related"].insert(0, dup_link)
 
     # related-Links setzen (nicht nur ergänzen — Cross-Reference ist die Autorität dafür).
     # Defense-in-depth: überschüssige Klammern normalisieren, damit nachträglich (nach

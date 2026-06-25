@@ -31,3 +31,29 @@ def test_rewrapped_link_is_single_pair():
     dup_link = f"[[{cr._clean_wikilink(raw)}]]"
     assert dup_link == "[[Kirkpatrick Level 1→2 Zusammenhang]]"
     assert "[[[[" not in dup_link
+
+
+# Knowles-Run 2026-06-25: das LLM lieferte duplicate_path als EINE kommaseparierte
+# Liste von 4 Titeln → related-Eintrag wurde zu einem kaputten Sammel-Wikilink
+# "[[A, B, C, D]]". duplicate_path ist als EIN Ziel modelliert; Mehrfachziele
+# müssen in saubere Einzelziele zerlegt werden, nie als ein Link gerendert.
+def test_clean_dup_targets_splits_comma_list():
+    raw = ("Readiness to Learn (Andragogy), Self-directed Learning, "
+           "Experience as Learning Resource, Problem-centered Learning Orientation")
+    assert cr._clean_dup_targets(raw) == [
+        "Readiness to Learn (Andragogy)",
+        "Self-directed Learning",
+        "Experience as Learning Resource",
+        "Problem-centered Learning Orientation",
+    ]
+
+
+def test_clean_dup_targets_single_target():
+    assert cr._clean_dup_targets("[[Foo]]") == ["Foo"]
+    assert cr._clean_dup_targets("Foo|alias") == ["Foo"]
+    assert cr._clean_dup_targets("path/to/Foo.md") == ["Foo"]
+
+
+def test_clean_dup_targets_empty():
+    assert cr._clean_dup_targets("") == []
+    assert cr._clean_dup_targets(None) == []
