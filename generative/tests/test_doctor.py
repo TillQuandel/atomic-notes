@@ -1,7 +1,6 @@
 """Tests für atomic-notes doctor (generative/doctor.py) — Preflight-Checks als pure Funktionen."""
 from __future__ import annotations
 
-from pathlib import Path
 
 from generative import doctor
 

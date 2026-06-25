@@ -5,7 +5,6 @@ Output erfüllt [[Schema-Konzept]]: Body 30–60 Zeilen destilliert, Anker inlin
 Seitenzahl, deutsche Sprache, Akronyme aufgelöst, aliases-Liste, kein Pass-Through.
 """
 from __future__ import annotations
-import json
 import re
 from pathlib import Path
 

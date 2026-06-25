@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from generative.config import VAULT, WISSEN, SCRIPTS_DIR  # BA_DIR-Import entfernt (v31)
+from generative.config import VAULT, SCRIPTS_DIR  # BA_DIR-Import entfernt (v31)
 
 # Vault-Ordner die NICHT als existing_concepts zählen
 SKIP_DIRS = {"00-inbox", "98-system", "99-archive", "08-dashboards", ".obsidian", ".trash"}

@@ -8,7 +8,6 @@ docs/superpowers/specs/2026-06-04-figure-embedding-feasibility.md.
 """
 from __future__ import annotations
 
-import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent

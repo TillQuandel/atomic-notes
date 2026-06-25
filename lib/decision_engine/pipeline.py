@@ -8,7 +8,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from decision_engine.models import ClaimDecision, ClaimInput, QualityFlag
+from decision_engine.models import ClaimDecision, ClaimInput
 from decision_engine.rules import (
     DEFAULT_CONFIG,
     RulesConfig,

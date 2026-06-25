@@ -6,8 +6,6 @@ from pathlib import Path
 from rapidfuzz import fuzz
 
 import re
-import sys
-from pathlib import Path
 
 from shared.db_schema import SCHEMA_SQL as _SCHEMA_MIGRATION
 

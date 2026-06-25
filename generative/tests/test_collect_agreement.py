@@ -6,8 +6,6 @@ Der alte Code rechnete `agreement_rate` auf Aggregat-Halluzinationsraten pro Not
 `note_claim_agreement` paart stattdessen Mensch- und Pipeline-Label pro claim_idx.
 """
 from __future__ import annotations
-import sys
-from pathlib import Path
 
 
 from generative.calibration.collect import note_claim_agreement

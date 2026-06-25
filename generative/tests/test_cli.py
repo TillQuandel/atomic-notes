@@ -1,7 +1,6 @@
 """Tests für den atomic-notes-Konsolen-Entry-Point (generative/cli.py)."""
 from __future__ import annotations
 
-import pytest
 
 from generative import cli
 

@@ -4,9 +4,7 @@ Edge-Cases aus 4 Review-Runden — Format-Spec gegen pathologische Outputs härt
 Ohne diese Suite wiederholen wir das v16-Silent-Fail-Pattern (anchor_patterns).
 """
 from __future__ import annotations
-import sys
 import unittest
-from pathlib import Path
 
 # Direct-Import-Pattern (wie in den anderen Modulen) — Sys-Path-Patch
 

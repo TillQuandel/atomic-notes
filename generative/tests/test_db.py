@@ -1,7 +1,6 @@
 import sqlite3
 import tempfile
 import os
-import sys
 
 
 def test_pipeline_run_has_cost_usd():

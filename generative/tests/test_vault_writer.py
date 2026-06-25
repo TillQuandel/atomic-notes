@@ -7,7 +7,6 @@ Coverage-Schwerpunkt:
 """
 import unittest
 from unittest.mock import patch
-from pathlib import Path
 
 from generative.pipeline.vault_writer import convert_inline_to_footnotes, build_quellen_block, render_merge_stub, VAULT
 from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor

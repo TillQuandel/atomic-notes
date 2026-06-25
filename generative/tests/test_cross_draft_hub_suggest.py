@@ -7,8 +7,6 @@ einem Guide-Run) bekommen keinen MoC. `suggest_unmarked_clusters()` findet sie:
 Seiteneffektfrei — schlägt nur vor, erzeugt keine Note.
 """
 from __future__ import annotations
-import sys
-from pathlib import Path
 
 
 from generative.schemas.atomic_note import AtomicNoteDraft

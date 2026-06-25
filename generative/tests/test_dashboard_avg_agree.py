@@ -6,8 +6,6 @@ NULL), ergab `sum(...)/max(1, count)` 0.0 — das Frontend zeigte "0 %"
 (katastrophale Fehlkalibrierung) statt "–" (keine Daten).
 """
 from __future__ import annotations
-import sys
-from pathlib import Path
 
 
 from generative.eval_dashboard_server import _avg_agreement

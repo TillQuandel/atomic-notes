@@ -11,7 +11,6 @@ Hintergrund (Review-Findings zum #24-Branch):
 from __future__ import annotations
 import json
 import sqlite3
-import sys
 from pathlib import Path
 
 

@@ -137,7 +137,6 @@ def extract_acronym_pairs(text: str) -> dict[str, str]:
     - „Short Form (Long Form)" — typisch in Lehrbüchern, Glossaren
     """
     pairs: dict[str, str] = {}
-    seen_orders: dict[str, str] = {}  # Prävention von späteren falschen Re-Definitionen
 
     for match in _PAT_LONG_PAREN_SHORT.finditer(text):
         before = match.group(1).strip()

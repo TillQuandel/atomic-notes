@@ -12,7 +12,6 @@ Usage: python eval_batch.py [--dry-run]
 from __future__ import annotations
 import argparse
 import re
-import sys
 from pathlib import Path
 
 

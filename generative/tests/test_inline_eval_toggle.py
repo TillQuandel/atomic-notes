@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-import sys
-from pathlib import Path
 
 
 from generative.orchestrator import inline_eval_enabled

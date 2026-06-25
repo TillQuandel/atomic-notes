@@ -5,8 +5,6 @@ und Withdrawal — alle landen als separate Quality-Flags. Nur retraction/withdr
 setzen `retracted=True` (Hard-Signal für Pipeline).
 """
 from __future__ import annotations
-import sys
-from pathlib import Path
 from unittest.mock import patch
 
 
