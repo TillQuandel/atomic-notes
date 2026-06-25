@@ -106,6 +106,15 @@ _PDF_META: dict[str, dict] = {
 def _ver_sort_key(v: str) -> tuple:
     return tuple(int(n) for n in re.findall(r"\d+", v))
 
+def is_foss_version(version) -> bool:
+    """True fuer nicht-generative Pipeline-Versionen. Realer Prefix ist `extractive-`
+    (extractive/orchestrator.py: EXTRACTIVE_VERSION = "extractive-v0.2.0"); `foss-`
+    wird als Forward-Compat-Alias mit erkannt. Diese Pipelines sind eine andere
+    Architektur als die generative — ihre Versionen gehoeren nicht in denselben
+    Versions-Trend (#36). NB: `foss-` allein matchte nichts Reales → Trennung war
+    ein No-op (Cross-Model-Review 2026-06-23)."""
+    return str(version or "").startswith(("extractive-", "foss-"))
+
 def _latest_version(ver_map: dict) -> str:
     return sorted(ver_map.keys(), key=_ver_sort_key)[-1]
 
@@ -436,6 +445,31 @@ def _chart_longitudinal(log_data: dict) -> dict:
     return {"versions": versions, "datasets": datasets}
 
 
+_DELTA_MIN_N = 20  # unter N=20 kein Besser/Schlechter-Urteil (Apophenie-Schutz)
+
+
+def version_delta(kpi_trend: dict, metric: str) -> dict:
+    """Delta neueste-vs-Vorversion fuer eine KPI-Metrik.
+
+    `kpi_trend["versions"]` ist aufsteigend sortiert (neueste = letzte Position),
+    die Metrik-Arrays laufen parallel dazu. `reliable` ist nur True, wenn beide
+    beteiligten Versionen n>=20 haben — sonst ist das Delta Rauschen (N-Guard).
+    """
+    values = kpi_trend.get(metric) or []
+    ns     = kpi_trend.get("n") or []
+    latest = values[-1] if values else None
+    prev   = values[-2] if len(values) >= 2 else None
+    n_latest = ns[-1] if ns else None
+    n_prev   = ns[-2] if len(ns) >= 2 else None
+    delta = None if (latest is None or prev is None) else round(latest - prev, 4)
+    reliable = (
+        delta is not None
+        and (n_latest or 0) >= _DELTA_MIN_N
+        and (n_prev or 0) >= _DELTA_MIN_N
+    )
+    return {"latest": latest, "prev": prev, "delta": delta, "reliable": reliable}
+
+
 def _chart_tokens(runs: list[dict]) -> dict:
     return {
         "labels":       [r["date"]         for r in runs],
@@ -444,6 +478,47 @@ def _chart_tokens(runs: list[dict]) -> dict:
         "tokens_out":   [r["tokens_out"]   for r in runs],
         "tokens_cache": [r["tokens_cache"] for r in runs],
         "duration_min": [r["duration_min"] for r in runs],
+    }
+
+
+_SCALING_RECENT_KEEP = 10  # juengste N Versionen ungedimmt (#36 P2)
+
+
+def mark_scaling_recency(points: list[dict], keep: int = _SCALING_RECENT_KEEP) -> list[dict]:
+    """Gibt eine neue Punktliste zurueck, in der die Punkte der juengsten `keep`
+    Versionen `recent=True` tragen, aeltere `recent=False`. So kann der Client
+    kaputte Frueh-Versions-Aeren dimmen, statt sie ungefiltert in die
+    PDF-Laengen-Skalierung zu mischen (#36 P2). Mutiert die Eingabe nicht.
+    """
+    versions = sorted({p["ver"] for p in points if p.get("ver")}, key=_ver_sort_key)
+    recent_set = set(versions[-keep:]) if keep > 0 else set()
+    return [{**p, "recent": p.get("ver") in recent_set} for p in points]
+
+
+def _chart_tokens_by_version(runs: list[dict]) -> dict:
+    """Token-Komposition (Summe) + Median-Duration pro Pipeline-Version,
+    aufsteigend sortiert (neueste rechts), foss-frei. Ersetzt die chronologische
+    Pro-Run-Achse, die bei vielen Runs unlesbar war und keinen Vergleich trug
+    (#36, E6)."""
+    by_ver: dict = {}
+    for r in runs:
+        ver = r.get("ver") or r.get("pipeline_version")
+        if not ver or is_foss_version(ver):
+            continue
+        b = by_ver.setdefault(ver, {"in": 0, "out": 0, "cache": 0, "dur": []})
+        b["in"]    += r.get("tokens_in", 0) or 0
+        b["out"]   += r.get("tokens_out", 0) or 0
+        b["cache"] += r.get("tokens_cache", 0) or 0
+        if r.get("duration_min") is not None:
+            b["dur"].append(r["duration_min"])
+    versions = sorted(by_ver, key=_ver_sort_key)
+    return {
+        "labels":       versions,
+        "tokens_in":    [by_ver[v]["in"]    for v in versions],
+        "tokens_out":   [by_ver[v]["out"]   for v in versions],
+        "tokens_cache": [by_ver[v]["cache"] for v in versions],
+        "duration_min": [round(_median(by_ver[v]["dur"]), 1) if by_ver[v]["dur"] else None
+                         for v in versions],
     }
 
 
@@ -462,6 +537,7 @@ def _chart_scaling(all_log_runs: list[dict]) -> dict:
         for r in all_log_runs
         if r["words"] is not None
     ]
+    points = mark_scaling_recency(points)
     keys = sorted({p["key"] for p in points})
     return {"points": points, "keys": keys}
 

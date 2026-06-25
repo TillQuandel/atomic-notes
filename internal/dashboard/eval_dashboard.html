@@ -548,7 +548,6 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
   </nav>
 
   <div class="side-foot">
-    <div class="eval-row">Eval <span class="ev-v" id="sf-ev-pill">–</span></div>
     <div id="sf-time">–</div>
     <div>auto-refresh 15 s</div>
     <button class="theme-toggle" onclick="cycleTheme()" title="Theme wechseln: System → Hell → Dunkel">
@@ -590,11 +589,7 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
         <option value="__all__">Alle</option>
       </select>
     </div>
-    <div class="filter-group">
-      <span class="filter-label">Eval</span>
-      <select class="fselect" id="eval-ver-select" onchange="onEvalVerChange()"></select>
-    </div>
-    <span class="eval-ver-warn" id="eval-ver-warn" title="Eval-Versionen haben unterschiedliche Skalen — Werte nur innerhalb einer Version vergleichen">Skalen nicht vergleichbar</span>
+    <!-- Eval-Version-Filter entfernt: nur eine eval_version aktiv (Server nutzt default = neueste) -->
 <div class="updated" style="margin-left:auto"><span class="udot"></span><span id="updated-at">lädt…</span></div>
   </div>
   <div class="filter-badges" id="filter-badges"></div>
@@ -717,7 +712,7 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     <div class="row">
       <div class="panel">
         <div class="p-head">
-          <div><div class="p-title">Skaliert die Pipeline mit der PDF-Länge?</div><div class="p-sub">Lange Papers erzeugen <strong>nicht</strong> linear mehr Notes.</div></div>
+          <div><div class="p-title">Skaliert die Pipeline mit der PDF-Länge?</div><div class="p-sub">Lange Papers erzeugen <strong>nicht</strong> linear mehr Notes. Ältere Versionen <span style="opacity:.4">gedimmt</span>.</div></div>
           <div class="p-meta">Notes vs. Wörter</div>
         </div>
         <div class="chart-body"><canvas id="ch3"></canvas></div>
@@ -1134,15 +1129,22 @@ function renderKpis(kpis, thresh, kpiTrend) {
     const vers = kpiTrend?.versions || [];
     const sparkColor = toneColor(kd.tone);
     const sparkSvg = _trendChart(vals, vers, sparkColor, kd.u);
-    const validVals = vals.filter(v=>v!=null);
-    const delta = validVals.length >= 2 ? (validVals[validVals.length-1] - validVals[0]).toFixed(1) : null;
-    const dClass = delta!=null ? (parseFloat(delta)>0 ? (kd.key==='hall'?'dneg':'dpos') : (kd.key==='hall'?'dpos':'dneg')) : '';
-    const sign = delta!=null && parseFloat(delta)>0 ? '+' : '';
+    // #36 P4: Delta neueste-vs-Vorversion (server-berechnet) mit N-Guard statt
+    // neueste-vs-erste. Ohne reliable (n<20 in einer der beiden Versionen) kein
+    // Besser/Schlechter-Farbcode — nur neutrale Anzeige (Rausch-Schutz).
+    const vd = kpiTrend?.deltas?.[kd.key] || null;
+    const dval = (vd && vd.delta != null) ? vd.delta.toFixed(1) : null;
+    const prevVer = vers.length >= 2 ? vers[vers.length-2] : null;
+    const dClass = (dval!=null && vd.reliable && parseFloat(dval)!==0) ? (parseFloat(dval)>0 ? (kd.key==='hall'?'dneg':'dpos') : (kd.key==='hall'?'dpos':'dneg')) : '';  // 0.0 = neutral, keine Farbe
+    const sign = dval!=null && parseFloat(dval)>0 ? '+' : '';
+    const deltaHtml = dval!=null
+      ? `Δ vs. ${prevVer}: <span class="${dClass}">${sign}${dval} ${kd.u}</span>${vd.reliable ? '' : ' (n&lt;20)'}`
+      : `${vers.length} Pipeline-Versionen`;
     const inner = document.getElementById('spark-inner');
     if (inner) inner.innerHTML = `
       <div class="spark-row-head">
         <strong>${kd.label} — Versions-Trend</strong>
-        <div class="spark-delta">${delta!=null ? `Δ <span class="${dClass}">${sign}${delta} ${kd.u}</span> · ${vers.length} Versionen` : `${vers.length} Pipeline-Versionen`}</div>
+        <div class="spark-delta">${deltaHtml}</div>
       </div>
       <div class="spark-chart-wrap">${sparkSvg}</div>`;
   }
@@ -1172,7 +1174,9 @@ function _trendChart(points, versions, color, unit) {
   const au = _autoUnit(valid, unit);  // dynamische Einheit + Formatter
   const vmax = Math.max(...valid), vmin = Math.min(...valid);
   const pad = (vmax - vmin) * 0.2 || (vmax * 0.1) || 1;
-  const max = vmax + pad, min = Math.max(0, vmin - pad);
+  // %-Metriken bei 100 deckeln — eine Rate kann nicht ueber 100 % (User-Feedback)
+  const max = (unit === '%') ? Math.min(100, vmax + pad) : vmax + pad;
+  const min = Math.max(0, vmin - pad);
   const span = (max - min) || 1;
   const n = points.length;
   const xs = points.map((_,i) => padL + (i/(n-1))*iw);
@@ -1222,10 +1226,11 @@ function _trendChart(points, versions, color, unit) {
   }).join('');
 
   // Version-Labels auf X-Achse
-  const verLabels = (versions||[]).map((v,i) =>
-    `<text x="${xs[i].toFixed(1)}" y="${h-3}" fill="${ink4}"
-      font-size="9.5" text-anchor="middle" font-family="JetBrains Mono">${v}</text>`
-  ).join('');
+  // Nur Endpunkte labeln — bei vielen Versionen ueberlappen Einzel-Labels (User-Feedback)
+  const verLabels = (versions && versions.length >= 2)
+    ? `<text x="${xs[0].toFixed(1)}" y="${h-3}" fill="${ink4}" font-size="9.5" text-anchor="start" font-family="JetBrains Mono">${versions[0] ?? ''}</text>`
+      + `<text x="${xs[n-1].toFixed(1)}" y="${h-3}" fill="${ink4}" font-size="9.5" text-anchor="end" font-family="JetBrains Mono">${versions[n-1] ?? ''}</text>`
+    : '';
 
   // 3 Hilfslinien mit Wert-Beschriftung — mehr Kontext
   const hairLines = [0, 0.5, 1].map(t => {
@@ -1410,7 +1415,9 @@ function renderCharts(d) {
         const col=t.enc[keys.indexOf(k)%t.enc.length];
         return{label:(d.scaling.points.find(p=>p.key===k)||{}).label||k,
           data:d.scaling.points.filter(p=>p.key===k).map(p=>({x:p.x,y:p.y,_p:p})),
-          backgroundColor:col+'b0',borderColor:col,borderWidth:1,pointRadius:6,pointHoverRadius:9};
+          backgroundColor:ctx=>ctx.raw?._p?.recent===false?col+'33':col+'b0',
+          borderColor:ctx=>ctx.raw?._p?.recent===false?col+'55':col,
+          borderWidth:1,pointRadius:ctx=>ctx.raw?._p?.recent===false?3:6,pointHoverRadius:9};
       })},
       options:{maintainAspectRatio:false,responsive:true,animation:{duration:500},
         plugins:{legend:legendCfg(),tooltip:{callbacks:{label:ctx=>{const p=ctx.raw._p||{};return [`${p.label} ${p.ver}`,`${(p.x||0).toLocaleString('de-DE')} Wörter · ${p.y} Notes`];}}}},
@@ -1474,14 +1481,13 @@ function renderCharts(d) {
 
   // ch5 — Tokens (Komposition: Teal=Input, Amber=Output, Grau=Cache)
   if (d.tokens?.labels?.length) {
-    const ax5=document.getElementById('ax5'); if(ax5) ax5.textContent=`${d.tokens.labels.length} Runs · chronologisch`;
-    const _tokPdf = d.tokens.pdf_labels||[];
+    const ax5=document.getElementById('ax5'); if(ax5) ax5.textContent=`${d.tokens.labels.length} Versionen · Summe`;
     getOrCreate('ch5',{type:'bar',data:{labels:d.tokens.labels,datasets:[
       {label:'Input', data:d.tokens.tokens_in, backgroundColor:t.teal+'aa', stack:'t'},
       {label:'Output',data:d.tokens.tokens_out,backgroundColor:t.amber+'aa', stack:'t'},
       {label:'Cache', data:d.tokens.tokens_cache,backgroundColor:t.ink4+'66',stack:'t'},
     ]},options:{maintainAspectRatio:false,responsive:true,animation:{duration:500},
-      plugins:{legend:legendCfg(),tooltip:{callbacks:{title:items=>{const i=items[0]?.dataIndex;const pdf=_tokPdf[i];return pdf?`${d.tokens.labels[i]} · ${pdf}`:d.tokens.labels[i];}}}},
+      plugins:{legend:legendCfg()},
       scales:{x:axisCfg({grid:{display:false},ticks:{color:t.ink3,maxRotation:45,font:{size:9}}}),
         y:{...axisCfg(),stacked:true,title:{display:true,text:'Tokens',color:t.ink4,font:{size:11}}}}}});
     const l5=document.getElementById('leg5');
@@ -1489,7 +1495,7 @@ function renderCharts(d) {
     // ch6 — Duration
     getOrCreate('ch6',{type:'line',data:{labels:d.tokens.labels,datasets:[{data:d.tokens.duration_min||[],borderColor:t.coral,backgroundColor:t.coral+'18',borderWidth:2,pointRadius:4,pointHoverRadius:7,pointBackgroundColor:t.card,pointBorderColor:t.coral,pointBorderWidth:2,tension:.3,fill:true}]},
       options:{maintainAspectRatio:false,responsive:true,animation:{duration:500},
-        plugins:{legend:{display:false},tooltip:{callbacks:{title:items=>{const i=items[0]?.dataIndex;const pdf=_tokPdf[i];return pdf?`${d.tokens.labels[i]} · ${pdf}`:d.tokens.labels[i];}}}},
+        plugins:{legend:{display:false}},
         scales:{x:axisCfg({grid:{display:false},ticks:{color:t.ink3,maxRotation:45,font:{size:9}}}),y:axisCfg({beginAtZero:true,ticks:{callback:v=>v+' min'}})}}});
   } else {
     setChartEmpty('ch5'); setChartEmpty('ch6');
@@ -1742,14 +1748,15 @@ function renderInsights(d) {
     } else { _setInsight('ins-quality', ''); }
   } else { _setInsight('ins-quality', ''); }
 
-  // Kosten: Gesamt-Tokens + Laufzeit der gefilterten Runs
+  // Kosten: Gesamt-Tokens + Laufzeit der gefilterten Versionen (d.tokens ist seit
+  // _chart_tokens_by_version pro Version aggregiert, nicht mehr pro Run — Label angepasst)
   const tok = d.tokens || {};
   if ((tok.labels||[]).length) {
     const totalTok = (tok.tokens_in||[]).reduce((a,b)=>a+(b||0),0) + (tok.tokens_out||[]).reduce((a,b)=>a+(b||0),0);
     const medDur = _median((tok.duration_min||[]).filter(v=>v>0).sort((a,b)=>a-b));
     _setInsight('ins-cost',
-      `<strong>${tok.labels.length}</strong> Runs verbrauchten <strong>${_fmtDE(totalTok/1e6, 2)} M</strong> Tokens` +
-      (medDur != null ? `, Median-Laufzeit <strong>${_fmtDE(medDur, 0)} min</strong> pro Run.` : '.'));
+      `<strong>${tok.labels.length}</strong> Versionen verbrauchten <strong>${_fmtDE(totalTok/1e6, 2)} M</strong> Tokens` +
+      (medDur != null ? `, Median-Laufzeit <strong>${_fmtDE(medDur, 0)} min</strong> pro Version.` : '.'));
   } else { _setInsight('ins-cost', ''); }
 
   // Agenten: größter Output-Token-Verursacher
@@ -1796,7 +1803,7 @@ function renderInsights(d) {
 function _renderWithData(d) {
   if(!d) return; window._lastData=d;
   const t = C();
-  _initEvalVerDropdown(d.available_eval_versions||[], d.eval_version||'');
+  // Eval-Version-Dropdown entfernt — Server nutzt default (neueste eval_version)
   // Dropdowns: immer mit ALLEN Optionen befüllen (vor globalem Filter)
   if (d.all_pvers?.length)   _initGlobalPverFilter(d.all_pvers);
   if (d.all_pdfs?.length)    _initGlobalPdfFilter(d.all_pdfs);
@@ -1847,9 +1854,8 @@ let _loadSeq = 0;
 async function loadAndRender() {
   const seq = ++_loadSeq;
   try {
-    const urlVer=_getEvalVerFromUrl(), verParam=_currentEvalVersion||urlVer||'';
+    // Eval-Version-Filter entfernt: nie aus URL/State setzen → Server nutzt default (neueste)
     const p = new URLSearchParams();
-    if (verParam) p.set('eval_version', verParam);
     if (_globalFilters.lang  && _globalFilters.lang  !== '__all__') p.set('language',         _globalFilters.lang);
     if (_globalFilters.model && _globalFilters.model !== '__all__') p.set('model',             _globalFilters.model);
     if (_globalFilters.pdf   && _globalFilters.pdf   !== '__all__') p.set('pdf',               _globalFilters.pdf);
