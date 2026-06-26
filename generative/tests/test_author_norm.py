@@ -90,3 +90,17 @@ def test_parse_filename_dynamic_cleans_affiliation():
 def test_parse_filename_fallback_cleans_affiliation():
     fb = _parse_filename_fallback(_MAHMOOD)
     assert fb["Author"] == "Mahmood"
+
+
+def test_extractor_source_meta_datei_line_drops_affiliation():
+    """Dritter Kanal: die 'Datei:'-Zeile im Extractor-Prompt zeigte den rohen
+    Zotero-Dateinamen → der Affiliations-Koautor leakte trotz gesäubertem
+    Autor-Feld in LLM-Sekundärzitate ('zit. n. Mahmood & Punjab')."""
+    from generative.agents.extractor import _format_source_meta
+    out = _format_source_meta(
+        {"Author": "Mahmood", "Year": "2016",
+         "Title": "Do People Overestimate Their Information Literacy Skills"},
+        _MAHMOOD,
+    )
+    assert "University of the Punjab" not in out
+    assert "Mahmood" in out

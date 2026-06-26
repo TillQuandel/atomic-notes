@@ -7,6 +7,7 @@ Seitenzahl, deutsche Sprache, Akronyme aufgelöst, aliases-Liste, kein Pass-Thro
 from __future__ import annotations
 import json
 import re
+from pathlib import Path
 
 from generative.agents.base import call_claude_async
 from generative.agents.structured_output import parse_extractor_output
@@ -258,12 +259,31 @@ def _format_tag_whitelist(tags: list[str] | None,
     return "\n".join(f"- {t}" for t in tags)
 
 
+def _clean_source_file_display(source_file: str) -> str:
+    """Gibt den Dateinamen für die Prompt-`Datei:`-Zeile mit gesäubertem Autor
+    zurück. Der rohe Zotero-Dateiname ('Mahmood und University of the Punjab -
+    2016 - …') leakt den Affiliations-Koautor sonst trotz gesäubertem Autor-Feld
+    in LLM-Sekundärzitate ('zit. n. Mahmood & Punjab') — das ' und ' liest sich
+    als Zwei-Autoren-Trenner. Drei­ter Geschwister-Kanal der Issue-41/PR-71-Klasse.
+    Nicht-parsbare Namen bleiben unverändert."""
+    from generative.pipeline.vault_writer import _parse_filename_fallback
+    fb = _parse_filename_fallback(source_file)
+    author = fb.get("Author")
+    if not author:
+        return source_file
+    ext = Path(source_file).suffix
+    title = fb.get("Title", "")
+    year = fb.get("Year")
+    core = f"{author} - {year} - {title}" if year else f"{author} - {title}"
+    return f"{core}{ext}"
+
+
 def _format_source_meta(meta: dict[str, str], source_file: str) -> str:
     parts = []
     if meta.get("Author"): parts.append(f"Autor: {meta['Author']}")
     if meta.get("Title"):  parts.append(f"Titel: {meta['Title']}")
     if meta.get("Year"):   parts.append(f"Jahr: {meta['Year']}")
-    parts.append(f"Datei: {source_file}")
+    parts.append(f"Datei: {_clean_source_file_display(source_file)}")
     return "\n".join(f"- {p}" for p in parts)
 
 
