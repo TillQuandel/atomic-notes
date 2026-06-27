@@ -1795,6 +1795,34 @@ def main(argv: list[str] | None = None):
             if _framing:
                 print(_framing)
 
+    # Edition-Verifikation (Layer 1): Auszug aus einem größeren Werk OHNE DOI-Beleg
+    # → Auflage/Jahr/Seiten sind nur dateiname-geraten (Impressum fehlt im Extrakt).
+    # first_print_page = erste numerische Druckseite aus /PageLabels (>1 ⟺ Auszug);
+    # doi_verified, wenn eine harte DOI via CrossRef auflöste (--doi ODER hartes
+    # Enrichment, kein Title-Match-Raten). Nur create-Notes, unresolved bleibt stärker.
+    _ed_labels = pdf_chunker._pdf_page_labels(source_path)
+    _first_print_page = int(str(_ed_labels[0]).strip()) if _ed_labels else None
+    # doi_verified NUR wenn CrossRef die DOI tatsächlich auflöste (crossref_year
+    # gesetzt) und sie nicht per Title-Match geraten wurde. Ein gepinntes --doi, das
+    # nicht auflöst (falsch/CrossRef down), zählt NICHT als verifiziert → fail-closed,
+    # die Note wird geflaggt statt still vertraut. (Codex-Review, fail-open-Lücke.)
+    _doi_verified = bool(quality_report.crossref_year) and not quality_report.doi_from_title_match
+    if routing_report.is_edition_unverified(_doi_verified, _first_print_page):
+        _ed_marked = 0
+        for draft in drafts:
+            if draft.action == "create" and draft.source_status != "unresolved":
+                draft.source_status = "edition-unverified"
+                draft.quality_flags.append(
+                    f"⚠️ Edition unverifiziert — Auszug ab Druckseite {_first_print_page} "
+                    f"ohne DOI; Jahr+Seiten nur aus Dateiname. Auflage manuell prüfen "
+                    f"oder via --doi pinnen.")
+                _ed_marked += 1
+        if _ed_marked:
+            _ed_framing = routing_report.source_status_framing(
+                "edition-unverified", source_path.name)
+            if _ed_framing:
+                print(_ed_framing)
+
     # v23: Tag-Hint via --target-tag wird allen Drafts angehängt → Auto-Note-Mover
     # routet beim Öffnen aus 00-inbox/ in den Zielordner (siehe CLAUDE.md-Mapping).
     if args.target_tag:

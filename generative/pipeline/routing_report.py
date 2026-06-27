@@ -95,6 +95,26 @@ def is_source_unresolved(enriched_meta: dict, fb: dict,
     return bool(block_crossref_override) or not (author and year)
 
 
+def is_edition_unverified(doi_verified: bool, first_print_page: int | None) -> bool:
+    """True wenn die Edition/Auflage NICHT gegen eine DOI belegt ist UND das
+    Dokument ein Auszug aus einem größeren Werk ist.
+
+    Hintergrund: Ein Kapitel-Extrakt trägt keine Impressum-/Titelei-Seite (ISBN,
+    „N. Auflage", Copyright-Jahr). Die Pipeline leitet Jahr/Edition dann allein aus
+    dem Dateinamen ab und kann nicht wissen, welche Auflage vorliegt — etwa KSS-6
+    (2013, S. 172 ff.) vs. KSS-7 (2022, S. 147 ff.) desselben Kapitels. Ohne DOI als
+    harten Anker ist die Zitation deshalb unverifiziert.
+
+    Auszug-Signal: erste **numerische Druckseite > 1** (aus `/PageLabels`). Ein
+    Standalone-Dokument beginnt bei 1; ein mid-book-Extrakt bei der Druckseite, an
+    der das Kapitel im Gesamtwerk startet. `first_print_page=None` (keine
+    numerischen Labels, z.B. normales Paper) → kein Auszug-Signal → kein Flag.
+    """
+    if doi_verified:
+        return False
+    return first_print_page is not None and first_print_page > 1
+
+
 def source_status_framing(source_status: str | None, source_name: str) -> str | None:
     """First-person-NL-Zeile bei unsicherer Quelle — sonst None.
 
@@ -102,6 +122,12 @@ def source_status_framing(source_status: str | None, source_name: str) -> str | 
     NL-Unsicherheit senkt Over-Reliance, FAccT 2024). Nur auf dem fail-closed-Pfad
     aktiv — High-Confidence/aufgelöste Quellen bleiben frictionless.
     """
+    if source_status == "edition-unverified":
+        return (f"  [Quelle] '{source_name}' ist ein Auszug ohne DOI — ich kann die "
+                f"Auflage/Edition nicht belegen (Jahr+Seiten stammen nur aus dem "
+                f"Dateinamen). Bei mehrfach aufgelegten Werken weicht die Seitenzählung "
+                f"je Auflage ab; ich habe die Notes mit `source-status: edition-unverified` "
+                f"markiert und nicht für den Vault empfohlen. Mit `--doi` pinnen behebt es.")
     if source_status != "unresolved":
         return None
     # Wahrheitsgemäß: source-status ist ein Sichtbarkeits-Flag, kein Routing-Gate.
