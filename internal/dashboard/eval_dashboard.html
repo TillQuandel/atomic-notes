@@ -1510,7 +1510,14 @@ function renderCharts(d) {
     const ax7=document.getElementById('ax7'); if(ax7) ax7.textContent=`kumuliert · ${ag.calls?.reduce((a,b)=>a+b,0)||0} calls`;
     getOrCreate('ch7',{type:'bar',data:{labels:agLabelsN,datasets:[{data:ag.output,backgroundColor:bgC,borderWidth:0,borderRadius:2,barPercentage:.65}]},
       options:{indexAxis:'y',maintainAspectRatio:false,responsive:true,animation:{duration:500},
-        plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const i=ctx.dataIndex;const costStr=(ag.cost_usd?.[i]>0)?` · $${ag.cost_usd[i].toFixed(4)}`:'';return `${(ctx.raw/1000).toFixed(0)}k tokens · Cache ${ag.cache_pct?.[i]} %${costStr}`;}}}},
+        plugins:{legend:{display:false},tooltip:{callbacks:{
+          label:ctx=>{const i=ctx.dataIndex;const costStr=(ag.cost_usd?.[i]>0)?` · $${ag.cost_usd[i].toFixed(4)}`:'';return `${(ctx.raw/1000).toFixed(0)}k tokens · Cache ${ag.cache_pct?.[i]} %${costStr}`;},
+          afterLabel:ctx=>{
+            if(!(ag.labels?.[ctx.dataIndex]||'').toLowerCase().startsWith('verifier')) return;
+            return ctx.raw===0
+              ? ['','0 in diesem Lauf — by accident, nicht by design:','die lokalen Pre-Pässe (rapidfuzz + sentence-transformers,','beide token-frei) lösten alle Anker, der LLM-Fallback','feuerte nicht. Verfehlt ein Anker beide Pre-Pässe, zieht','der Verifier Tokens wie jeder andere Agent.']
+              : ['','Hybrid: token-freie lokale Pre-Pässe + LLM-Fallback nur','für Anker, die beide Pre-Pässe verfehlen.'];
+          }}}},
         scales:{x:axisCfg({ticks:{callback:v=>v>=1000?(v/1000).toFixed(0)+'k':v}}),y:axisCfg({grid:{display:false},ticks:{color:t.ink2,font:{size:12}}})}}});
     getOrCreate('ch8',{type:'bar',data:{labels:agLabelsN,datasets:[{data:ag.dur_s,backgroundColor:bgC,borderWidth:0,borderRadius:2,barPercentage:.65}]},
       options:{indexAxis:'y',maintainAspectRatio:false,responsive:true,animation:{duration:500},

@@ -38,6 +38,8 @@ CREATE TABLE IF NOT EXISTS note_evals (
     note_path           TEXT,
     acceptance_status   TEXT,
     hallucination_rate  REAL,
+    anchors_total       INT,
+    anchors_hallucinated INT,
     coverage_factual    REAL,
     coverage_rate       REAL,
     anchor_rate         REAL,

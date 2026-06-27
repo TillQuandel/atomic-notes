@@ -123,6 +123,34 @@ def _median(lst: list[float]) -> float:
     # Server passen, sonst zeigen KPI-Karte und Sparkline verschiedene Werte.
     return statistics.median(lst)
 
+def _pooled_hall_pct(rows: list[dict]) -> float | None:
+    """Gepoolte Halluzinationsrate über mehrere Notes: Σ halluzinierte Anker /
+    Σ Anker, in Prozent.
+
+    Ankergewichtet statt notengewichtet — beantwortet „wie viel Prozent ALLER
+    Anker sind falsch". Robuster als Median (kollabiert bei zero-inflation auf 0)
+    und als Mean-of-rates (überbewertet kleine Notes). Eine Definition, geteilt
+    von KPI-Kachel (_calc_kpis) und Sparkline (eval_dashboard_server), damit
+    beide denselben Wert zeigen.
+
+    Fallback auf den Mittelwert der Pro-Note-Raten, wenn keine Roh-Counts
+    vorliegen (historische DB-Rows vor 2026-06-27 hatten anchors_total nicht).
+    """
+    rate_rows = [r for r in rows
+                 if r.get("hallucination_rate") is not None and r["hallucination_rate"] >= 0]
+    if not rate_rows:
+        return None
+    # Nur poolen, wenn ALLE bewertbaren Rows Roh-Counts haben. Sonst würde
+    # ankergewichtet über eine Teilmenge gemittelt und der Rest still verworfen
+    # (Cross-Review Codex+QWEN 2026-06-27) — bei gemischten Rows daher Mean.
+    if all(r.get("anchors_total") is not None
+           and r.get("anchors_hallucinated") is not None for r in rate_rows):
+        th = sum(r["anchors_total"] for r in rate_rows)
+        ah = sum(r["anchors_hallucinated"] for r in rate_rows)
+        if th > 0:
+            return round(ah / th * 100, 1)
+    return round(statistics.mean(r["hallucination_rate"] for r in rate_rows) * 100, 1)
+
 def _pdf_short_name(raw: str) -> str:
     name = raw.replace(".pdf", "").strip()
     parts = [p.strip() for p in name.split(" - ")]
@@ -130,6 +158,57 @@ def _pdf_short_name(raw: str) -> str:
         return f"{parts[0]} ({parts[1]})" if parts[1].isdigit() else parts[0]
     name = re.sub(r"^\d+\.", "", name).strip()
     return name[:45]
+
+def _top_versions(counts: dict, limit: int = 15, min_n: int = 3) -> list[str]:
+    """Die `limit` neuesten Pipeline-Versionen mit mindestens `min_n` Eval-Notes,
+    neueste zuerst. Hält Einzel-Note-Wegwerfläufe aus dem Versions-Filter (sonst
+    füllen n=1-Versionen die Liste, während robuste ältere rausfallen).
+
+    Die allerneueste Version ist **immer** dabei, auch wenn sie noch unter
+    `min_n` liegt — ein frischer Lauf soll sofort sichtbar sein.
+    """
+    ranked = sorted(counts, key=_ver_sort_key, reverse=True)
+    keep = [v for v in ranked if counts[v] >= min_n]
+    if ranked and ranked[0] not in keep:
+        keep.insert(0, ranked[0])
+    return keep[:limit]
+
+
+def _pdf_filter_key(raw: str) -> str:
+    """„Bates - 2017" aus „Bates - 2017 - Information Behavior.pdf".
+
+    Autor + Jahr (erste zwei „ - "-Teile). Bleibt ein startswith-Präfix des
+    DB-`pdf`-Felds, sodass der bestehende Filter unverändert matcht, kürzt aber
+    die verwirrend langen Titel und dedupliziert Varianten derselben Quelle.
+    Verschiedene Jahre (Beutelspacher 2014 vs. 2022) bleiben getrennt.
+    """
+    name = raw.replace(".pdf", "").strip()
+    parts = [p.strip() for p in name.split(" - ")]
+    if len(parts) >= 2:
+        return f"{parts[0]} - {parts[1]}"
+    return parts[0]
+
+
+def _dedupe_pdf_options(labels) -> list[str]:
+    """PDF-Dropdown-Optionen: Volltitel („Autor - Jahr - Titel") behalten, aber
+    pro Quelle (Autor-Jahr) nur einmal — den vollständigsten Eintrag. Eine reine
+    Autor-Variante wird verworfen, wenn sie Präfix genau einer Autor-Jahr-Quelle
+    ist (z. B. das verirrte „Bates" neben „Bates - 2017 - Information Behavior").
+    Der Volltitel bleibt startswith-Präfix des DB-`pdf`-Felds → Filter matcht
+    unverändert.
+    """
+    by_key: dict[str, str] = {}
+    for raw in labels:
+        clean = raw.replace(".pdf", "").strip()
+        if not clean:
+            continue
+        k = _pdf_filter_key(clean)
+        if k not in by_key or len(clean) > len(by_key[k]):
+            by_key[k] = clean
+    keys = sorted(by_key)
+    drop = {k for k in keys if any(o != k and o.startswith(k + " - ") for o in keys)}
+    return [by_key[k] for k in keys if k not in drop]
+
 
 def _pdf_color(key: str, idx: int = 0) -> str:
     return _PDF_COLORS.get(key, _COLOR_FALLBACKS[idx % len(_COLOR_FALLBACKS)])
@@ -309,9 +388,11 @@ def _calc_kpis(
     avg_accept = (round(accept_vault / accept_generated * 100, 1)
                   if accept_generated else None)
 
-    hall_rates = [r["hallucination_rate"] for r in latest_qrows
-                  if "hallucination_rate" in r and r["hallucination_rate"] >= 0]
-    avg_hall   = round(_median(hall_rates) * 100, 1) if hall_rates else None
+    # Gepoolte Rate (ankergewichtet) statt Median: hallucination_rate ist
+    # zero-inflated (>50 % der Notes haben 0 halluzinierte Anker), der Median
+    # kollabierte sonst auf 0,0 % und verdeckte, dass das System halluziniert
+    # (Bug 2026-06-27). Mean-Fallback für Rows ohne Roh-Counts.
+    avg_hall   = _pooled_hall_pct(latest_qrows)
 
     cov_vals = [v for r in latest_qrows
                 if (v := r.get("coverage_factual") or r.get("coverage_rate")) is not None and v >= 0]
