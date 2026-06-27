@@ -25,6 +25,14 @@ def test_clean_wikilink_handles_empty():
     assert cr._clean_wikilink(None) == ""
 
 
+def test_clean_wikilink_does_not_mangle_inner_brackets():
+    # strip("[]") zerstörte Titel mit Klammern an einem Ende; jetzt nur paarweise
+    # von außen strippen, wenn beide Enden Klammern tragen (Qwen-Review HIGH).
+    assert cr._clean_wikilink("[2024] Projekt X") == "[2024] Projekt X"
+    assert cr._clean_wikilink("Array [1]") == "Array [1]"
+    assert cr._clean_wikilink("[Titel](path.md)") == "[Titel](path.md)"
+
+
 def test_rewrapped_link_is_single_pair():
     # Der Code baut dup_link als f"[[{_clean_wikilink(x)}]]" — nie doppelt geklammert.
     raw = "[[Kirkpatrick Level 1→2 Zusammenhang]]"

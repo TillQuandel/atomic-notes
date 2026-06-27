@@ -171,6 +171,17 @@ class TestQuellenBlockPagePrefix(unittest.TestCase):
         self.assertIn(", S. 1, 5*", out)
         self.assertNotIn("S. S.", out)
 
+    def test_pages_sorted_numerically_not_lexicographically(self):
+        # Gemischt-stellige Seiten (durch den page-label-Fix: Druckseiten 9, 159…)
+        # müssen numerisch sortiert werden, nicht lexikografisch (Qwen-Review HIGH).
+        draft = _draft_with_anchors([
+            TextAnchor(quote="a", page="S. 159"),
+            TextAnchor(quote="b", page="S. 9"),
+            TextAnchor(quote="c", page="S. 159–160"),
+        ])
+        out = build_quellen_block(draft, self.SRC, self.META)
+        self.assertIn(", S. 9, 159, 159–160*", out)
+
 
 class TestRewriteMergedRelatedLinks(unittest.TestCase):
     """Issue #21: Drafts, die beim Schreiben zu Merge-Stubs werden (Title-/Alias-
