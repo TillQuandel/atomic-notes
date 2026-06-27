@@ -345,6 +345,13 @@ def test_usable_page_labels_gate_requires_numeric_and_unique():
     assert _usable_page_labels(["xi", "xii", "1"]) is None             # gemischt römisch/arabisch
     assert _usable_page_labels(["1", "2", "2"]) is None                # doppelt → mehrdeutig
     assert _usable_page_labels(["100", "1", "2"]) is None              # nicht monoton → falsche Ranges
+    # Zero-Padding-Duplikat: als Strings verschieden ("01"≠"1"), als Zahl gleich (1==1).
+    # Muss abgelehnt werden, sonst zwei Seiten mit [S. 1] → False-Bind (Qwen-Review, 2026-06-27).
+    assert _usable_page_labels(["01", "1", "2"]) is None
+    # Unicode-Ziffern: str.isdigit() ist True für Superscripts (²), aber int("²") crasht.
+    # isdecimal()-Gate lehnt sie ab statt sich auf das except im Aufrufer zu verlassen
+    # (Codex-Review, 2026-06-27).
+    assert _usable_page_labels(["1", "²"]) is None
     assert _usable_page_labels(None) is None
     assert _usable_page_labels([]) is None
 

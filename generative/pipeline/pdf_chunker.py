@@ -62,14 +62,21 @@ def _usable_page_labels(labels: list | None) -> list | None:
     if not labels:
         return None
     stripped = [str(label).strip() for label in labels]
-    if not all(s.isdigit() for s in stripped):
+    # isdecimal() statt isdigit(): isdigit() ist True für Unicode-Superscripts (²),
+    # die int() dann nicht parsen kann (ValueError). isdecimal() == genau die von
+    # int() akzeptierten Ziffern → kein Crash, sauberer Fallback. (Codex-Review.)
+    if not all(s.isdecimal() for s in stripped):
         return None
-    if len(set(stripped)) != len(stripped):
+    nums = [int(s) for s in stripped]
+    # Eindeutigkeit auf der ZAHL prüfen, nicht dem String: "01" und "1" sind als
+    # String verschieden, als Druckseite identisch → zwei Seiten "S. 1" (False-Bind).
+    # Numerische Eindeutigkeit erzwingt zusammen mit der Monotonie echte strikte
+    # Monotonie. (Qwen-Review, 2026-06-27.)
+    if len(set(nums)) != len(nums):
         return None
     # Auch strikt monoton steigend verlangen: nicht-monotone (aber eindeutige)
     # Labels wie 100,1,2 würden in min/max-Chunk-Ranges (page_range_of_text,
     # split_by_chapters) falsche breite Spannen erzeugen. (Codex-Re-Review.)
-    nums = [int(s) for s in stripped]
     if nums != sorted(nums):
         return None
     return labels
