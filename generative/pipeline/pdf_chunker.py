@@ -34,8 +34,73 @@ _PAGE_MARKER_RE = re.compile(r"\n*\[S\.\s*(\d+)\]\n*", re.MULTILINE)
 _PAGE_MARKER_LINE_RE = re.compile(r"^\s*\[S\.\s*\d+\]\s*$", re.MULTILINE)
 
 
+def _pdf_page_labels(pdf_path: Path) -> list[str] | None:
+    """Druckseiten-Bezeichner (`/PageLabels`) je PDF-Seite, oder None wenn das PDF
+    keine führt. Fail-open: jeder pypdf-Fehler → None. **Nur** wenn `/PageLabels`
+    real vorhanden ist, weicht das Ergebnis vom alten i+1-Verhalten ab — PDFs ohne
+    Labels (die meisten Paper/Test-Fixtures) bleiben damit bit-identisch."""
+    try:
+        from pypdf import PdfReader
+        from pypdf.generic import DictionaryObject
+        reader = PdfReader(str(pdf_path))
+        root = reader.trailer["/Root"].get_object()
+        if not isinstance(root, DictionaryObject) or "/PageLabels" not in root:
+            return None
+        return _usable_page_labels(list(reader.page_labels))
+    except Exception:
+        return None
+
+
+def _usable_page_labels(labels: list | None) -> list | None:
+    """Gibt ``labels`` nur zurück, wenn ALLE numerisch UND eindeutig sind — sonst None.
+
+    Verhindert, dass nicht-numerische (römische) Labels auf den i+1-Fallback fallen
+    und mit echten numerischen Druckseiten im selben ``S. N``-Namespace kollidieren
+    (→ False-Binds in figure_alt) bzw. dass doppelte Labels die Label→Index-Abbildung
+    mehrdeutig machen. Gemischt/doppelt → einheitlicher i+1-Pfad für ALLE Konsumenten.
+    (Codex-Review, 2. Durchgang.)"""
+    if not labels:
+        return None
+    stripped = [str(label).strip() for label in labels]
+    if not all(s.isdigit() for s in stripped):
+        return None
+    if len(set(stripped)) != len(stripped):
+        return None
+    # Auch strikt monoton steigend verlangen: nicht-monotone (aber eindeutige)
+    # Labels wie 100,1,2 würden in min/max-Chunk-Ranges (page_range_of_text,
+    # split_by_chapters) falsche breite Spannen erzeugen. (Codex-Re-Review.)
+    nums = [int(s) for s in stripped]
+    if nums != sorted(nums):
+        return None
+    return labels
+
+
+def _resolve_page_numbers(
+    pages_raw: list[str], labels: list | None
+) -> list[tuple[int, str]]:
+    """Ordnet jeder Seite ihre zitierfähige Seitenzahl zu: das numerische
+    Druckseiten-Label, sonst die 1-basierte Form-Feed-Position.
+
+    Nicht-numerische Labels (römisches Frontmatter) fallen bewusst auf den Index
+    zurück — die Anker-Kette (`PAGE_MARKER_RE`, `_extract_page_span`) erwartet
+    `\\d+`. Längen-Mismatch (pdftotext-Extraseite via finalem \\f) ist sicher."""
+    out: list[tuple[int, str]] = []
+    for i, page_text in enumerate(pages_raw):
+        raw = labels[i] if labels and i < len(labels) else None
+        # robust: pypdf-Labels können Whitespace (" 159 ") oder selten non-str
+        # tragen → strippen/coercen statt aufs Form-Feed zurückzufallen/zu crashen.
+        label = str(raw).strip() if raw is not None else ""
+        num = int(label) if label.isdigit() else i + 1
+        out.append((num, page_text))
+    return out
+
+
 def pdf_to_pages(pdf_path: Path) -> list[tuple[int, str]]:
-    """Liefert [(page_num, page_text), ...] via pdftotext + \\f-Split."""
+    """Liefert [(page_num, page_text), ...] via pdftotext + \\f-Split.
+
+    `page_num` ist die zitierfähige Druckseite aus den PDF-`/PageLabels`, falls das
+    PDF welche führt (Buch: PDF-Seite 179 → Druckseite „159"); sonst die 1-basierte
+    pdftotext-Position (Paper ohne Labels — unverändertes Verhalten)."""
     from generative.pipeline.error_hints import pdftotext_error_hint
     try:
         result = subprocess.run(
@@ -49,9 +114,17 @@ def pdf_to_pages(pdf_path: Path) -> list[tuple[int, str]]:
     if result.returncode != 0:
         sys.exit(pdftotext_error_hint(result.stderr))
     pages_raw = result.stdout.split("\f")
-    # letzte page kann leer sein (pdftotext hängt oft \f am Ende an)
-    pages_raw = [p for p in pages_raw if p.strip()]
-    return [(i + 1, p) for i, p in enumerate(pages_raw)]
+    labels = _pdf_page_labels(pdf_path)
+    if labels is None:
+        # Unverändertes Verhalten: leere Seiten verwerfen, lückenlos ab 1 zählen
+        # (pdftotext hängt oft ein finales \\f → leere letzte Seite).
+        pages_raw = [p for p in pages_raw if p.strip()]
+        return [(i + 1, p) for i, p in enumerate(pages_raw)]
+    # Mit Druckseiten-Labels: Label-Index = PDF-Seite, daher VOR dem Leerseiten-
+    # Filter zuordnen (eine leere Seite mittendrin darf die Folgeseiten nicht
+    # verschieben), dann leere Seiten verwerfen.
+    numbered = _resolve_page_numbers(pages_raw, labels)
+    return [(n, p) for n, p in numbered if p.strip()]
 
 
 def pages_to_marked_text(pages: list[tuple[int, str]]) -> str:

@@ -90,11 +90,13 @@ def embed_alt_figures(pdf_path: Path, drafts: list[AtomicNoteDraft]) -> BindRepo
     with fitz.open(str(pdf_path)) as doc:
         page_count = doc.page_count
     has_text = _page_text_flags(pdf_path, page_count)
+    from generative.pipeline.pdf_chunker import _pdf_page_labels
+    page_labels = _pdf_page_labels(pdf_path)
 
     figures: list[TaggedFigure] = []
     report = BindReport()
     for page_index, alt in raw:
-        anchor_page = pdf_index_to_anchor_page(has_text, page_index)
+        anchor_page = pdf_index_to_anchor_page(has_text, page_index, page_labels)
         if anchor_page is None:
             # Figur auf textloser Seite -> kein source_anchor kann sie tragen.
             # anchor_page-Sentinel, da es keine gueltige pdftotext-Seite gibt.
@@ -203,11 +205,14 @@ def extract_tagged_figures(pdf_path: Path) -> list[tuple[int, str]]:
     return figures
 
 
-def pdf_index_to_anchor_page(has_text: list[bool], pymupdf_index: int) -> int | None:
+def pdf_index_to_anchor_page(has_text: list[bool], pymupdf_index: int,
+                             page_labels: list | None = None) -> int | None:
     """Bildet einen 0-basierten PyMuPDF-Seitenindex auf die source_anchor-Seitennummer ab.
 
-    ``source_anchors`` nutzen die pdftotext-Nummerierung (``pdf_chunker.pdf_to_pages``):
-    1-basiert, ueber NUR die textfuehrenden Seiten (textlose Seiten werden verworfen).
+    ``source_anchors`` tragen dieselbe Seitenzahl wie ``pdf_chunker.pdf_to_pages``:
+    das numerische Druckseiten-Label aus ``/PageLabels`` (Buch: PyMuPDF-Seite 178 →
+    „159"), falls vorhanden — sonst die 1-basierte Zählung ueber NUR die
+    textfuehrenden Seiten (= altes pdftotext-Verhalten, PDFs ohne Labels unveraendert).
     ``has_text[i]`` sagt, ob PyMuPDF-Seite i pdftotext-Text liefert.
 
     Liegt die Figur selbst auf einer textlosen Seite, kann kein source_anchor diese
@@ -215,4 +220,9 @@ def pdf_index_to_anchor_page(has_text: list[bool], pymupdf_index: int) -> int | 
     """
     if not has_text[pymupdf_index]:
         return None
+    # Mit numerischem Druckseiten-Label: konsistent zu pdf_to_pages/source_anchors.
+    if page_labels and pymupdf_index < len(page_labels):
+        label = str(page_labels[pymupdf_index]).strip()
+        if label.isdigit():
+            return int(label)
     return sum(1 for flag in has_text[: pymupdf_index + 1] if flag)
