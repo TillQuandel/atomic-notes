@@ -139,7 +139,65 @@ def extract_claims(note_path: Path) -> list[str]:
             continue
         seen.add(key)
         claims.append(sentence)
-    return claims
+    return filter_meta_claims(claims)
+
+
+# --- Fix A: Metatext-Vorfilter (Cross-Model-Fehleranalyse 2026-06-28) ---------
+# Pipeline-/Vault-Metatext leakt in die Claim-Extraktion und wird fälschlich
+# gegen das PDF geprüft (→ „not_in_context") — das trieb die hallucination_rate
+# künstlich hoch (7 von 14 Fehl-Flags). Deterministischer Vorfilter, kein LLM.
+# Wiki-Link mit Capture-Group; Alias [[Ziel|Anzeige]] → der Anzeigetext bleibt.
+_WIKILINK_RE = re.compile(r"\[\[([^\]]*)\]\]")
+# Reiner Wiki-Link-Pointer (optional triviales Suffix wie „ 2.") — kein Claim.
+_POINTER_RE = re.compile(r"^\s*\[\[[^\]]*\]\]\s*\d*\.?\s*$")
+_META_MARKER_RE = re.compile(
+    r"merge stub|bestehende note existiert|pipeline hat das konzept",
+    re.IGNORECASE,
+)
+# Reines Zitat-Fragment, z.B. „Schlebbe und Greifeneder 2022, S. 145." — eine
+# Folge namens-artiger Token (Großbuchstaben-Wort/Initiale, Jahr, „et al.",
+# Adelspartikel van/von/de/…), per Komma/&/und/Space verbunden, + Seitenangabe.
+# Ein normales kleingeschriebenes Wort (Verb/Artikel) ist KEIN Namens-Token →
+# bricht die Kette → echte Sätze wie „Das Konzept ist widerlegt, S. 12." bleiben.
+# (Cross-Model-Review Qwen+Mistral, 2 Runden, 2026-06-28.)
+_NAME_TOKEN = (
+    r"(?:[A-ZÄÖÜ][\wäöüß.\-]*|\d{4}[a-z]?|et\s+al\.?|"
+    r"van|von|der|den|de|del|della|du|da|la|le|di)"
+)
+_CITATION_FRAGMENT_RE = re.compile(
+    rf"^{_NAME_TOKEN}(?:(?:\s*[,&]\s*|\s+und\s+|\s+){_NAME_TOKEN})*"
+    rf"\s*,?\s*S\.\s*\d+(?:\s*[–-]\s*\d+)?\s*\)?\.?$"
+)
+_MIN_CLAIM_LEN = 30
+
+
+def _replace_wikilink(m: "re.Match") -> str:
+    """[[Ziel]] → Ziel, [[Ziel|Anzeige]] → Anzeige (der in Obsidian sichtbare Text)."""
+    inner = m.group(1)
+    return inner.split("|", 1)[1] if "|" in inner else inner
+
+
+def filter_meta_claims(claims: list[str]) -> list[str]:
+    """Verwirft Nicht-Claims (Pipeline-/Vault-Metatext) aus der Claim-Liste.
+
+    Verwirft reine Wiki-Link-Pointer, Merge-Stub-Marker, Vault-Meta-Hinweise und
+    reine Zitat-Fragmente. Echte Inhalts-Claims (auch mit Wiki-Link) bleiben erhalten
+    — der Link wird durch seinen Anzeigetext ersetzt, das Subjekt also bewahrt.
+    """
+    out: list[str] = []
+    for claim in claims:
+        if _POINTER_RE.match(claim):
+            continue
+        stripped = _WIKILINK_RE.sub(_replace_wikilink, claim)
+        stripped = re.sub(r"\s+", " ", stripped).strip(" \t\r\n:;,-")
+        if len(stripped) < _MIN_CLAIM_LEN:
+            continue
+        if _META_MARKER_RE.search(stripped):
+            continue
+        if _CITATION_FRAGMENT_RE.match(stripped):
+            continue
+        out.append(stripped)
+    return out
 
 
 def _raw_page_lines(pdf_doc: fitz.Document, page_num: int) -> list[str]:
