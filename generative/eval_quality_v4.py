@@ -12,6 +12,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 import re
 import sys
 from collections import Counter, defaultdict
@@ -68,6 +69,65 @@ LABELS = {
 # Lokale Konstante bezieht sich davon, damit kein Drift zwischen Eval-Audit-Trigger und Pipeline.
 RETRIEVAL_LOW_COSINE = DEFAULT_CONFIG.retrieval_low_cosine_threshold
 MAX_PROMPT_WORDS = 12000
+
+# --- Fix B (flag-only): Retrieval-Miss-Kandidaten sichtbar machen (2026-06-28) ---
+# Ein als not_in_context geflaggter Claim, dessen Inhalt semantisch im VOLLTEXT
+# präsent ist (evtl. nur falscher Chunk retrieved), ist evtl. ein Retrieval-Miss,
+# keine Halluzination. ABER: reines Cosine kann „präsent" nicht von „präsent-aber-
+# übergeneralisiert" trennen (Cross-Model-Review + empirisch: Overgeneralization
+# cos 0.845 → würde maskieren). Deshalb wird NICHT reklassifiziert (hallucination_rate
+# bleibt), sondern nur GEFLAGGT (`possible_retrieval_miss`) + der Cosine-Score
+# protokolliert — sichtbar für Review und spätere n≥50-Kalibrierung/NLI-Gate.
+# Threshold empirisch (n=8, NICHT gold-kalibriert), ENV-tunbar. contradicted unberührt.
+SOURCE_PRESENCE_COSINE = float(os.getenv("ATOMIC_AGENT_SOURCE_PRESENCE_COSINE", "0.75"))
+
+
+def apply_source_presence_fallback(
+    claim_scores: list[dict[str, Any]],
+    presence_score,
+    threshold: float = SOURCE_PRESENCE_COSINE,
+) -> list[dict[str, Any]]:
+    """Flaggt not_in_context-Claims, deren Inhalt im Volltext semantisch präsent ist,
+    als mögliche Retrieval-Misses — OHNE das Label zu ändern (kein Masking).
+
+    `presence_score(claim) -> float | None`: max Cosine des Claims gegen die Volltext-Sätze.
+    Setzt `source_presence_score` für alle not_in_context-Claims (Diagnostik) und das
+    Flag `possible_retrieval_miss` ab Threshold.
+    """
+    for s in claim_scores:
+        if s.get("label") != NOT_IN_CONTEXT:
+            continue
+        score = presence_score(s.get("claim", ""))
+        if score is None:
+            continue
+        s["source_presence_score"] = round(float(score), 3)
+        if score >= threshold:
+            s["quality_flags"] = sorted(
+                set(s.get("quality_flags") or []) | {"possible_retrieval_miss"}
+            )
+    return claim_scores
+
+
+def _build_presence_scorer(pdf_path: Path, claim_scores: list[dict[str, Any]]):
+    """Scorer claim→max-Satz-Cosine gegen den Volltext. Lazy: encodet nur, wenn es
+    überhaupt not_in_context-Claims gibt (Satz-Encoding ist teuer)."""
+    if not any(s.get("label") == NOT_IN_CONTEXT for s in claim_scores):
+        return lambda claim: None
+    from generative.eval_quality_v2 import _pdf_sentences
+    with fitz.open(str(pdf_path)) as doc:
+        sentences = [s for s, _ in _pdf_sentences(doc)]
+    if not sentences:
+        return lambda claim: None
+    model = _model()
+    sent_embs = model.encode(sentences, normalize_embeddings=True, show_progress_bar=False)
+
+    def score(claim: str):
+        if not claim:
+            return None
+        ce = model.encode([claim], normalize_embeddings=True, show_progress_bar=False)[0]
+        return max(cosine(ce, se) for se in sent_embs)
+
+    return score
 
 
 @dataclass
@@ -683,6 +743,12 @@ def eval_note(note_path: Path | str, pdf_path: Path | str, pipeline_version: str
         llm_meta["output_tokens"] += audit_meta.get("output_tokens", 0)
         llm_meta["cached_calls"] += audit_meta.get("cached_calls", 0)
         llm_meta["quality_flags"] = sorted(set(llm_meta.get("quality_flags", [])) | set(audit_meta.get("quality_flags", [])))
+
+    # Fix B (flag-only): not_in_context-Claims, die semantisch im Volltext stehen, als
+    # mögliche Retrieval-Misses flaggen (kein Relabel → kein Masking; nur sichtbar machen).
+    claim_scores = apply_source_presence_fallback(
+        claim_scores, _build_presence_scorer(pdf_path, claim_scores)
+    )
 
     return _aggregate(note_path, pdf_path, pipeline_version, timestamp, language_pair, chunks, claim_scores, llm_meta)
 
