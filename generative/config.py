@@ -97,6 +97,17 @@ DEDUP_EXCLUDE_TYPES = frozenset({"literature", "moc", "merge-stub"})
 REDUNDANT_SIBLING_COSINE_THRESHOLD = float(
     os.getenv("ATOMIC_AGENT_REDUNDANT_SIBLING_COSINE", "0.90"))
 
+# Stage-B-Sibling-Linking: ab dieser Body-Cosine wird ein Pipeline-Geschwister
+# OHNE Titel-/Alias-Token-Overlap trotzdem als related-Kandidat aufgenommen (additiv
+# zum Token-Gate, das unverändert bleibt). Fängt semantisch nahe, aber lexikalisch
+# disjunkt betitelte Geschwister (dt. Komposita, Alias-Drift) — z.B.
+# "Wissensorganisation" ↔ "Semantisches Retrieval mit Assoziationsnetz" (cos 0.97).
+# Empirisch kalibriert 2026-06-27: verwandte Geschwister 0.97–0.985, fremde Paare
+# 0.73–0.76 → 0.85 trennt mit Marge. Kandidatur ist looser als der Redundanz-Flag
+# (0.90); der LLM bleibt finaler Arbiter über den Link. ENV-überschreibbar.
+SIBLING_SEMANTIC_COSINE_THRESHOLD = float(
+    os.getenv("ATOMIC_AGENT_SIBLING_SEMANTIC_COSINE", "0.85"))
+
 # Chunk-Größe Fallback (Wörter)
 CHUNK_WORDS = 3000
 

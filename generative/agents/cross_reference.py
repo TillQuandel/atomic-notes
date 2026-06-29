@@ -6,7 +6,7 @@ from pathlib import Path
 from generative.agents.base import call_claude
 from generative.agents.structured_output import parse_cross_reference_output
 from generative import config as _config
-from generative.config import VAULT, MODEL_CROSS_REF, ENABLE_NLI_VALIDATION, NLI_MODEL_NAME, NLI_CONTRADICTION_THRESHOLD
+from generative.config import VAULT, MODEL_CROSS_REF, ENABLE_NLI_VALIDATION, NLI_MODEL_NAME, NLI_CONTRADICTION_THRESHOLD, SIBLING_SEMANTIC_COSINE_THRESHOLD
 from generative.schemas.atomic_note import AtomicNoteDraft
 
 # Mindest-Anzahl `related`-Wikilinks für eine Schema-konforme Note (siehe Schema-Konzept §5)
@@ -282,6 +282,47 @@ def _excerpt_from_body(body: str, max_words: int = 150) -> str:
     return " ".join(body.split()[:max_words])
 
 
+def _rank_sibling_candidates(draft: AtomicNoteDraft,
+                             siblings: dict[str, AtomicNoteDraft] | None,
+                             query_tokens: set,
+                             sib_cosine_fn,
+                             threshold: float | None = None
+                             ) -> list[tuple[str, AtomicNoteDraft]]:
+    """Pipeline-Geschwister als related-Kandidaten ranken — ADDITIV.
+
+    Signal 1 (unverändert): Titel-/Alias-Token-Overlap (≥1) — starkes lexikalisches
+    Signal, Score ≥ 2.0, rankt vor semantischen Treffern.
+    Signal 2 (neu): für lexikalisch disjunkte Geschwister (0 Tokens) entscheidet
+    ``sib_cosine_fn(sib_draft) → float`` gegen ``threshold``. Fängt semantisch nahe,
+    aber anders betitelte Geschwister (dt. Komposita, Alias-Drift), die der reine
+    Token-Gate verfehlt (z.B. „Wissensorganisation" ↔ „Semantisches Retrieval mit
+    Assoziationsnetz"). Der LLM bleibt finaler Arbiter über den tatsächlichen Link.
+
+    ``sib_cosine_fn`` wird NUR für Token-disjunkte Geschwister aufgerufen (spart
+    Embedding-Calls). Top 5.
+    """
+    if not siblings:
+        return []
+    if threshold is None:
+        threshold = SIBLING_SEMANTIC_COSINE_THRESHOLD
+    scored: list[tuple[float, str, AtomicNoteDraft]] = []
+    for sib_title, sib_draft in siblings.items():
+        if sib_title == draft.title:
+            continue  # self
+        sib_keys = _tokens(sib_title)
+        for alias in sib_draft.aliases:
+            sib_keys |= _tokens(alias)
+        overlap = len(query_tokens & sib_keys)
+        if overlap >= 1:
+            scored.append((1.0 + overlap, sib_title, sib_draft))  # lexikalisch vor semantisch
+            continue
+        cos = sib_cosine_fn(sib_draft)
+        if cos >= threshold:
+            scored.append((cos, sib_title, sib_draft))  # 0<cos<1 → unter Token-Treffern
+    scored.sort(key=lambda t: -t[0])
+    return [(t, d) for _, t, d in scored[:5]]
+
+
 def run(draft: AtomicNoteDraft, existing_concepts: dict[str, str],
         siblings: dict[str, AtomicNoteDraft] | None = None) -> AtomicNoteDraft:
     # Relevante existierende Notes finden via Content-Token-Overlap.
@@ -304,22 +345,22 @@ def run(draft: AtomicNoteDraft, existing_concepts: dict[str, str],
 
     # Stage B (F5): Pipeline-Sibling-Drafts als zusätzliche Kandidaten.
     # Drafts vom selben PDF-Lauf kennen sich nicht — Cross-Reference sah bisher nur
-    # Vault. Bei Kuhlthau-ISP-Phasen führt das zu 0-1 related → Hard-Gate-Fail.
-    # Sibling-Drafts werden mit gleicher Token-Overlap-Heuristik geranked, Top 5.
+    # Vault. Token-Overlap-Gate verfehlte lexikalisch disjunkte, aber semantisch nahe
+    # Geschwister (0 Tokens → 0 Kandidaten → leeres related). Jetzt additiv:
+    # Token-Overlap ODER Body-Embedding-Cosine ≥ Schwelle (_rank_sibling_candidates).
     sibling_candidates: list[tuple[str, AtomicNoteDraft]] = []
     if siblings:
-        scored_sib: list[tuple[int, str, AtomicNoteDraft]] = []
-        for sib_title, sib_draft in siblings.items():
-            if sib_title == draft.title:
-                continue  # self
-            sib_keys = _tokens(sib_title)
-            for alias in sib_draft.aliases:
-                sib_keys |= _tokens(alias)
-            overlap = len(query_tokens & sib_keys)
-            if overlap >= 1:
-                scored_sib.append((overlap, sib_title, sib_draft))
-        scored_sib.sort(key=lambda t: -t[0])
-        sibling_candidates = [(t, d) for _, t, d in scored_sib[:5]]
+        from generative.pipeline import embeddings as _emb
+        _draft_emb: dict[str, object] = {}
+
+        def _sib_cos(sib_draft: AtomicNoteDraft) -> float:
+            # Draft-Embedding einmal cachen; nur Token-disjunkte Siblings landen hier.
+            if "e" not in _draft_emb:
+                _draft_emb["e"] = _emb.embed_body(draft.body or "")
+            return _emb.cosine(_draft_emb["e"], _emb.embed_body(sib_draft.body or ""))
+
+        sibling_candidates = _rank_sibling_candidates(
+            draft, siblings, query_tokens, _sib_cos)
 
     total_candidates = len(vault_candidates) + len(sibling_candidates)
     if total_candidates == 0:
