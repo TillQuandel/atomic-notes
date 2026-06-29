@@ -526,6 +526,13 @@ def auto_write_decision(note: AtomicNoteDraft) -> tuple[bool, str]:
                      and note.critic_score >= 4
                      and len(note.hub_subconcepts) >= 2)
 
+    # Edition unverifiziert (Auszug ohne DOI): Auflage/Jahr/Seiten sind nur
+    # dateiname-geraten, nicht belegt → nie automatisch in den Vault, immer in die
+    # Inbox zur manuellen Bestätigung (oder via --doi pinnen). Vor allen anderen
+    # Pfaden, damit auch ein Score-5-Auszug geblockt wird.
+    if note.source_status == "edition-unverified":
+        return False, "edition unverifiziert (Auszug ohne DOI)"
+
     if not note.hard_gates_pass and not is_strong_hub:
         return False, "hard-gate fail (Glance/Future-Self/Quellen)"
     # Pfad C: Hub-Note mit Score ≥ 4 und ≥2 Sub-Konzepten → Vault auch ohne HG-pass
