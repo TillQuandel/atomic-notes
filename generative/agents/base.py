@@ -137,9 +137,10 @@ def _ensure_dirs() -> None:
     _RUN_DIR.mkdir(parents=True, exist_ok=True)
 
 
-def _cache_key(prompt: str, model: str, agent: str = "") -> str:
+def _cache_key(prompt: str, model: str, agent: str = "", namespace: str | None = None) -> str:
+    ns = _CACHE_NAMESPACE if namespace is None else namespace
     h = hashlib.sha256()
-    h.update((_CACHE_NAMESPACE or "").encode("utf-8"))
+    h.update((ns or "").encode("utf-8"))
     h.update(b"\0")
     h.update((model or "").encode("utf-8"))
     h.update(b"\0")
@@ -182,12 +183,12 @@ def _cache_put(key: str, result: CallResult) -> None:
 
 
 def _trace(agent: str, prompt: str, model: str, result: CallResult,
-           error: Optional[str] = None) -> None:
+           error: Optional[str] = None, cache_key: Optional[str] = None) -> None:
     entry = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "agent": agent,
         "model": model,
-        "prompt_hash": _cache_key(prompt, model),
+        "prompt_hash": cache_key if cache_key is not None else _cache_key(prompt, model),
         "input_tokens": result.input_tokens,
         "output_tokens": result.output_tokens,
         "cache_read_tokens": result.cache_read_tokens,
@@ -240,15 +241,19 @@ def call_claude(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
 
 
 def call_claude_full(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
-                     use_cache: bool = True) -> CallResult:
-    """Synchroner Aufruf mit vollem CallResult (text + usage)."""
+                     use_cache: bool = True, cache_namespace: str | None = None) -> CallResult:
+    """Synchroner Aufruf mit vollem CallResult (text + usage).
+
+    cache_namespace ueberschreibt den globalen Run-Salt (set_cache_namespace) fuer
+    diesen Call: "" = run-unabhaengiger, rein content-adressierter Cache-Key.
+    """
     with _llm_span(agent, prompt, model) as span:
-        key = _cache_key(prompt, model, agent)
+        key = _cache_key(prompt, model, agent, namespace=cache_namespace)
         if use_cache:
             cached = _cache_get(key)
             if cached is not None:
                 _annotate_llm_span(span, cached, cache_hit=True)
-                _trace(agent, prompt, model, cached)
+                _trace(agent, prompt, model, cached, cache_key=key)
                 _record_call(agent, prompt, cached.text)
                 return cached
 
@@ -257,14 +262,14 @@ def call_claude_full(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unkn
         except RuntimeError as e:
             result = CallResult(text="")
             _annotate_llm_span(span, result, error=str(e))
-            _trace(agent, prompt, model, result, error=str(e))
+            _trace(agent, prompt, model, result, error=str(e), cache_key=key)
             _record_call(agent, prompt, "", error=str(e))
             raise
 
         _annotate_llm_span(span, result)
         if use_cache:
             _cache_put(key, result)
-        _trace(agent, prompt, model, result)
+        _trace(agent, prompt, model, result, cache_key=key)
         _record_call(agent, prompt, result.text)
         return result
 
