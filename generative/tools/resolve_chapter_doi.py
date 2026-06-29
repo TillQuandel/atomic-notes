@@ -11,6 +11,7 @@ Der Extraktions-Schritt ruft `resolve_chapter_doi(...)` mit Titel + Autor +
 `--doi` an die Pipeline. Dann ist die Zitation CrossRef-belegt statt
 dateiname-geraten, und eine falsche Auflage fällt sofort auf (kein Match → None).
 """
+
 from __future__ import annotations
 
 import json
@@ -38,8 +39,7 @@ def _year(item: dict) -> Optional[int]:
     return parts[0] if parts and parts[0] else None
 
 
-def pick_chapter_doi(items: list[dict], start_page: int,
-                     year: Optional[str] = None) -> Optional[dict]:
+def pick_chapter_doi(items: list[dict], start_page: int, year: Optional[str] = None) -> Optional[dict]:
     """Wählt aus CrossRef-Treffern das Kapitel, dessen Seitenbereich auf
     ``start_page`` beginnt — und, falls ``year`` gegeben, dessen Jahr passt.
 
@@ -63,8 +63,9 @@ def pick_chapter_doi(items: list[dict], start_page: int,
     return matches[0] if len(matches) == 1 else None
 
 
-def resolve_chapter_doi(title: str, author: Optional[str], start_page: int,
-                        year: Optional[str] = None, rows: int = 10) -> Optional[dict]:
+def resolve_chapter_doi(
+    title: str, author: Optional[str], start_page: int, year: Optional[str] = None, rows: int = 10
+) -> Optional[dict]:
     """Fragt CrossRef nach ``title``(+``author``) und disambiguiert per Startseite.
 
     Gibt das matchende CrossRef-Item (inkl. ``DOI``) zurück oder ``None``. I/O —
@@ -86,18 +87,18 @@ def resolve_chapter_doi(title: str, author: Optional[str], start_page: int,
 
 def _main(argv: list[str]) -> int:
     import argparse
-    p = argparse.ArgumentParser(
-        description="Kapitel-DOI über den Seitenbereich auflösen (Edition-Beweis).")
+
+    p = argparse.ArgumentParser(description="Kapitel-DOI über den Seitenbereich auflösen (Edition-Beweis).")
     p.add_argument("--title", required=True, help="Kapitel- oder Werk-Titel")
     p.add_argument("--author", default=None, help="Autor (Nachname genügt)")
-    p.add_argument("--start-page", type=int, required=True,
-                   help="Bekannte Druck-Startseite des Kapitels (beweist die Auflage)")
+    p.add_argument(
+        "--start-page", type=int, required=True, help="Bekannte Druck-Startseite des Kapitels (beweist die Auflage)"
+    )
     p.add_argument("--year", default=None, help="Erwartetes Jahr (fail-closed-Filter)")
     a = p.parse_args(argv)
     hit = resolve_chapter_doi(a.title, a.author, a.start_page, a.year)
     if not hit:
-        print("kein eindeutiger Treffer (Seitenbereich passt zu keiner Auflage) — kein DOI gepinnt",
-              file=sys.stderr)
+        print("kein eindeutiger Treffer (Seitenbereich passt zu keiner Auflage) — kein DOI gepinnt", file=sys.stderr)
         return 1
     print(hit["DOI"])
     return 0

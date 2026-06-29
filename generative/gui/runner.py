@@ -6,6 +6,7 @@ stdout zeilenweise durch den RunParser zu strukturierten Events. Ein Subprocess
 VAULT/BACKEND beim Import aus ENV (config.py:7-12) und ruft `sys.exit()` —
 beides unkritisch in einem eigenen Prozess.
 """
+
 from __future__ import annotations
 
 import os

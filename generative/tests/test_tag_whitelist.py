@@ -5,6 +5,7 @@ Konservative Variante (Codex-Empfehlung + Literatur-Konvergenz):
 - Source-Scoring sortiert die Whitelist im Prompt in zwei Blöcke (Bias-Fix)
 - proposed-tags als getrenntes Schema-Feld für Bootstrap, KEIN Routing
 """
+
 from __future__ import annotations
 
 
@@ -13,6 +14,7 @@ from generative.agents.extractor import _validate_proposed_tags, _format_tag_whi
 
 
 # ---- Source-Scoring (Schwäche 4a: Bias-Fix) ---------------------------------
+
 
 def test_score_finds_lexical_match():
     whitelist = ["change-management", "information-behavior", "methods"]
@@ -56,14 +58,13 @@ def test_score_stopwords_ignored():
 def test_score_priority_by_overlap_count():
     # Mehr Token-Overlap → höherer Rang
     whitelist = ["change", "change-management", "change-management-process"]
-    prio, _ = score_tags_for_source(
-        whitelist, "Change management process for organizational change."
-    )
+    prio, _ = score_tags_for_source(whitelist, "Change management process for organizational change.")
     # change-management-process matched alle drei Tokens, sollte vor "change" stehen
     assert prio[0] == "change-management-process"
 
 
 # ---- Format-Output für Prompt -----------------------------------------------
+
 
 def test_format_whitelist_two_blocks_when_source_given():
     whitelist = ["change-management", "uni/ibi/konzept", "methods"]
@@ -88,6 +89,7 @@ def test_format_whitelist_empty():
 
 
 # ---- Proposed-Tag-Validator (Schwäche 4b: Bootstrap) ------------------------
+
 
 def test_validator_accepts_kebab_case_hierarchical():
     out = _validate_proposed_tags(["change-management/adkar"], whitelist=set())
@@ -117,9 +119,7 @@ def test_validator_drops_tags_already_in_whitelist():
 
 
 def test_validator_max_count_two():
-    out = _validate_proposed_tags(
-        ["one", "two", "three", "four"], whitelist=set(), max_count=2
-    )
+    out = _validate_proposed_tags(["one", "two", "three", "four"], whitelist=set(), max_count=2)
     assert len(out) == 2
 
 
@@ -135,6 +135,7 @@ def test_validator_strips_hash_prefix():
 
 
 # ---- Codex-Schwäche4-Review Folge-Fixes -------------------------------------
+
 
 def test_validator_rejects_trailing_hyphen():
     # Codex-Finding 2: `bad-` durfte unter alter Regex durch
@@ -164,10 +165,16 @@ def test_render_moc_includes_proposed_tags():
     """Codex-Finding 5: render_moc rendert proposed-tags-Block."""
     from generative.pipeline.vault_writer import render_moc
     from generative.schemas.atomic_note import AtomicNoteDraft
+
     note = AtomicNoteDraft(
-        title="ADKAR Model", body="# Hub\n\nEinleitung.", source_anchors=[],
-        related=[], tags=[], synthesis_confidence="medium",
-        action="hub", hub_subconcepts=["Awareness", "Desire"],
+        title="ADKAR Model",
+        body="# Hub\n\nEinleitung.",
+        source_anchors=[],
+        related=[],
+        tags=[],
+        synthesis_confidence="medium",
+        action="hub",
+        hub_subconcepts=["Awareness", "Desire"],
         proposed_tags=["change-management/adkar"],
         tag_review_status="needs-review",
     )
@@ -180,9 +187,14 @@ def test_render_moc_includes_proposed_tags():
 def test_render_note_skips_proposed_block_when_empty():
     from generative.pipeline.vault_writer import render_note
     from generative.schemas.atomic_note import AtomicNoteDraft
+
     note = AtomicNoteDraft(
-        title="Test", body="# Test\n\nBody.", source_anchors=[],
-        related=[], tags=["methods"], synthesis_confidence="medium",
+        title="Test",
+        body="# Test\n\nBody.",
+        source_anchors=[],
+        related=[],
+        tags=["methods"],
+        synthesis_confidence="medium",
     )
     out = render_note(note, source_file="test.pdf")
     assert "proposed-tags:" not in out
@@ -192,6 +204,7 @@ def test_render_note_skips_proposed_block_when_empty():
 def test_header_normalizes_dash_to_underscore():
     """Zusatzbefund: Modell schreibt `proposed-tags:`, Parser muss das aufnehmen."""
     from generative.agents.structured_output import parse_extractor_output
+
     text = (
         "<!--NOTE-->\n"
         "title: Test\n"
@@ -210,6 +223,7 @@ def test_registry_loader_handles_top_level_list():
     from generative.agents import context_builder
     import tempfile
     from pathlib import Path
+
     with tempfile.NamedTemporaryFile("w", suffix=".yml", delete=False, encoding="utf-8") as f:
         f.write("- just\n- a\n- list\n")
         path = Path(f.name)
@@ -227,6 +241,7 @@ def test_registry_loader_validates_schema():
     from generative.agents import context_builder
     import tempfile
     from pathlib import Path
+
     with tempfile.NamedTemporaryFile("w", suffix=".yml", delete=False, encoding="utf-8") as f:
         f.write("approved:\n  - valid-tag\n  - bad-\n  - a//b\n  - UPPER\n  - ok/deep/tag\n")
         path = Path(f.name)
@@ -275,6 +290,7 @@ def test_inbox_reread_preserves_proposed_tags_block():
     from generative.pipeline.vault_writer import _read_proposed_tags_from_inbox
     import tempfile
     from pathlib import Path
+
     content = """---
 title: "Test"
 tags:
@@ -301,6 +317,7 @@ Body.
 def test_inbox_reread_handles_missing_file():
     from generative.pipeline.vault_writer import _read_proposed_tags_from_inbox
     from pathlib import Path
+
     tags, status = _read_proposed_tags_from_inbox(Path("/nonexistent/file.md"))
     assert tags == []
     assert status is None
@@ -310,6 +327,7 @@ def test_inbox_reread_handles_no_proposed_block():
     from generative.pipeline.vault_writer import _read_proposed_tags_from_inbox
     import tempfile
     from pathlib import Path
+
     content = """---
 title: "Test"
 tags:
@@ -331,6 +349,7 @@ Body without proposed-tags.
 def test_registry_loader_missing_file_returns_empty():
     from generative.agents import context_builder
     from pathlib import Path
+
     orig = context_builder.TAG_REGISTRY_PATH
     try:
         context_builder.TAG_REGISTRY_PATH = Path("/nonexistent/path/registry.yml")

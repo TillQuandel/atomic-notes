@@ -16,6 +16,7 @@ Architektur (siehe [[Akronym-Erkennung]] im Wissenspool):
 Keine private Whitelist — alle Auflösungen kommen aus dem Quell-PDF oder via
 LLM-Inferenz. Publish-tauglich, multilingual, multi-domain.
 """
+
 from __future__ import annotations
 import os
 import re
@@ -31,9 +32,7 @@ _SHORT_FORM_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9\-&]{1,9}$")
 # Pattern (i): "Long Form (Short Form)" — Klammer enthält Kandidaten für Short Form
 # Klammer-Inhalt-Limit großzügig (200 chars) damit auch lange Long Forms in
 # Pattern (ii) ("Short Form (Long Form)") matchen.
-_PAT_LONG_PAREN_SHORT = re.compile(
-    r"([^()]{1,200}?)\s*\(\s*([A-Za-z0-9][A-Za-z0-9\-&,.\s]{1,200}?)\s*\)"
-)
+_PAT_LONG_PAREN_SHORT = re.compile(r"([^()]{1,200}?)\s*\(\s*([A-Za-z0-9][A-Za-z0-9\-&,.\s]{1,200}?)\s*\)")
 
 # Pattern (ii): "Short Form (Long Form)" — Klammer enthält Long Form (>2 Wörter)
 # wird unten anhand Wort-Anzahl in der Klammer entschieden
@@ -171,14 +170,14 @@ def extract_acronym_pairs(text: str) -> dict[str, str]:
 
 # ---------- Body-Insertion (idempotent) -----------------------------------
 
+
 def _already_resolved(body: str, acronym: str, expansion: str) -> bool:
     """Akronym gilt als aufgelöst, wenn die Langform irgendwo im Body steht
     (egal ob als `(...)` direkt nach dem Akronym oder als eigenständige Phrase)."""
     return expansion.lower() in body.lower()
 
 
-def expand_acronyms(body: str,
-                    whitelist: dict[str, str] | None = None) -> tuple[str, list[str]]:
+def expand_acronyms(body: str, whitelist: dict[str, str] | None = None) -> tuple[str, list[str]]:
     """Fügt beim ersten Vorkommen jedes Akronyms aus der Whitelist `(<Auflösung>)` ein.
 
     Returns: (modifizierter Body, Liste der eingefügten Akronyme).
@@ -211,11 +210,36 @@ def expand_acronyms(body: str,
 # Heuristik: Akronym-Kandidaten im Body, die NICHT im Schwartz-Hearst-Dict stehen.
 # Pattern: ≥2 chars, ≥2 Großbuchstaben (mind. 60%), 2-10 chars total.
 _BODY_ACRONYM_RE = re.compile(r"\b([A-ZÄÖÜ][A-ZÄÖÜ0-9\-&]{1,9})\b")
-_COMMON_NON_ACRONYMS = frozenset({
-    "DER", "DIE", "DAS", "UND", "ODER", "ICH", "WIR", "SIE", "ER", "ES",
-    "THE", "AND", "OR", "FOR", "NOT", "BUT", "YES", "NO", "TO", "OF",
-    "GMBH", "KG", "EG", "EU", "USA", "UK",  # Common but rarely need expansion
-})
+_COMMON_NON_ACRONYMS = frozenset(
+    {
+        "DER",
+        "DIE",
+        "DAS",
+        "UND",
+        "ODER",
+        "ICH",
+        "WIR",
+        "SIE",
+        "ER",
+        "ES",
+        "THE",
+        "AND",
+        "OR",
+        "FOR",
+        "NOT",
+        "BUT",
+        "YES",
+        "NO",
+        "TO",
+        "OF",
+        "GMBH",
+        "KG",
+        "EG",
+        "EU",
+        "USA",
+        "UK",  # Common but rarely need expansion
+    }
+)
 
 
 def _candidate_acronyms_in_body(body: str, resolved: set[str]) -> list[tuple[str, str]]:
@@ -233,7 +257,7 @@ def _candidate_acronyms_in_body(body: str, resolved: set[str]) -> list[tuple[str
         if token in _COMMON_NON_ACRONYMS:
             continue
         # Skip wenn sofort von `(` gefolgt — das ist eine bereits-gegebene Auflösung
-        if body[m.end():m.end() + 2].lstrip().startswith("("):
+        if body[m.end() : m.end() + 2].lstrip().startswith("("):
             continue
         seen.add(token)
         start = max(0, m.start() - 100)
@@ -282,7 +306,7 @@ def llm_resolve_unknown(acronym: str, context: str) -> str | None:
     for line in raw.splitlines():
         line = line.strip()
         if line.startswith("LONG_FORM:"):
-            value = line[len("LONG_FORM:"):].strip()
+            value = line[len("LONG_FORM:") :].strip()
             if value and value != "UNKNOWN" and len(value) > len(acronym):
                 return value
     return None

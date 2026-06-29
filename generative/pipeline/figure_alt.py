@@ -8,6 +8,7 @@ Empirisch motiviert: nur tagged-PDFs speichern eine semantische Figur-Einheit;
 untagged-Vektor-Extraktion ist deterministisch widerlegt (Spike A/C, siehe
 docs/superpowers/specs/2026-06-04-figure-embedding-feasibility.md).
 """
+
 from __future__ import annotations
 
 import re
@@ -25,7 +26,8 @@ _NO_ANCHOR = -1  # anchor_page-Sentinel fuer geskippte (nicht-bindbare) Figuren
 @dataclass(frozen=True)
 class TaggedFigure:
     """Eine aus einem getaggten PDF extrahierte Figur (Alt-Text-Pfad)."""
-    anchor_page: int          # source_anchor-Seitennummer (pdftotext-Space)
+
+    anchor_page: int  # source_anchor-Seitennummer (pdftotext-Space)
     alt_text: str
     label: Optional[str] = None  # Caption-Label, z.B. "Abbildung 2", falls vorhanden
 
@@ -58,7 +60,10 @@ def _page_text_flags(pdf_path: Path, page_count: int) -> list[bool]:
     try:
         result = subprocess.run(
             ["pdftotext", str(pdf_path), "-"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
             timeout=120,
         )
     except (subprocess.TimeoutExpired, OSError):
@@ -91,6 +96,7 @@ def embed_alt_figures(pdf_path: Path, drafts: list[AtomicNoteDraft]) -> BindRepo
         page_count = doc.page_count
     has_text = _page_text_flags(pdf_path, page_count)
     from generative.pipeline.pdf_chunker import _pdf_page_labels
+
     page_labels = _pdf_page_labels(pdf_path)
 
     figures: list[TaggedFigure] = []
@@ -110,8 +116,7 @@ def embed_alt_figures(pdf_path: Path, drafts: list[AtomicNoteDraft]) -> BindRepo
     return report
 
 
-def bind_figures_to_drafts(figures: list[TaggedFigure],
-                           drafts: list[AtomicNoteDraft]) -> BindReport:
+def bind_figures_to_drafts(figures: list[TaggedFigure], drafts: list[AtomicNoteDraft]) -> BindReport:
     """Bindet Figuren an genau eine create-Note mit exaktem source_anchor-Seitenmatch.
 
     Precision-first: nur ``action == "create"``-Drafts, nur exakte ``page``-Treffer
@@ -124,11 +129,7 @@ def bind_figures_to_drafts(figures: list[TaggedFigure],
 
     for fig in figures:
         target_page = f"S. {fig.anchor_page}"
-        matches = [
-            d for d in drafts
-            if d.action == "create"
-            and any(a.page == target_page for a in d.source_anchors)
-        ]
+        matches = [d for d in drafts if d.action == "create" and any(a.page == target_page for a in d.source_anchors)]
         if len(matches) == 1:
             per_draft.setdefault(id(matches[0]), []).append(fig)
             report.bound.append((fig, matches[0].title))
@@ -163,6 +164,7 @@ def _sanitize_alt(text: str) -> str:
 def is_tagged_pdf(pdf_path: Path) -> bool:
     """True wenn das PDF PDF-UA-getaggt ist (StructTreeRoot im Catalog)."""
     import fitz  # PyMuPDF
+
     try:
         with fitz.open(str(pdf_path)) as doc:
             return doc.xref_get_key(doc.pdf_catalog(), "StructTreeRoot")[0] == "xref"
@@ -205,8 +207,7 @@ def extract_tagged_figures(pdf_path: Path) -> list[tuple[int, str]]:
     return figures
 
 
-def pdf_index_to_anchor_page(has_text: list[bool], pymupdf_index: int,
-                             page_labels: list | None = None) -> int | None:
+def pdf_index_to_anchor_page(has_text: list[bool], pymupdf_index: int, page_labels: list | None = None) -> int | None:
     """Bildet einen 0-basierten PyMuPDF-Seitenindex auf die source_anchor-Seitennummer ab.
 
     ``source_anchors`` tragen dieselbe Seitenzahl wie ``pdf_chunker.pdf_to_pages``:

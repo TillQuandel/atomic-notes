@@ -1,4 +1,5 @@
 """Tests für Schwartz-Hearst-basierte Akronym-Erkennung + Body-Insertion."""
+
 from __future__ import annotations
 
 
@@ -12,6 +13,7 @@ from generative.pipeline.acronym_fix import (
 
 
 # ---- _short_is_valid -----------------------------------------------------
+
 
 def test_short_valid_classic_acronyms():
     for s in ["IT", "API", "CSCW", "UCLA", "DOI", "ISBN"]:
@@ -45,6 +47,7 @@ def test_short_valid_with_special_chars():
 
 # ---- _letter_match -------------------------------------------------------
 
+
 def test_letter_match_exact():
     assert _letter_match("CSCW", "Computer-Supported Cooperative Work")
     assert _letter_match("ISP", "Information Search Process")
@@ -70,6 +73,7 @@ def test_letter_match_fails_when_letters_missing():
 
 # ---- _trim_long_form -----------------------------------------------------
 
+
 def test_trim_long_form_picks_shortest_match():
     # Even if longer prefix would match, pick shortest valid
     long = "the field of Computer-Supported Cooperative Work"
@@ -85,6 +89,7 @@ def test_trim_long_form_handles_compound_word():
 
 # ---- extract_acronym_pairs (integration) ---------------------------------
 
+
 def test_extract_pattern_i_long_paren_short():
     text = "The Information Search Process (ISP) was developed."
     pairs = extract_acronym_pairs(text)
@@ -98,10 +103,7 @@ def test_extract_pattern_ii_short_paren_long():
 
 
 def test_extract_german_text():
-    text = (
-        "Das Verfahren der Informations-Such-Prozess (ISP) wurde entwickelt. "
-        "Mountain-Bike (MTB) hat Disziplinen."
-    )
+    text = "Das Verfahren der Informations-Such-Prozess (ISP) wurde entwickelt. Mountain-Bike (MTB) hat Disziplinen."
     pairs = extract_acronym_pairs(text)
     assert "ISP" in pairs
     assert pairs["ISP"] == "Informations-Such-Prozess"
@@ -116,10 +118,7 @@ def test_extract_skips_year_in_parens():
 
 
 def test_extract_multiple_acronyms():
-    text = (
-        "Application Programming Interface (API) returns JSON. "
-        "HyperText Transfer Protocol (HTTP) is standard."
-    )
+    text = "Application Programming Interface (API) returns JSON. HyperText Transfer Protocol (HTTP) is standard."
     pairs = extract_acronym_pairs(text)
     assert pairs["API"] == "Application Programming Interface"
     assert pairs["HTTP"] == "HyperText Transfer Protocol"
@@ -133,6 +132,7 @@ def test_extract_no_long_form_no_match():
 
 
 # ---- expand_acronyms (body insertion) ------------------------------------
+
 
 def test_expand_inserts_at_first_occurrence():
     body = "CSCW ist ein Forschungsfeld. CSCW betrifft Gruppenarbeit."

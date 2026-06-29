@@ -4,6 +4,7 @@ Echte Subprocesses (kein Mock): ein kleines `python -c`-Skript druckt
 orchestrator-typische Marker-Zeilen, der Runner muss daraus die geparsten
 Events streamen.
 """
+
 import sys
 
 from generative.gui.runner import build_argv, iter_run_events
@@ -24,10 +25,7 @@ def test_build_argv_real_run_omits_dry_run():
 
 
 def test_iter_run_events_streams_parsed_events():
-    script = (
-        "print('[1/7] PDF extrahieren…'); "
-        "print('=== Fertig: 1 Notes (dry-run) ==='); "
-    )
+    script = "print('[1/7] PDF extrahieren…'); print('=== Fertig: 1 Notes (dry-run) ==='); "
     evs = list(iter_run_events([sys.executable, "-c", script]))
     types = [e["type"] for e in evs]
     assert "stage" in types

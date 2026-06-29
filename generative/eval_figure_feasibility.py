@@ -9,6 +9,7 @@ mechanische Figur-Signale liefert:
 
 Tabellen bleiben absichtlich ausserhalb dieser Lane.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -65,12 +66,14 @@ def find_figure_captions(page_text: str, page: int) -> list[FigureCaption]:
         match = _FIGURE_CAPTION_RE.match(stripped)
         if not match:
             continue
-        captions.append(FigureCaption(
-            page=page,
-            label=" ".join(match.group(1).split()),
-            text=stripped,
-            line_number=line_number,
-        ))
+        captions.append(
+            FigureCaption(
+                page=page,
+                label=" ".join(match.group(1).split()),
+                text=stripped,
+                line_number=line_number,
+            )
+        )
     return captions
 
 
@@ -171,12 +174,14 @@ def _page_visual_signals(pdf_path: Path, pages: list[tuple[int, str]]) -> list[P
             page = doc[pymupdf_index]
             raster_images = _count_raster_image_placements(page)
             vector_drawings = len(page.get_drawings())
-            signals.append(PageVisualSignals(
-                page=page_number,
-                raster_images=raster_images,
-                vector_drawings=vector_drawings,
-                captions=find_figure_captions(page_text, page_number),
-            ))
+            signals.append(
+                PageVisualSignals(
+                    page=page_number,
+                    raster_images=raster_images,
+                    vector_drawings=vector_drawings,
+                    captions=find_figure_captions(page_text, page_number),
+                )
+            )
     return signals
 
 
@@ -207,14 +212,16 @@ def analyze_pdf(pdf_path: Path) -> dict[str, Any]:
     pages_report = []
     for signal in page_signals:
         classification = classify_page_signals(signal)
-        pages_report.append({
-            "page": signal.page,
-            "raster_images": signal.raster_images,
-            "vector_drawings": signal.vector_drawings,
-            "captions": [dataclasses.asdict(c) for c in signal.captions],
-            "classification": classification,
-            "warning": warning_for_classification(classification),
-        })
+        pages_report.append(
+            {
+                "page": signal.page,
+                "raster_images": signal.raster_images,
+                "vector_drawings": signal.vector_drawings,
+                "captions": [dataclasses.asdict(c) for c in signal.captions],
+                "classification": classification,
+                "warning": warning_for_classification(classification),
+            }
+        )
 
     return {
         "pdf": str(pdf_path),

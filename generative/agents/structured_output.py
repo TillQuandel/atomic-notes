@@ -9,13 +9,13 @@ Format-Spec siehe Docstrings der einzelnen `parse_*_output`-Funktionen.
 Edge-Cases sind durch `tests/test_structured_parser.py` abgedeckt — Format-
 Änderungen ohne Test-Update sind ein v16-Wiederholungs-Risiko.
 """
+
 from __future__ import annotations
 import re
 
 # Erkannte Sentinels — strikt ALL_CAPS_WITH_UNDERSCORES.
 # Lowercase oder unbekannte Namen werden als Body-Content behandelt.
-_SENTINELS = {"NOTE", "BODY", "ANCHOR", "QUOTE", "REVISION_HINT",
-              "CONCEPT", "CONTRADICTION", "RELATED", "END"}
+_SENTINELS = {"NOTE", "BODY", "ANCHOR", "QUOTE", "REVISION_HINT", "CONCEPT", "CONTRADICTION", "RELATED", "END"}
 _SENTINEL_RE = re.compile(r"^\s*<!--([A-Z_]+)-->\s*$")
 # Modelle schreiben gelegentlich `proposed-tags:` statt `proposed_tags:` (Prompt-Drift).
 # Bindestriche werden in `parse_header_line()` zu `_` normalisiert, sonst geht der
@@ -139,6 +139,7 @@ def _finalize_anchor(note: dict, anchor: dict, warnings: list[str]) -> None:
 
 # --- Per-Agent-Parser ---
 
+
 def parse_extractor_output(text: str) -> tuple[list[dict], list[str]]:
     """Parst Extractor-Output (Liste von Notes mit body + source_anchors).
 
@@ -198,9 +199,7 @@ def parse_extractor_output(text: str) -> tuple[list[dict], list[str]]:
                 warnings.append("BODY ohne vorhergehendes NOTE — verworfen")
                 continue
             if "body" in current_note:
-                warnings.append(
-                    f"Duplicate BODY in '{current_note.get('title', '?')}' — last wins"
-                )
+                warnings.append(f"Duplicate BODY in '{current_note.get('title', '?')}' — last wins")
             current_note["body"] = _join_body(content)
         elif name == "ANCHOR":
             if current_anchor is not None and current_note is not None:
@@ -395,31 +394,29 @@ def parse_planner_output(text: str) -> tuple[dict, list[str]]:
                 continue
             category = (h.get("category") or "conceptual").lower()
             if category not in ("architectural", "operational", "conceptual"):
-                warnings.append(
-                    f"Planner: ungültige category '{category}' für '{title}' → conceptual"
-                )
+                warnings.append(f"Planner: ungültige category '{category}' für '{title}' → conceptual")
                 category = "conceptual"
 
             raw_origin = (h.get("origin") or "primary").lower().strip()
             if raw_origin not in {"primary", "extension", "secondary_mention"}:
-                warnings.append(
-                    f"Planner: ungültiger origin '{raw_origin}' für '{title}' → primary"
-                )
+                warnings.append(f"Planner: ungültiger origin '{raw_origin}' für '{title}' → primary")
                 raw_origin = "primary"
 
             raw_authors = h.get("cited_authors") or ""
             cited_authors = [a.strip() for a in raw_authors.split(",") if a.strip()]
 
-            concepts.append({
-                "title":         title,
-                "priority":      (h.get("priority") or "medium").lower(),
-                "chapter":       h.get("chapter") or "",
-                "action":        (h.get("action") or "create").lower(),
-                "extend_path":   h.get("extend_path"),
-                "category":      category,
-                "origin":        raw_origin,
-                "cited_authors": cited_authors,
-            })
+            concepts.append(
+                {
+                    "title": title,
+                    "priority": (h.get("priority") or "medium").lower(),
+                    "chapter": h.get("chapter") or "",
+                    "action": (h.get("action") or "create").lower(),
+                    "extend_path": h.get("extend_path"),
+                    "category": category,
+                    "origin": raw_origin,
+                    "cited_authors": cited_authors,
+                }
+            )
         else:
             warnings.append(f"Planner: unbekannte Sektion {name}")
 

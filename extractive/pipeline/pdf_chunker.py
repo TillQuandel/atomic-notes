@@ -6,20 +6,24 @@ import pdfplumber
 
 try:
     import fitz as _fitz  # PyMuPDF — bessere Spacing-Erkennung als pdfplumber
+
     _HAS_PYMUPDF = True
 except ImportError:
     _HAS_PYMUPDF = False
 
 try:
     from langdetect import detect as _detect
+
     def detect_language(text: str) -> str:
         try:
             return _detect(text[:500])
         except Exception:
             return "unknown"
 except ImportError:
+
     def detect_language(text: str) -> str:
         return "unknown"
+
 
 _ANCHOR_RE = re.compile(r"\s*\(S\.\s*\d+(?:-\d+)?\)")
 _HEADER_RE = re.compile(r"^\d{0,2}\.?\s*[A-Z][A-Za-z\s]{3,60}$")
@@ -44,8 +48,9 @@ def extract_chunks(pdf_path, max_words: int = 3000) -> list[Chunk]:
     """Extrahiert Text-Chunks via pdfplumber (kein OS-Paket noetig)."""
     chunks, current, current_page, current_header, word_count = [], [], 1, "", 0
     with pdfplumber.open(str(pdf_path)) as pdf:
-        sizes = [float(w["size"]) for p in pdf.pages
-                 for w in (p.extract_words(extra_attrs=["size"]) or []) if w.get("size")]
+        sizes = [
+            float(w["size"]) for p in pdf.pages for w in (p.extract_words(extra_attrs=["size"]) or []) if w.get("size")
+        ]
         avg = sum(sizes) / len(sizes) if sizes else 10.0
 
         page_texts = _page_text_clean(pdf_path)

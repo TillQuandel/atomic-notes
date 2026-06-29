@@ -7,6 +7,7 @@ Dual-Use-Schutz: TOC-Trail-Filter verhindert dass Inhaltsverzeichnis-Zeilen oder
 Aufzählungs-Bulletpoints als Kapitel-Heading durchgehen — sowohl in
 split_by_chapters() als auch in drop_frontmatter_pages().
 """
+
 from __future__ import annotations
 
 
@@ -23,6 +24,7 @@ def _matches(text: str) -> list[str]:
 
 
 # ---- Positiv: bestehende Pattern bleiben grün ----------------------------
+
 
 def test_arabic_chapter_still_matches():
     text = "[S. 5]\n1 Einleitung\nText folgt hier.\n[S. 12]\n2 Methoden\nMehr Text."
@@ -43,6 +45,7 @@ def test_chapter_prefix_still_matches():
 
 
 # ---- Positiv: neue Pattern -----------------------------------------------
+
 
 def test_roman_numeral_chapter():
     text = "I. Einleitung\nText hier.\nII. Theorie\nMehr Text."
@@ -72,6 +75,7 @@ def test_long_title_up_to_120_chars():
 
 # ---- Negativ: False-Positives müssen gefiltert werden --------------------
 
+
 def test_toc_trail_with_dots_filtered():
     # Klassischer Inhaltsverzeichnis-Eintrag — KEIN echtes Kapitel-Heading
     text = "Inhalt\nI. Einleitung .................. 12\nII. Theorie ................... 24"
@@ -87,6 +91,7 @@ def test_toc_trail_with_spaces_filtered():
 
 # ---- Integration: split_by_chapters --------------------------------------
 
+
 def test_split_by_chapters_with_roman():
     text = (
         "[S. 1]\nI. Einleitung\nLanger Einleitungstext hier mit vielen Wörtern und Sätzen.\n"
@@ -100,6 +105,7 @@ def test_split_by_chapters_with_roman():
 
 
 # ---- Integration: drop_frontmatter_pages mit römisch ---------------------
+
 
 def test_drop_frontmatter_with_roman_chapter():
     pages = [

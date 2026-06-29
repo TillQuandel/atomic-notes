@@ -4,8 +4,8 @@ Die Probe ist absichtlich LLM-frei und bleibt ein entkoppeltes Eval-Werkzeug:
 Caption-Matching, Seitennaehe zu Chunks und PyMuPDF-Signale werden separat
 bewertet, ohne den Orchestrator oder den Vault-Writer zu beruehren.
 """
-from __future__ import annotations
 
+from __future__ import annotations
 
 
 from generative.pipeline.pdf_chunker import Chunk
@@ -81,10 +81,21 @@ def test_match_caption_to_chunk_returns_none_when_no_page_range_matches():
 
 def test_classify_page_signals_uses_only_caption_and_raster():
     caption = find_figure_captions("Figure 1: Conceptual model.", page=1)
-    assert classify_page_signals(PageVisualSignals(page=1, raster_images=2, vector_drawings=0, captions=caption)) == "captioned_raster"
-    assert classify_page_signals(PageVisualSignals(page=2, raster_images=0, vector_drawings=0, captions=caption)) == "captioned_no_raster"
-    assert classify_page_signals(PageVisualSignals(page=3, raster_images=2, vector_drawings=0, captions=[])) == "raster_uncaptioned"
-    assert classify_page_signals(PageVisualSignals(page=4, raster_images=0, vector_drawings=0, captions=[])) == "no_signal"
+    assert (
+        classify_page_signals(PageVisualSignals(page=1, raster_images=2, vector_drawings=0, captions=caption))
+        == "captioned_raster"
+    )
+    assert (
+        classify_page_signals(PageVisualSignals(page=2, raster_images=0, vector_drawings=0, captions=caption))
+        == "captioned_no_raster"
+    )
+    assert (
+        classify_page_signals(PageVisualSignals(page=3, raster_images=2, vector_drawings=0, captions=[]))
+        == "raster_uncaptioned"
+    )
+    assert (
+        classify_page_signals(PageVisualSignals(page=4, raster_images=0, vector_drawings=0, captions=[])) == "no_signal"
+    )
 
 
 def test_classify_ignores_noisy_vector_drawings_without_caption_or_raster():
@@ -98,11 +109,20 @@ def test_classify_vector_count_never_upgrades_the_class():
     """Hoher vector_drawings-Count darf keine Klasse hochstufen (alter Dominanz-Fehler)."""
     caption = find_figure_captions("Abb. 2: Schema.", page=7)
     # Caption ohne Raster bleibt captioned_no_raster, egal wie viele Vektorpfade.
-    assert classify_page_signals(PageVisualSignals(page=7, raster_images=0, vector_drawings=99, captions=caption)) == "captioned_no_raster"
+    assert (
+        classify_page_signals(PageVisualSignals(page=7, raster_images=0, vector_drawings=99, captions=caption))
+        == "captioned_no_raster"
+    )
     # Raster ohne Caption bleibt raster_uncaptioned, egal wie viele Vektorpfade.
-    assert classify_page_signals(PageVisualSignals(page=8, raster_images=1, vector_drawings=99, captions=[])) == "raster_uncaptioned"
+    assert (
+        classify_page_signals(PageVisualSignals(page=8, raster_images=1, vector_drawings=99, captions=[]))
+        == "raster_uncaptioned"
+    )
     # Caption + Raster bleibt captioned_raster, egal wie viele Vektorpfade.
-    assert classify_page_signals(PageVisualSignals(page=9, raster_images=1, vector_drawings=99, captions=caption)) == "captioned_raster"
+    assert (
+        classify_page_signals(PageVisualSignals(page=9, raster_images=1, vector_drawings=99, captions=caption))
+        == "captioned_raster"
+    )
 
 
 def test_warning_only_fires_for_no_signal_and_is_honest_about_vector():

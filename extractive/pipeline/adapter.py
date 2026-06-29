@@ -24,6 +24,7 @@ def convert_anchors_to_footnotes(body: list[str], source_file: str) -> tuple[lis
     converted: list[str] = []
 
     for sentence in body:
+
         def replace(m: re.Match) -> str:
             nonlocal counter
             page = m.group(1)
@@ -31,22 +32,18 @@ def convert_anchors_to_footnotes(body: list[str], source_file: str) -> tuple[lis
                 page_to_fn[page] = counter
                 counter += 1
             return f"[^{page_to_fn[page]}]"
+
         converted.append(_PAGE_ANCHOR_RE.sub(replace, sentence))
 
     # Footnote-Definitions-Block
     stem = Path(source_file).stem
-    defs = "\n".join(
-        f"[^{fn}]: *{stem}* · S. {page}"
-        for page, fn in sorted(page_to_fn.items(), key=lambda x: x[1])
-    )
+    defs = "\n".join(f"[^{fn}]: *{stem}* · S. {page}" for page, fn in sorted(page_to_fn.items(), key=lambda x: x[1]))
     return converted, defs
 
 
 def render_note(note, output_format: str = "obsidian") -> str:
     if output_format == "obsidian":
-        body_converted, footnote_defs = convert_anchors_to_footnotes(
-            note.extracted_body, note.source_file
-        )
+        body_converted, footnote_defs = convert_anchors_to_footnotes(note.extracted_body, note.source_file)
         return _ENV.get_template("obsidian.md.jinja2").render(
             note=note,
             body_converted=body_converted,

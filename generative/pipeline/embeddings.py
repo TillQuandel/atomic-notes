@@ -7,6 +7,7 @@ Sprachen) → passt zu DE-Bodies mit eingestreuten EN-Direktzitaten.
 
 Token-Limit 128 wird durch Sentence-Chunking + Mean-Pooling überbrückt.
 """
+
 from __future__ import annotations
 import re
 import threading
@@ -22,6 +23,7 @@ def _model():
         with _MODEL_LOCK:
             if _MODEL is None:  # Double-Checked Locking
                 from sentence_transformers import SentenceTransformer
+
                 _MODEL = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
     return _MODEL
 
@@ -52,13 +54,14 @@ def embed_body(body: str):
     für Long-Document-Cosine-Similarity.
     """
     import numpy as np
+
     sents = _sentences(body)
     if not sents:
         return np.zeros(_model().get_sentence_embedding_dimension())
     embs = _model().encode(sents, show_progress_bar=False, normalize_embeddings=True)
     # Mean-Pooling über Sätze, dann Re-Normalisieren für Cosine
     mean = embs.mean(axis=0)
-    norm = (mean ** 2).sum() ** 0.5
+    norm = (mean**2).sum() ** 0.5
     return mean / norm if norm > 0 else mean
 
 
@@ -66,6 +69,7 @@ def embed_title(title: str):
     """Titel → 384-dim numpy-Array. Direkte Kodierung ohne Satz-Splitting.
     Optimiert für Kurz-Texte (V35 semantisches Titel-Matching)."""
     import numpy as np
+
     t = title.strip()
     if not t:
         return np.zeros(_model().get_sentence_embedding_dimension())

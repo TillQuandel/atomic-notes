@@ -1,4 +1,4 @@
-﻿"""eval_dashboard.py -- Interaktives HTML-Dashboard Für Atomic-Agent Eval-Daten.
+"""eval_dashboard.py -- Interaktives HTML-Dashboard Für Atomic-Agent Eval-Daten.
 
 Liest:
   .cache/quality_history.jsonl    -- Stage-8-Eval pro Note
@@ -9,6 +9,7 @@ Schreibt: .cache/eval/dashboard.html  ->  oeffnet im Browser.
 
 Usage: python eval_dashboard.py
 """
+
 from __future__ import annotations
 
 import json
@@ -24,21 +25,21 @@ from pathlib import Path
 
 BASE_DIR = Path(__file__).parent
 CACHE_DIR = BASE_DIR / ".cache"
-EVAL_DIR  = CACHE_DIR / "eval" / "baseline"
-RUNS_DIR  = CACHE_DIR / "runs"
+EVAL_DIR = CACHE_DIR / "eval" / "baseline"
+RUNS_DIR = CACHE_DIR / "runs"
 QUALITY_HISTORY = CACHE_DIR / "quality_history.jsonl"
 OUTPUT = CACHE_DIR / "eval" / "dashboard.html"
 
-_NOTE_RE    = re.compile(r"^\s*\[DRY-RUN\] -> (Vault|Inbox)[^:]*: (.+?)\.md\b")
-_MERGE_RE   = re.compile(r"\[Merge-Stub\b|XSOURCE-MERGE")
-_VER_RE    = re.compile(r"_(v[\d.]+(?:\.\d+)*)(?:_run\d+)?\.log$")
-_KEY_RE    = re.compile(r"^([a-z]+)_")
-_WORDS_RE  = re.compile(r"(\d[\d.]*)\s+W")
-_PAGES_RE  = re.compile(r"(\d+)\s+S\.")
+_NOTE_RE = re.compile(r"^\s*\[DRY-RUN\] -> (Vault|Inbox)[^:]*: (.+?)\.md\b")
+_MERGE_RE = re.compile(r"\[Merge-Stub\b|XSOURCE-MERGE")
+_VER_RE = re.compile(r"_(v[\d.]+(?:\.\d+)*)(?:_run\d+)?\.log$")
+_KEY_RE = re.compile(r"^([a-z]+)_")
+_WORDS_RE = re.compile(r"(\d[\d.]*)\s+W")
+_PAGES_RE = re.compile(r"(\d+)\s+S\.")
 _CHUNKS_RE = re.compile(r"(\d+)\s+Chunks")
 
 _PDF_LABELS: dict[str, str] = {
-    "bates":    "Bates 2017",
+    "bates": "Bates 2017",
     "kuhlthau": "Kuhlthau ISP",
     "schlebbe": "Schlebbe & Greifeneder 2022",
 }
@@ -48,13 +49,13 @@ _PDF_LABELS: dict[str, str] = {
 #   Fehlerquote:   Claude Sonnet-4.6 = 10.6 % (Vectara); gut <10 %, ok 10–20 %, schlecht >20 %
 #   Abdeckung:     RAGAS Context Recall Ziel >0.80; akademische Texte: gut ≥50 %, ok 30–50 %
 #   Akzeptanzrate: Knowledge Extraction 45–70 % normal; gut ≥70 %, ok 50–70 %
-THRESH_ACCEPT = (85, 65)   # gut ≥85 %, ok 65–85 %, schlecht <65 %
-THRESH_HALL   = ( 5, 15)   # gut <5 %,  ok 5–15 %,  schlecht >15 %  — invert=True
-THRESH_COV    = (80, 50)   # gut ≥80 %, ok 50–80 %, schlecht <50 %
+THRESH_ACCEPT = (85, 65)  # gut ≥85 %, ok 65–85 %, schlecht <65 %
+THRESH_HALL = (5, 15)  # gut <5 %,  ok 5–15 %,  schlecht >15 %  — invert=True
+THRESH_COV = (80, 50)  # gut ≥80 %, ok 50–80 %, schlecht <50 %
 
 # Claude Design Farbpalette (editorial, kein Neon)
 _PDF_COLORS: dict[str, str] = {
-    "bates":    "#e07a5f",  # coral
+    "bates": "#e07a5f",  # coral
     "kuhlthau": "#5bbfbf",  # teal
     "schlebbe": "#e8b53b",  # amber
 }
@@ -62,40 +63,40 @@ _COLOR_FALLBACKS = ["#8a86c8", "#6dbf8c", "#94a3b8"]
 
 _PDF_META: dict[str, dict] = {
     "bates": {
-        "titel":   "Information Behavior",
-        "autor":   "Marcia J. Bates",
-        "jahr":    "2017",
-        "in":      "Encyclopedia of Library and Information Sciences, 3rd ed.",
-        "thema":   "Grundlagentext des Felds Information Behavior. Definiert Kernbegriffe "
-                   "(Information Seeking, Information Searching, Browsing), zeichnet die "
-                   "Begriffsgeschichte von Use Studies bis Information Behavior nach und "
-                   "stellt Bates' eigene Konzepte vor (Red Thread of Information, Berrypicking).",
+        "titel": "Information Behavior",
+        "autor": "Marcia J. Bates",
+        "jahr": "2017",
+        "in": "Encyclopedia of Library and Information Sciences, 3rd ed.",
+        "thema": "Grundlagentext des Felds Information Behavior. Definiert Kernbegriffe "
+        "(Information Seeking, Information Searching, Browsing), zeichnet die "
+        "Begriffsgeschichte von Use Studies bis Information Behavior nach und "
+        "stellt Bates' eigene Konzepte vor (Red Thread of Information, Berrypicking).",
         "sprache": "Englisch",
-        "typ":     "Handbuchkapitel / Überblicksartikel",
+        "typ": "Handbuchkapitel / Überblicksartikel",
     },
     "kuhlthau": {
-        "titel":   "Information Search Process (ISP)",
-        "autor":   "Carol C. Kuhlthau",
-        "jahr":    "2009",
-        "in":      "Eigenständiges Dokument / Buchkapitel",
-        "thema":   "Beschreibt das ISP-Modell mit seinen 6 Phasen (Initiation, Selection, "
-                   "Exploration, Formulation, Collection, Presentation). Jede Phase umfasst "
-                   "drei Erfahrungsdimensionen: kognitiv, affektiv, physisch. "
-                   "Zentrale Konzepte: Uncertainty Principle, Zone of Intervention.",
+        "titel": "Information Search Process (ISP)",
+        "autor": "Carol C. Kuhlthau",
+        "jahr": "2009",
+        "in": "Eigenständiges Dokument / Buchkapitel",
+        "thema": "Beschreibt das ISP-Modell mit seinen 6 Phasen (Initiation, Selection, "
+        "Exploration, Formulation, Collection, Presentation). Jede Phase umfasst "
+        "drei Erfahrungsdimensionen: kognitiv, affektiv, physisch. "
+        "Zentrale Konzepte: Uncertainty Principle, Zone of Intervention.",
         "sprache": "Englisch",
-        "typ":     "Theoriemodell-Dokument",
+        "typ": "Theoriemodell-Dokument",
     },
     "schlebbe": {
-        "titel":   "Information Need, Informationsbedarf und -bedürfnis",
-        "autor":   "Kirsten Schlebbe & Elke Greifeneder",
-        "jahr":    "2022",
-        "in":      "Grundlagen der Informationswissenschaft (Kuhlen et al., Hrsg.)",
-        "thema":   "Deutschsprachiger Überblick über Konzepte des Informationsbedarfs. "
-                   "Behandelt Taylors Vier-Stufen-Typologie, Wilsons Modell (Information Needs "
-                   "als sekundäre Bedürfnisse), Greens Vier-Charakteristiken und "
-                   "Chatmans Small Worlds Theory.",
+        "titel": "Information Need, Informationsbedarf und -bedürfnis",
+        "autor": "Kirsten Schlebbe & Elke Greifeneder",
+        "jahr": "2022",
+        "in": "Grundlagen der Informationswissenschaft (Kuhlen et al., Hrsg.)",
+        "thema": "Deutschsprachiger Überblick über Konzepte des Informationsbedarfs. "
+        "Behandelt Taylors Vier-Stufen-Typologie, Wilsons Modell (Information Needs "
+        "als sekundäre Bedürfnisse), Greens Vier-Charakteristiken und "
+        "Chatmans Small Worlds Theory.",
         "sprache": "Deutsch",
-        "typ":     "Handbuchkapitel",
+        "typ": "Handbuchkapitel",
     },
 }
 
@@ -103,8 +104,10 @@ _PDF_META: dict[str, dict] = {
 # Hilfsfunktionen
 # ---------------------------------------------------------------------------
 
+
 def _ver_sort_key(v: str) -> tuple:
     return tuple(int(n) for n in re.findall(r"\d+", v))
+
 
 def is_foss_version(version) -> bool:
     """True fuer nicht-generative Pipeline-Versionen. Realer Prefix ist `extractive-`
@@ -115,13 +118,16 @@ def is_foss_version(version) -> bool:
     ein No-op (Cross-Model-Review 2026-06-23)."""
     return str(version or "").startswith(("extractive-", "foss-"))
 
+
 def _latest_version(ver_map: dict) -> str:
     return sorted(ver_map.keys(), key=_ver_sort_key)[-1]
+
 
 def _median(lst: list[float]) -> float:
     # statistics.median (interpoliert) — muss zur kpi_trend-Berechnung im
     # Server passen, sonst zeigen KPI-Karte und Sparkline verschiedene Werte.
     return statistics.median(lst)
+
 
 def _pooled_hall_pct(rows: list[dict]) -> float | None:
     """Gepoolte Halluzinationsrate über mehrere Notes: Σ halluzinierte Anker /
@@ -136,20 +142,19 @@ def _pooled_hall_pct(rows: list[dict]) -> float | None:
     Fallback auf den Mittelwert der Pro-Note-Raten, wenn keine Roh-Counts
     vorliegen (historische DB-Rows vor 2026-06-27 hatten anchors_total nicht).
     """
-    rate_rows = [r for r in rows
-                 if r.get("hallucination_rate") is not None and r["hallucination_rate"] >= 0]
+    rate_rows = [r for r in rows if r.get("hallucination_rate") is not None and r["hallucination_rate"] >= 0]
     if not rate_rows:
         return None
     # Nur poolen, wenn ALLE bewertbaren Rows Roh-Counts haben. Sonst würde
     # ankergewichtet über eine Teilmenge gemittelt und der Rest still verworfen
     # (Cross-Review Codex+QWEN 2026-06-27) — bei gemischten Rows daher Mean.
-    if all(r.get("anchors_total") is not None
-           and r.get("anchors_hallucinated") is not None for r in rate_rows):
+    if all(r.get("anchors_total") is not None and r.get("anchors_hallucinated") is not None for r in rate_rows):
         th = sum(r["anchors_total"] for r in rate_rows)
         ah = sum(r["anchors_hallucinated"] for r in rate_rows)
         if th > 0:
             return round(ah / th * 100, 1)
     return round(statistics.mean(r["hallucination_rate"] for r in rate_rows) * 100, 1)
+
 
 def _pdf_short_name(raw: str) -> str:
     name = raw.replace(".pdf", "").strip()
@@ -158,6 +163,7 @@ def _pdf_short_name(raw: str) -> str:
         return f"{parts[0]} ({parts[1]})" if parts[1].isdigit() else parts[0]
     name = re.sub(r"^\d+\.", "", name).strip()
     return name[:45]
+
 
 def _top_versions(counts: dict, limit: int = 15, min_n: int = 3) -> list[str]:
     """Die `limit` neuesten Pipeline-Versionen mit mindestens `min_n` Eval-Notes,
@@ -213,9 +219,11 @@ def _dedupe_pdf_options(labels) -> list[str]:
 def _pdf_color(key: str, idx: int = 0) -> str:
     return _PDF_COLORS.get(key, _COLOR_FALLBACKS[idx % len(_COLOR_FALLBACKS)])
 
+
 # ---------------------------------------------------------------------------
 # Daten lesen
 # ---------------------------------------------------------------------------
+
 
 def _read_quality_history() -> list[dict]:
     if not QUALITY_HISTORY.exists():
@@ -267,6 +275,7 @@ def _log_key(log: Path) -> str | None:
     m = _KEY_RE.match(log.stem)
     return m.group(1) if m else None
 
+
 def _log_version(log: Path) -> str | None:
     m = _VER_RE.search(log.name)
     return m.group(1) if m else None
@@ -280,8 +289,8 @@ def _read_all_log_runs() -> list[dict]:
         key = _log_key(log)
         if not key:
             continue
-        ver   = _log_version(log) or "unknown"
-        ext   = _parse_log_extended(log)
+        ver = _log_version(log) or "unknown"
+        ext = _parse_log_extended(log)
         notes = ext["notes"]
         if not notes:
             continue
@@ -289,24 +298,26 @@ def _read_all_log_runs() -> list[dict]:
         n_vault = sum(1 for v in notes.values() if v == "Vault")
         n_merge = sum(1 for v in notes.values() if v == "Merge")
         n_inbox = sum(1 for v in notes.values() if v == "Inbox")
-        runs.append({
-            "key":        key,
-            "label":      _PDF_LABELS.get(key, key),
-            "ver":        ver,
-            "n_total":    n_total,
-            "n_vault":    n_vault,
-            "n_merge":    n_merge,
-            "n_inbox":    n_inbox,
-            # Creation-Rate: neue Notes → Vault
-            "accept_pct": round(100 * n_vault / n_total, 1) if n_total else 0.0,
-            # Enrichment-Rate: Merge-Stubs (korrekte Ergänzung bestehender Notes)
-            "enrich_pct": round(100 * n_merge / n_total, 1) if n_total else 0.0,
-            # Erfolgsrate: Vault + Merge-Stubs zusammen
-            "success_pct": round(100 * (n_vault + n_merge) / n_total, 1) if n_total else 0.0,
-            "words":     ext["words"],
-            "pages":     ext["pages"],
-            "chunks":    ext["chunks"],
-        })
+        runs.append(
+            {
+                "key": key,
+                "label": _PDF_LABELS.get(key, key),
+                "ver": ver,
+                "n_total": n_total,
+                "n_vault": n_vault,
+                "n_merge": n_merge,
+                "n_inbox": n_inbox,
+                # Creation-Rate: neue Notes → Vault
+                "accept_pct": round(100 * n_vault / n_total, 1) if n_total else 0.0,
+                # Enrichment-Rate: Merge-Stubs (korrekte Ergänzung bestehender Notes)
+                "enrich_pct": round(100 * n_merge / n_total, 1) if n_total else 0.0,
+                # Erfolgsrate: Vault + Merge-Stubs zusammen
+                "success_pct": round(100 * (n_vault + n_merge) / n_total, 1) if n_total else 0.0,
+                "words": ext["words"],
+                "pages": ext["pages"],
+                "chunks": ext["chunks"],
+            }
+        )
     return runs
 
 
@@ -331,12 +342,12 @@ def _read_token_runs() -> list[dict]:
                 r = json.loads(line)
                 if r.get("cached"):
                     continue
-                tin    += r.get("input_tokens", 0) or 0
-                tout   += r.get("output_tokens", 0) or 0
-                tcr    += r.get("cache_read_tokens", 0) or 0
-                tcw    += r.get("cache_creation_tokens", 0) or 0
+                tin += r.get("input_tokens", 0) or 0
+                tout += r.get("output_tokens", 0) or 0
+                tcr += r.get("cache_read_tokens", 0) or 0
+                tcw += r.get("cache_creation_tokens", 0) or 0
                 dur_ms += r.get("duration_ms", 0) or 0
-                count  += 1
+                count += 1
             except json.JSONDecodeError:
                 pass
         if count > 0:
@@ -346,32 +357,47 @@ def _read_token_runs() -> list[dict]:
                 date_label = f"{stem[6:8]}.{stem[4:6]} {stem[9:11]}:{stem[11:13]}"
             except (IndexError, ValueError):
                 date_label = stem
-            runs.append({
-                "date":         date_label,
-                "run_id":       stem,
-                "pdf_label":    "",
-                "tokens_in":    tin,
-                "tokens_out":   tout,
-                "tokens_cache": tcr + tcw,
-                "duration_min": round(dur_ms / 60000, 1),
-                "calls":        count,
-            })
+            runs.append(
+                {
+                    "date": date_label,
+                    "run_id": stem,
+                    "pdf_label": "",
+                    "tokens_in": tin,
+                    "tokens_out": tout,
+                    "tokens_cache": tcr + tcw,
+                    "duration_min": round(dur_ms / 60000, 1),
+                    "calls": count,
+                }
+            )
     return runs
+
 
 # ---------------------------------------------------------------------------
 # Chart-Daten aufbereiten
 # ---------------------------------------------------------------------------
 
+
 def _calc_kpis(
-    log_data:     dict[str, dict[str, list[float]]],
+    log_data: dict[str, dict[str, list[float]]],
     all_log_runs: list[dict],
     quality_rows: list[dict],
-    token_runs:   list[dict],
+    token_runs: list[dict],
 ) -> dict:
     # KPIs = neueste Pipeline-Version, nicht Durchschnitt aller Versionen
-    all_pvers = sorted({r.get("version") or r.get("pipeline_version") or "" for r in quality_rows if r.get("version") or r.get("pipeline_version")}, key=_ver_sort_key)
+    all_pvers = sorted(
+        {
+            r.get("version") or r.get("pipeline_version") or ""
+            for r in quality_rows
+            if r.get("version") or r.get("pipeline_version")
+        },
+        key=_ver_sort_key,
+    )
     latest_pver = all_pvers[-1] if all_pvers else None
-    latest_qrows = [r for r in quality_rows if (r.get("version") or r.get("pipeline_version")) == latest_pver] if latest_pver else quality_rows
+    latest_qrows = (
+        [r for r in quality_rows if (r.get("version") or r.get("pipeline_version")) == latest_pver]
+        if latest_pver
+        else quality_rows
+    )
 
     all_versions = sorted({r["ver"] for r in all_log_runs if r.get("ver")}, key=_ver_sort_key)
 
@@ -379,63 +405,65 @@ def _calc_kpis(
     # (neueste Pipeline-Version, gepoolt) — vorher mischte der Mittelwert
     # über die jeweils letzte Version JEDES PDFs alte und neue Versionen
     # unter der Überschrift "Qualität — <neueste Version>".
-    accept_ver       = latest_pver or (all_versions[-1] if all_versions else None)
-    accept_runs      = [r for r in all_log_runs if r.get("ver") == accept_ver]
+    accept_ver = latest_pver or (all_versions[-1] if all_versions else None)
+    accept_runs = [r for r in all_log_runs if r.get("ver") == accept_ver]
     accept_generated = sum(r["n_total"] for r in accept_runs)
     # Vault-Notes der KPI-Version (nicht alle Vault-Notes) — Basis fuer den
     # Eval-Coverage-Hinweis: der Eval bewertet nur Vault-Notes.
-    accept_vault     = sum(r["n_vault"] for r in accept_runs)
-    avg_accept = (round(accept_vault / accept_generated * 100, 1)
-                  if accept_generated else None)
+    accept_vault = sum(r["n_vault"] for r in accept_runs)
+    avg_accept = round(accept_vault / accept_generated * 100, 1) if accept_generated else None
 
     # Gepoolte Rate (ankergewichtet) statt Median: hallucination_rate ist
     # zero-inflated (>50 % der Notes haben 0 halluzinierte Anker), der Median
     # kollabierte sonst auf 0,0 % und verdeckte, dass das System halluziniert
     # (Bug 2026-06-27). Mean-Fallback für Rows ohne Roh-Counts.
-    avg_hall   = _pooled_hall_pct(latest_qrows)
+    avg_hall = _pooled_hall_pct(latest_qrows)
 
-    cov_vals = [v for r in latest_qrows
-                if (v := r.get("coverage_factual") or r.get("coverage_rate")) is not None and v >= 0]
-    avg_cov  = round(_median(cov_vals) * 100, 1) if cov_vals else None
+    cov_vals = [
+        v for r in latest_qrows if (v := r.get("coverage_factual") or r.get("coverage_rate")) is not None and v >= 0
+    ]
+    avg_cov = round(_median(cov_vals) * 100, 1) if cov_vals else None
     total_generated = sum(r["n_total"] for r in all_log_runs)
-    total_accepted  = sum(r["n_vault"] for r in all_log_runs)
-    total_merged    = sum(r.get("n_merge", 0) for r in all_log_runs)
-    total_tokens    = sum(r["tokens_in"] + r["tokens_out"] for r in token_runs)
-    total_dur_s     = sum(r["duration_min"] * 60 for r in token_runs)
-    latest_truns    = [r for r in token_runs if r.get("ver") == latest_pver] if latest_pver else token_runs
-    cur_tokens      = sum(r["tokens_in"] + r["tokens_out"] for r in latest_truns)
-    cur_dur_h       = round(sum(r["duration_min"] for r in latest_truns) / 60, 1)
-    cur_cost_usd    = round(sum(r.get("cost_usd", 0.0) or 0.0 for r in latest_truns), 4)
+    total_accepted = sum(r["n_vault"] for r in all_log_runs)
+    total_merged = sum(r.get("n_merge", 0) for r in all_log_runs)
+    total_tokens = sum(r["tokens_in"] + r["tokens_out"] for r in token_runs)
+    total_dur_s = sum(r["duration_min"] * 60 for r in token_runs)
+    latest_truns = [r for r in token_runs if r.get("ver") == latest_pver] if latest_pver else token_runs
+    cur_tokens = sum(r["tokens_in"] + r["tokens_out"] for r in latest_truns)
+    cur_dur_h = round(sum(r["duration_min"] for r in latest_truns) / 60, 1)
+    cur_cost_usd = round(sum(r.get("cost_usd", 0.0) or 0.0 for r in latest_truns), 4)
 
     return {
-        "avg_accept":      avg_accept,
-        "avg_hall":        avg_hall,
-        "avg_cov":         avg_cov,
-        "kpi_accept_n":    accept_generated,
-        "kpi_vault_n":     accept_vault,
+        "avg_accept": avg_accept,
+        "avg_hall": avg_hall,
+        "avg_cov": avg_cov,
+        "kpi_accept_n": accept_generated,
+        "kpi_vault_n": accept_vault,
         # Version-Basis von Akzeptanz/Vault-Zahl — kann von kpi_version
         # abweichen, wenn (noch) keine Eval-Rows zur neuesten Version existieren
-        "kpi_accept_ver":  accept_ver,
-        "kpi_version":     latest_pver,
-        "n_notes":         len(latest_qrows),
-        "total_runs":      len(all_log_runs),
-        "n_pdfs":          len(log_data),
-        "n_versions":      len(all_versions),
-        "versions_range":  f"{all_versions[0]}–{all_versions[-1]}" if len(all_versions) > 1 else (all_versions[0] if all_versions else "--"),
+        "kpi_accept_ver": accept_ver,
+        "kpi_version": latest_pver,
+        "n_notes": len(latest_qrows),
+        "total_runs": len(all_log_runs),
+        "n_pdfs": len(log_data),
+        "n_versions": len(all_versions),
+        "versions_range": f"{all_versions[0]}–{all_versions[-1]}"
+        if len(all_versions) > 1
+        else (all_versions[0] if all_versions else "--"),
         "total_generated": total_generated,
-        "total_accepted":  total_accepted,
-        "total_merged":    total_merged,
-        "total_dropped":   sum(r.get("n_dropped", 0) or 0 for r in all_log_runs),
-        "total_tokens":    total_tokens,
-        "total_dur_h":     round(total_dur_s / 3600, 1),
-        "cur_tokens":      cur_tokens,
-        "cur_dur_h":       cur_dur_h,
-        "cur_cost_usd":    cur_cost_usd,
+        "total_accepted": total_accepted,
+        "total_merged": total_merged,
+        "total_dropped": sum(r.get("n_dropped", 0) or 0 for r in all_log_runs),
+        "total_tokens": total_tokens,
+        "total_dur_h": round(total_dur_s / 3600, 1),
+        "cur_tokens": cur_tokens,
+        "cur_dur_h": cur_dur_h,
+        "cur_cost_usd": cur_cost_usd,
     }
 
 
 def _calc_pdf_table(
-    log_data:     dict[str, dict[str, list[float]]],
+    log_data: dict[str, dict[str, list[float]]],
     all_log_runs: list[dict],
     quality_rows: list[dict],
 ) -> list[dict]:
@@ -444,32 +472,36 @@ def _calc_pdf_table(
         ver_map = log_data[key]
         if not ver_map:
             continue
-        latest    = _latest_version(ver_map)
-        accept    = _median(ver_map[latest])
-        label     = _PDF_LABELS.get(key, key)
-        pdf_runs  = [r for r in all_log_runs if r["key"] == key]
+        latest = _latest_version(ver_map)
+        accept = _median(ver_map[latest])
+        label = _PDF_LABELS.get(key, key)
+        pdf_runs = [r for r in all_log_runs if r["key"] == key]
         words_list = [r["words"] for r in pdf_runs if r["words"]]
         pages_list = [r["pages"] for r in pdf_runs if r["pages"]]
         words = _median(words_list) if words_list else None
         pages = _median(pages_list) if pages_list else None
         pdf_qrows = [r for r in quality_rows if key.lower() in (r.get("pdf") or "").lower()]
-        _hall_vals = [r["hallucination_rate"] for r in pdf_qrows
-                      if r.get("hallucination_rate") is not None and r["hallucination_rate"] >= 0]
+        _hall_vals = [
+            r["hallucination_rate"]
+            for r in pdf_qrows
+            if r.get("hallucination_rate") is not None and r["hallucination_rate"] >= 0
+        ]
         hall = round(statistics.mean(_hall_vals) * 100, 1) if _hall_vals else None
-        _cov_vals = [v for r in pdf_qrows
-                     if (v := r.get("coverage_factual") or r.get("coverage_rate", -1)) >= 0]
-        cov  = round(statistics.mean(_cov_vals) * 100, 1) if _cov_vals else None
-        rows.append({
-            "key":     key,
-            "label":   label,
-            "version": latest,
-            "accept":  accept,
-            "hall":    hall,
-            "cov":     cov,
-            "n_notes": len(pdf_qrows),
-            "words":   int(words) if words else None,
-            "pages":   int(pages) if pages else None,
-        })
+        _cov_vals = [v for r in pdf_qrows if (v := r.get("coverage_factual") or r.get("coverage_rate", -1)) >= 0]
+        cov = round(statistics.mean(_cov_vals) * 100, 1) if _cov_vals else None
+        rows.append(
+            {
+                "key": key,
+                "label": label,
+                "version": latest,
+                "accept": accept,
+                "hall": hall,
+                "cov": cov,
+                "n_notes": len(pdf_qrows),
+                "words": int(words) if words else None,
+                "pages": int(pages) if pages else None,
+            }
+        )
     return rows
 
 
@@ -490,21 +522,23 @@ def _chart_scatter(quality_rows: list[dict]) -> dict:
     pdf_map: dict[str, str] = {}
     for r in quality_rows:
         hall = r.get("hallucination_rate")
-        cov  = r.get("coverage_factual") or r.get("coverage_rate")
+        cov = r.get("coverage_factual") or r.get("coverage_rate")
         if hall is None or cov is None or float(hall) < 0 or float(cov) < 0:
             continue
         label = r.get("note") or r.get("note_title") or "?"
         label = re.sub(r"^(vault|inbox)__", "", label).replace(".md", "")
-        pdf   = r.get("pdf") or r.get("source_pdf") or "unbekannt"
+        pdf = r.get("pdf") or r.get("source_pdf") or "unbekannt"
         if pdf not in pdf_map:
             pdf_map[pdf] = _pdf_short_name(pdf)
-        points.append({
-            "x": round(float(hall) * 100, 1),
-            "y": round(float(cov)  * 100, 1),
-            "label": label,
-            "pdf":   pdf,
-            "pdf_label": pdf_map[pdf],
-        })
+        points.append(
+            {
+                "x": round(float(hall) * 100, 1),
+                "y": round(float(cov) * 100, 1),
+                "label": label,
+                "pdf": pdf,
+                "pdf_label": pdf_map[pdf],
+            }
+        )
     pdfs = [{"raw": k, "label": v} for k, v in pdf_map.items()]
     return {"points": points, "pdfs": pdfs}
 
@@ -516,13 +550,15 @@ def _chart_longitudinal(log_data: dict) -> dict:
     versions = sorted(all_ver, key=_ver_sort_key)
     datasets = []
     for key in sorted(log_data):
-        vm       = log_data[key]
+        vm = log_data[key]
         data_pts = [_median(vm[v]) if vm.get(v) else None for v in versions]
-        datasets.append({
-            "label": _PDF_LABELS.get(key, key),
-            "data":  data_pts,
-            "color": _pdf_color(key),
-        })
+        datasets.append(
+            {
+                "label": _PDF_LABELS.get(key, key),
+                "data": data_pts,
+                "color": _pdf_color(key),
+            }
+        )
     return {"versions": versions, "datasets": datasets}
 
 
@@ -537,26 +573,22 @@ def version_delta(kpi_trend: dict, metric: str) -> dict:
     beteiligten Versionen n>=20 haben — sonst ist das Delta Rauschen (N-Guard).
     """
     values = kpi_trend.get(metric) or []
-    ns     = kpi_trend.get("n") or []
+    ns = kpi_trend.get("n") or []
     latest = values[-1] if values else None
-    prev   = values[-2] if len(values) >= 2 else None
+    prev = values[-2] if len(values) >= 2 else None
     n_latest = ns[-1] if ns else None
-    n_prev   = ns[-2] if len(ns) >= 2 else None
+    n_prev = ns[-2] if len(ns) >= 2 else None
     delta = None if (latest is None or prev is None) else round(latest - prev, 4)
-    reliable = (
-        delta is not None
-        and (n_latest or 0) >= _DELTA_MIN_N
-        and (n_prev or 0) >= _DELTA_MIN_N
-    )
+    reliable = delta is not None and (n_latest or 0) >= _DELTA_MIN_N and (n_prev or 0) >= _DELTA_MIN_N
     return {"latest": latest, "prev": prev, "delta": delta, "reliable": reliable}
 
 
 def _chart_tokens(runs: list[dict]) -> dict:
     return {
-        "labels":       [r["date"]         for r in runs],
-        "pdf_labels":   [r.get("pdf_label", "") for r in runs],
-        "tokens_in":    [r["tokens_in"]    for r in runs],
-        "tokens_out":   [r["tokens_out"]   for r in runs],
+        "labels": [r["date"] for r in runs],
+        "pdf_labels": [r.get("pdf_label", "") for r in runs],
+        "tokens_in": [r["tokens_in"] for r in runs],
+        "tokens_out": [r["tokens_out"] for r in runs],
         "tokens_cache": [r["tokens_cache"] for r in runs],
         "duration_min": [r["duration_min"] for r in runs],
     }
@@ -587,33 +619,32 @@ def _chart_tokens_by_version(runs: list[dict]) -> dict:
         if not ver or is_foss_version(ver):
             continue
         b = by_ver.setdefault(ver, {"in": 0, "out": 0, "cache": 0, "dur": []})
-        b["in"]    += r.get("tokens_in", 0) or 0
-        b["out"]   += r.get("tokens_out", 0) or 0
+        b["in"] += r.get("tokens_in", 0) or 0
+        b["out"] += r.get("tokens_out", 0) or 0
         b["cache"] += r.get("tokens_cache", 0) or 0
         if r.get("duration_min") is not None:
             b["dur"].append(r["duration_min"])
     versions = sorted(by_ver, key=_ver_sort_key)
     return {
-        "labels":       versions,
-        "tokens_in":    [by_ver[v]["in"]    for v in versions],
-        "tokens_out":   [by_ver[v]["out"]   for v in versions],
+        "labels": versions,
+        "tokens_in": [by_ver[v]["in"] for v in versions],
+        "tokens_out": [by_ver[v]["out"] for v in versions],
         "tokens_cache": [by_ver[v]["cache"] for v in versions],
-        "duration_min": [round(_median(by_ver[v]["dur"]), 1) if by_ver[v]["dur"] else None
-                         for v in versions],
+        "duration_min": [round(_median(by_ver[v]["dur"]), 1) if by_ver[v]["dur"] else None for v in versions],
     }
 
 
 def _chart_scaling(all_log_runs: list[dict]) -> dict:
     points = [
         {
-            "x":       r["words"],
-            "y":       r["n_total"],
+            "x": r["words"],
+            "y": r["n_total"],
             "y_vault": r["n_vault"],
-            "pages":   r["pages"],
-            "key":     r["key"],
-            "label":   r["label"],
-            "ver":     r["ver"],
-            "pct":     r["accept_pct"],
+            "pages": r["pages"],
+            "key": r["key"],
+            "label": r["label"],
+            "ver": r["ver"],
+            "pct": r["accept_pct"],
         }
         for r in all_log_runs
         if r["words"] is not None
@@ -629,76 +660,86 @@ def _build_quality_chart_data(quality_rows: list[dict]) -> dict:
     for r in quality_rows:
         note = r.get("note") or r.get("note_title") or "?"
         note = re.sub(r"^(vault|inbox)__", "", note).replace(".md", "")
-        pdf  = r.get("pdf") or r.get("source_pdf") or "unbekannt"
-        ver  = r.get("version") or "unknown"
+        pdf = r.get("pdf") or r.get("source_pdf") or "unbekannt"
+        ver = r.get("version") or "unknown"
         hall = r.get("hallucination_rate")
-        cov  = r.get("coverage_factual") or r.get("coverage_rate")
+        cov = r.get("coverage_factual") or r.get("coverage_rate")
         anch_total = r.get("anchors_total") or 0
-        anch_conf  = r.get("anchors_confirmed") or 0
-        rows_clean.append({
-            "note":     note,
-            "pdf":      pdf,
-            "pdf_short": _pdf_short_name(pdf),
-            "version":  ver,
-            "hall":     round(float(hall) * 100, 1) if hall is not None else None,
-            "cov":      round(float(cov)  * 100, 1) if cov  is not None else None,
-            "anchors_confirmed": anch_conf,
-            "anchors_total":     anch_total,
-            "tokens_input":  r.get("tokens_input", 0) or 0,
-            "tokens_output": r.get("tokens_output", 0) or 0,
-            "tokens_cache":  r.get("tokens_cache_read", 0) or 0,
-            "wall_time_s":   r.get("wall_time_s", 0) or 0,
-            "small_sample":  r.get("small_sample_warning", False),
-        })
+        anch_conf = r.get("anchors_confirmed") or 0
+        rows_clean.append(
+            {
+                "note": note,
+                "pdf": pdf,
+                "pdf_short": _pdf_short_name(pdf),
+                "version": ver,
+                "hall": round(float(hall) * 100, 1) if hall is not None else None,
+                "cov": round(float(cov) * 100, 1) if cov is not None else None,
+                "anchors_confirmed": anch_conf,
+                "anchors_total": anch_total,
+                "tokens_input": r.get("tokens_input", 0) or 0,
+                "tokens_output": r.get("tokens_output", 0) or 0,
+                "tokens_cache": r.get("tokens_cache_read", 0) or 0,
+                "wall_time_s": r.get("wall_time_s", 0) or 0,
+                "small_sample": r.get("small_sample_warning", False),
+            }
+        )
 
     all_versions = sorted({r["version"] for r in rows_clean}, key=_ver_sort_key)
-    all_pdfs     = sorted({r["pdf"] for r in rows_clean})
+    all_pdfs = sorted({r["pdf"] for r in rows_clean})
 
     # Slope-Daten: Median Hall-Rate + Coverage pro Version pro PDF
     slope_datasets = []
     pdf_colors_used: dict[str, str] = {}
     for i, pdf in enumerate(all_pdfs):
-        key = _KEY_RE.match(pdf.replace(".pdf","").strip()).group(1) if _KEY_RE.match(pdf.replace(".pdf","").strip()) else pdf.lower()[:6]
+        key = (
+            _KEY_RE.match(pdf.replace(".pdf", "").strip()).group(1)
+            if _KEY_RE.match(pdf.replace(".pdf", "").strip())
+            else pdf.lower()[:6]
+        )
         color = _pdf_color(key, i)
         pdf_colors_used[pdf] = color
         hall_pts = []
-        cov_pts  = []
+        cov_pts = []
         for v in all_versions:
             vrows = [r for r in rows_clean if r["pdf"] == pdf and r["version"] == v and r["hall"] is not None]
             hall_pts.append(_median([r["hall"] for r in vrows]) if vrows else None)
             vrows2 = [r for r in rows_clean if r["pdf"] == pdf and r["version"] == v and r["cov"] is not None]
             cov_pts.append(_median([r["cov"] for r in vrows2]) if vrows2 else None)
-        slope_datasets.append({
-            "pdf":       pdf,
-            "pdf_short": _pdf_short_name(pdf),
-            "color":     color,
-            "hall_data": hall_pts,
-            "cov_data":  cov_pts,
-        })
+        slope_datasets.append(
+            {
+                "pdf": pdf,
+                "pdf_short": _pdf_short_name(pdf),
+                "color": color,
+                "hall_data": hall_pts,
+                "cov_data": cov_pts,
+            }
+        )
 
     # Token-Daten: Summe Input/Output/Cache pro Version
     token_by_ver: dict[str, dict] = {}
     for v in all_versions:
         vrows = [r for r in rows_clean if r["version"] == v]
         token_by_ver[v] = {
-            "tokens_input":  sum(r["tokens_input"]  for r in vrows),
+            "tokens_input": sum(r["tokens_input"] for r in vrows),
             "tokens_output": sum(r["tokens_output"] for r in vrows),
-            "tokens_cache":  sum(r["tokens_cache"]  for r in vrows),
-            "n":             len(vrows),
+            "tokens_cache": sum(r["tokens_cache"] for r in vrows),
+            "n": len(vrows),
         }
 
     return {
-        "rows":           rows_clean,
-        "versions":       all_versions,
-        "pdfs":           all_pdfs,
-        "pdf_colors":     pdf_colors_used,
+        "rows": rows_clean,
+        "versions": all_versions,
+        "pdfs": all_pdfs,
+        "pdf_colors": pdf_colors_used,
         "slope_datasets": slope_datasets,
-        "token_by_ver":   token_by_ver,
+        "token_by_ver": token_by_ver,
     }
+
 
 # ---------------------------------------------------------------------------
 # HTML-Render-Hilfsfunktionen
 # ---------------------------------------------------------------------------
+
 
 def _pill(value, good_thr, bad_thr, invert=False, suffix="%", good_label=None, bad_label=None) -> str:
     """Gibt eine .pill.good/warn/bad Spanne zurueck."""
@@ -734,7 +775,7 @@ def _mini_bar(value, good_thr, bad_thr) -> str:
     if value is None:
         return ""
     cls = "good" if value >= good_thr else ("bad" if value <= bad_thr else "warn")
-    return f'<span class="mini-bar {cls}"><i style="width:{min(value,100):.0f}%"></i></span>'
+    return f'<span class="mini-bar {cls}"><i style="width:{min(value, 100):.0f}%"></i></span>'
 
 
 def _render_pdf_table(rows: list[dict]) -> str:
@@ -744,58 +785,60 @@ def _render_pdf_table(rows: list[dict]) -> str:
     header = (
         '<table class="cmp"><thead><tr>'
         '<th style="width:28px"></th>'
-        '<th>Quell-PDF</th>'
-        '<th>Letzte Version</th>'
+        "<th>Quell-PDF</th>"
+        "<th>Letzte Version</th>"
         '<th class="num">W&ouml;rter</th>'
         '<th class="num">Seiten</th>'
         '<th class="num">Akzeptiert</th>'
         '<th class="num">Fehlerquote</th>'
         '<th class="num">Abdeckung</th>'
         '<th class="num">Eval.&nbsp;Notes</th>'
-        '</tr></thead><tbody>'
+        "</tr></thead><tbody>"
     )
     body = ""
     for r in rows:
-        key    = r.get("key", "")
-        meta   = _PDF_META.get(key, {})
-        w_str  = f"{r['words']:,}".replace(",", ".") if r["words"] else "&mdash;"
-        p_str  = str(r["pages"]) if r["pages"] else "&mdash;"
-        acc_q  = _quant(r["accept"], THRESH_ACCEPT[0], THRESH_ACCEPT[1])
+        key = r.get("key", "")
+        meta = _PDF_META.get(key, {})
+        w_str = f"{r['words']:,}".replace(",", ".") if r["words"] else "&mdash;"
+        p_str = str(r["pages"]) if r["pages"] else "&mdash;"
+        acc_q = _quant(r["accept"], THRESH_ACCEPT[0], THRESH_ACCEPT[1])
         hall_q = _quant(r["hall"], THRESH_HALL[0], THRESH_HALL[1], invert=True)
-        cov_q  = _quant(r["cov"], THRESH_COV[0], THRESH_COV[1])
-        bar    = _mini_bar(r["accept"], THRESH_ACCEPT[0], THRESH_ACCEPT[1])
+        cov_q = _quant(r["cov"], THRESH_COV[0], THRESH_COV[1])
+        bar = _mini_bar(r["accept"], THRESH_ACCEPT[0], THRESH_ACCEPT[1])
         ver_cls = "cur" if r["version"] != "unknown" else ""
 
         if meta:
+
             def _dl(k: str, v: str) -> str:
                 return f'<div class="pdf-dl-row"><dt>{k}</dt><dd>{v}</dd></div>'
+
             meta_html = (
                 '<dl class="pdf-meta">'
                 + _dl("Vollst. Titel", meta.get("titel", "--"))
                 + _dl("Autor(en)", meta.get("autor", "--"))
                 + _dl("Jahr", meta.get("jahr", "--"))
                 + _dl("Erschienen in", meta.get("in", "--"))
-                + _dl("Sprache / Typ", f'{meta.get("sprache","--")} &middot; {meta.get("typ","--")}')
-                + f'<div class="pdf-dl-row pdf-dl-full"><dt>Inhalt</dt><dd>{meta.get("thema","--")}</dd></div>'
-                + '</dl>'
+                + _dl("Sprache / Typ", f"{meta.get('sprache', '--')} &middot; {meta.get('typ', '--')}")
+                + f'<div class="pdf-dl-row pdf-dl-full"><dt>Inhalt</dt><dd>{meta.get("thema", "--")}</dd></div>'
+                + "</dl>"
             )
             toggle = (
                 '<td style="text-align:center;width:28px">'
                 '<button class="expand-btn" onclick="toggleRow(this)" title="Details">&#9656;</button>'
-                '</td>'
+                "</td>"
             )
             detail = (
                 f'<tr class="detail-row" style="display:none">'
                 f'<td colspan="9" style="padding:0;border-bottom:1px solid var(--hairline)">'
-                f'{meta_html}</td></tr>'
+                f"{meta_html}</td></tr>"
             )
         else:
-            toggle = '<td></td>'
-            detail = ''
+            toggle = "<td></td>"
+            detail = ""
 
         body += (
             f'<tr class="data-row">'
-            f'{toggle}'
+            f"{toggle}"
             f'<td class="td-name" onclick="toggleRow(this.closest(\'tr\').querySelector(\'.expand-btn\'))" style="cursor:pointer">{r["label"]}</td>'
             f'<td><span class="tag {ver_cls}">{r["version"]}</span></td>'
             f'<td class="num" style="color:var(--ink-3)">{w_str}</td>'
@@ -804,41 +847,42 @@ def _render_pdf_table(rows: list[dict]) -> str:
             f'<td class="num">{hall_q}</td>'
             f'<td class="num">{cov_q}</td>'
             f'<td class="num" style="color:var(--ink-3)">{r["n_notes"] or "&mdash;"}</td>'
-            f'</tr>'
-            f'{detail}'
+            f"</tr>"
+            f"{detail}"
         )
     return header + body + "</tbody></table>"
+
 
 # ---------------------------------------------------------------------------
 # HTML zusammenbauen
 # ---------------------------------------------------------------------------
 
 _CHARTJS_CDN = "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
-_FONT_URL    = "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Inter+Tight:wght@500;600;700;800&display=swap"
+_FONT_URL = "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Inter+Tight:wght@500;600;700;800&display=swap"
 
 
 def _build_html(
-    kpis:           dict,
+    kpis: dict,
     pdf_table_rows: list[dict],
-    accept_chart:   dict,
-    scatter_chart:  dict,
-    long_chart:     dict,
-    token_chart:    dict,
-    scaling_chart:  dict,
-    quality_data:   dict,
-    generated_at:   str,
+    accept_chart: dict,
+    scatter_chart: dict,
+    long_chart: dict,
+    token_chart: dict,
+    scaling_chart: dict,
+    quality_data: dict,
+    generated_at: str,
 ) -> str:
-    accept_json   = json.dumps(accept_chart,  ensure_ascii=False)
-    scatter_json  = json.dumps(scatter_chart, ensure_ascii=False)
-    long_json     = json.dumps(long_chart,    ensure_ascii=False)
-    token_json    = json.dumps(token_chart,   ensure_ascii=False)
-    scaling_json  = json.dumps(scaling_chart, ensure_ascii=False)
-    quality_json  = json.dumps(quality_data,  ensure_ascii=False)
+    accept_json = json.dumps(accept_chart, ensure_ascii=False)
+    scatter_json = json.dumps(scatter_chart, ensure_ascii=False)
+    long_json = json.dumps(long_chart, ensure_ascii=False)
+    token_json = json.dumps(token_chart, ensure_ascii=False)
+    scaling_json = json.dumps(scaling_chart, ensure_ascii=False)
+    quality_json = json.dumps(quality_data, ensure_ascii=False)
 
-    accept_empty  = not accept_chart.get("labels")
+    accept_empty = not accept_chart.get("labels")
     scatter_empty = not scatter_chart.get("points")
-    long_empty    = not long_chart.get("versions")
-    token_empty   = not token_chart.get("labels")
+    long_empty = not long_chart.get("versions")
+    token_empty = not token_chart.get("labels")
     scaling_empty = not scaling_chart.get("points")
     quality_empty = not quality_data.get("rows")
 
@@ -850,21 +894,17 @@ def _build_html(
             btns += f'<button class="filter-btn" data-pdf="{p["raw"]}">{p["label"]}</button>'
         pdf_filter_html = f'<div class="filter-bar" id="scatterFilter">{btns}</div>'
 
-    tok_m = f'{kpis["total_tokens"] / 1_000_000:.2f}M' if kpis["total_tokens"] else "--"
+    tok_m = f"{kpis['total_tokens'] / 1_000_000:.2f}M" if kpis["total_tokens"] else "--"
 
     pdf_table_html = _render_pdf_table(pdf_table_rows)
 
-    no_data = '<p style="color:var(--ink-4);font-style:italic;padding:3rem 0;text-align:center">Keine Daten vorhanden.</p>'
+    no_data = (
+        '<p style="color:var(--ink-4);font-style:italic;padding:3rem 0;text-align:center">Keine Daten vorhanden.</p>'
+    )
 
     # Versions- und PDF-Optionen fuer Filter-Dropdowns
-    all_versions_opts = "".join(
-        f'<option value="{v}">{v}</option>'
-        for v in quality_data.get("versions", [])
-    )
-    all_pdfs_opts = "".join(
-        f'<option value="{p}">{_pdf_short_name(p)}</option>'
-        for p in quality_data.get("pdfs", [])
-    )
+    all_versions_opts = "".join(f'<option value="{v}">{v}</option>' for v in quality_data.get("versions", []))
+    all_pdfs_opts = "".join(f'<option value="{p}">{_pdf_short_name(p)}</option>' for p in quality_data.get("pdfs", []))
 
     return f"""<!DOCTYPE html>
 <html lang="de">
@@ -1214,7 +1254,7 @@ table.detail-tbl tbody td.note-name {{ max-width:340px; overflow:hidden; text-ov
   <div class="cell"><div class="k">Pipeline-Versionen</div><div class="v">{kpis["n_versions"]}<small> &middot; {kpis["versions_range"]}</small></div></div>
   <div class="cell"><div class="k">Runs</div><div class="v">{kpis["total_runs"]}</div></div>
   <div class="cell"><div class="k">Notes generiert</div><div class="v">{kpis["total_generated"]}</div></div>
-  <div class="cell"><div class="k">Akzeptiert</div><div class="v">{kpis["total_accepted"]}<small> / {round(100*kpis["total_accepted"]/kpis["total_generated"],1) if kpis["total_generated"] else "--"}&nbsp;%</small></div></div>
+  <div class="cell"><div class="k">Akzeptiert</div><div class="v">{kpis["total_accepted"]}<small> / {round(100 * kpis["total_accepted"] / kpis["total_generated"], 1) if kpis["total_generated"] else "--"}&nbsp;%</small></div></div>
   <div class="cell"><div class="k">Tokens</div><div class="v">{tok_m}</div></div>
   <div class="cell"><div class="k">Laufzeit</div><div class="v">{kpis["total_dur_h"]}<small>&nbsp;h</small></div></div>
 </div>
@@ -1338,7 +1378,7 @@ table.detail-tbl tbody td.note-name {{ max-width:340px; overflow:hidden; text-ov
 
   <!-- Chart 2: Scatter -->
   <div class="chart">
-    <div class="head"><h3>Jede Note: Fehler gegen Abdeckung</h3><div class="ax">{len(scatter_chart.get("points",[]))} evaluierte Notes</div></div>
+    <div class="head"><h3>Jede Note: Fehler gegen Abdeckung</h3><div class="ax">{len(scatter_chart.get("points", []))} evaluierte Notes</div></div>
     <p class="sub">
       Jede Note ist ein Punkt. <b>Links oben</b> = ideal: wenige Fehler, hohe Abdeckung.
       Hover zeigt Titel und Quelle.
@@ -2086,34 +2126,41 @@ if (!{str(token_empty).lower()}) {{
 </html>
 """
 
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
+
 
 def main() -> None:
     print("[dashboard] Lese Daten...")
     quality_rows = _read_quality_history()
     all_log_runs = _read_all_log_runs()
-    token_runs   = _read_token_runs()
-    log_data     = _build_log_data(all_log_runs)
+    token_runs = _read_token_runs()
+    log_data = _build_log_data(all_log_runs)
 
     print(f"  quality_history: {len(quality_rows)} Eintraege")
     print(f"  Log-Runs: {len(all_log_runs)} aus {len(log_data)} PDFs")
     print(f"  Token-Runs: {len(token_runs)}")
 
-    kpis           = _calc_kpis(log_data, all_log_runs, quality_rows, token_runs)
+    kpis = _calc_kpis(log_data, all_log_runs, quality_rows, token_runs)
     pdf_table_rows = _calc_pdf_table(log_data, all_log_runs, quality_rows)
-    accept_chart   = _chart_acceptance(log_data)
-    scatter_chart  = _chart_scatter(quality_rows)
-    long_chart     = _chart_longitudinal(log_data)
-    token_chart    = _chart_tokens(token_runs)
-    scaling_chart  = _chart_scaling(all_log_runs)
-    quality_data   = _build_quality_chart_data(quality_rows)
+    accept_chart = _chart_acceptance(log_data)
+    scatter_chart = _chart_scatter(quality_rows)
+    long_chart = _chart_longitudinal(log_data)
+    token_chart = _chart_tokens(token_runs)
+    scaling_chart = _chart_scaling(all_log_runs)
+    quality_data = _build_quality_chart_data(quality_rows)
 
     generated_at = datetime.now().strftime("%Y-%m-%d %H:%M")
     html = _build_html(
-        kpis, pdf_table_rows,
-        accept_chart, scatter_chart, long_chart, token_chart, scaling_chart,
+        kpis,
+        pdf_table_rows,
+        accept_chart,
+        scatter_chart,
+        long_chart,
+        token_chart,
+        scaling_chart,
         quality_data,
         generated_at,
     )

@@ -9,6 +9,7 @@ Strategie: Sätze die in ≥SHARED_THRESHOLD Sub-Drafts identisch vorkommen werd
 als Boilerplate erkannt, aus den Sub-Drafts entfernt und (falls fehlend) dem
 Hub-Draft am Ende des Bodys angehängt. Deterministisch, keine LLM-Calls.
 """
+
 from __future__ import annotations
 import re
 
@@ -158,8 +159,7 @@ def dedup_hub_subconcepts(drafts: list[AtomicNoteDraft]) -> tuple[list[AtomicNot
                 sentence_to_drafts.setdefault(norm, set()).add(id(sub))
                 sentence_canonical.setdefault(norm, sent)
 
-        boilerplate_norms = {n for n, ids in sentence_to_drafts.items()
-                             if len(ids) >= SHARED_THRESHOLD}
+        boilerplate_norms = {n for n, ids in sentence_to_drafts.items() if len(ids) >= SHARED_THRESHOLD}
         if not boilerplate_norms:
             continue
 
@@ -175,9 +175,7 @@ def dedup_hub_subconcepts(drafts: list[AtomicNoteDraft]) -> tuple[list[AtomicNot
             if removed <= 0:
                 continue
             sub.body = stripped_body
-            sub.quality_flags.append(
-                f"Boilerplate-Dedup: {removed} Satz/Sätze aus Hub [[{hub.title}]] zentralisiert"
-            )
+            sub.quality_flags.append(f"Boilerplate-Dedup: {removed} Satz/Sätze aus Hub [[{hub.title}]] zentralisiert")
             stripped_in_hub_run += removed
 
         if stripped_in_hub_run == 0:
@@ -186,13 +184,10 @@ def dedup_hub_subconcepts(drafts: list[AtomicNoteDraft]) -> tuple[list[AtomicNot
 
         # Boilerplate-Sätze die noch nicht im Hub sind, am Hub-Body anhängen unter
         # eigenem Abschnitt — semantisch klar abgegrenzt von Hub-eigenem Prosa.
-        missing = [sentence_canonical[n] for n in boilerplate_norms
-                   if n not in hub_existing_norms]
+        missing = [sentence_canonical[n] for n in boilerplate_norms if n not in hub_existing_norms]
         if missing:
             block = "\n\n".join(missing).strip()
             hub.body = hub.body.rstrip() + "\n\n## Geteilte Empirie\n\n" + block + "\n"
-            hub.quality_flags.append(
-                f"Boilerplate-Dedup: {len(missing)} geteilten Satz/Sätze aus Sub-Notes übernommen"
-            )
+            hub.quality_flags.append(f"Boilerplate-Dedup: {len(missing)} geteilten Satz/Sätze aus Sub-Notes übernommen")
 
     return drafts, total_stripped

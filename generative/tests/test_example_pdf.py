@@ -8,6 +8,7 @@ Verifies that examples/zettelkasten-primer.pdf:
 pdftotext is required (poppler-utils). It is available in CI (ubuntu + windows)
 and is a documented prerequisite for running the pipeline.
 """
+
 from __future__ import annotations
 
 import shutil
@@ -46,9 +47,7 @@ def test_example_pdf_word_count():
         check=True,
     )
     word_count = len(result.stdout.split())
-    assert word_count > 400, (
-        f"pdftotext extracted only {word_count} words; expected > 400"
-    )
+    assert word_count > 400, f"pdftotext extracted only {word_count} words; expected > 400"
 
 
 @needs_pdftotext
@@ -60,6 +59,4 @@ def test_example_pdf_contains_atomic():
         text=True,
         check=True,
     )
-    assert "atomic" in result.stdout.lower(), (
-        "The word 'atomic' was not found in the extracted PDF text"
-    )
+    assert "atomic" in result.stdout.lower(), "The word 'atomic' was not found in the extracted PDF text"

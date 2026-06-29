@@ -200,8 +200,7 @@ def should_attempt_refine(
 
 def refine_accepted(refined, *, auto_threshold: int) -> bool:
     return (
-        bool(getattr(refined, "hard_gates_pass", False))
-        and int(getattr(refined, "critic_score", 0)) >= auto_threshold
+        bool(getattr(refined, "hard_gates_pass", False)) and int(getattr(refined, "critic_score", 0)) >= auto_threshold
     )
 
 
@@ -250,9 +249,6 @@ def cap_actionable_concepts(concepts: list, max_concepts: int | None) -> tuple[l
         return concepts, []
 
     kept_actionable_ids = {id(c) for c in actionable[:max_concepts]}
-    capped = [
-        c for c in concepts
-        if id(c) in kept_actionable_ids or not is_actionable_concept(c)
-    ]
+    capped = [c for c in concepts if id(c) in kept_actionable_ids or not is_actionable_concept(c)]
     dropped = actionable[max_concepts:]
     return capped, dropped

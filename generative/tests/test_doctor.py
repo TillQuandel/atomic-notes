@@ -1,4 +1,5 @@
 """Tests für atomic-notes doctor (generative/doctor.py) — Preflight-Checks als pure Funktionen."""
+
 from __future__ import annotations
 
 
@@ -6,6 +7,7 @@ from generative import doctor
 
 
 # --- Poppler ---
+
 
 def test_pdftotext_fehlt():
     r = doctor.check_tool("pdftotext", which=lambda n: None)
@@ -21,6 +23,7 @@ def test_pdftotext_gefunden():
 
 # --- Backend: subscription ---
 
+
 def test_subscription_cli_fehlt(tmp_path):
     r = doctor.check_backend("subscription", which=lambda n: None, home=tmp_path, env={})
     assert r.ok is False
@@ -29,9 +32,7 @@ def test_subscription_cli_fehlt(tmp_path):
 
 
 def test_subscription_nicht_eingeloggt(tmp_path):
-    r = doctor.check_backend(
-        "subscription", which=lambda n: "/usr/bin/claude", home=tmp_path, env={}
-    )
+    r = doctor.check_backend("subscription", which=lambda n: "/usr/bin/claude", home=tmp_path, env={})
     assert r.ok is False
     assert "einlogg" in r.hint.lower() or "login" in r.hint.lower()
 
@@ -40,13 +41,12 @@ def test_subscription_eingeloggt(tmp_path):
     cred = tmp_path / ".claude" / ".credentials.json"
     cred.parent.mkdir()
     cred.write_text("{}", encoding="utf-8")
-    r = doctor.check_backend(
-        "subscription", which=lambda n: "/usr/bin/claude", home=tmp_path, env={}
-    )
+    r = doctor.check_backend("subscription", which=lambda n: "/usr/bin/claude", home=tmp_path, env={})
     assert r.ok is True
 
 
 # --- Backend: litellm ---
+
 
 def test_litellm_ohne_key(tmp_path):
     r = doctor.check_backend("litellm", which=lambda n: None, home=tmp_path, env={})
@@ -56,13 +56,16 @@ def test_litellm_ohne_key(tmp_path):
 
 def test_litellm_mit_key(tmp_path):
     r = doctor.check_backend(
-        "litellm", which=lambda n: None, home=tmp_path,
+        "litellm",
+        which=lambda n: None,
+        home=tmp_path,
         env={"ANTHROPIC_API_KEY": "sk-test"},
     )
     assert r.ok is True
 
 
 # --- Vault ---
+
 
 def test_vault_fehlt(tmp_path):
     r = doctor.check_vault(tmp_path / "gibt-es-nicht")
@@ -76,6 +79,7 @@ def test_vault_vorhanden_und_beschreibbar(tmp_path):
 
 
 # --- Gesamtlauf ---
+
 
 def test_main_exit_0_wenn_alles_ok(monkeypatch, capsys):
     ok = doctor.CheckResult(name="x", ok=True, detail="gut")
@@ -94,6 +98,7 @@ def test_main_exit_1_und_hint_bei_fehlschlag(monkeypatch, capsys):
 
 # --- Review-Funde (Codex 2026-06-10) ---
 
+
 def test_vault_probe_ueberschreibt_keine_existierende_datei(tmp_path):
     """Schreibprobe darf keine vorhandene Datei anfassen (alter fester Probe-Name)."""
     leftover = tmp_path / ".atomic-notes-doctor-probe"
@@ -106,8 +111,9 @@ def test_vault_probe_ueberschreibt_keine_existierende_datei(tmp_path):
 def test_optionale_deps_fuehren_nicht_zu_exit_1(monkeypatch, capsys):
     results = [
         doctor.CheckResult(name="pdftotext", ok=True, detail="ok"),
-        doctor.CheckResult(name="sentence_transformers", ok=False,
-                           detail="fehlt", hint="pip install ...", required=False),
+        doctor.CheckResult(
+            name="sentence_transformers", ok=False, detail="fehlt", hint="pip install ...", required=False
+        ),
     ]
     monkeypatch.setattr(doctor, "run_all", lambda: results)
     assert doctor.main() == 0
@@ -119,7 +125,5 @@ def test_credentials_ok_nennt_heuristik(tmp_path):
     cred = tmp_path / ".claude" / ".credentials.json"
     cred.parent.mkdir()
     cred.write_text("{}", encoding="utf-8")
-    r = doctor.check_backend(
-        "subscription", which=lambda n: "/usr/bin/claude", home=tmp_path, env={}
-    )
+    r = doctor.check_backend("subscription", which=lambda n: "/usr/bin/claude", home=tmp_path, env={})
     assert "nicht live verifiziert" in r.detail

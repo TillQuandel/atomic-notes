@@ -6,6 +6,7 @@ try:
     from nltk.tokenize import sent_tokenize
 except Exception:
     import nltk
+
     nltk.download("punkt", quiet=True)
     nltk.download("punkt_tab", quiet=True)
     from nltk.tokenize import sent_tokenize
@@ -40,9 +41,7 @@ def clean_sentence(text: str) -> str:
     return text.strip()
 
 
-def find_concept_sentences(
-    concept: str, text: str, context: int = 1, threshold: int = 70
-) -> list[str]:
+def find_concept_sentences(concept: str, text: str, context: int = 1, threshold: int = 70) -> list[str]:
     """Findet Saetze mit Konzept-Erwaehnung + Kontext-Fenster. Bereinigt Artefakte."""
     sentences = sent_tokenize(text)
     result, seen = [], set()
@@ -57,9 +56,7 @@ def find_concept_sentences(
     return result
 
 
-def extract_body_for_concept(
-    concept: str, text: str, n: int = 4, language: str = "english"
-) -> list[str]:
+def extract_body_for_concept(concept: str, text: str, n: int = 4, language: str = "english") -> list[str]:
     """LexRank ueber Konzept-Sentence-Cluster -> Top-n Saetze.
     Gibt leere Liste zurueck wenn kein Satz das Konzept erwaehnt (kein Fallback auf Volltext).
     """

@@ -8,6 +8,7 @@ Resume-fähig: überspringt Notes die bereits mit eval_version=4.1 in DB stehen.
 Verwendung:
   python reeval_baseline.py [--dry-run]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -23,11 +24,15 @@ BASELINE_DIR = ROOT / ".cache" / "eval" / "baseline"
 
 # Mapping: Ordner-Präfix → PDF-Pfad
 PDF_MAP = {
-    "Bates":      Path(r"C:/Users/tillq/OneDrive/Dokumente/Literatur/Bates - 2017 - Information Behavior.pdf"),
-    "Hertzum":    Path(r"C:/Users/tillq/OneDrive/Dokumente/Literatur/Hertzum - 2023 - Information seeking by experimentation Trying something out to discover what.pdf"),
-    "Kaletski":   Path(r"C:/Users/tillq/OneDrive/Dokumente/Literatur/Kaletski - 2017 - Faculty Perceptions ACRL Framework.pdf"),
-    "Kuhlthau":   None,  # PDF nicht verfügbar
-    "Schlebbe":   None,  # PDF nicht verfügbar
+    "Bates": Path(r"C:/Users/tillq/OneDrive/Dokumente/Literatur/Bates - 2017 - Information Behavior.pdf"),
+    "Hertzum": Path(
+        r"C:/Users/tillq/OneDrive/Dokumente/Literatur/Hertzum - 2023 - Information seeking by experimentation Trying something out to discover what.pdf"
+    ),
+    "Kaletski": Path(
+        r"C:/Users/tillq/OneDrive/Dokumente/Literatur/Kaletski - 2017 - Faculty Perceptions ACRL Framework.pdf"
+    ),
+    "Kuhlthau": None,  # PDF nicht verfügbar
+    "Schlebbe": None,  # PDF nicht verfügbar
 }
 
 
@@ -41,8 +46,7 @@ def _find_pdf(folder_name: str) -> Path | None:
 def _already_done(note_name: str, conn) -> bool:
     """Prüft ob Note schon mit eval_version=4.1 in DB steht."""
     row = conn.execute(
-        "SELECT 1 FROM note_evals WHERE note_path=? AND eval_version='4.1' LIMIT 1",
-        (note_name,)
+        "SELECT 1 FROM note_evals WHERE note_path=? AND eval_version='4.1' LIMIT 1", (note_name,)
     ).fetchone()
     return row is not None
 
@@ -76,15 +80,19 @@ def main() -> None:
 
     # Reeval-Run in pipeline_runs eintragen damit FK-Constraints erfüllt sind
     from generative.agents.base import _RUN_ID as _reeval_run_id
+
     if not args.dry_run:
         with _db.get_db() as _conn_init:
-            _conn_init.execute("""
+            _conn_init.execute(
+                """
                 INSERT OR IGNORE INTO pipeline_runs
                 (run_id, timestamp, pipeline_version, pdf_source, pdf_key, pdf_label,
                  n_generated, n_vault, n_inbox, fully_cached)
                 VALUES (?, datetime('now'), 'reeval', 'baseline-reeval', 'reeval', 'Re-Eval Baseline',
                         ?, 0, 0, 0)
-            """, (_reeval_run_id, len(notes)))
+            """,
+                (_reeval_run_id, len(notes)),
+            )
         print(f"  Reeval-Run ID: {_reeval_run_id}\n")
 
     with _db.get_db() as conn:
@@ -106,7 +114,7 @@ def main() -> None:
                     _eq.save_result(result)
                     done += 1
                     hall = result.get("hallucination_rate", -1)
-                    cov  = result.get("coverage_factual", -1)
+                    cov = result.get("coverage_factual", -1)
                     print(f"       → hall={hall:.1%}  cov={cov:.1%}")
                 else:
                     print(f"       → FEHLER: {result['error']}")

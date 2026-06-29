@@ -5,6 +5,7 @@ Frontmatter-Strip verhindert dass `concept_text_window` Cluster im PDF-Frontmatt
 dort en passant vorkommen — Hiatt 2026-05-10 ADKAR-Eval-Bug. Siehe
 [[Atomic-Agent-Pipeline]] v24.
 """
+
 from __future__ import annotations
 import re
 
@@ -13,6 +14,7 @@ from generative.pipeline.pdf_chunker import drop_frontmatter_pages, page_range_o
 
 
 # ---- drop_frontmatter_pages ---------------------------------------------
+
 
 def test_drop_advance_praise_before_chapter_one():
     pages = [
@@ -122,6 +124,7 @@ def test_isbn_alone_triggers_signal():
 
 # ---- page_range_of_text (Sanity) ----------------------------------------
 
+
 def test_page_range_extracts_min_max():
     text = "[S. 5]\n\nfoo\n\n[S. 7]\n\nbar\n\n[S. 12]\n\nbaz"
     assert page_range_of_text(text) == (5, 12)
@@ -138,6 +141,7 @@ def test_page_range_no_marker_returns_none():
 # Sliding-Window, Score = 100·title_match + 1·unique_token_match, Top-Fenster
 # bis max_chars gesammelt.
 
+
 def test_title_match_beats_token_only():
     """Fenster mit Exact-Title-Match muss Token-Spam schlagen (TOC-Bias-Fix).
 
@@ -151,7 +155,8 @@ def test_title_match_beats_token_only():
     out = concept_text_window(
         text,
         ["Multi-Agent System", "agent", "system", "multi"],
-        window_words=200, max_chars=1500,
+        window_words=200,
+        max_chars=1500,
     )
     assert "multi-agent system is a coordinated" in out
     assert "TOC_MARKER" not in out  # TOC-Fenster wurde verworfen
@@ -168,7 +173,8 @@ def test_unique_token_count_not_repetition():
     out = concept_text_window(
         text,
         ["Foo", "agent", "system", "multi"],  # kein Title-Match möglich
-        window_words=200, max_chars=400,
+        window_words=200,
+        max_chars=400,
     )
     assert "agent system multi context" in out
 
@@ -191,7 +197,10 @@ def test_document_order_preserved():
     pad = " ".join(["filler"] * 600)  # genug damit Fenster getrennt sind
     text = f"{early} {pad} {late}"
     out = concept_text_window(
-        text, ["TARGET"], window_words=200, max_chars=8000,
+        text,
+        ["TARGET"],
+        window_words=200,
+        max_chars=8000,
     )
     pos_early = out.find("at start")
     pos_late = out.find("late in doc")
@@ -228,6 +237,7 @@ def test_single_chunk_oversize_still_returned():
 # und erbt dann die Seite eines früheren Snippets → falsche Fußnoten-Seite.
 # Merrill-Run 2026-06-24: Integration-Detail (echt S.8) bekam pauschal "S.3".
 
+
 def _page_before(text: str, needle: str) -> str | None:
     """Letzter [S. N]-Marker vor `needle` — exakt wie Downstream die Seite ableitet."""
     pos = text.find(needle)
@@ -256,14 +266,11 @@ def test_snippet_retains_correct_page_marker_when_window_starts_mid_page():
     detail = "\n\n[S. 5]\n\n" + " ".join(["filler"] * 550) + " TARGET alpha beta delta DETAILNEEDLE"
     text = f"{overview}{mid}{detail}"
 
-    out = concept_text_window(
-        text, ["TARGET", "alpha", "beta"], window_words=400, max_chars=8000
-    )
+    out = concept_text_window(text, ["TARGET", "alpha", "beta"], window_words=400, max_chars=8000)
 
     assert "DETAILNEEDLE" in out, "Detail-Fenster muss selektiert sein"
     assert _page_before(out, "DETAILNEEDLE") == "5", (
-        "Detail-Snippet muss seinen eigenen Seitenmarker S.5 tragen, "
-        "nicht den S.1 des früheren Snippets erben"
+        "Detail-Snippet muss seinen eigenen Seitenmarker S.5 tragen, nicht den S.1 des früheren Snippets erben"
     )
 
 
@@ -279,40 +286,37 @@ def test_inline_page_ref_not_treated_as_page_start():
         + " TARGET alpha beta DETAILNEEDLE"
     )
 
-    out = concept_text_window(
-        text, ["TARGET", "alpha", "beta"], window_words=400, max_chars=8000
-    )
+    out = concept_text_window(text, ["TARGET", "alpha", "beta"], window_words=400, max_chars=8000)
 
     assert "DETAILNEEDLE" in out, "Detail-Fenster muss selektiert sein"
     assert _page_before(out, "DETAILNEEDLE") == "7", (
-        "markerloses Detail-Snippet muss die echte Seite S.7 erben, "
-        "nicht die inline zitierte S.12"
+        "markerloses Detail-Snippet muss die echte Seite S.7 erben, nicht die inline zitierte S.12"
     )
 
 
 # ---- _resolve_page_numbers (Druckseiten-Labels statt Form-Feed-Index) -----
 
+
 def test_resolve_page_numbers_uses_numeric_labels():
     """Echte (arabische) Druckseiten-Labels werden als Seitenzahl genutzt — nicht
     die Form-Feed-Position. Buch-Kapitel/-Extrakt: PDF-Seite 1 trägt Druckseite 159."""
     from generative.pipeline.pdf_chunker import _resolve_page_numbers
-    assert _resolve_page_numbers(["a", "b", "c"], ["159", "160", "161"]) == [
-        (159, "a"), (160, "b"), (161, "c")
-    ]
+
+    assert _resolve_page_numbers(["a", "b", "c"], ["159", "160", "161"]) == [(159, "a"), (160, "b"), (161, "c")]
 
 
 def test_resolve_page_numbers_roman_falls_back_to_index():
     """Nicht-numerische Labels (römisches Frontmatter) dürfen die \\d+-Anker-Kette
     nicht brechen → Fallback auf 1-basierten Form-Feed-Index."""
     from generative.pipeline.pdf_chunker import _resolve_page_numbers
-    assert _resolve_page_numbers(["a", "b", "c"], ["xi", "xii", "1"]) == [
-        (1, "a"), (2, "b"), (1, "c")
-    ]
+
+    assert _resolve_page_numbers(["a", "b", "c"], ["xi", "xii", "1"]) == [(1, "a"), (2, "b"), (1, "c")]
 
 
 def test_resolve_page_numbers_no_labels_is_index():
     """Kein PageLabels-Eintrag (labels=None) → exakt das alte Verhalten (i+1)."""
     from generative.pipeline.pdf_chunker import _resolve_page_numbers
+
     assert _resolve_page_numbers(["a", "b"], None) == [(1, "a"), (2, "b")]
 
 
@@ -320,9 +324,8 @@ def test_resolve_page_numbers_length_mismatch_safe():
     """pdftotext kann eine Extraseite liefern (finaler \\f) → überzählige Seiten
     fallen sauber auf den Index zurück, kein IndexError."""
     from generative.pipeline.pdf_chunker import _resolve_page_numbers
-    assert _resolve_page_numbers(["a", "b", "c"], ["159", "160"]) == [
-        (159, "a"), (160, "b"), (3, "c")
-    ]
+
+    assert _resolve_page_numbers(["a", "b", "c"], ["159", "160"]) == [(159, "a"), (160, "b"), (3, "c")]
 
 
 def test_resolve_page_numbers_strips_whitespace_and_coerces_nonstr():
@@ -330,6 +333,7 @@ def test_resolve_page_numbers_strips_whitespace_and_coerces_nonstr():
     robust strippen/coercen statt aufs Form-Feed zurückzufallen oder zu crashen
     (Qwen-Review HIGH/MED, 2. Durchgang)."""
     from generative.pipeline.pdf_chunker import _resolve_page_numbers
+
     assert _resolve_page_numbers(["a", "b"], [" 159 ", 160]) == [(159, "a"), (160, "b")]
 
 
@@ -338,11 +342,12 @@ def test_usable_page_labels_gate_requires_numeric_and_unique():
     None. Verhindert Namespace-Kollision römisch↔arabisch (False-Bind in figure_alt)
     und mehrdeutige Index-Abbildung bei Duplikaten (Codex-Review, 2. Durchgang)."""
     from generative.pipeline.pdf_chunker import _usable_page_labels
+
     assert _usable_page_labels(["159", "160", "161"]) == ["159", "160", "161"]
-    assert _usable_page_labels([" 159 ", "160"]) == [" 159 ", "160"]   # numerisch m. Whitespace ok
-    assert _usable_page_labels(["xi", "xii", "1"]) is None             # gemischt römisch/arabisch
-    assert _usable_page_labels(["1", "2", "2"]) is None                # doppelt → mehrdeutig
-    assert _usable_page_labels(["100", "1", "2"]) is None              # nicht monoton → falsche Ranges
+    assert _usable_page_labels([" 159 ", "160"]) == [" 159 ", "160"]  # numerisch m. Whitespace ok
+    assert _usable_page_labels(["xi", "xii", "1"]) is None  # gemischt römisch/arabisch
+    assert _usable_page_labels(["1", "2", "2"]) is None  # doppelt → mehrdeutig
+    assert _usable_page_labels(["100", "1", "2"]) is None  # nicht monoton → falsche Ranges
     # Zero-Padding-Duplikat: als Strings verschieden ("01"≠"1"), als Zahl gleich (1==1).
     # Muss abgelehnt werden, sonst zwei Seiten mit [S. 1] → False-Bind (Qwen-Review, 2026-06-27).
     assert _usable_page_labels(["01", "1", "2"]) is None
@@ -356,8 +361,10 @@ def test_usable_page_labels_gate_requires_numeric_and_unique():
 
 # ---- assess_text_quality (G6/#27 — Textqualitäts-Gate) -------------------
 
+
 def test_empty_text_is_empty_not_thin():
     from generative.pipeline.pdf_chunker import assess_text_quality
+
     q = assess_text_quality("")
     assert q.is_empty is True
     assert q.is_thin is False
@@ -367,6 +374,7 @@ def test_empty_text_is_empty_not_thin():
 def test_thin_scanned_text_flagged():
     # Gescanntes PDF ohne OCR: viele Seiten, kaum extrahierter Text (Rauschen).
     from generative.pipeline.pdf_chunker import assess_text_quality, pages_to_marked_text
+
     pages = [(n, "3 7") for n in range(1, 11)]  # 10 Seiten, je 2 "Wörter"
     text = pages_to_marked_text(pages)
     q = assess_text_quality(text)
@@ -377,6 +385,7 @@ def test_thin_scanned_text_flagged():
 
 def test_normal_dense_text_not_thin():
     from generative.pipeline.pdf_chunker import assess_text_quality, pages_to_marked_text
+
     body = " ".join(["wort"] * 300)  # 300 Wörter/Seite — normaler Fließtext
     pages = [(1, body), (2, body)]
     text = pages_to_marked_text(pages)
@@ -390,6 +399,7 @@ def test_page_markers_not_counted_as_words():
     # Die `[S. N]`-Marker dürfen die Wortzahl nicht aufblähen (sonst sähe ein
     # leeres PDF mit 40 Seiten-Markern "wortreich" aus).
     from generative.pipeline.pdf_chunker import assess_text_quality, pages_to_marked_text
+
     pages = [(n, "") for n in range(1, 41)]  # 40 leere Seiten → nur Marker
     text = pages_to_marked_text(pages)
     q = assess_text_quality(text)
@@ -404,11 +414,12 @@ def test_inline_page_refs_not_counted_as_pages():
     # is_thin (False-Positive-Warnung) markiert. Nur zeilen-isolierte Pipeline-Marker
     # zählen als echte Seiten.
     from generative.pipeline.pdf_chunker import assess_text_quality, pages_to_marked_text
+
     body = "Mustertext " * 100 + "vgl. dazu [S. 12] sowie [S. 34] in der Literatur."
     pages = [(1, body)]
     text = pages_to_marked_text(pages)
     q = assess_text_quality(text)
-    assert q.pages == 1        # nur der eine echte Pipeline-Marker
+    assert q.pages == 1  # nur der eine echte Pipeline-Marker
     assert q.is_thin is False  # ~100 Wörter auf 1 Seite ist nicht dünn
 
 

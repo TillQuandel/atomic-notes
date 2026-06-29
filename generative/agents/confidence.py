@@ -20,13 +20,18 @@ Für Pipeline-erzeugte Notes: Default low, weil ein PDF = monoquellig (Adequacy 
 medium nur wenn Cross-Reference echte Vault-Belege gefunden hat (zweite Quelle).
 high nur bei ≥2 unabhängigen Tier-A/B-Quellen (heuristisch via QualityReport-Flags).
 """
+
 from __future__ import annotations
 
 from generative.schemas.atomic_note import AtomicNoteDraft
 
 
-def run(draft: AtomicNoteDraft, has_vault_corroboration: bool = False,
-        peer_reviewed: bool = False, citation_count: int | None = None) -> AtomicNoteDraft:
+def run(
+    draft: AtomicNoteDraft,
+    has_vault_corroboration: bool = False,
+    peer_reviewed: bool = False,
+    citation_count: int | None = None,
+) -> AtomicNoteDraft:
     """CERQual-Stufung. Pipeline-Default low, hochstufen nur bei klarer Evidenz.
 
     Args:
@@ -51,10 +56,7 @@ def run(draft: AtomicNoteDraft, has_vault_corroboration: bool = False,
     # 2. Coherence — Widersprüche aus Cross-Reference?
     # Nur harte ⚠️-Flags (Haiku+NLI bestätigt) zählen als Coherence-Penalty.
     # Soft-Warnings (ℹ️ Möglicher Widerspruch, nur Haiku) sind kein Confidence-Signal.
-    has_contradiction = any(
-        f.startswith("⚠️") and "Widerspruch" in f
-        for f in draft.quality_flags
-    )
+    has_contradiction = any(f.startswith("⚠️") and "Widerspruch" in f for f in draft.quality_flags)
     if has_contradiction:
         components_pass -= 1
         reasons.append("Widerspruch zu Vault-Note erkannt (Coherence)")

@@ -9,22 +9,68 @@ _ANCHOR_RE_PLAN = _re.compile(r"\s*\(S\.\s*\d+(?:-\d+)?\)")
 def _strip_name(text: str) -> str:
     return _ANCHOR_RE_PLAN.sub("", text).strip().lower()
 
+
 CONCEPT_TYPES = ["Theory", "Concept", "Method", "Metric", "Model", "Framework", "Phenomenon"]
 _MODEL_NAME = "urchade/gliner_medium-v2.1"
 
-_GENERIC_BLACKLIST = frozenset({
-    # Abstrakte Generika
-    "information", "system", "process", "method", "model", "data", "analysis",
-    "management", "mean", "average", "advantage", "result", "approach", "aspect",
-    "concept", "theory", "issue", "factor", "element", "component", "feature",
-    "problem", "solution", "area", "level", "type", "form", "role",
-    "ability", "use", "need", "way", "part", "point", "case", "end", "set",
-    # Plural-Generika
-    "methods", "models", "surveys", "rubrics", "metrics", "factors", "systems",
-    "concepts", "aspects", "results", "studies", "issues", "elements",
-    # Fachfremde Einzelbegriffe
-    "tinnitus",
-})
+_GENERIC_BLACKLIST = frozenset(
+    {
+        # Abstrakte Generika
+        "information",
+        "system",
+        "process",
+        "method",
+        "model",
+        "data",
+        "analysis",
+        "management",
+        "mean",
+        "average",
+        "advantage",
+        "result",
+        "approach",
+        "aspect",
+        "concept",
+        "theory",
+        "issue",
+        "factor",
+        "element",
+        "component",
+        "feature",
+        "problem",
+        "solution",
+        "area",
+        "level",
+        "type",
+        "form",
+        "role",
+        "ability",
+        "use",
+        "need",
+        "way",
+        "part",
+        "point",
+        "case",
+        "end",
+        "set",
+        # Plural-Generika
+        "methods",
+        "models",
+        "surveys",
+        "rubrics",
+        "metrics",
+        "factors",
+        "systems",
+        "concepts",
+        "aspects",
+        "results",
+        "studies",
+        "issues",
+        "elements",
+        # Fachfremde Einzelbegriffe
+        "tinnitus",
+    }
+)
 
 
 def _is_specific_concept(name: str) -> bool:
@@ -68,6 +114,7 @@ def _matches_language(text: str, main_language: str) -> bool:
         return True
     try:
         from langdetect import detect
+
         detected = detect(text)
         if detected == main_language:
             return True
@@ -85,12 +132,11 @@ def _matches_language(text: str, main_language: str) -> bool:
 @lru_cache(maxsize=1)
 def _get_model():
     from gliner import GLiNER
+
     return GLiNER.from_pretrained(_MODEL_NAME)
 
 
-def extract_concepts(
-    text: str, page: int = 1, threshold: float = 0.75, main_language: str = "en"
-) -> list[dict]:
+def extract_concepts(text: str, page: int = 1, threshold: float = 0.75, main_language: str = "en") -> list[dict]:
     model = _get_model()
     entities = model.predict_entities(text, CONCEPT_TYPES, threshold=threshold)
     return [
@@ -123,6 +169,7 @@ def plan_concepts(
     # Sicherstellen dass max_concepts nicht kleiner als min_concepts ist
     max_concepts = max(max_concepts, min_concepts)
     from collections import Counter
+
     all_concepts: list[dict] = []
     for chunk in chunks:
         all_concepts.extend(extract_concepts(chunk.text, page=chunk.page, main_language=main_language))
@@ -143,9 +190,7 @@ def plan_concepts(
     return result
 
 
-def _keybert_fallback(
-    chunks, existing: list[dict], main_language: str = "en"
-) -> list[dict]:
+def _keybert_fallback(chunks, existing: list[dict], main_language: str = "en") -> list[dict]:
     try:
         from keybert import KeyBERT
     except ImportError:

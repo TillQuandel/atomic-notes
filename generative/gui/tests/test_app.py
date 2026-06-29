@@ -4,6 +4,7 @@ Der echte Orchestrator-Lauf (Subprocess, Minuten, LLM-Calls) wird per
 Dependency-Injection durch eine `fake_run`-Generator-Funktion ersetzt, die
 echte Event-Dicts yieldet — keine Mock-Bibliothek.
 """
+
 import json
 from pathlib import Path
 
@@ -15,6 +16,7 @@ from generative.gui.app import create_app
 
 def fake_doctor():
     from generative.doctor import CheckResult
+
     return [
         CheckResult(name="pdftotext", ok=True, detail="pdftotext: /usr/bin"),
         CheckResult(name="backend (subscription)", ok=True, detail="CLI ok"),
@@ -26,8 +28,15 @@ def fake_doctor():
 def fake_run(pdf, dry_run, register=None):
     yield {"type": "started", "argv": ["fake"]}
     yield {"type": "stage", "num": 1, "total": 7, "label": "PDF & Chunking"}
-    yield {"type": "preview", "name": "a.md", "routing": "vault", "score": 5,
-           "hard_gates": True, "confidence": "high", "flags": ""}
+    yield {
+        "type": "preview",
+        "name": "a.md",
+        "routing": "vault",
+        "score": 5,
+        "hard_gates": True,
+        "confidence": "high",
+        "flags": "",
+    }
     yield {"type": "done", "written": 1, "dry_run": dry_run}
     yield {"type": "exited", "returncode": 0}
 
@@ -39,9 +48,14 @@ def client(tmp_path):
     uploads = tmp_path / "uploads"
     vault = tmp_path / "vault"
     vault.mkdir()
-    app = create_app(run_factory=fake_run, pdf_dirs=[tmp_path],
-                     vault_path=vault, backend="subscription",
-                     uploads_dir=uploads, doctor_fn=fake_doctor)
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=vault,
+        backend="subscription",
+        uploads_dir=uploads,
+        doctor_fn=fake_doctor,
+    )
     c = TestClient(app)
     c._uploads = uploads  # für Upload-Tests
     return c, pdf
@@ -81,13 +95,18 @@ def test_doctor_ok_false_when_required_check_fails(tmp_path):
 
     def failing_doctor():
         return [
-            CheckResult(name="backend (subscription)", ok=False,
-                        detail="CLI nicht eingeloggt", hint="claude login"),
+            CheckResult(name="backend (subscription)", ok=False, detail="CLI nicht eingeloggt", hint="claude login"),
             CheckResult(name="pypdf", ok=True, detail="ok", required=False),
         ]
-    app = create_app(run_factory=fake_run, pdf_dirs=[tmp_path],
-                     vault_path=tmp_path, backend="subscription",
-                     uploads_dir=tmp_path / "u", doctor_fn=failing_doctor)
+
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=failing_doctor,
+    )
     body = TestClient(app).get("/api/doctor").json()
     assert body["ok"] is False  # required-Fehler → Start sperren
 
@@ -116,8 +135,7 @@ def test_run_then_stream_yields_events(client):
     assert body.rstrip().endswith('data: {"type": "exited", "returncode": 0}')
     # Letztes Note-Event korrekt durchgereicht.
     done_payloads = [ln for ln in body.splitlines() if ln.startswith("data:") and '"done"' in ln]
-    assert any(json.loads(ln[len("data:"):].strip()).get("written") == 1
-               for ln in done_payloads)
+    assert any(json.loads(ln[len("data:") :].strip()).get("written") == 1 for ln in done_payloads)
 
 
 def test_preview_rejects_path_traversal(client):
@@ -129,8 +147,7 @@ def test_preview_rejects_path_traversal(client):
 
 def test_upload_pdf_saves_and_returns_path(client):
     c, _ = client
-    r = c.post("/api/upload",
-               files={"file": ("Mein Dokument.pdf", b"%PDF-1.4 echtes", "application/pdf")})
+    r = c.post("/api/upload", files={"file": ("Mein Dokument.pdf", b"%PDF-1.4 echtes", "application/pdf")})
     assert r.status_code == 200
     body = r.json()
     assert body["name"] == "Mein Dokument.pdf"
@@ -145,15 +162,13 @@ def test_upload_pdf_saves_and_returns_path(client):
 
 def test_upload_rejects_non_pdf(client):
     c, _ = client
-    r = c.post("/api/upload",
-               files={"file": ("notiz.txt", b"kein pdf", "text/plain")})
+    r = c.post("/api/upload", files={"file": ("notiz.txt", b"kein pdf", "text/plain")})
     assert r.status_code == 400
 
 
 def test_upload_sanitizes_filename_no_traversal(client):
     c, _ = client
-    r = c.post("/api/upload",
-               files={"file": ("../../evil.pdf", b"%PDF-1.4", "application/pdf")})
+    r = c.post("/api/upload", files={"file": ("../../evil.pdf", b"%PDF-1.4", "application/pdf")})
     assert r.status_code == 200
     saved = Path(r.json()["path"])
     # Kein Entkommen aus uploads_dir.
@@ -166,6 +181,7 @@ def test_run_rejected_while_active(client, monkeypatch):
 
     # Langsamer Lauf: blockiert, bis das Test-Event gesetzt wird.
     import threading
+
     gate = threading.Event()
 
     def slow_run(pdf, dry_run, register=None):
@@ -173,8 +189,7 @@ def test_run_rejected_while_active(client, monkeypatch):
         gate.wait(timeout=5)
         yield {"type": "done", "written": 0, "dry_run": dry_run}
 
-    app = create_app(run_factory=slow_run, pdf_dirs=[pdf.parent],
-                     vault_path=pdf.parent, backend="subscription")
+    app = create_app(run_factory=slow_run, pdf_dirs=[pdf.parent], vault_path=pdf.parent, backend="subscription")
     cc = TestClient(app)
     r1 = cc.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     assert r1.status_code == 200
@@ -185,6 +200,7 @@ def test_run_rejected_while_active(client, monkeypatch):
 
 def test_cancel_terminates_active_run(tmp_path):
     import threading
+
     gate = threading.Event()
     terminated = {"v": False}
 
@@ -205,9 +221,13 @@ def test_cancel_terminates_active_run(tmp_path):
 
     pdf = tmp_path / "x.pdf"
     pdf.write_bytes(b"%PDF-1.4")
-    app = create_app(run_factory=slow_run, pdf_dirs=[tmp_path],
-                     vault_path=tmp_path, backend="subscription",
-                     uploads_dir=tmp_path / "u")
+    app = create_app(
+        run_factory=slow_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+    )
     cc = TestClient(app)
     assert cc.post("/api/run", json={"pdf": str(pdf), "dry_run": True}).status_code == 200
     r = cc.post("/api/cancel")
@@ -225,9 +245,14 @@ def test_run_revalidates_vault_server_side(tmp_path):
     # existierenden Vault ab (Fehlervermeidung statt Mid-Run-Crash).
     pdf = tmp_path / "x.pdf"
     pdf.write_bytes(b"%PDF-1.4")
-    app = create_app(run_factory=fake_run, pdf_dirs=[tmp_path],
-                     vault_path=tmp_path / "nicht-da", backend="subscription",
-                     uploads_dir=tmp_path / "u", doctor_fn=fake_doctor)
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path / "nicht-da",
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+    )
     r = TestClient(app).post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     assert r.status_code == 400
     assert "vault" in r.json()["error"].lower()
@@ -242,8 +267,9 @@ def test_run_factory_exception_surfaces_as_error_event(tmp_path):
 
     pdf = tmp_path / "x.pdf"
     pdf.write_bytes(b"%PDF-1.4")
-    app = create_app(run_factory=boom, pdf_dirs=[tmp_path], vault_path=tmp_path,
-                     backend="subscription", uploads_dir=tmp_path / "u")
+    app = create_app(
+        run_factory=boom, pdf_dirs=[tmp_path], vault_path=tmp_path, backend="subscription", uploads_dir=tmp_path / "u"
+    )
     cc = TestClient(app)
     assert cc.post("/api/run", json={"pdf": str(pdf), "dry_run": True}).status_code == 200
     body = cc.get("/api/stream").text
@@ -256,9 +282,14 @@ def test_preview_returns_body_for_existing_eval_copy(tmp_path):
     base = tmp_path / "baseline"
     (base / "meinpdf").mkdir(parents=True)
     (base / "meinpdf" / "vault__Konzept.md").write_text("# Konzept\nKörper", encoding="utf-8")
-    app = create_app(run_factory=fake_run, pdf_dirs=[tmp_path], vault_path=tmp_path,
-                     backend="subscription", uploads_dir=tmp_path / "u",
-                     preview_root=base)
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        preview_root=base,
+    )
     r = TestClient(app).get("/api/preview", params={"pdf_stem": "meinpdf", "name": "Konzept.md"})
     assert r.status_code == 200
     assert r.json()["body"] == "# Konzept\nKörper"
@@ -268,24 +299,24 @@ def test_run_rejects_cross_origin(client):
     # #1: Ein Cross-Origin-POST (CSRF aus fremdem Browser-Tab) wird abgelehnt,
     # bevor irgendein Lauf startet — auch wenn der Browser den Request absetzt.
     c, pdf = client
-    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True},
-               headers={"Origin": "http://evil.example"})
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True}, headers={"Origin": "http://evil.example"})
     assert r.status_code == 403
 
 
 def test_run_allows_same_origin(client):
     # Same-Origin (127.0.0.1) bleibt erlaubt.
     c, pdf = client
-    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True},
-               headers={"Origin": "http://127.0.0.1:8052"})
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True}, headers={"Origin": "http://127.0.0.1:8052"})
     assert r.status_code == 200
 
 
 def test_upload_rejects_cross_origin(client):
     c, _ = client
-    r = c.post("/api/upload",
-               files={"file": ("x.pdf", b"%PDF-1.4", "application/pdf")},
-               headers={"Origin": "http://evil.example"})
+    r = c.post(
+        "/api/upload",
+        files={"file": ("x.pdf", b"%PDF-1.4", "application/pdf")},
+        headers={"Origin": "http://evil.example"},
+    )
     assert r.status_code == 403
 
 
@@ -302,9 +333,14 @@ def test_run_rejects_pdf_outside_allowed_dirs(tmp_path):
     allowed.mkdir()
     outside = tmp_path / "geheim.pdf"
     outside.write_bytes(b"%PDF-1.4")
-    app = create_app(run_factory=fake_run, pdf_dirs=[allowed],
-                     vault_path=tmp_path, backend="subscription",
-                     uploads_dir=tmp_path / "uploads", doctor_fn=fake_doctor)
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[allowed],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "uploads",
+        doctor_fn=fake_doctor,
+    )
     r = TestClient(app).post("/api/run", json={"pdf": str(outside), "dry_run": True})
     assert r.status_code == 400
 
@@ -315,9 +351,14 @@ def test_run_accepts_pdf_from_uploads_dir(tmp_path):
     uploads.mkdir()
     up = uploads / "doc.pdf"
     up.write_bytes(b"%PDF-1.4")
-    app = create_app(run_factory=fake_run, pdf_dirs=[tmp_path / "pdfs"],
-                     vault_path=tmp_path, backend="subscription",
-                     uploads_dir=uploads, doctor_fn=fake_doctor)
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path / "pdfs"],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=uploads,
+        doctor_fn=fake_doctor,
+    )
     r = TestClient(app).post("/api/run", json={"pdf": str(up), "dry_run": True})
     assert r.status_code == 200
 
@@ -330,6 +371,7 @@ def test_status_reports_no_active_run_initially(client):
 
 def test_status_reports_active_run(tmp_path):
     import threading
+
     gate = threading.Event()
 
     def slow_run(pdf, dry_run, register=None):
@@ -339,9 +381,13 @@ def test_status_reports_active_run(tmp_path):
 
     pdf = tmp_path / "x.pdf"
     pdf.write_bytes(b"%PDF-1.4")
-    app = create_app(run_factory=slow_run, pdf_dirs=[tmp_path],
-                     vault_path=tmp_path, backend="subscription",
-                     uploads_dir=tmp_path / "u")
+    app = create_app(
+        run_factory=slow_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+    )
     cc = TestClient(app)
     cc.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     body = cc.get("/api/status").json()

@@ -4,6 +4,7 @@ Asynchron — mehrere Chunks parallel verarbeitbar.
 Output erfüllt [[Schema-Konzept]]: Body 30–60 Zeilen destilliert, Anker inline mit
 Seitenzahl, deutsche Sprache, Akronyme aufgelöst, aliases-Liste, kein Pass-Through.
 """
+
 from __future__ import annotations
 import re
 from pathlib import Path
@@ -184,9 +185,7 @@ def _ends_complete(body: str) -> bool:
 # - Bindestriche nur als Worttrenner (kein `bad-`, kein `a--b`)
 # - max 3 Hierarchie-Ebenen via "/"
 # - Codex-Finding 2: vorherige Regex erlaubte trailing/double hyphen
-_PROPOSED_TAG_RE = re.compile(
-    r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:/[a-z][a-z0-9]*(?:-[a-z0-9]+)*){0,2}$"
-)
+_PROPOSED_TAG_RE = re.compile(r"^[a-z][a-z0-9]*(?:-[a-z0-9]+)*(?:/[a-z][a-z0-9]*(?:-[a-z0-9]+)*){0,2}$")
 
 
 def is_valid_schema_tag(tag: str) -> bool:
@@ -230,13 +229,15 @@ def _validate_proposed_tags(raw: list[str], whitelist: set[str], max_count: int 
     # Modell-Overproduction. Pipeline crasht nicht, aber Drop wird geloggt.
     if schema_valid_count > max_count:
         import sys
-        print(f"      [proposed-tags-truncate] {schema_valid_count} valide Vorschläge "
-              f"→ auf {max_count} gekürzt", file=sys.stderr)
+
+        print(
+            f"      [proposed-tags-truncate] {schema_valid_count} valide Vorschläge → auf {max_count} gekürzt",
+            file=sys.stderr,
+        )
     return valid
 
 
-def _format_tag_whitelist(tags: list[str] | None,
-                            source_text: str | None = None) -> str:
+def _format_tag_whitelist(tags: list[str] | None, source_text: str | None = None) -> str:
     """Whitelist als Bullet-Liste fürs Prompt. Leere Liste → Tags strikt
     leer lassen. Bei vorhandenem source_text wird zweigeteilt: priorisierte
     Tags (Token-Match) + übrige. Bias-Schutz: Vault-häufige aber quellfremde
@@ -245,6 +246,7 @@ def _format_tag_whitelist(tags: list[str] | None,
         return "(keine Whitelist verfügbar — Tag-Feld leer lassen)"
     if source_text:
         from generative.agents.context_builder import score_tags_for_source
+
         prio, rest = score_tags_for_source(tags, source_text)
         if prio:
             blocks = [
@@ -266,6 +268,7 @@ def _clean_source_file_display(source_file: str) -> str:
     als Zwei-Autoren-Trenner. Drei­ter Geschwister-Kanal der Issue-41/PR-71-Klasse.
     Nicht-parsbare Namen bleiben unverändert."""
     from generative.pipeline.vault_writer import _parse_filename_fallback
+
     fb = _parse_filename_fallback(source_file)
     author = fb.get("Author")
     if not author:
@@ -279,9 +282,12 @@ def _clean_source_file_display(source_file: str) -> str:
 
 def _format_source_meta(meta: dict[str, str], source_file: str) -> str:
     parts = []
-    if meta.get("Author"): parts.append(f"Autor: {meta['Author']}")
-    if meta.get("Title"):  parts.append(f"Titel: {meta['Title']}")
-    if meta.get("Year"):   parts.append(f"Jahr: {meta['Year']}")
+    if meta.get("Author"):
+        parts.append(f"Autor: {meta['Author']}")
+    if meta.get("Title"):
+        parts.append(f"Titel: {meta['Title']}")
+    if meta.get("Year"):
+        parts.append(f"Jahr: {meta['Year']}")
     parts.append(f"Datei: {_clean_source_file_display(source_file)}")
     return "\n".join(f"- {p}" for p in parts)
 
@@ -323,15 +329,18 @@ def _format_related_mentions(mentions: list[str] | None) -> str:
     )
 
 
-async def run_per_concept(concept, concept_text: str,
-                          existing_concepts: dict[str, str],
-                          source_meta: dict[str, str] | None = None,
-                          source_file: str = "",
-                          revision_hint: str | None = None,
-                          tag_whitelist: list[str] | None = None,
-                          background_context: list[str] | None = None,
-                          related_mentions: list[str] | None = None,
-                          current_draft_body: str | None = None) -> AtomicNoteDraft | None:
+async def run_per_concept(
+    concept,
+    concept_text: str,
+    existing_concepts: dict[str, str],
+    source_meta: dict[str, str] | None = None,
+    source_file: str = "",
+    revision_hint: str | None = None,
+    tag_whitelist: list[str] | None = None,
+    background_context: list[str] | None = None,
+    related_mentions: list[str] | None = None,
+    current_draft_body: str | None = None,
+) -> AtomicNoteDraft | None:
     """Extrahiere genau eine Note für ein konkretes Konzept aus den relevanten
     Textstellen (gesammelt via pdf_chunker.concept_text_window).
 
@@ -376,16 +385,19 @@ async def run_per_concept(concept, concept_text: str,
             "Adressiere diesen Punkt direkt in der neuen Version.\n\n"
         )
 
-    prompt = refine_block + _PROMPT.format(
-        source_meta=_format_source_meta(source_meta, source_file),
-        author_short=_short_author(source_meta),
-        concepts=concepts_str,
-        existing=existing_str or "(noch keine)",
-        background_block=_format_background_block(background_context),
-        related_mentions_block=_format_related_mentions(related_mentions),
-        tag_whitelist=_format_tag_whitelist(tag_whitelist, source_text=concept_text),
-        chunk_title=concept.title,
-        chunk_text=concept_text,  # pdf_chunker.concept_text_window liefert bereits gerankte Top-Fenster (Option D, max_chars=8000)
+    prompt = (
+        refine_block
+        + _PROMPT.format(
+            source_meta=_format_source_meta(source_meta, source_file),
+            author_short=_short_author(source_meta),
+            concepts=concepts_str,
+            existing=existing_str or "(noch keine)",
+            background_block=_format_background_block(background_context),
+            related_mentions_block=_format_related_mentions(related_mentions),
+            tag_whitelist=_format_tag_whitelist(tag_whitelist, source_text=concept_text),
+            chunk_title=concept.title,
+            chunk_text=concept_text,  # pdf_chunker.concept_text_window liefert bereits gerankte Top-Fenster (Option D, max_chars=8000)
+        )
     )
 
     raw = await call_claude_async(prompt, model=MODEL_EXTRACTOR, agent="extractor")
@@ -393,13 +405,17 @@ async def run_per_concept(concept, concept_text: str,
     items, parse_warnings = parse_extractor_output(raw)
     if parse_warnings:
         import sys
+
         for w in parse_warnings:
             print(f"      [extractor-warn] '{concept.title}': {w}", file=sys.stderr)
 
     if not items:
         import sys
-        print(f"      [extractor-empty] '{concept.title}' kein verwertbarer Output (raw[:120]={raw[:120]!r})",
-              file=sys.stderr)
+
+        print(
+            f"      [extractor-empty] '{concept.title}' kein verwertbarer Output (raw[:120]={raw[:120]!r})",
+            file=sys.stderr,
+        )
         return None
 
     item = items[0]
@@ -419,10 +435,7 @@ async def run_per_concept(concept, concept_text: str,
             "Sätze vollständig mit Satzendzeichen. Empirie-Phase auf 1–2 Sätze "
             "kürzen wenn Platzdruck. Definition + Substanz haben Vorrang."
         )
-        retry_prompt = (
-            "## Trunkierungs-Hinweis (höchste Priorität)\n"
-            f"{trunc_hint}\n\n"
-        ) + _PROMPT.format(
+        retry_prompt = (f"## Trunkierungs-Hinweis (höchste Priorität)\n{trunc_hint}\n\n") + _PROMPT.format(
             source_meta=_format_source_meta(source_meta, source_file),
             author_short=_short_author(source_meta),
             concepts=concepts_str,
@@ -441,12 +454,8 @@ async def run_per_concept(concept, concept_text: str,
             # Übernahme nur wenn Retry sauber endet — sonst Original behalten
             if cand_body and _ends_complete(cand_body):
                 item = cand
-    anchors = [
-        TextAnchor(quote=a.get("quote", ""), page=a.get("page"))
-        for a in item.get("source_anchors", [])
-    ]
-    proposed = _validate_proposed_tags(item.get("proposed_tags", []),
-                                         whitelist=set(tag_whitelist or []))
+    anchors = [TextAnchor(quote=a.get("quote", ""), page=a.get("page")) for a in item.get("source_anchors", [])]
+    proposed = _validate_proposed_tags(item.get("proposed_tags", []), whitelist=set(tag_whitelist or []))
     return AtomicNoteDraft(
         title=item.get("title", concept.title),
         body=item.get("body", ""),
@@ -462,27 +471,29 @@ async def run_per_concept(concept, concept_text: str,
     )
 
 
-async def run(chunk_title: str, chunk_text: str,
-              concept_plan: ConceptPlan,
-              existing_concepts: dict[str, str],
-              source_meta: dict[str, str] | None = None,
-              source_file: str = "",
-              tag_whitelist: list[str] | None = None) -> list[AtomicNoteDraft]:
+async def run(
+    chunk_title: str,
+    chunk_text: str,
+    concept_plan: ConceptPlan,
+    existing_concepts: dict[str, str],
+    source_meta: dict[str, str] | None = None,
+    source_file: str = "",
+    tag_whitelist: list[str] | None = None,
+) -> list[AtomicNoteDraft]:
 
     source_meta = source_meta or {}
     target_concepts = [
-        c for c in concept_plan.concepts
-        if c.action in ("create", "extend") and c.chapter.lower() in chunk_title.lower()
+        c
+        for c in concept_plan.concepts
+        if c.action in ("create", "extend")
+        and c.chapter.lower() in chunk_title.lower()
         or c.priority == "high"  # High-Priority-Konzepte in jedem Chunk suchen
     ]
 
     if not target_concepts:
         return []
 
-    concepts_str = "\n".join(
-        f"- {c.title} (Priorität: {c.priority}, action: {c.action})"
-        for c in target_concepts
-    )
+    concepts_str = "\n".join(f"- {c.title} (Priorität: {c.priority}, action: {c.action})" for c in target_concepts)
     _etoks2 = set(chunk_title.lower().split())
     _esorted2 = sorted(existing_concepts, key=lambda k: len(_etoks2 & set(k.lower().split())), reverse=True)
     existing_str = "\n".join(f"- {k}" for k in _esorted2[:75])
@@ -492,8 +503,8 @@ async def run(chunk_title: str, chunk_text: str,
         author_short=_short_author(source_meta),
         concepts=concepts_str,
         existing=existing_str or "(noch keine)",
-        background_block="",           # run() hat kein background_context — legacy-Pfad
-        related_mentions_block="",     # run() hat kein related_mentions — legacy-Pfad
+        background_block="",  # run() hat kein background_context — legacy-Pfad
+        related_mentions_block="",  # run() hat kein related_mentions — legacy-Pfad
         tag_whitelist=_format_tag_whitelist(tag_whitelist, source_text=chunk_text),
         chunk_title=chunk_title,
         chunk_text=chunk_text[:8000],
@@ -504,28 +515,27 @@ async def run(chunk_title: str, chunk_text: str,
     items, parse_warnings = parse_extractor_output(raw)
     if parse_warnings:
         import sys
+
         for w in parse_warnings:
             print(f"      [extractor-warn] {w}", file=sys.stderr)
 
     drafts: list[AtomicNoteDraft] = []
     for item in items:
-        anchors = [
-            TextAnchor(quote=a.get("quote", ""), page=a.get("page"))
-            for a in item.get("source_anchors", [])
-        ]
-        drafts.append(AtomicNoteDraft(
-            title=item.get("title", ""),
-            body=item.get("body", ""),
-            source_anchors=anchors,
-            related=[],  # wird vom Cross-Reference-Agent gefüllt
-            tags=item.get("tags", []),
-            aliases=item.get("aliases", []),
-            synthesis_confidence=item.get("synthesis_confidence", "low"),
-            action=item.get("action", "create"),
-            extend_path=item.get("extend_path"),
-        ))
-        proposed = _validate_proposed_tags(
-            item.get("proposed_tags", []), whitelist=set(tag_whitelist or []))
+        anchors = [TextAnchor(quote=a.get("quote", ""), page=a.get("page")) for a in item.get("source_anchors", [])]
+        drafts.append(
+            AtomicNoteDraft(
+                title=item.get("title", ""),
+                body=item.get("body", ""),
+                source_anchors=anchors,
+                related=[],  # wird vom Cross-Reference-Agent gefüllt
+                tags=item.get("tags", []),
+                aliases=item.get("aliases", []),
+                synthesis_confidence=item.get("synthesis_confidence", "low"),
+                action=item.get("action", "create"),
+                extend_path=item.get("extend_path"),
+            )
+        )
+        proposed = _validate_proposed_tags(item.get("proposed_tags", []), whitelist=set(tag_whitelist or []))
         drafts[-1].proposed_tags = proposed
         if proposed:
             drafts[-1].tag_review_status = "needs-review"

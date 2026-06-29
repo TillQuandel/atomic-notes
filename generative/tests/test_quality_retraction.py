@@ -4,6 +4,7 @@ Differenzierung zwischen Full-Retraction, Expression of Concern, Erratum/Korrekt
 und Withdrawal — alle landen als separate Quality-Flags. Nur retraction/withdrawal
 setzen `retracted=True` (Hard-Signal für Pipeline).
 """
+
 from __future__ import annotations
 from unittest.mock import patch
 
@@ -23,8 +24,10 @@ def _fake_crossref(update_types: list[str] | None = None, ctype: str = "journal-
 
 
 def _run_check(crossref_meta: dict, openalex: dict | None = None):
-    with patch.object(quality, "_crossref_meta", return_value=crossref_meta), \
-         patch.object(quality, "_openalex_work", return_value=openalex):
+    with (
+        patch.object(quality, "_crossref_meta", return_value=crossref_meta),
+        patch.object(quality, "_openalex_work", return_value=openalex),
+    ):
         return quality.check_quality(doi="10.1/test")
 
 
@@ -94,9 +97,11 @@ def test_case_insensitive_update_type():
 
 def test_doi_from_title_match_flagged_true():
     """Per Title geratener DOI wird als unsicher markiert (kein harter ID-Match)."""
-    with patch.object(quality, "_crossref_doi_lookup", return_value="10.9999/guessed"), \
-         patch.object(quality, "_crossref_meta", return_value=None), \
-         patch.object(quality, "_openalex_work", return_value=None):
+    with (
+        patch.object(quality, "_crossref_doi_lookup", return_value="10.9999/guessed"),
+        patch.object(quality, "_crossref_meta", return_value=None),
+        patch.object(quality, "_openalex_work", return_value=None),
+    ):
         rep = quality.check_quality(title="Some Sufficiently Long Title")
     assert rep.doi_from_title_match is True
 

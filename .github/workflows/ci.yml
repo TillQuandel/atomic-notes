@@ -37,6 +37,10 @@ jobs:
       - name: Abhängigkeiten installieren (uv, aus Lockfile)
         run: uv sync --extra dev --locked --python 3.12
 
+      # Format-Gate (gepinnte ruff-Version aus uv.lock; nur Formatierung, kein Lint/--fix)
+      - name: Ruff-Format-Check
+        run: uv run ruff format --check .
+
       # Nicht `pdftotext -v` direkt: Xpdf-basierte Windows-Builds exiten dabei non-zero
       - name: pdftotext-Smoke-Test
         run: uv run python -c "import shutil, sys; p = shutil.which('pdftotext'); print(p); sys.exit(0 if p else 1)"

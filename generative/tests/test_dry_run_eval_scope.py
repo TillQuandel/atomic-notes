@@ -14,8 +14,8 @@ def test_excludes_stale_notes_from_previous_runs(tmp_path):
     (tmp_path / "vault__OLD.md").write_text("old", encoding="utf-8")
 
     written = [
-        (Path("A.md"), True),    # vault-empfohlen -> evaluieren
-        (Path("B.md"), False),   # Inbox -> nicht evaluieren
+        (Path("A.md"), True),  # vault-empfohlen -> evaluieren
+        (Path("B.md"), False),  # Inbox -> nicht evaluieren
     ]
 
     assert dry_run_eval_targets(written, tmp_path) == [tmp_path / "vault__A.md"]

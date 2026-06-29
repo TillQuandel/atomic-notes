@@ -6,6 +6,7 @@ binden (exakter source_anchor-Seitenmatch, nie fuzzy). Untagged-PDFs liefern
 nichts (Gate). Empirisch motiviert in
 docs/superpowers/specs/2026-06-04-figure-embedding-feasibility.md.
 """
+
 from __future__ import annotations
 
 from pathlib import Path
@@ -26,16 +27,21 @@ from generative.pipeline.figure_alt import (
 FIXTURES = ROOT / "tests" / "fixtures"
 
 
-def _draft(title: str, anchor_pages: list[str | None], action: str = "create",
-           fuzzy_pages: list[str | None] | None = None) -> AtomicNoteDraft:
+def _draft(
+    title: str, anchor_pages: list[str | None], action: str = "create", fuzzy_pages: list[str | None] | None = None
+) -> AtomicNoteDraft:
     fuzzy_pages = fuzzy_pages or [None] * len(anchor_pages)
     anchors = [
-        TextAnchor(quote=f"q{i}", page=p, fuzzy_page=fz)
-        for i, (p, fz) in enumerate(zip(anchor_pages, fuzzy_pages))
+        TextAnchor(quote=f"q{i}", page=p, fuzzy_page=fz) for i, (p, fz) in enumerate(zip(anchor_pages, fuzzy_pages))
     ]
     return AtomicNoteDraft(
-        title=title, body=f"# {title}\n\nBody.", source_anchors=anchors,
-        related=[], tags=[], synthesis_confidence="low", action=action,
+        title=title,
+        body=f"# {title}\n\nBody.",
+        source_anchors=anchors,
+        related=[],
+        tags=[],
+        synthesis_confidence="low",
+        action=action,
     )
 
 
@@ -197,6 +203,5 @@ def test_untagged_pdf_flagged_for_reporting():
 
 
 def test_tagged_pdf_not_flagged_as_untagged():
-    report = embed_alt_figures(FIXTURES / "tagged_one_figure.pdf",
-                               [_draft("Konzept A", ["S. 1"])])
+    report = embed_alt_figures(FIXTURES / "tagged_one_figure.pdf", [_draft("Konzept A", ["S. 1"])])
     assert report.untagged is False

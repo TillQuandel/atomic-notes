@@ -8,6 +8,7 @@ Unterstützte Provider (Auswahl):
 
 Vollständige Provider-Liste: https://docs.litellm.ai/docs/providers
 """
+
 from __future__ import annotations
 import time
 
@@ -26,6 +27,7 @@ _MAX_RETRIES = 2
 
 def _parse_response(resp, duration_ms: float):
     from generative.agents.base import CallResult
+
     usage = resp.usage
     # Anthropic: cache_read_input_tokens / cache_creation_input_tokens
     # OpenAI: usage.prompt_tokens_details.cached_tokens (kein creation-Äquivalent)
@@ -62,6 +64,7 @@ def call_full(
         )
     except Exception as e:
         from generative.pipeline.error_hints import litellm_error_hint
+
         raise RuntimeError(litellm_error_hint(agent, model, e)) from e
     return _parse_response(resp, (time.time() - t0) * 1000)
 
@@ -86,5 +89,6 @@ async def call_full_async(
         )
     except Exception as e:
         from generative.pipeline.error_hints import litellm_error_hint
+
         raise RuntimeError(litellm_error_hint(agent, model, e)) from e
     return _parse_response(resp, (time.time() - t0) * 1000)

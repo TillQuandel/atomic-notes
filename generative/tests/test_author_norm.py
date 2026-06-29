@@ -9,6 +9,7 @@ zweiten "Autor" (`Mahmood und University of the Punjab`). Die Pipeline behandelt
 ZWEI Dateiname-Parsern (pdf_enrich._parse_filename_dynamic Kanal 1 + vault_writer.
 _parse_filename_fallback Kanal 2).
 """
+
 from pathlib import Path
 
 from shared.author_norm import drop_institutional_coauthors
@@ -17,6 +18,7 @@ from generative.pipeline.vault_writer import _parse_filename_fallback
 
 
 # --- Kern-Helper: Person + Institution gemischt -> Institution droppen ---
+
 
 def test_german_und_affiliation_dropped():
     assert drop_institutional_coauthors("Mahmood und University of the Punjab") == "Mahmood"
@@ -31,6 +33,7 @@ def test_semicolon_institute_dropped():
 
 
 # --- Regressions-Schutz: legitime Fälle dürfen NICHT verändert werden ---
+
 
 def test_two_persons_unchanged():
     # KRITISCH: legitime Zwei-Autoren bleiben unverändert.
@@ -56,6 +59,7 @@ def test_three_persons_unchanged():
 
 # --- Review-Härtung (Qwen/Codex 2026-06-25) ---
 
+
 def test_uppercase_separator_still_strips():
     # HIGH 1 (Qwen): 'UND'/'AND' aus manuellem Rename muss auch greifen.
     assert drop_institutional_coauthors("Mahmood UND University of the Punjab") == "Mahmood"
@@ -77,8 +81,7 @@ def test_markerless_affiliation_passes_through():
 
 # --- Integration: beide Dateiname-Parser liefern den gereinigten Autor ---
 
-_MAHMOOD = ("Mahmood und University of the Punjab - 2016 - "
-            "Do People Overestimate Their Information Literacy Skills.pdf")
+_MAHMOOD = "Mahmood und University of the Punjab - 2016 - Do People Overestimate Their Information Literacy Skills.pdf"
 
 
 def test_parse_filename_dynamic_cleans_affiliation():
@@ -97,9 +100,9 @@ def test_extractor_source_meta_datei_line_drops_affiliation():
     Zotero-Dateinamen → der Affiliations-Koautor leakte trotz gesäubertem
     Autor-Feld in LLM-Sekundärzitate ('zit. n. Mahmood & Punjab')."""
     from generative.agents.extractor import _format_source_meta
+
     out = _format_source_meta(
-        {"Author": "Mahmood", "Year": "2016",
-         "Title": "Do People Overestimate Their Information Literacy Skills"},
+        {"Author": "Mahmood", "Year": "2016", "Title": "Do People Overestimate Their Information Literacy Skills"},
         _MAHMOOD,
     )
     assert "University of the Punjab" not in out

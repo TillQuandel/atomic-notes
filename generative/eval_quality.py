@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """eval_quality.py — Deterministische Halluzinations-Messung für Atomic-Agent Notes.
 
 Misst wie viele source_anchors einer Note tatsächlich in der Quell-PDF stehen —
@@ -18,6 +18,7 @@ Usage:
     python eval_quality.py --note 04-wissen/Agent-Evals.md --pdf Literatur/guide.pdf
     python eval_quality.py --baseline  # alle Baseline-PDFs + ihre Vault-Notes
 """
+
 from __future__ import annotations
 import argparse
 import json
@@ -39,9 +40,14 @@ try:
 except ImportError:
     sys.exit("rapidfuzz fehlt: pip install rapidfuzz")
 
-from generative.config import (AGENT_VERSION, CACHE_DIR, ENABLE_MDEBERTA_NLI,
-                    MDEBERTA_NLI_MODEL, MDEBERTA_THRESHOLD_CONFIRMED,
-                    MDEBERTA_THRESHOLD_CONTRA)
+from generative.config import (
+    AGENT_VERSION,
+    CACHE_DIR,
+    ENABLE_MDEBERTA_NLI,
+    MDEBERTA_NLI_MODEL,
+    MDEBERTA_THRESHOLD_CONFIRMED,
+    MDEBERTA_THRESHOLD_CONTRA,
+)
 
 _QUALITY_HISTORY = CACHE_DIR / "quality_history.jsonl"
 
@@ -52,17 +58,35 @@ EVAL_VERSION = "1.3"  # 1.3: mDeBERTa NLI-Scorer für Cross-Language (512-Token 
 
 # Stoppwörter für Structural-Filter (DE + EN)
 _STRUCTURAL_STARTS = {
-    "des weiteren", "außerdem", "zusammenfassend", "daher", "somit", "damit",
-    "folglich", "demnach", "insgesamt", "abschließend", "zusammenfassend",
-    "furthermore", "moreover", "therefore", "thus", "hence", "additionally",
-    "in summary", "to summarize", "finally", "lastly", "in conclusion",
+    "des weiteren",
+    "außerdem",
+    "zusammenfassend",
+    "daher",
+    "somit",
+    "damit",
+    "folglich",
+    "demnach",
+    "insgesamt",
+    "abschließend",
+    "zusammenfassend",
+    "furthermore",
+    "moreover",
+    "therefore",
+    "thus",
+    "hence",
+    "additionally",
+    "in summary",
+    "to summarize",
+    "finally",
+    "lastly",
+    "in conclusion",
 }
 
 # Thresholds — Gemini-Review: 0.85 für same-language Direktzitate
 # Cross-language (DE Note ← EN PDF): kalibriert auf labeled data nötig.
 # Aktuell konservativ: 0.70/0.50 — absolute Werte sind Annäherung,
 # Vergleiche über Versionen bleiben valide wenn Threshold konstant bleibt.
-THRESHOLD_CONFIRMED_SAME = 0.85   # same-language / original-lang quote
+THRESHOLD_CONFIRMED_SAME = 0.85  # same-language / original-lang quote
 THRESHOLD_UNCERTAIN_SAME = 0.70
 THRESHOLD_CONFIRMED_CROSS = 0.70  # cross-language paraphrase (uncalibrated)
 THRESHOLD_UNCERTAIN_CROSS = 0.50
@@ -77,6 +101,7 @@ WEIGHT_SEMANTIC = 0.2
 # ---------------------------------------------------------------------------
 # Text-Extraktion + Normalisierung
 # ---------------------------------------------------------------------------
+
 
 def _extract_page_text(pdf_doc: fitz.Document, page_num: int) -> str:
     """Extrahiert Seiten-Text via blocks für korrekte Lesereihenfolge.
@@ -125,10 +150,12 @@ def _page_num_from_str(page_str: str) -> int | None:
 # Scoring
 # ---------------------------------------------------------------------------
 
+
 def _semantic_score(quote: str, page_text: str) -> float:
     """Sentence-Transformers Cosine-Similarity. 0.0 wenn Modell nicht geladen."""
     try:
         from generative.pipeline.embeddings import _model
+
         model = _model()
         if model is None:
             return 0.0
@@ -155,6 +182,7 @@ def _nli_model():
     try:
         from transformers import AutoTokenizer, AutoModelForSequenceClassification
         import torch
+
         tok = AutoTokenizer.from_pretrained(MDEBERTA_NLI_MODEL)
         mdl = AutoModelForSequenceClassification.from_pretrained(MDEBERTA_NLI_MODEL)
         mdl.eval()
@@ -191,9 +219,7 @@ def _nli_best_window(premise: str, hypothesis: str, tokenizer, max_total: int = 
         # Fallback: Token-Truncation von vorne
         return tokenizer.decode(prem_tokens[:budget], skip_special_tokens=True)
 
-    scored = sorted(enumerate(sentences),
-                    key=lambda x: fuzz.partial_ratio(hypothesis, x[1]),
-                    reverse=True)
+    scored = sorted(enumerate(sentences), key=lambda x: fuzz.partial_ratio(hypothesis, x[1]), reverse=True)
     best_idx = scored[0][0]
 
     # Fenster zentriert auf best_idx aufbauen
@@ -240,8 +266,7 @@ def _nli_score(quote: str, page_text: str) -> dict:
         if not premise:
             return {}
 
-        inp = tok(premise, quote, truncation=True, max_length=512,
-                  return_tensors="pt")
+        inp = tok(premise, quote, truncation=True, max_length=512, return_tensors="pt")
         with torch.no_grad():
             logits = mdl(**inp).logits[0]
         probs = torch.softmax(logits, dim=-1).tolist()
@@ -252,8 +277,7 @@ def _nli_score(quote: str, page_text: str) -> dict:
         e = probs[label_map.get("entailment", 0)]
         n = probs[label_map.get("neutral", 1)]
         c = probs[label_map.get("contradiction", 2)]
-        return {"entailment": round(e, 3), "neutral": round(n, 3),
-                "contradiction": round(c, 3)}
+        return {"entailment": round(e, 3), "neutral": round(n, 3), "contradiction": round(c, 3)}
     except Exception as ex:
         print(f"  [mDeBERTa] Scoring-Fehler: {ex}", file=sys.stderr)
         return {}
@@ -299,26 +323,24 @@ def score_anchor(quote: str, page_text: str, is_original_lang: bool = False) -> 
     Returns dict mit fuzzy, semantic, combined, label, weights_used.
     """
     if not page_text:
-        return {"fuzzy": 0.0, "semantic": 0.0, "combined": 0.0,
-                "label": "not_parseable", "weights": "n/a"}
+        return {"fuzzy": 0.0, "semantic": 0.0, "combined": 0.0, "label": "not_parseable", "weights": "n/a"}
 
     norm_quote = _normalize(quote)
     if len(norm_quote) < 10:
-        return {"fuzzy": 0.0, "semantic": 0.0, "combined": 0.0,
-                "label": "too_short", "weights": "n/a"}
+        return {"fuzzy": 0.0, "semantic": 0.0, "combined": 0.0, "label": "too_short", "weights": "n/a"}
 
     fuzzy = fuzz.partial_ratio(norm_quote, page_text) / 100.0
     semantic = _semantic_score(norm_quote, page_text)
 
     # Sprach-adaptive Gewichtung (Cross-Language-Finding 2026-05-14)
     if is_original_lang:
-        w_f, w_s = WEIGHT_FUZZY, WEIGHT_SEMANTIC          # 0.8 / 0.2 — Direktzitat
+        w_f, w_s = WEIGHT_FUZZY, WEIGHT_SEMANTIC  # 0.8 / 0.2 — Direktzitat
         weights_used = "original"
     elif _is_cross_language(norm_quote, page_text):
-        w_f, w_s = 0.0, 1.0                                # DE→EN: rein semantisch (Fuzzy = Rauschen bei Sprachwechsel)
+        w_f, w_s = 0.0, 1.0  # DE→EN: rein semantisch (Fuzzy = Rauschen bei Sprachwechsel)
         weights_used = "cross_language"
     else:
-        w_f, w_s = WEIGHT_FUZZY, WEIGHT_SEMANTIC           # same language
+        w_f, w_s = WEIGHT_FUZZY, WEIGHT_SEMANTIC  # same language
         weights_used = "same_language"
 
     combined = w_f * fuzzy + w_s * semantic
@@ -336,8 +358,13 @@ def score_anchor(quote: str, page_text: str, is_original_lang: bool = False) -> 
     else:
         label = "hallucinated"
 
-    result = {"fuzzy": round(fuzzy, 3), "semantic": round(semantic, 3),
-              "combined": round(combined, 3), "label": label, "weights": weights_used}
+    result = {
+        "fuzzy": round(fuzzy, 3),
+        "semantic": round(semantic, 3),
+        "combined": round(combined, 3),
+        "label": label,
+        "weights": weights_used,
+    }
 
     # mDeBERTa NLI: Entailment statt Similarity bei Cross-Language
     # Überschreibt label wenn ENABLE_MDEBERTA_NLI=1 und weights=cross_language
@@ -346,7 +373,7 @@ def score_anchor(quote: str, page_text: str, is_original_lang: bool = False) -> 
         nli_lbl = _nli_label(nli, label)
         result["nli"] = nli
         if nli_lbl is not None:
-            result["label"] = nli_lbl   # Override nur bei starkem Signal
+            result["label"] = nli_lbl  # Override nur bei starkem Signal
             result["label_source"] = "nli"
         else:
             result["label_source"] = "cosine"
@@ -358,20 +385,22 @@ def score_anchor(quote: str, page_text: str, is_original_lang: bool = False) -> 
 # Wilson-Konfidenzintervall
 # ---------------------------------------------------------------------------
 
+
 def wilson_ci(successes: int, total: int, z: float = 1.96) -> tuple[float, float]:
     """Wilson-Score-Konfidenzintervall für Binomial-Rate. z=1.96 → 95% CI."""
     if total == 0:
         return 0.0, 0.0
     p = successes / total
-    denom = 1 + z ** 2 / total
-    center = (p + z ** 2 / (2 * total)) / denom
-    margin = (z * math.sqrt(p * (1 - p) / total + z ** 2 / (4 * total ** 2))) / denom
+    denom = 1 + z**2 / total
+    center = (p + z**2 / (2 * total)) / denom
+    margin = (z * math.sqrt(p * (1 - p) / total + z**2 / (4 * total**2))) / denom
     return max(0.0, round(center - margin, 3)), min(1.0, round(center + margin, 3))
 
 
 # ---------------------------------------------------------------------------
 # Note-Parser
 # ---------------------------------------------------------------------------
+
 
 def _parse_anchors_from_note(note_path: Path) -> tuple[list[dict], int]:
     """Extrahiert Anker aus vault_writer-generierten Markdown-Notes.
@@ -403,9 +432,9 @@ def _parse_anchors_from_note(note_path: Path) -> tuple[list[dict], int]:
     anchors = []
     # Sentence-Boundary + Footnote: alles zwischen letztem Satzende und [^N]
     sent_fn_re = re.compile(
-        r"(?:^|(?<=[.!?])\s+)"      # Satzanfang
-        r"([^.!?\n]{20,}?)"          # Satz-Text (min 20 Zeichen)
-        r"(\[\^\d+\])+",             # ein oder mehr Footnote-Refs am Ende
+        r"(?:^|(?<=[.!?])\s+)"  # Satzanfang
+        r"([^.!?\n]{20,}?)"  # Satz-Text (min 20 Zeichen)
+        r"(\[\^\d+\])+",  # ein oder mehr Footnote-Refs am Ende
         re.MULTILINE,
     )
     for m in sent_fn_re.finditer(body):
@@ -420,13 +449,12 @@ def _parse_anchors_from_note(note_path: Path) -> tuple[list[dict], int]:
     # Schritt 3: Block-Quote-Callouts als zusätzliche Anker
     # Format: > [!quote]- Autor YYYY, S. N  →  > „Text"
     bq_re = re.compile(
-        r'>\s*\[!quote\][^\n]*S\.\s*(\d+)[^\n]*\n'    # Header mit Seite
-        r'>\s*[„"](.{10,200})[“""]',          # Zitat-Text (deutsche + ASCII Quotes)
+        r">\s*\[!quote\][^\n]*S\.\s*(\d+)[^\n]*\n"  # Header mit Seite
+        r'>\s*[„"](.{10,200})[“""]',  # Zitat-Text (deutsche + ASCII Quotes)
         re.MULTILINE,
     )
     for m in bq_re.finditer(body):
-        anchors.append({"source": m.group(2).strip(), "page": int(m.group(1)),
-                        "fn": None})
+        anchors.append({"source": m.group(2).strip(), "page": int(m.group(1)), "fn": None})
 
     # Deduplizieren (gleicher Satz + gleiche Seite)
     seen = set()
@@ -439,8 +467,7 @@ def _parse_anchors_from_note(note_path: Path) -> tuple[list[dict], int]:
 
     # Body-Sätze zählen (Coverage-Metrik) — Footnote-Definitionen ausblenden
     body_no_fn = re.sub(r"^\[\^\d+\]:.*$", "", body, flags=re.MULTILINE)
-    body_sentences = len([s for s in re.split(r"[.!?]", body_no_fn)
-                          if len(s.strip()) > 15])
+    body_sentences = len([s for s in re.split(r"[.!?]", body_no_fn) if len(s.strip()) > 15])
 
     return unique_anchors, body_sentences
 
@@ -448,6 +475,7 @@ def _parse_anchors_from_note(note_path: Path) -> tuple[list[dict], int]:
 # ---------------------------------------------------------------------------
 # Haupt-Eval
 # ---------------------------------------------------------------------------
+
 
 def _detect_language_pair(note_body: str, sample_page_text: str) -> str:
     """Erkennt Sprachpaar: 'DE→DE', 'EN→DE', 'DE→EN', 'EN→EN'.
@@ -468,16 +496,22 @@ def eval_note(note_path: Path, pdf_path: Path, pipeline_version: str) -> dict:
 
     if not anchors:
         return {
-            "note": note_path.name, "pdf": pdf_path.name,
-            "version": pipeline_version, "timestamp": datetime.now().isoformat(),
-            "error": "no_anchors_found", "anchors_total": 0,
+            "note": note_path.name,
+            "pdf": pdf_path.name,
+            "version": pipeline_version,
+            "timestamp": datetime.now().isoformat(),
+            "error": "no_anchors_found",
+            "anchors_total": 0,
         }
 
     if not pdf_path.exists():
         return {
-            "note": note_path.name, "pdf": pdf_path.name,
-            "version": pipeline_version, "timestamp": datetime.now().isoformat(),
-            "error": "pdf_not_found", "anchors_total": len(anchors),
+            "note": note_path.name,
+            "pdf": pdf_path.name,
+            "version": pipeline_version,
+            "timestamp": datetime.now().isoformat(),
+            "error": "pdf_not_found",
+            "anchors_total": len(anchors),
         }
 
     pdf_doc = fitz.open(str(pdf_path))
@@ -502,8 +536,7 @@ def eval_note(note_path: Path, pdf_path: Path, pipeline_version: str) -> dict:
         # OCR-Detect: leere Seite → not_parseable (Nemotron-Finding)
         if not page_text:
             not_parseable += 1
-            results.append({"page": page, "label": "not_parseable",
-                             "fuzzy": 0.0, "semantic": 0.0, "combined": 0.0})
+            results.append({"page": page, "label": "not_parseable", "fuzzy": 0.0, "semantic": 0.0, "combined": 0.0})
             continue
 
         quote = anc["source"][:200].strip()
@@ -532,8 +565,7 @@ def eval_note(note_path: Path, pdf_path: Path, pipeline_version: str) -> dict:
     body_only = re.sub(r"^\[\^\d+\]:.*$", "", note_text_body[fm_end2:], flags=re.MULTILINE)
     all_sents = [s.strip() for s in re.split(r"[.!?]", body_only) if len(s.strip()) > 8]
     structural_sents = sum(
-        1 for s in all_sents
-        if len(s.split()) < 6 or any(s.lower().startswith(sw) for sw in _STRUCTURAL_STARTS)
+        1 for s in all_sents if len(s.split()) < 6 or any(s.lower().startswith(sw) for sw in _STRUCTURAL_STARTS)
     )
     factual_sents = max(0, body_sentences - structural_sents)
     coverage_factual = confirmed / factual_sents if factual_sents > 0 else 0.0
@@ -559,9 +591,9 @@ def eval_note(note_path: Path, pdf_path: Path, pipeline_version: str) -> dict:
         "anchors_hallucinated": hallucinated,
         "hallucination_rate": round(hall_rate, 3),
         "hallucination_ci_95": hall_ci,
-        "coverage_rate": round(coverage, 3),          # confirmed / alle Sätze
-        "coverage_factual": round(coverage_factual, 3), # confirmed / faktische Sätze
-        "source_coverage": round(source_coverage, 3),   # PDF-Seiten abgedeckt
+        "coverage_rate": round(coverage, 3),  # confirmed / alle Sätze
+        "coverage_factual": round(coverage_factual, 3),  # confirmed / faktische Sätze
+        "source_coverage": round(source_coverage, 3),  # PDF-Seiten abgedeckt
         "body_sentences": body_sentences,
         "body_sentences_structural": structural_sents,
         "body_sentences_factual": factual_sents,
@@ -581,32 +613,37 @@ def save_result(result: dict) -> None:
     try:
         from generative import db as _db
         from generative.agents.base import _RUN_ID as _run_id
+
         note_name = result.get("note", "")
         eval_id = f"{_run_id}__{note_name}"
         with _db.get_db() as _conn:
-            _db.insert_eval(_conn, {
-                "eval_id":           eval_id,
-                "run_id":            _run_id,
-                "note_path":         note_name,
-                "acceptance_status": None,
-                "hallucination_rate":result.get("hallucination_rate"),
-                "anchors_total":     result.get("anchors_total"),
-                "anchors_hallucinated": result.get("anchors_hallucinated"),
-                "coverage_factual":  result.get("coverage_factual"),
-                "coverage_rate":     result.get("coverage_rate"),
-                "tokens_total":      result.get("tokens_total"),
-                "tokens_input":      result.get("tokens_input"),
-                "tokens_output":     result.get("tokens_output"),
-                "tokens_cache_read": result.get("tokens_cache_read"),
-                "wall_time_s":       result.get("wall_time_s"),
-                "pipeline_version":  result.get("version"),
-                "pdf":               result.get("pdf"),
-                "language":          result.get("language"),
-                "eval_version":      result.get("eval_version"),
-                "timestamp":         result.get("timestamp"),
-            })
+            _db.insert_eval(
+                _conn,
+                {
+                    "eval_id": eval_id,
+                    "run_id": _run_id,
+                    "note_path": note_name,
+                    "acceptance_status": None,
+                    "hallucination_rate": result.get("hallucination_rate"),
+                    "anchors_total": result.get("anchors_total"),
+                    "anchors_hallucinated": result.get("anchors_hallucinated"),
+                    "coverage_factual": result.get("coverage_factual"),
+                    "coverage_rate": result.get("coverage_rate"),
+                    "tokens_total": result.get("tokens_total"),
+                    "tokens_input": result.get("tokens_input"),
+                    "tokens_output": result.get("tokens_output"),
+                    "tokens_cache_read": result.get("tokens_cache_read"),
+                    "wall_time_s": result.get("wall_time_s"),
+                    "pipeline_version": result.get("version"),
+                    "pdf": result.get("pdf"),
+                    "language": result.get("language"),
+                    "eval_version": result.get("eval_version"),
+                    "timestamp": result.get("timestamp"),
+                },
+            )
     except Exception as _db_err:
         import sys as _sys
+
         print(f"  [warn] DB-Write fehlgeschlagen: {_db_err}", file=_sys.stderr)
 
     print(f"  → gespeichert: {_QUALITY_HISTORY}")

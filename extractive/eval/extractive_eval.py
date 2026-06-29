@@ -47,10 +47,7 @@ def compute_hallucination_rate(sentences: list[str], fulltext: str, threshold: i
     scorable = [s for s in sentences if len(_strip(s)) >= 12]
     if not scorable:
         return 0.0
-    hallucinated = sum(
-        1 for s in scorable
-        if fuzz.partial_ratio(_strip(s).lower(), fulltext.lower()) < threshold
-    )
+    hallucinated = sum(1 for s in scorable if fuzz.partial_ratio(_strip(s).lower(), fulltext.lower()) < threshold)
     return hallucinated / len(scorable)
 
 
@@ -66,25 +63,28 @@ def insert_extractive_run(
 ) -> None:
     conn = _connect(db_path)
     try:
-        conn.execute("""
+        conn.execute(
+            """
             INSERT OR REPLACE INTO pipeline_runs
               (run_id, timestamp, pipeline_version, pdf_source, pdf_key, pdf_label,
                n_generated, n_inbox, model, cost_usd, tokens_total, duration_s,
                eval_version, fully_cached)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0.0, 0, ?, ?, 0)
-        """, (
-            run_id,
-            datetime.utcnow().isoformat(),
-            pipeline_version,
-            pdf_source,
-            Path(pdf_source).stem.lower().replace(" ", "-"),
-            Path(pdf_source).stem,
-            n_generated,
-            n_generated,  # extractive schreibt alles nach output-dir (kein vault-routing)
-            "gliner_medium-v2.1",
-            duration_s,
-            "extractive-1.0",
-        ))
+        """,
+            (
+                run_id,
+                datetime.utcnow().isoformat(),
+                pipeline_version,
+                pdf_source,
+                Path(pdf_source).stem.lower().replace(" ", "-"),
+                Path(pdf_source).stem,
+                n_generated,
+                n_generated,  # extractive schreibt alles nach output-dir (kein vault-routing)
+                "gliner_medium-v2.1",
+                duration_s,
+                "extractive-1.0",
+            ),
+        )
         conn.commit()
     finally:
         conn.close()
@@ -103,28 +103,29 @@ def insert_extractive_eval(
     hall_rate = compute_hallucination_rate(sentences, fulltext)
     anch_rate = compute_anchor_rate(sentences)
     result = {
-        "eval_id":           str(uuid.uuid4()),
-        "run_id":            run_id,
-        "note_path":         note_title,
+        "eval_id": str(uuid.uuid4()),
+        "run_id": run_id,
+        "note_path": note_title,
         "acceptance_status": None,
         "hallucination_rate": hall_rate,
-        "coverage_factual":  None,
-        "coverage_rate":     None,
-        "anchor_rate":       anch_rate,
-        "tokens_total":      0,
-        "tokens_input":      0,
-        "tokens_output":     0,
+        "coverage_factual": None,
+        "coverage_rate": None,
+        "anchor_rate": anch_rate,
+        "tokens_total": 0,
+        "tokens_input": 0,
+        "tokens_output": 0,
         "tokens_cache_read": 0,
-        "wall_time_s":       None,
-        "pipeline_version":  pipeline_version,
-        "pdf":               source_file,
-        "language":          language or None,
-        "eval_version":      "extractive-1.0",
-        "timestamp":         datetime.utcnow().isoformat(),
+        "wall_time_s": None,
+        "pipeline_version": pipeline_version,
+        "pdf": source_file,
+        "language": language or None,
+        "eval_version": "extractive-1.0",
+        "timestamp": datetime.utcnow().isoformat(),
     }
     conn = _connect(db_path)
     try:
-        conn.execute("""
+        conn.execute(
+            """
             INSERT OR REPLACE INTO note_evals
               (eval_id, run_id, note_path, acceptance_status,
                hallucination_rate, coverage_factual, coverage_rate, anchor_rate,
@@ -135,7 +136,9 @@ def insert_extractive_eval(
                :hallucination_rate, :coverage_factual, :coverage_rate, :anchor_rate,
                :tokens_total, :tokens_input, :tokens_output, :tokens_cache_read,
                :wall_time_s, :pipeline_version, :pdf, :language, :eval_version, :timestamp)
-        """, result)
+        """,
+            result,
+        )
         conn.commit()
     finally:
         conn.close()

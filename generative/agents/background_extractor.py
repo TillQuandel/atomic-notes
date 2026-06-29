@@ -9,6 +9,7 @@ das aus dem Training" diskriminieren (Yona et al. 2024 Discriminative Gap). Inde
 wir das Hintergrundwissen in einem dedizierten Stage ohne Quellentext abfragen,
 ist der Ursprung strukturell sauber: alles was hier rauskommt ist Trainingswissen.
 """
+
 from __future__ import annotations
 import re
 import sys

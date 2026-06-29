@@ -1,19 +1,60 @@
 """Planner-Agent: TOC + Intro + Fazit + Relevanz-Profil → ConceptPlan."""
+
 from __future__ import annotations
 
 
 # Generika-Blacklist (portiert aus extractive/gliner_planner.py, angepasst für LLM-Output).
 # Fängt seltene LLM-"Ausrutscher" ab wenn trotz Prompt-Vorgabe abstrakte Einzel-Konzepte
 # geplant werden. Normalisierung auf lowercase Pflicht (LLM gibt Title-Case aus).
-_GENERIC_BLACKLIST: frozenset[str] = frozenset({
-    "information", "system", "process", "method", "model", "data", "analysis",
-    "management", "result", "approach", "aspect", "concept", "theory", "issue",
-    "factor", "element", "component", "feature", "problem", "solution", "area",
-    "level", "type", "form", "role", "ability", "use", "need", "way", "part",
-    "point", "case", "end", "set",
-    "methods", "models", "metrics", "factors", "systems", "concepts", "aspects",
-    "results", "studies", "issues", "elements",
-})
+_GENERIC_BLACKLIST: frozenset[str] = frozenset(
+    {
+        "information",
+        "system",
+        "process",
+        "method",
+        "model",
+        "data",
+        "analysis",
+        "management",
+        "result",
+        "approach",
+        "aspect",
+        "concept",
+        "theory",
+        "issue",
+        "factor",
+        "element",
+        "component",
+        "feature",
+        "problem",
+        "solution",
+        "area",
+        "level",
+        "type",
+        "form",
+        "role",
+        "ability",
+        "use",
+        "need",
+        "way",
+        "part",
+        "point",
+        "case",
+        "end",
+        "set",
+        "methods",
+        "models",
+        "metrics",
+        "factors",
+        "systems",
+        "concepts",
+        "aspects",
+        "results",
+        "studies",
+        "issues",
+        "elements",
+    }
+)
 
 from generative.agents.base import call_claude
 from generative.agents.cross_reference import _tokens  # Stoppwort-gefilterte Content-Tokens
@@ -136,6 +177,7 @@ def _bm25_rerank(concepts: list[str], query_text: str, top_n: int = 200) -> list
     try:
         import numpy as np
         from rank_bm25 import BM25Okapi
+
         tokenized = [list(_tokens(c)) or ["_"] for c in concepts]
         bm25 = BM25Okapi(tokenized)
         query_toks = list(_tokens(query_text)) or ["_"]
@@ -146,8 +188,7 @@ def _bm25_rerank(concepts: list[str], query_text: str, top_n: int = 200) -> list
         return concepts[:top_n]
 
 
-def run(overview: str, relevance_profile: dict,
-        primary_authors: list[str] | None = None) -> ConceptPlan:
+def run(overview: str, relevance_profile: dict, primary_authors: list[str] | None = None) -> ConceptPlan:
     # BM25-Reranking: relevante Konzepte zuerst, Top 200 statt 1500
     # (Fix 3 — Lost-in-the-Middle, Gemini/Nemotron-Review 2026-05-14).
     # Vorher [:1500] flach — Gemini-Finding G2 (2026-05-10) hatte Limit auf 1500
@@ -178,6 +219,7 @@ def run(overview: str, relevance_profile: dict,
     data, parse_warnings = parse_planner_output(raw)
     if parse_warnings:
         import sys
+
         for w in parse_warnings:
             print(f"      [planner-warn] {w}", file=sys.stderr)
 
@@ -198,6 +240,7 @@ def run(overview: str, relevance_profile: dict,
     # Kategorien-Verteilung loggen — macht operative Lücke sichtbar (Fix 1).
     if concepts:
         import sys
+
         cat_counts: dict[str, int] = {}
         for c in concepts:
             cat_counts[c.category] = cat_counts.get(c.category, 0) + 1
@@ -209,8 +252,6 @@ def run(overview: str, relevance_profile: dict,
         source_summary=data.get("source_summary", ""),
         concepts=concepts,
     )
-
-
 
 
 _SENT_EMB_CACHE: dict[tuple[int, int], object] = {}
@@ -239,8 +280,7 @@ def _default_semantic_presence(title: str, full_text: str) -> float:
         key = (len(full_text), hash(full_text))
         embs = _SENT_EMB_CACHE.get(key)
         if embs is None:
-            embs = np.asarray(_model().encode(
-                sents, show_progress_bar=False, normalize_embeddings=True, batch_size=64))
+            embs = np.asarray(_model().encode(sents, show_progress_bar=False, normalize_embeddings=True, batch_size=64))
             # Cache deckt mehrere verworfene Konzepte DESSELBEN Laufs ab (ein Encode statt N).
             # Kleiner LRU-artiger Deckel, damit ein Langläufer (GUI-Server, Batch-Eval über
             # viele PDFs) nicht unbounded wächst (~600 KB pro Volltext).
@@ -253,9 +293,9 @@ def _default_semantic_presence(title: str, full_text: str) -> float:
         return 1.0
 
 
-def filter_hallucinated(plan: ConceptPlan, full_text: str,
-                        min_coverage: float = 0.5,
-                        semantic_presence_fn=None) -> tuple[ConceptPlan, list[str]]:
+def filter_hallucinated(
+    plan: ConceptPlan, full_text: str, min_coverage: float = 0.5, semantic_presence_fn=None
+) -> tuple[ConceptPlan, list[str]]:
     """Verwirft Konzepte deren Titel im PDF weder lexikalisch noch semantisch vorkommen.
 
     Lexikalischer Coverage-Filter: |Title-Tokens ∩ Text-Tokens| / |Title-Tokens| ≥ min_coverage.

@@ -15,6 +15,7 @@ Schwellen (konservativ: aktueller Bestwert - 2):
 Warnung: Jeder Run dauert ~15–30 min. Nur für Release-Checks und
 nach größeren Refactors ausführen, nicht im Entwicklungs-Loop.
 """
+
 from __future__ import annotations
 import os
 import re
@@ -30,7 +31,7 @@ from generative.config import LITERATURE_DIR as _LIT  # noqa: E402
 BASELINE_PDFS = {
     "schlebbe": _LIT / "Schlebbe und Greifeneder - 2022 - Information Need, Informationsbedarf und -bedürfnis.pdf",
     "kuhlthau": _LIT / "Kuhlthau - INFORMATION SEARCH PROCESS.pdf",
-    "bates":    _LIT / "Bates - 2017 - Information Behavior.pdf",
+    "bates": _LIT / "Bates - 2017 - Information Behavior.pdf",
 }
 
 # Mindest-Vault-Quote: (min_vault, expected_total).
@@ -39,7 +40,7 @@ BASELINE_PDFS = {
 THRESHOLDS: dict[str, tuple[int, int | None]] = {
     "schlebbe": (5, None),  # Vault gewachsen seit v35 → Planner skippt mehr als existing; None = kein total-Check
     "kuhlthau": (6, None),  # analog
-    "bates":    (2, None),  # analog
+    "bates": (2, None),  # analog
 }
 
 _DRY_RUN_RE = re.compile(r"^\s*\[DRY-RUN\]")
@@ -101,8 +102,7 @@ def test_vault_quote_baseline(key: str):
     assert vault > 0, f"[{key}] Keine Notes extrahiert — Pipeline-Fehler?\n{output[-500:]}"
     assert vault >= min_vault, (
         f"[{key}] Vault-Quote {vault}/{total} unter Schwelle {min_vault}. "
-        f"Mögliche Regression! Output-Tail:\n"
-        + "\n".join(output.splitlines()[-30:])
+        f"Mögliche Regression! Output-Tail:\n" + "\n".join(output.splitlines()[-30:])
     )
     if expected_total is not None:
         assert total == expected_total, (

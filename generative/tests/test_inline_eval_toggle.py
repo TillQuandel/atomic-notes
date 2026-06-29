@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 
-
 from generative.orchestrator import inline_eval_enabled
 from generative.runtime_config import load_runtime_config
 
@@ -17,8 +16,10 @@ def test_inline_eval_disabled_by_fast_profile():
 
 
 def test_inline_eval_env_override_still_wins():
-    cfg = load_runtime_config(env={
-        "ATOMIC_AGENT_PROFILE": "fast",
-        "ATOMIC_AGENT_INLINE_EVAL": "1",
-    })
+    cfg = load_runtime_config(
+        env={
+            "ATOMIC_AGENT_PROFILE": "fast",
+            "ATOMIC_AGENT_INLINE_EVAL": "1",
+        }
+    )
     assert inline_eval_enabled(cfg) is True

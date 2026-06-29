@@ -6,7 +6,8 @@ import os
 def test_pipeline_run_has_cost_usd():
     from generative import db
     from pathlib import Path
-    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         path = f.name
     try:
         db.init_db(Path(path))
@@ -21,21 +22,23 @@ def test_pipeline_run_has_cost_usd():
 def test_insert_run_stores_cost_usd():
     from generative import db
     from pathlib import Path
-    with tempfile.NamedTemporaryFile(suffix='.db', delete=False) as f:
+
+    with tempfile.NamedTemporaryFile(suffix=".db", delete=False) as f:
         path = f.name
     try:
         db.init_db(Path(path))
         with db.get_db(Path(path)) as conn:
-            db.insert_run(conn, {
-                "run_id": "test-run-1",
-                "pipeline_version": "v0.0.1",
-                "cost_usd": 0.1234,
-            })
+            db.insert_run(
+                conn,
+                {
+                    "run_id": "test-run-1",
+                    "pipeline_version": "v0.0.1",
+                    "cost_usd": 0.1234,
+                },
+            )
         conn2 = sqlite3.connect(path)
         try:
-            row = conn2.execute(
-                "SELECT cost_usd FROM pipeline_runs WHERE run_id='test-run-1'"
-            ).fetchone()
+            row = conn2.execute("SELECT cost_usd FROM pipeline_runs WHERE run_id='test-run-1'").fetchone()
         finally:
             conn2.close()
         assert row is not None

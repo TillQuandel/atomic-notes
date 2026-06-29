@@ -4,6 +4,7 @@
 # valid_claims=0 → Metric.invalid(). Sentinel-Wert -1.0 ist universell, kein
 # Mix aus 0.0 und -1.0 mehr (Fix für v4-Aggregation-Inkonsistenz).
 """
+
 from __future__ import annotations
 
 from collections import Counter
@@ -101,7 +102,6 @@ def aggregate(decisions: list[ClaimDecision]) -> dict[str, object]:
         "anchors_total": total,
         "anchors_confirmed": confirmed,
         "anchors_hallucinated": hallucinated,
-
         # Strukturierte Metriken (jede mit eigener validity)
         "metrics": {
             "hallucination_rate": _metric_dict(hall_metric),
@@ -111,7 +111,6 @@ def aggregate(decisions: list[ClaimDecision]) -> dict[str, object]:
             "parse_error_rate": _metric_dict(parse_metric),
             "claim_support_rate": _metric_dict(support_metric),
         },
-
         # Backward-Compat-Aliases (flache Sentinel-Werte für Dashboard/Orchestrator)
         "hallucination_rate": hall_metric.value,
         "confirmed_rate": conf_metric.value,

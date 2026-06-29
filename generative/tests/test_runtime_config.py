@@ -46,12 +46,14 @@ def test_balanced_profile_refines_only_high_roi_cases():
 
 
 def test_env_override_beats_profile():
-    cfg = load_runtime_config(env={
-        "ATOMIC_AGENT_PROFILE": "fast",
-        "ATOMIC_AGENT_INLINE_EVAL": "1",
-        "ATOMIC_AGENT_MAX_CONCEPTS": "7",
-        "ATOMIC_AGENT_TIMEOUT_RETRIES": "1",
-    })
+    cfg = load_runtime_config(
+        env={
+            "ATOMIC_AGENT_PROFILE": "fast",
+            "ATOMIC_AGENT_INLINE_EVAL": "1",
+            "ATOMIC_AGENT_MAX_CONCEPTS": "7",
+            "ATOMIC_AGENT_TIMEOUT_RETRIES": "1",
+        }
+    )
 
     assert cfg.profile == "fast"
     assert cfg.inline_eval is True

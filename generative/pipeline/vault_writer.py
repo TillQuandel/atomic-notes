@@ -1,4 +1,5 @@
 """Schreibt genehmigte AtomicNoteDraft-Objekte als .md-Dateien in den Vault."""
+
 from __future__ import annotations
 import re
 import difflib
@@ -37,17 +38,15 @@ def _yaml_list(items: list[str], indent: str = "  ") -> str:
     Backslashes und Anführungszeichen werden escapt für YAML-Kompatibilität."""
     if not items:
         return f"{indent}[]"
+
     def esc(s: str) -> str:
         return s.replace("\\", "\\\\").replace('"', '\\"')
+
     return "\n".join(f'{indent}- "{esc(s)}"' for s in items)
 
 
-_FILENAME_PATTERN_FULL = re.compile(
-    r"^(?P<author>.+?)\s+-\s+(?P<year>\d{4})\s+-\s+(?P<title>.+?)$"
-)
-_FILENAME_PATTERN_NOYEAR = re.compile(
-    r"^(?P<author>.+?)\s+-\s+(?P<title>.+?)$"
-)
+_FILENAME_PATTERN_FULL = re.compile(r"^(?P<author>.+?)\s+-\s+(?P<year>\d{4})\s+-\s+(?P<title>.+?)$")
+_FILENAME_PATTERN_NOYEAR = re.compile(r"^(?P<author>.+?)\s+-\s+(?P<title>.+?)$")
 _TITLE_LOOKS_BAD = re.compile(r"^[\d\s\.\-]+$|^Microsoft Word")  # Zahlenmüll oder Word-Doc-Header
 
 
@@ -103,8 +102,7 @@ def _strip_page_prefix(value: str) -> str:
     return _PAGE_PREFIX_RE.sub("", value)
 
 
-def build_quellen_block(note: AtomicNoteDraft, source_file: str,
-                        source_meta: dict[str, str] | None) -> str:
+def build_quellen_block(note: AtomicNoteDraft, source_file: str, source_meta: dict[str, str] | None) -> str:
     """Quellen-Block deterministisch aus PDF-Metadata + verifizierten Anker-Pages.
     Kein Halluzinations-Risiko, weil das Modell nichts mehr selbst schreibt.
     Public, damit Orchestrator den Block schon vor Critic an draft.body anhängen kann."""
@@ -128,7 +126,7 @@ def build_quellen_block(note: AtomicNoteDraft, source_file: str,
     # Fallback auf Filename-Stem wenn Metadaten leer — kein "[unbekannt]" im Output
     author = meta.get("Author", "").strip() or fallback.get("Author", "").strip() or Path(source_file).stem
     year = meta.get("Year", "").strip() or fallback.get("Year", "").strip() or ""
-    title = (meta.get("Title", "").strip() or fallback.get("Title", "").strip() or Path(source_file).stem)
+    title = meta.get("Title", "").strip() or fallback.get("Title", "").strip() or Path(source_file).stem
 
     # Seiten aus verifizierten Ankern. F8: page (LLM-exact) ODER fuzzy_page
     # (rapidfuzz-Fallback) — beide sind valide Seitenbelege für den Quellen-Block.
@@ -160,10 +158,7 @@ def build_quellen_block(note: AtomicNoteDraft, source_file: str,
     else:
         link = short  # Klartext-Fallback wenn PDF fehlt oder Filename unsafe
     pages_marker = f", S. {pages_str}" if pages_str else ""
-    return (
-        "## Quellen\n\n"
-        f"*Quelle: {link}: {title}{pages_marker}*\n"
-    )
+    return f"## Quellen\n\n*Quelle: {link}: {title}{pages_marker}*\n"
 
 
 def _short_label(meta: dict[str, str] | None, source_file: str) -> str:
@@ -228,8 +223,7 @@ def renumber_footnotes(text: str) -> str:
     return "\n".join(new_lines)
 
 
-def convert_inline_to_footnotes(body: str, source_label: str,
-                                 source_file: str | None = None) -> str:
+def convert_inline_to_footnotes(body: str, source_label: str, source_file: str | None = None) -> str:
     """Konvertiert `(S. N)`-Inline-Marker zu `[^i]`-Footnote-Markern. Footnote-Defs
     werden an den Body-Ende als nackter Block angehängt (Reading-Mode rendert sie eh
     am Ende der Note). Block-Quote-Callouts (`> ...`) werden NICHT umgeschrieben —
@@ -246,12 +240,8 @@ def convert_inline_to_footnotes(body: str, source_label: str,
     # Filename mit Wikilink-Syntax-Zeichen würde den Wikilink semantisch
     # zerbrechen. Defensiv: Klartext-Fallback. Codex-Finding 1 (`|`, `#`),
     # Gemini-Finding G1 (einzelne `[`, `]`).
-    wikilink_unsafe = bool(source_file) and any(
-        c in source_file for c in ("|", "#", "[", "]")
-    )
-    pdf_in_vault = (source_file is not None
-                    and not wikilink_unsafe
-                    and (LITERATURE_DIR / source_file).exists())
+    wikilink_unsafe = bool(source_file) and any(c in source_file for c in ("|", "#", "[", "]"))
+    pdf_in_vault = source_file is not None and not wikilink_unsafe and (LITERATURE_DIR / source_file).exists()
 
     def repl(m: re.Match) -> str:
         counter[0] += 1
@@ -303,6 +293,7 @@ def _read_proposed_tags_from_inbox(path: Path) -> tuple[list[str], str | None]:
         return [], None
     try:
         import yaml
+
         fm = yaml.safe_load(text[3:end]) or {}
     except Exception:
         return [], None
@@ -329,8 +320,7 @@ def _render_proposed_tags_block(note: AtomicNoteDraft) -> str:
     return block
 
 
-def render_moc(note: AtomicNoteDraft, source_file: str,
-               source_meta: dict[str, str] | None = None) -> str:
+def render_moc(note: AtomicNoteDraft, source_file: str, source_meta: dict[str, str] | None = None) -> str:
     """Hub-Routing: Note als MoC-Note rendern (Schema-MoC).
     Frontmatter: type=moc, cssclasses=[moc], obsidianUIMode=preview. Kein H1, keine
     fixen H2-Sektionen. Body wird übernommen; Quellen-Block am Ende (optional per Schema)
@@ -364,8 +354,7 @@ sub-concepts:
 
     body = note.body.strip()
     body = re.sub(
-        r"\n+##\s+(Quellen?|Confidence-Notiz)\s*\n.*?(?=\n+##\s|\Z)",
-        "", body, flags=re.IGNORECASE | re.DOTALL
+        r"\n+##\s+(Quellen?|Confidence-Notiz)\s*\n.*?(?=\n+##\s|\Z)", "", body, flags=re.IGNORECASE | re.DOTALL
     ).rstrip()
     body = convert_inline_to_footnotes(body, _short_label(source_meta, source_file), source_file)
 
@@ -403,9 +392,9 @@ sub-concepts:
             for i, sc in enumerate(note.hub_subconcepts):
                 desc = note.hub_subconcept_descriptions.get(sc, "").strip()
                 if desc:
-                    list_lines.append(f"{i+1}. [[{sc}]] — {desc}")
+                    list_lines.append(f"{i + 1}. [[{sc}]] — {desc}")
                 else:
-                    list_lines.append(f"{i+1}. [[{sc}]]")
+                    list_lines.append(f"{i + 1}. [[{sc}]]")
             list_md = "## Komponenten\n" + "\n".join(list_lines)
             sections.append(h1)
             if intro:
@@ -416,8 +405,8 @@ sub-concepts:
         else:
             # Fallback: kein H1 erkannt → Liste vor Body
             list_md = "## Komponenten\n" + "\n".join(
-                f"{i+1}. [[{sc}]]" + (f" — {note.hub_subconcept_descriptions[sc]}"
-                                       if note.hub_subconcept_descriptions.get(sc) else "")
+                f"{i + 1}. [[{sc}]]"
+                + (f" — {note.hub_subconcept_descriptions[sc]}" if note.hub_subconcept_descriptions.get(sc) else "")
                 for i, sc in enumerate(note.hub_subconcepts)
             )
             sections.append(list_md)
@@ -427,12 +416,18 @@ sub-concepts:
     # Footnote-Renumbering: nach Body-Layout-Refactor können verwaiste Defs
     # zurückbleiben (z.B. wenn redundanter Aufzählungs-Absatz gestrippt wurde).
     body_combined = renumber_footnotes("\n\n".join(sections))
-    rendered = frontmatter + "\n" + body_combined + "\n\n" + build_quellen_block(note, source_file, source_meta).rstrip() + "\n"
+    rendered = (
+        frontmatter
+        + "\n"
+        + body_combined
+        + "\n\n"
+        + build_quellen_block(note, source_file, source_meta).rstrip()
+        + "\n"
+    )
     return inject_content_hash(rendered)  # #47: auch Hubs hashen (Idempotenz bei Re-Run)
 
 
-def render_note(note: AtomicNoteDraft, source_file: str,
-                source_meta: dict[str, str] | None = None) -> str:
+def render_note(note: AtomicNoteDraft, source_file: str, source_meta: dict[str, str] | None = None) -> str:
     if note.action == "hub":
         return render_moc(note, source_file, source_meta)
     today = date.today().isoformat()
@@ -446,8 +441,7 @@ def render_note(note: AtomicNoteDraft, source_file: str,
     # F3: confidence-rationale ins Frontmatter (statt Body-Anhang). Nur bei low/medium
     # mit vorhandenem Reasoning. YAML-Doppelquote-Escape für eingebettete Quotes.
     rationale_line = ""
-    if (note.synthesis_confidence in ("low", "medium")
-            and note.confidence_reasoning):
+    if note.synthesis_confidence in ("low", "medium") and note.confidence_reasoning:
         rat_esc = note.confidence_reasoning.replace("\\", "\\\\").replace('"', '\\"')
         rationale_line = f'\nconfidence-rationale: "{rat_esc}"'
 
@@ -490,8 +484,7 @@ related:
     # aus alten Pipeline-Versionen im Body vorhanden. Saubere Drafts (post Stabilisierungs-
     # Refactor) haben weder noch — dieser Strip ist Defensiv-Code für Cache-Drafts.
     body = re.sub(
-        r"\n+##\s+(Quellen?|Confidence-Notiz)\s*\n.*?(?=\n+##\s|\Z)",
-        "", body, flags=re.IGNORECASE | re.DOTALL
+        r"\n+##\s+(Quellen?|Confidence-Notiz)\s*\n.*?(?=\n+##\s|\Z)", "", body, flags=re.IGNORECASE | re.DOTALL
     ).rstrip()
 
     # v28: `(S. N)` → `[^i]`-Footnotes deterministisch im Renderer (Pipeline-Components
@@ -522,9 +515,7 @@ def auto_write_decision(note: AtomicNoteDraft) -> tuple[bool, str]:
     # Eine MoC kann legitim ohne präzisen Glance-Test oder mit weniger Ankern
     # auskommen, wenn der Sub-Konzept-Index (`hub_subconcepts`) substanziell ist.
     # Akzeptanz-Schwelle: Score ≥ 4 + Hard-Gates ignoriert + ≥2 Sub-Konzepte.
-    is_strong_hub = (note.action == "hub"
-                     and note.critic_score >= 4
-                     and len(note.hub_subconcepts) >= 2)
+    is_strong_hub = note.action == "hub" and note.critic_score >= 4 and len(note.hub_subconcepts) >= 2
 
     # Edition unverifiziert (Auszug ohne DOI): Auflage/Jahr/Seiten sind nur
     # dateiname-geraten, nicht belegt → nie automatisch in den Vault, immer in die
@@ -544,13 +535,13 @@ def auto_write_decision(note: AtomicNoteDraft) -> tuple[bool, str]:
     return True, "ok"
 
 
-def find_existing_in_vault(title: str, aliases: list[str],
-                            existing_concepts: dict[str, str]) -> Path | None:
+def find_existing_in_vault(title: str, aliases: list[str], existing_concepts: dict[str, str]) -> Path | None:
     """Title-/Alias-Match gegen Vault-Index aus context_builder. Existing_concepts
     excludiert bereits 00-inbox/98-system/99-archive/08-dashboards (siehe SKIP_DIRS).
     Match-Reihenfolge: exakter Title, dann jeder Alias. Erster Treffer gewinnt.
     """
     from generative.agents.context_builder import is_dedup_eligible
+
     candidates = [title.strip().lower()]
     candidates.extend(a.strip().lower() for a in aliases if a)
     for c in candidates:
@@ -566,8 +557,7 @@ def find_existing_in_vault(title: str, aliases: list[str],
     return None
 
 
-def find_existing_in_inbox(source_file: str, title: str,
-                           inbox_dir: Path | None = None) -> Path | None:
+def find_existing_in_inbox(source_file: str, title: str, inbox_dir: Path | None = None) -> Path | None:
     """Idempotenz-Check: Inbox-Datei mit identischem source-file + title.
     Findet eigene Pipeline-Drafts aus früherem Run derselben PDF — überschreiben statt
     -2-Suffix anhängen.
@@ -591,8 +581,7 @@ def find_existing_in_inbox(source_file: str, title: str,
             fm = yaml.safe_load(text[3:end]) or {}
         except Exception:
             continue
-        if (fm.get("source-file") == source_file
-                and str(fm.get("title", "")).strip().lower() == title_norm):
+        if fm.get("source-file") == source_file and str(fm.get("title", "")).strip().lower() == title_norm:
             matches.append((f, text))
     if not matches:
         return None
@@ -620,9 +609,9 @@ def _read_source_field(note_path: Path) -> str | None:
         return None
 
 
-def render_merge_stub(note: AtomicNoteDraft, source_file: str,
-                      existing_path: Path,
-                      source_meta: dict[str, str] | None = None) -> str:
+def render_merge_stub(
+    note: AtomicNoteDraft, source_file: str, existing_path: Path, source_meta: dict[str, str] | None = None
+) -> str:
     """v27 MVP — Diff-Stub für menschlichen Merge-Review.
 
     Voller Attribute-First-Merge (siehe [[Multi-Source-Note-Merge]]) ist v28. v27
@@ -681,8 +670,7 @@ tags:
     return inject_content_hash(rendered)  # #47: Merge-Stubs hashen → editierte Stubs schützen
 
 
-def rewrite_merged_related_links(drafts: list[AtomicNoteDraft],
-                                 existing_concepts: dict[str, str] | None) -> int:
+def rewrite_merged_related_links(drafts: list[AtomicNoteDraft], existing_concepts: dict[str, str] | None) -> int:
     """Issue #21: Drafts, die beim Schreiben zu Merge-Stubs werden (Title-/Alias-
     Match im Vault), erscheinen unter dem Dateinamen der bestehenden Note
     (`[[<vault-stem>]]`), nicht unter ihrem Draft-Titel. Sibling-Drafts behalten
@@ -804,18 +792,22 @@ def _free_variant(target_dir: Path, stem: str) -> Path:
     raise RuntimeError(f"Keine freie Variante für '{stem}' in {target_dir} (1000 belegt)")
 
 
-def markdown_overwrite_diff(old_text: str, new_text: str, filename: str = "",
-                            max_lines: int = 60) -> str:
+def markdown_overwrite_diff(old_text: str, new_text: str, filename: str = "", max_lines: int = 60) -> str:
     """Schlanker unified Markdown-Diff old→new (#46). Leer wenn keine Änderung.
 
     Begrenzt auf den Overwrite-Fall — kein Voll-Diff-UI. Lange Diffs werden auf
     max_lines gekappt (mit Kürzungs-Hinweis), damit der Preview schlank bleibt.
     """
-    diff = list(difflib.unified_diff(
-        old_text.splitlines(), new_text.splitlines(),
-        fromfile=f"{filename} (bestehend)" if filename else "bestehend",
-        tofile=f"{filename} (neu)" if filename else "neu",
-        n=2, lineterm=""))
+    diff = list(
+        difflib.unified_diff(
+            old_text.splitlines(),
+            new_text.splitlines(),
+            fromfile=f"{filename} (bestehend)" if filename else "bestehend",
+            tofile=f"{filename} (neu)" if filename else "neu",
+            n=2,
+            lineterm="",
+        )
+    )
     if not diff:
         return ""
     truncated = False
@@ -828,10 +820,14 @@ def markdown_overwrite_diff(old_text: str, new_text: str, filename: str = "",
     return body
 
 
-def write_note(note: AtomicNoteDraft, source_file: str, dry_run: bool = False,
-               source_meta: dict[str, str] | None = None,
-               existing_concepts: dict[str, str] | None = None,
-               inbox_dir: Path | None = None) -> Path:
+def write_note(
+    note: AtomicNoteDraft,
+    source_file: str,
+    dry_run: bool = False,
+    source_meta: dict[str, str] | None = None,
+    existing_concepts: dict[str, str] | None = None,
+    inbox_dir: Path | None = None,
+) -> Path:
     """Schreibt Note immer nach 00-inbox/. Auto-Note-Mover-Plugin (Obsidian) routet
     basierend auf Tags zu Zielordner (siehe CLAUDE.md Auto-Note-Mover-Mapping).
 
@@ -867,9 +863,9 @@ def write_note(note: AtomicNoteDraft, source_file: str, dry_run: bool = False,
     # moc/merge-stub aus (das #2a-Gate setzt extend_path ohnehin nur noch für Konzept-Notes).
     # resolve_sibling_dups regelt Intra-Run-Siblings vorher; diese Auflösung greift nur, wenn
     # dort kein Vault-Treffer als Alias hinterlegt wurde.
-    if (existing_vault is None and existing_concepts
-            and note.action == "extend" and note.extend_path):
+    if existing_vault is None and existing_concepts and note.action == "extend" and note.extend_path:
         from generative.agents.context_builder import resolve_vault_relpath, is_dedup_eligible
+
         _rel = resolve_vault_relpath(note.extend_path, existing_concepts)
         if _rel and is_dedup_eligible(VAULT / _rel):
             existing_vault = VAULT / _rel
@@ -879,14 +875,18 @@ def write_note(note: AtomicNoteDraft, source_file: str, dry_run: bool = False,
         # Wenn source-file abweicht → andere Primärquelle → stub markiert als cross-source.
         # Voller Pre-Merge-Validation-LLM-Call ist TODO (v28).
         existing_source = _read_source_field(existing_vault)
-        cross_source = (existing_source is not None
-                        and Path(source_file).stem not in existing_source
-                        and existing_source not in source_file)
+        cross_source = (
+            existing_source is not None
+            and Path(source_file).stem not in existing_source
+            and existing_source not in source_file
+        )
         is_merge_stub = True
         stub_prefix = "XSOURCE-MERGE" if cross_source else "MERGE"
         if cross_source:
-            print(f"  [pre-merge] Quellen-Konflikt: neue Quelle '{Path(source_file).stem}' "
-                  f"vs. bestehende '{existing_source}' — Stub als XSOURCE markiert")
+            print(
+                f"  [pre-merge] Quellen-Konflikt: neue Quelle '{Path(source_file).stem}' "
+                f"vs. bestehende '{existing_source}' — Stub als XSOURCE markiert"
+            )
         filename = f"{stub_prefix} - {slugify(note.title)}.md"
         target = target_dir / filename
         # Idempotenz auch für merge-stubs: gleicher source_file + title → überschreiben
@@ -896,18 +896,18 @@ def write_note(note: AtomicNoteDraft, source_file: str, dry_run: bool = False,
         elif existing_stub is not None:
             # #47: editierter Merge-Stub → nicht überschreiben, neue Version daneben
             target = _free_variant(target_dir, Path(filename).stem)
-            print(f"  [overwrite-schutz] '{existing_stub.name}' wurde seit dem "
-                  f"letzten Lauf editiert — neue Version als '{target.name}' "
-                  f"geschrieben, deine Edits bleiben erhalten.")
+            print(
+                f"  [overwrite-schutz] '{existing_stub.name}' wurde seit dem "
+                f"letzten Lauf editiert — neue Version als '{target.name}' "
+                f"geschrieben, deine Edits bleiben erhalten."
+            )
         elif target.exists():
             target = _free_variant(target_dir, target.stem)
-        content = render_merge_stub(note, source_file, existing_vault,
-                                    source_meta=source_meta)
+        content = render_merge_stub(note, source_file, existing_vault, source_meta=source_meta)
     else:
         # Idempotenz: eigener früherer Run derselben PDF → überschreibe
         existing_inbox = find_existing_in_inbox(source_file, note.title, inbox_dir)
-        _base_name = (moc_filename(note.title) if note.action == "hub"
-                      else slugify(note.title) + ".md")
+        _base_name = moc_filename(note.title) if note.action == "hub" else slugify(note.title) + ".md"
         if existing_inbox is not None and _is_pristine_inbox_file(existing_inbox):
             # unveränderte Pipeline-Note → idempotent überschreiben (wie bisher)
             target = existing_inbox
@@ -915,9 +915,11 @@ def write_note(note: AtomicNoteDraft, source_file: str, dry_run: bool = False,
             # #47: seit dem letzten Lauf editiert → NICHT überschreiben, neue
             # Version daneben; die User-Edits bleiben unangetastet.
             target = _free_variant(target_dir, Path(_base_name).stem)
-            print(f"  [overwrite-schutz] '{existing_inbox.name}' wurde seit dem "
-                  f"letzten Lauf editiert — neue Version als '{target.name}' "
-                  f"geschrieben, deine Edits bleiben erhalten.")
+            print(
+                f"  [overwrite-schutz] '{existing_inbox.name}' wurde seit dem "
+                f"letzten Lauf editiert — neue Version als '{target.name}' "
+                f"geschrieben, deine Edits bleiben erhalten."
+            )
             existing_inbox = None  # kein Overwrite → kein proposed-tags-Erhalt
         else:
             target = target_dir / _base_name
@@ -941,7 +943,9 @@ def write_note(note: AtomicNoteDraft, source_file: str, dry_run: bool = False,
             marker = "[Vault-Empf.]" if auto else f"[Inbox-Review: {reason}]"
         safe = lambda s: s.encode("ascii", "replace").decode("ascii")
         print(f"  [DRY-RUN] -> Inbox: {target.name}  {marker}")
-        print(f"    Score: {note.critic_score}/5 | Hard-Gates: {'pass' if note.hard_gates_pass else 'fail'} | Confidence: {note.synthesis_confidence}")
+        print(
+            f"    Score: {note.critic_score}/5 | Hard-Gates: {'pass' if note.hard_gates_pass else 'fail'} | Confidence: {note.synthesis_confidence}"
+        )
         if note.quality_flags:
             print(f"    Flags: {safe(', '.join(note.quality_flags))}")
         # #46: Overwrite-Fall — target.exists() ⟺ Idempotenz-Re-Run überschreibt

@@ -4,6 +4,7 @@ Damit ein Stage-6-Crash-Handler Prompt + rohen Output des gecrashten Calls
 eindeutig zuordnen kann (auch bei N parallelen Notes via to_thread), merkt sich
 call_claude_full pro Thread den letzten Call.
 """
+
 import threading
 
 import generative.agents.base as base
@@ -11,8 +12,7 @@ from generative.agents.base import CallResult
 
 
 def test_last_call_record_set_on_success(monkeypatch):
-    monkeypatch.setattr(base, "_backend_call_full",
-                        lambda prompt, **k: CallResult(text="roher output"))
+    monkeypatch.setattr(base, "_backend_call_full", lambda prompt, **k: CallResult(text="roher output"))
     base.clear_last_call_record()
 
     base.call_claude_full("mein prompt", agent="verifier", use_cache=False)
@@ -28,6 +28,7 @@ def test_last_call_record_set_on_success(monkeypatch):
 def test_last_call_record_set_on_runtime_error(monkeypatch):
     def boom(prompt, **k):
         raise RuntimeError("backend crashed")
+
     monkeypatch.setattr(base, "_backend_call_full", boom)
     base.clear_last_call_record()
 
@@ -45,8 +46,7 @@ def test_last_call_record_set_on_runtime_error(monkeypatch):
 
 
 def test_last_call_record_is_thread_local(monkeypatch):
-    monkeypatch.setattr(base, "_backend_call_full",
-                        lambda prompt, **k: CallResult(text="x"))
+    monkeypatch.setattr(base, "_backend_call_full", lambda prompt, **k: CallResult(text="x"))
     base.clear_last_call_record()
     captured = {}
 

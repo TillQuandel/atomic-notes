@@ -1,4 +1,5 @@
 """Tests für das origin-Feld in ConceptItem (Secondary Citation Handling)."""
+
 from generative.schemas.atomic_note import ConceptItem
 
 
@@ -43,14 +44,12 @@ def test_secondary_mention_routing_logic():
         source_summary="Test.",
         concepts=[
             ConceptItem("Primary Concept", "high", "ch1", "create", origin="primary"),
-            ConceptItem("IFT", "medium", "bg", "create", origin="secondary_mention",
-                        cited_authors=["Pirolli", "Card"]),
+            ConceptItem("IFT", "medium", "bg", "create", origin="secondary_mention", cited_authors=["Pirolli", "Card"]),
             ConceptItem("Extension Note", "medium", "ch2", "create", origin="extension"),
         ],
     )
     secondary = [c for c in plan.concepts if c.origin == "secondary_mention"]
-    actionable = [c for c in plan.concepts
-                  if c.action != "skip" and c.origin != "secondary_mention"]
+    actionable = [c for c in plan.concepts if c.action != "skip" and c.origin != "secondary_mention"]
     related_mentions = [c.title for c in secondary]
 
     assert len(actionable) == 2

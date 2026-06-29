@@ -17,6 +17,7 @@ Ablauf:
     6. Verifier, Cross-Reference, Critic pro Note        (sequenziell pro Note)
     7. Vault-Writer: Note → 04-wissen/ oder 00-inbox/
 """
+
 from __future__ import annotations
 import argparse
 import asyncio
@@ -29,7 +30,7 @@ import threading
 import traceback
 from pathlib import Path
 
-_TRACER = None    # gesetzt von _setup_phoenix_tracing wenn Phoenix läuft
+_TRACER = None  # gesetzt von _setup_phoenix_tracing wenn Phoenix läuft
 _PROVIDER = None  # TracerProvider von register() — für force_flush am Prozess-Ende
 
 
@@ -45,12 +46,33 @@ def _span(name: str, **attrs):
             span.set_attribute(k, str(v))
         yield span
 
-# Windows-Terminal-Codepage ignoriert PYTHONIOENCODING für bestimmte Print-Pfade
-sys.stdout.reconfigure(encoding='utf-8')
-sys.stderr.reconfigure(encoding='utf-8')
 
-from generative.agents import context_builder, quality, planner, extractor, background_extractor, verifier, cross_reference, confidence, critic, canonicalizer
-from generative.pipeline import pdf_chunker, vault_writer, embeddings, acronym_fix, anchor_repair, boilerplate_dedup, figure_alt, routing_report
+# Windows-Terminal-Codepage ignoriert PYTHONIOENCODING für bestimmte Print-Pfade
+sys.stdout.reconfigure(encoding="utf-8")
+sys.stderr.reconfigure(encoding="utf-8")
+
+from generative.agents import (
+    context_builder,
+    quality,
+    planner,
+    extractor,
+    background_extractor,
+    verifier,
+    cross_reference,
+    confidence,
+    critic,
+    canonicalizer,
+)
+from generative.pipeline import (
+    pdf_chunker,
+    vault_writer,
+    embeddings,
+    acronym_fix,
+    anchor_repair,
+    boilerplate_dedup,
+    figure_alt,
+    routing_report,
+)
 from generative.schemas.atomic_note import AtomicNoteDraft, ConceptPlan
 from generative.config import (
     AGENT_VERSION,
@@ -70,8 +92,13 @@ from generative.config import (
     REDUNDANT_SIBLING_COSINE_THRESHOLD,
 )
 from generative.runtime_config import (
-    load_runtime_config, cap_actionable_concepts, count_actionable,
-    RunBudget, refine_accepted, should_attempt_refine, LEGACY,
+    load_runtime_config,
+    cap_actionable_concepts,
+    count_actionable,
+    RunBudget,
+    refine_accepted,
+    should_attempt_refine,
+    LEGACY,
 )
 
 LARGE_DOC_THRESHOLD = 15
@@ -86,6 +113,7 @@ def _extract_primary_authors(pdf_meta: dict | None) -> list[str]:
     if not pdf_meta:
         return []
     import re
+
     raw = pdf_meta.get("Author") or pdf_meta.get("author") or ""
     if not raw or raw.strip() in ("?", "unknown", ""):
         return []
@@ -114,13 +142,16 @@ def _extract_primary_authors(pdf_meta: dict | None) -> list[str]:
     return authors
 
 
-async def run_extractors_per_concept(full_text: str, concept_plan: ConceptPlan,
-                                      existing_concepts: dict,
-                                      source_meta: dict | None = None,
-                                      source_file: str = "",
-                                      tag_whitelist: list[str] | None = None,
-                                      background_map: dict[str, list[str]] | None = None,
-                                      related_mentions: list[str] | None = None) -> tuple[list[AtomicNoteDraft], dict, int]:
+async def run_extractors_per_concept(
+    full_text: str,
+    concept_plan: ConceptPlan,
+    existing_concepts: dict,
+    source_meta: dict | None = None,
+    source_file: str = "",
+    tag_whitelist: list[str] | None = None,
+    background_map: dict[str, list[str]] | None = None,
+    related_mentions: list[str] | None = None,
+) -> tuple[list[AtomicNoteDraft], dict, int]:
     """Pro Konzept ein Extractor-Call mit den relevanten Textstellen aus ALLEN Chunks.
 
     Konzepte mit action='skip' werden übersprungen. Konzepte ohne Treffer im Volltext
@@ -136,9 +167,11 @@ async def run_extractors_per_concept(full_text: str, concept_plan: ConceptPlan,
         async with sem:
             bg = (background_map or {}).get(concept.title)
             return await extractor.run_per_concept(
-                concept=concept, concept_text=ctext,
+                concept=concept,
+                concept_text=ctext,
                 existing_concepts=existing_concepts,
-                source_meta=source_meta, source_file=source_file,
+                source_meta=source_meta,
+                source_file=source_file,
                 tag_whitelist=tag_whitelist,
                 background_context=bg,
                 related_mentions=related_mentions,
@@ -154,9 +187,11 @@ async def run_extractors_per_concept(full_text: str, concept_plan: ConceptPlan,
         search_terms = [c.title]
         # Heuristisch: Tokens des Titels die nicht Stoppwörter sind
         from generative.agents.cross_reference import _tokens
+
         search_terms.extend(t for t in _tokens(c.title) if len(t) >= 4)
         # Fenster sammeln
         from generative.pipeline.pdf_chunker import concept_text_window
+
         # window_words=400 = neue Option-D-Semantik (Fenster-Größe für Sliding-Window-Scoring),
         # nicht mehr ±expansion wie vor 2026-05-17.
         ctext = concept_text_window(full_text, search_terms, window_words=400)
@@ -189,6 +224,7 @@ async def run_extractors_per_concept(full_text: str, concept_plan: ConceptPlan,
 def _normalize(title: str) -> str:
     """Normalisiert Titel für Dedup-Vergleich: Kleinbuchstaben, Satzzeichen entfernen."""
     import re
+
     return re.sub(r"[^a-z0-9\s]", "", title.lower()).strip()
 
 
@@ -198,8 +234,7 @@ def _jaccard(a: set, b: set) -> float:
     return len(a & b) / len(a | b)
 
 
-async def _llm_dedup_batch(pairs: list[tuple[int, int]],
-                            drafts: list[AtomicNoteDraft]) -> set[tuple[int, int]]:
+async def _llm_dedup_batch(pairs: list[tuple[int, int]], drafts: list[AtomicNoteDraft]) -> set[tuple[int, int]]:
     """Stage 2.5: Haiku-Batch-Call für ambiguous Cosine-Zone.
 
     Schickt alle ambiguous Paare in einem einzigen Call. Antwortformat:
@@ -222,9 +257,7 @@ async def _llm_dedup_batch(pairs: list[tuple[int, int]],
     for idx, (i, j) in enumerate(pairs, 1):
         a, b = drafts[i], drafts[j]
         lines.append(
-            f"Pair {idx}:\n"
-            f"  A: \"{a.title}\" — {_first_sentences(a.body)}\n"
-            f"  B: \"{b.title}\" — {_first_sentences(b.body)}"
+            f'Pair {idx}:\n  A: "{a.title}" — {_first_sentences(a.body)}\n  B: "{b.title}" — {_first_sentences(b.body)}'
         )
 
     prompt = (
@@ -237,12 +270,11 @@ async def _llm_dedup_batch(pairs: list[tuple[int, int]],
         "Format — exactly one line per pair, same order, no other text:\n"
         "1: SAME\n"
         "2: DIFFERENT\n\n"
-        "Pairs:\n"
-        + "\n\n".join(lines)
-        + "\n\nYour answer:"
+        "Pairs:\n" + "\n\n".join(lines) + "\n\nYour answer:"
     )
 
     from generative.agents.base import call_claude_async
+
     try:
         result = await call_claude_async(prompt, model=MODEL_LLM_DEDUP)
         raw = result.text if hasattr(result, "text") else str(result)
@@ -310,6 +342,7 @@ async def entity_resolution(drafts: list[AtomicNoteDraft]) -> list[AtomicNoteDra
     eigene Trace-Zeile.
     """
     from generative.agents.cross_reference import _tokens
+
     n = len(drafts)
     if n <= 1:
         return drafts
@@ -340,7 +373,10 @@ async def entity_resolution(drafts: list[AtomicNoteDraft]) -> list[AtomicNoteDra
             t_cos = embeddings.cosine(title_embs[i], title_embs[j])
             if t_cos >= ER_TITLE_COSINE_THRESHOLD:
                 candidate_pairs.append((i, j))
-                print(f"      [er-stage1] semantic-accept cos={t_cos:.3f} '{drafts[i].title}' ↔ '{drafts[j].title}'", file=sys.stderr)
+                print(
+                    f"      [er-stage1] semantic-accept cos={t_cos:.3f} '{drafts[i].title}' ↔ '{drafts[j].title}'",
+                    file=sys.stderr,
+                )
                 continue
 
             if verdict in ("skip-mono", "skip-no-subset"):
@@ -362,7 +398,7 @@ async def entity_resolution(drafts: list[AtomicNoteDraft]) -> list[AtomicNoteDra
     # Stage 2: Similarity — Body-Embedding-Cosine
     # Embeddings einmal pro Draft berechnen (auch wenn ein Draft in mehreren Paaren
     # vorkommt). lru_cache wäre nett — hier inline-Cache via dict.
-    print(f"      [er-stage1] {len(candidate_pairs)} Block-Kandidaten von {n*(n-1)//2} Paaren", file=sys.stderr)
+    print(f"      [er-stage1] {len(candidate_pairs)} Block-Kandidaten von {n * (n - 1) // 2} Paaren", file=sys.stderr)
     body_embs: dict[int, object] = {}
     for i in {idx for pair in candidate_pairs for idx in pair}:
         body_embs[i] = embeddings.embed_body(drafts[i].body)
@@ -389,7 +425,9 @@ async def entity_resolution(drafts: list[AtomicNoteDraft]) -> list[AtomicNoteDra
         if c >= ER_BODY_COSINE_THRESHOLD:
             union(i, j)
             edge_count += 1
-            print(f"      [er-stage2] cluster-edge cos={c:.3f} '{drafts[i].title}' ↔ '{drafts[j].title}'", file=sys.stderr)
+            print(
+                f"      [er-stage2] cluster-edge cos={c:.3f} '{drafts[i].title}' ↔ '{drafts[j].title}'", file=sys.stderr
+            )
         elif ENABLE_LLM_DEDUP and ER_AMBIGUOUS_LOWER <= c < ER_BODY_COSINE_THRESHOLD:
             ambiguous_pairs.append((i, j))
             print(f"      [er-stage2] ambiguous cos={c:.3f} '{drafts[i].title}' ↔ '{drafts[j].title}'", file=sys.stderr)
@@ -397,9 +435,12 @@ async def entity_resolution(drafts: list[AtomicNoteDraft]) -> list[AtomicNoteDra
     # Stage 2.5: LLM-Dedup für ambiguous Zone — in Chunks à 25 Paare
     if ambiguous_pairs:
         _BATCH = 25
-        print(f"      [er-stage2.5] {len(ambiguous_pairs)} ambiguous Paare → Haiku ({(_BATCH-1+len(ambiguous_pairs))//_BATCH} Batch(es))", file=sys.stderr)
+        print(
+            f"      [er-stage2.5] {len(ambiguous_pairs)} ambiguous Paare → Haiku ({(_BATCH - 1 + len(ambiguous_pairs)) // _BATCH} Batch(es))",
+            file=sys.stderr,
+        )
         for chunk_start in range(0, len(ambiguous_pairs), _BATCH):
-            chunk = ambiguous_pairs[chunk_start:chunk_start + _BATCH]
+            chunk = ambiguous_pairs[chunk_start : chunk_start + _BATCH]
             llm_same = await _llm_dedup_batch(chunk, drafts)
             for i, j in llm_same:
                 union(i, j)
@@ -420,8 +461,7 @@ async def entity_resolution(drafts: list[AtomicNoteDraft]) -> list[AtomicNoteDra
         return drafts
 
     print(f"      [er-stage4] {len(multi_clusters)} Cluster zu mergen", file=sys.stderr)
-    merge_tasks = [canonicalizer.merge_cluster([drafts[k] for k in members])
-                   for members in multi_clusters]
+    merge_tasks = [canonicalizer.merge_cluster([drafts[k] for k in members]) for members in multi_clusters]
     merged_results = await asyncio.gather(*merge_tasks, return_exceptions=True)
 
     # Resultate zurück in die Draft-Liste einsetzen
@@ -461,6 +501,7 @@ def _current_phase() -> str:
 
 class _Stage6Failure:
     """Sentinel-Ergebnis eines gecrashten Stage-6-Note-Laufs (statt Exception)."""
+
     def __init__(self, idx: int, payload: dict):
         self.idx = idx
         self.payload = payload
@@ -472,6 +513,7 @@ def _run_note_pipeline_guarded(i, n_total, draft, *args, _run_meta=None, **kwarg
     Gibt (i, draft) bei Erfolg oder _Stage6Failure(i, payload) bei Crash zurück.
     """
     from generative.agents.base import get_last_call_record, clear_last_call_record
+
     clear_last_call_record()
     _STAGE6_PHASE.value = "initial"
     try:
@@ -497,6 +539,7 @@ def _collect_stage6_results(results, failed_dir: Path):
     Schreibt pro Crash einen JSON-Report nach failed_dir. Gibt (survived, crashes).
     """
     from generative.pipeline.crash_report import write_crash_report
+
     survived_by_idx: dict[int, AtomicNoteDraft] = {}
     crashes: list[_Stage6Failure] = []
     for res in results:
@@ -505,8 +548,7 @@ def _collect_stage6_results(results, failed_dir: Path):
             crashes.append(res)
         elif isinstance(res, BaseException):
             # Crash außerhalb des guarded Wrappers — defensiv, ohne Payload.
-            print(f"  [WARN] Stage-6 unerwartet fehlgeschlagen (kein Crash-Report): {res}",
-                  file=sys.stderr)
+            print(f"  [WARN] Stage-6 unerwartet fehlgeschlagen (kein Crash-Report): {res}", file=sys.stderr)
         else:
             idx, d = res
             survived_by_idx[idx] = d
@@ -515,13 +557,20 @@ def _collect_stage6_results(results, failed_dir: Path):
 
 
 def _run_note_pipeline(
-    i: int, n_total: int, draft: AtomicNoteDraft,
+    i: int,
+    n_total: int,
+    draft: AtomicNoteDraft,
     initial_drafts: list[AtomicNoteDraft],
-    existing_concepts: dict, concept_links: dict,
-    chunk_map: dict, full_text: str,
-    acronym_dict: dict, concept_map: dict,
-    quality_report, pdf_meta: dict,
-    source_path: Path, tag_whitelist: list,
+    existing_concepts: dict,
+    concept_links: dict,
+    chunk_map: dict,
+    full_text: str,
+    acronym_dict: dict,
+    concept_map: dict,
+    quality_report,
+    pdf_meta: dict,
+    source_path: Path,
+    tag_whitelist: list,
     all_hub_concepts: dict | None = None,
     all_run_concept_links: dict | None = None,
     background_map: dict | None = None,
@@ -536,22 +585,41 @@ def _run_note_pipeline(
     siblings-Index genutzt (konsistent, da Body-Änderungen aus der Stage
     das Hub-Routing nicht beeinflussen).
     """
-    print(f"  [{i+1}/{n_total}] {draft.title}")
+    print(f"  [{i + 1}/{n_total}] {draft.title}")
 
-    _STOP_V = frozenset({
-        "the", "of", "and", "in", "a", "an", "for", "on", "to", "is", "as",
-        "und", "der", "die", "das", "von", "mit", "für", "auf", "bei", "im",
-    })
-    _title_tokens = [t for t in draft.title.lower().split()
-                     if t not in _STOP_V and len(t) >= 3]
+    _STOP_V = frozenset(
+        {
+            "the",
+            "of",
+            "and",
+            "in",
+            "a",
+            "an",
+            "for",
+            "on",
+            "to",
+            "is",
+            "as",
+            "und",
+            "der",
+            "die",
+            "das",
+            "von",
+            "mit",
+            "für",
+            "auf",
+            "bei",
+            "im",
+        }
+    )
+    _title_tokens = [t for t in draft.title.lower().split() if t not in _STOP_V and len(t) >= 3]
     source_chunk = pdf_chunker.concept_text_window(
         full_text, [draft.title] + _title_tokens, window_words=400, max_chars=8000
     )
     if not source_chunk.strip():
         source_chunk = next(
-            (text[:12000] for _ct, text in chunk_map.items()
-             if any(w in draft.body[:500] for w in _ct.split()[:3])),
-            list(chunk_map.values())[0][:12000] if chunk_map else full_text[:6000]
+            (text[:12000] for _ct, text in chunk_map.items() if any(w in draft.body[:500] for w in _ct.split()[:3])),
+            list(chunk_map.values())[0][:12000] if chunk_map else full_text[:6000],
         )
 
     per_draft_dict = dict(acronym_dict)
@@ -596,19 +664,21 @@ def _run_note_pipeline(
     draft = critic.run(draft, existing_concepts=hub_concepts, concept_links=run_concept_links)
 
     # Self-Refine (Milestone 3.6 + v8): Retry bei knapp gescheiterten Notes
-    refine_trigger_b = (draft.critic_score >= CRITIC_AUTO_THRESHOLD and not draft.hard_gates_pass)  # nur noch für synthesized_hint; Refine-Gating macht should_attempt_refine unten
+    refine_trigger_b = (
+        draft.critic_score >= CRITIC_AUTO_THRESHOLD and not draft.hard_gates_pass
+    )  # nur noch für synthesized_hint; Refine-Gating macht should_attempt_refine unten
     fs_violations = [f for f in draft.quality_flags if f.startswith("⚠️ Future-Self:")]
     synthesized_hint = None
     if not draft.revision_hint and refine_trigger_b and fs_violations:
-        synthesized_hint = (
-            "Hard-Gate-Fail trotz Score-Pass — Future-Self-Verstöße deterministisch erkannt."
-        )
+        synthesized_hint = "Hard-Gate-Fail trotz Score-Pass — Future-Self-Verstöße deterministisch erkannt."
 
     # Score=4 + Hint: kein Retry (Gemini-Review 2026-05-18: 0% Erfolgsrate, Vault-Note braucht
     # keinen Retry). Hint als Metadatum für spätere Analyse speichern.
-    if (draft.critic_score == CRITIC_AUTO_THRESHOLD
-            and draft.revision_hint
-            and "critic_improvement_hint" not in (draft.quality_flags or [])):
+    if (
+        draft.critic_score == CRITIC_AUTO_THRESHOLD
+        and draft.revision_hint
+        and "critic_improvement_hint" not in (draft.quality_flags or [])
+    ):
         draft.quality_flags.append(f"critic_improvement_hint: {draft.revision_hint[:120]}")
 
     # Bug #5: concept_map-Lookup mit refine_key-Fallback (nach ER kann draft.title abweichen)
@@ -627,29 +697,37 @@ def _run_note_pipeline(
         print("      [refine] übersprungen: Run-Budget ausgeschöpft")
     if _should_attempt and _budget_ok:
         base_hint = draft.revision_hint or synthesized_hint
-        augmented_hint = (
-            base_hint
-            + ("\n\nKonkrete Future-Self-Verstöße (deterministisch, alle entfernen):\n"
-               + "\n".join(f"- {v.replace('⚠️ Future-Self: ', '')}" for v in fs_violations)
-               if fs_violations else "")
+        augmented_hint = base_hint + (
+            "\n\nKonkrete Future-Self-Verstöße (deterministisch, alle entfernen):\n"
+            + "\n".join(f"- {v.replace('⚠️ Future-Self: ', '')}" for v in fs_violations)
+            if fs_violations
+            else ""
         )
         hint_source = "Critic-Hint" if draft.revision_hint else "synth"
-        print(f"      [refine] Score {draft.critic_score} + {hint_source} — 1 Retry"
-              + (f" + {len(fs_violations)} Regex-Violations" if fs_violations else ""))
+        print(
+            f"      [refine] Score {draft.critic_score} + {hint_source} — 1 Retry"
+            + (f" + {len(fs_violations)} Regex-Violations" if fs_violations else "")
+        )
         concept_obj, ctext = concept_map[_refine_map_key]
         try:
             # asyncio.run() ist in Threads (kein Event-Loop) erlaubt
-            _bg = (background_map or {}).get(concept_obj.title) or (background_map or {}).get(draft.title)  # Bug #6: plan title bevorzugen
-            refined = asyncio.run(extractor.run_per_concept(
-                concept=concept_obj, concept_text=ctext,
-                existing_concepts=existing_concepts,
-                source_meta=pdf_meta, source_file=source_path.name,
-                revision_hint=augmented_hint,
-                tag_whitelist=tag_whitelist,
-                background_context=_bg,
-                related_mentions=related_mentions,   # Bug #7: beim Retry übergeben
-                current_draft_body=draft.body,       # Bug #1: gezieltes Überarbeiten statt Neugenerierung
-            ))
+            _bg = (background_map or {}).get(concept_obj.title) or (background_map or {}).get(
+                draft.title
+            )  # Bug #6: plan title bevorzugen
+            refined = asyncio.run(
+                extractor.run_per_concept(
+                    concept=concept_obj,
+                    concept_text=ctext,
+                    existing_concepts=existing_concepts,
+                    source_meta=pdf_meta,
+                    source_file=source_path.name,
+                    revision_hint=augmented_hint,
+                    tag_whitelist=tag_whitelist,
+                    background_context=_bg,
+                    related_mentions=related_mentions,  # Bug #7: beim Retry übergeben
+                    current_draft_body=draft.body,  # Bug #1: gezieltes Überarbeiten statt Neugenerierung
+                )
+            )
         except Exception as e:
             print(f"      [refine] Retry fehlgeschlagen: {e}")
             refined = None
@@ -677,12 +755,16 @@ def _run_note_pipeline(
             refined = critic.run(refined, existing_concepts=hub_concepts, concept_links=run_concept_links)
             better = refine_accepted(refined, auto_threshold=CRITIC_AUTO_THRESHOLD)
             if better:
-                print(f"      [refine] Score {draft.critic_score}/{draft.hard_gates_pass} → "
-                      f"{refined.critic_score}/{refined.hard_gates_pass} ✓")
+                print(
+                    f"      [refine] Score {draft.critic_score}/{draft.hard_gates_pass} → "
+                    f"{refined.critic_score}/{refined.hard_gates_pass} ✓"
+                )
                 draft = refined
             else:
-                print(f"      [refine] Score {refined.critic_score}/{refined.hard_gates_pass} ≤ "
-                      f"{draft.critic_score}/{draft.hard_gates_pass}, Original behalten")
+                print(
+                    f"      [refine] Score {refined.critic_score}/{refined.hard_gates_pass} ≤ "
+                    f"{draft.critic_score}/{draft.hard_gates_pass}, Original behalten"
+                )
 
     # #45: Routing-Grund + konkrete Quality-Flags auch im echten Lauf sichtbar
     # (bisher erschienen die Flags nur im --dry-run).
@@ -693,11 +775,16 @@ def _run_note_pipeline(
 
 async def process_all_notes_async(
     drafts: list[AtomicNoteDraft],
-    existing_concepts: dict, concept_links: dict,
-    chunk_map: dict, full_text: str,
-    acronym_dict: dict, concept_map: dict,
-    quality_report, pdf_meta: dict,
-    source_path: Path, tag_whitelist: list,
+    existing_concepts: dict,
+    concept_links: dict,
+    chunk_map: dict,
+    full_text: str,
+    acronym_dict: dict,
+    concept_map: dict,
+    quality_report,
+    pdf_meta: dict,
+    source_path: Path,
+    tag_whitelist: list,
     background_map: dict | None = None,
     related_mentions: list[str] | None = None,
     runtime_config=None,
@@ -717,7 +804,7 @@ async def process_all_notes_async(
     all_hub_concepts: dict = dict(existing_concepts)
     for d in initial_drafts:
         all_hub_concepts.setdefault(d.title.lower(), f"<sibling:{d.title}>")
-        for alias in (d.aliases or []):
+        for alias in d.aliases or []:
             all_hub_concepts.setdefault(alias.lower(), f"<sibling:{d.title}>")
 
     all_run_concept_links: dict = dict(concept_links)
@@ -734,6 +821,7 @@ async def process_all_notes_async(
 
     from generative.agents.base import _RUN_ID
     from generative.config import CACHE_DIR, BACKEND
+
     if failed_dir is None:
         failed_dir = CACHE_DIR / "failed" / _RUN_ID
     run_meta = {"run_id": _RUN_ID, "pdf": source_path.name, "backend": BACKEND}
@@ -742,13 +830,22 @@ async def process_all_notes_async(
         async with sem:
             return await asyncio.to_thread(
                 _run_note_pipeline_guarded,
-                i, n_total, draft, initial_drafts,
-                existing_concepts, concept_links,
-                chunk_map, full_text,
-                acronym_dict, concept_map,
-                quality_report, pdf_meta,
-                source_path, tag_whitelist,
-                all_hub_concepts, all_run_concept_links,
+                i,
+                n_total,
+                draft,
+                initial_drafts,
+                existing_concepts,
+                concept_links,
+                chunk_map,
+                full_text,
+                acronym_dict,
+                concept_map,
+                quality_report,
+                pdf_meta,
+                source_path,
+                tag_whitelist,
+                all_hub_concepts,
+                all_run_concept_links,
                 background_map,
                 related_mentions,
                 runtime_config,
@@ -764,23 +861,33 @@ async def process_all_notes_async(
     survived, crashes = _collect_stage6_results(results, failed_dir)
 
     if crashes:
-        print(f"\n  [Stage-6-Crash] {len(crashes)} Note(s) verworfen (unverifiziert, nicht geschrieben):",
-              file=sys.stderr)
+        print(
+            f"\n  [Stage-6-Crash] {len(crashes)} Note(s) verworfen (unverifiziert, nicht geschrieben):", file=sys.stderr
+        )
         for c in crashes:
             p = c.payload
-            print(f"    - {p['title']} | {p['step']}/{p['phase']} | {p['exception']}",
-                  file=sys.stderr)
+            print(f"    - {p['title']} | {p['step']}/{p['phase']} | {p['exception']}", file=sys.stderr)
         print(f"    Crash-Reports: {failed_dir}", file=sys.stderr)
 
     return survived
 
 
 _ABSENCE_PHRASES = (
-    "nicht behandelt", "nicht vorkommt", "kommt nicht vor",
-    "nicht diskutiert", "nicht thematisiert", "keine erwähnung",
-    "behandelt nicht", "erwähnt nicht", "thematisiert nicht",
-    "not discussed", "not covered", "not mentioned", "not addressed",
-    "abwesenheit statt wissen", "dokumentiert abwesenheit",
+    "nicht behandelt",
+    "nicht vorkommt",
+    "kommt nicht vor",
+    "nicht diskutiert",
+    "nicht thematisiert",
+    "keine erwähnung",
+    "behandelt nicht",
+    "erwähnt nicht",
+    "thematisiert nicht",
+    "not discussed",
+    "not covered",
+    "not mentioned",
+    "not addressed",
+    "abwesenheit statt wissen",
+    "dokumentiert abwesenheit",
 )
 
 
@@ -807,8 +914,7 @@ def _drop_artifacts(drafts: list[AtomicNoteDraft]) -> list[AtomicNoteDraft]:
     return kept
 
 
-def dedup_exact(drafts: list[AtomicNoteDraft],
-                existing_concepts: dict[str, str]) -> list[AtomicNoteDraft]:
+def dedup_exact(drafts: list[AtomicNoteDraft], existing_concepts: dict[str, str]) -> list[AtomicNoteDraft]:
     """Exact-Match-Dedup: identischer normalisierter Titel innerhalb der Drafts +
     Vault-Match-Umflag (action=create → action=extend bei Vault-Treffer).
 
@@ -831,9 +937,9 @@ def dedup_exact(drafts: list[AtomicNoteDraft],
     return result
 
 
-def resolve_sibling_dups(drafts: list[AtomicNoteDraft],
-                         existing_concepts: dict[str, str] | None = None
-                         ) -> tuple[list[AtomicNoteDraft], int]:
+def resolve_sibling_dups(
+    drafts: list[AtomicNoteDraft], existing_concepts: dict[str, str] | None = None
+) -> tuple[list[AtomicNoteDraft], int]:
     """Intra-Run-Sibling-Dedup (Befund D).
 
     cross_reference erkennt zwei Near-Dup-Drafts EINES Laufs (dup_risk=high) und setzt
@@ -863,6 +969,7 @@ def resolve_sibling_dups(drafts: list[AtomicNoteDraft],
     (keine norm-Title-Kollisionen, Codex MED#3).
     """
     from generative.agents.cross_reference import MAX_RELATED
+
     n = len(drafts)
     if n <= 1:
         return drafts, 0
@@ -925,9 +1032,7 @@ def resolve_sibling_dups(drafts: list[AtomicNoteDraft],
     for members in clusters.values():
         if len(members) <= 1:  # Multi-Member-Cluster entsteht nur durch eine Sibling-Kante
             continue
-        survivor = max(members, key=lambda m: (drafts[m].critic_score,
-                                               len(drafts[m].body or ""),
-                                               norm_title[m]))
+        survivor = max(members, key=lambda m: (drafts[m].critic_score, len(drafts[m].body or ""), norm_title[m]))
         s = drafts[survivor]
         alias_norms = {_normalize(a) for a in s.aliases} | {norm_title[survivor]}
 
@@ -952,9 +1057,14 @@ def resolve_sibling_dups(drafts: list[AtomicNoteDraft],
         # sie. Das eigene Vault-Ziel des Survivors hat Vorrang (Mistral-Review 2026-06-23),
         # sonst der erste Member in Index-Reihenfolge.
         _vault_order = [survivor] + [m for m in sorted(members) if m != survivor]
-        vault_ep = next((drafts[m].extend_path for m in _vault_order
-                         if drafts[m].action == "extend" and _vault_target(drafts[m].extend_path)),
-                        None)
+        vault_ep = next(
+            (
+                drafts[m].extend_path
+                for m in _vault_order
+                if drafts[m].action == "extend" and _vault_target(drafts[m].extend_path)
+            ),
+            None,
+        )
         if vault_ep is not None:
             s.action = "extend"
             s.extend_path = vault_ep
@@ -970,10 +1080,11 @@ def resolve_sibling_dups(drafts: list[AtomicNoteDraft],
     return kept, len(drop_idx)
 
 
-def flag_redundant_siblings(drafts: list[AtomicNoteDraft],
-                            threshold: float | None = None,
-                            body_cosine_fn=None,
-                            ) -> tuple[list[AtomicNoteDraft], int]:
+def flag_redundant_siblings(
+    drafts: list[AtomicNoteDraft],
+    threshold: float | None = None,
+    body_cosine_fn=None,
+) -> tuple[list[AtomicNoteDraft], int]:
     """#8: seiteneffekt-freier Flag bei hoher Body-Überlappung zwischen DISTINKTEN Notes.
 
     Zwei empirische Gates (Ebner-Audit 2026-06-23) zeigten: Geschwister-Notes EINES Laufs
@@ -997,8 +1108,7 @@ def flag_redundant_siblings(drafts: list[AtomicNoteDraft],
 
     # Nur create-Drafts mit nicht-leerem Body: extend gehört dem Merge-Pfad; ein leerer Body
     # kann nicht redundant sein (Cosine 0) und würde nur das Embedding-Modell unnötig laden.
-    candidates = [i for i, d in enumerate(drafts)
-                  if d.action == "create" and (d.body or "").strip()]
+    candidates = [i for i, d in enumerate(drafts) if d.action == "create" and (d.body or "").strip()]
     if len(candidates) < 2:
         return drafts, 0
 
@@ -1013,8 +1123,8 @@ def flag_redundant_siblings(drafts: list[AtomicNoteDraft],
         if any(marker in f for f in draft.quality_flags):  # idempotent
             return
         draft.quality_flags.append(
-            f"⚠️ Hohe inhaltliche {marker} (Body-cos={cos:.2f}) — "
-            f"beim Review Kontext kürzen/verlinken")
+            f"⚠️ Hohe inhaltliche {marker} (Body-cos={cos:.2f}) — beim Review Kontext kürzen/verlinken"
+        )
 
     n_pairs = 0
     for a in range(len(candidates)):
@@ -1031,6 +1141,7 @@ def flag_redundant_siblings(drafts: list[AtomicNoteDraft],
 def _auto_start_dashboard() -> None:
     """Startet den Dashboard-Server im Hintergrund falls er noch nicht läuft."""
     import socket, subprocess
+
     try:
         with socket.create_connection(("localhost", 8051), timeout=0.5):
             return  # Läuft bereits
@@ -1075,6 +1186,7 @@ def dry_run_eval_targets(written: list[tuple[Path, bool]], cache_note_dir: Path)
 def _auto_version_bump() -> None:
     """Erhöht AGENT_VERSION Patch wenn sich Pipeline-Code seit letztem Run geändert hat."""
     import hashlib, json as _json, re as _re
+
     state_file = Path(__file__).parent / ".cache" / "pipeline_state.json"
     state_file.parent.mkdir(parents=True, exist_ok=True)
 
@@ -1082,15 +1194,11 @@ def _auto_version_bump() -> None:
     tracked_dirs = [
         Path(__file__).parent / "agents",
         Path(__file__).parent / "pipeline",
-        Path(__file__),            # orchestrator.py selbst
+        Path(__file__),  # orchestrator.py selbst
         Path(__file__).parent / "config.py",
     ]
     h = hashlib.md5()
-    for p in sorted(
-        f for d in tracked_dirs
-        for f in ([d] if d.is_file() else d.rglob("*.py"))
-        if f.is_file()
-    ):
+    for p in sorted(f for d in tracked_dirs for f in ([d] if d.is_file() else d.rglob("*.py")) if f.is_file()):
         h.update(p.read_bytes())
     current_hash = h.hexdigest()
 
@@ -1117,6 +1225,7 @@ def _auto_version_bump() -> None:
         )
         # AGENT_VERSION im laufenden Prozess aktualisieren
         from generative import config as _cfg
+
         _cfg.AGENT_VERSION = new_ver
         print(f"  [version] Code geändert → {new_ver}")
     else:
@@ -1142,6 +1251,7 @@ def _phoenix_exe(venv: Path) -> Path:
 def _phoenix_server_running(port: int) -> bool:
     """True wenn auf localhost:port ein Server lauscht."""
     import socket
+
     try:
         with socket.create_connection(("localhost", port), timeout=0.5):
             return True
@@ -1149,8 +1259,7 @@ def _phoenix_server_running(port: int) -> bool:
         return False
 
 
-def _ensure_phoenix_server(port: int | None = None, venv: Path | None = None,
-                           timeout: float | None = None) -> bool:
+def _ensure_phoenix_server(port: int | None = None, venv: Path | None = None, timeout: float | None = None) -> bool:
     """Startet den Phoenix-Server (detached) falls er nicht auf `port` lauscht.
 
     Idempotent bei sequentiellen Läufen: läuft der Server schon, passiert nichts
@@ -1169,6 +1278,7 @@ def _ensure_phoenix_server(port: int | None = None, venv: Path | None = None,
     """
     import subprocess, time
     from generative import config
+
     port = config.PHOENIX_PORT if port is None else port
     venv = config.PHOENIX_VENV if venv is None else venv
     if timeout is None:
@@ -1190,7 +1300,9 @@ def _ensure_phoenix_server(port: int | None = None, venv: Path | None = None,
     try:
         subprocess.Popen(
             [str(exe), "serve"],
-            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **kwargs,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+            **kwargs,
         )
     except OSError as e:
         # z.B. WinError 193 bei beschädigtem Binary trotz exists() — graceful bleiben.
@@ -1240,26 +1352,26 @@ def _setup_phoenix_tracing() -> None:
         # BatchSpanProcessor bei kurzlebigen CLI-Runs (kein Flush-Verlust).
         # Resource openinference.project.name → Phoenix gruppiert in dieses Projekt
         # (statt "default"); entspricht register(project_name=...).
-        _PROVIDER = TracerProvider(
-            resource=Resource.create({"openinference.project.name": "atomic-agent"})
-        )
-        _PROVIDER.add_span_processor(
-            SimpleSpanProcessor(OTLPSpanExporter(endpoint="http://localhost:6006/v1/traces"))
-        )
+        _PROVIDER = TracerProvider(resource=Resource.create({"openinference.project.name": "atomic-agent"}))
+        _PROVIDER.add_span_processor(SimpleSpanProcessor(OTLPSpanExporter(endpoint="http://localhost:6006/v1/traces")))
         trace.set_tracer_provider(_PROVIDER)
         _TRACER = trace.get_tracer("atomic-agent")
         # LLM-Call-Instrumentierung in base.py explizit aktivieren (nur hier, nur
         # bei aktivem Tracing — kein impliziter Proxy-Tracer).
         from generative.agents.base import set_llm_tracer
+
         set_llm_tracer(_TRACER)
         import atexit
+
         atexit.register(lambda: _PROVIDER and _PROVIDER.force_flush())
         print("[phoenix] Tracing aktiv → http://localhost:6006")
     except Exception as e:
         print(f"[phoenix] Tracing nicht verfügbar ({e}) — Pipeline läuft ohne Traces")
 
 
-def _run_extraction_stages(args, source_path: Path, runtime_config=None):  # main() übergibt immer einen RuntimeConfig; None = kein Runtime-Config / Capping deaktiviert
+def _run_extraction_stages(
+    args, source_path: Path, runtime_config=None
+):  # main() übergibt immer einen RuntimeConfig; None = kein Runtime-Config / Capping deaktiviert
     """Stages 0–5: PDF extract → planning → extraction.
 
     Returns:
@@ -1270,6 +1382,7 @@ def _run_extraction_stages(args, source_path: Path, runtime_config=None):  # mai
     """
     from generative.agents.base import trace_run_start as _trace_run_start
     from generative.config import MODEL_CONFIG as _MODEL_CONFIG
+
     _trace_run_start(_MODEL_CONFIG)
 
     # --- Schritt 1: PDF → Text + Metadata → Chunks ---
@@ -1283,36 +1396,47 @@ def _run_extraction_stages(args, source_path: Path, runtime_config=None):  # mai
     text_quality = pdf_chunker.assess_text_quality(text)
     if text_quality.is_empty or text_quality.is_thin:
         from generative.pipeline.error_hints import scanned_pdf_hint
-        print(scanned_pdf_hint(
-            source_path.name,
-            words_per_page=text_quality.words_per_page if text_quality.is_thin else None,
-        ))
+
+        print(
+            scanned_pdf_hint(
+                source_path.name,
+                words_per_page=text_quality.words_per_page if text_quality.is_thin else None,
+            )
+        )
     chunks = pdf_chunker.split_by_chapters(text)
     pdf_meta_early = pdf_chunker.pdf_metadata(source_path) or {}
     try:
         source_pages = int(pdf_meta_early.get("Pages") or 0)
     except (TypeError, ValueError):
         source_pages = 0
-    if (len(chunks) > MAX_CHUNKS_SHORT_DOC
-            and 0 < source_pages <= MAX_PAGES_SHORT_DOC
-            and not getattr(args, "by_chapter", False)):
-        print(f"      [chunk-cap] {len(chunks)} Chunks bei {source_pages} S. → "
-              f"Fallback auf Word-Count-Split (max {MAX_CHUNKS_SHORT_DOC})")
+    if (
+        len(chunks) > MAX_CHUNKS_SHORT_DOC
+        and 0 < source_pages <= MAX_PAGES_SHORT_DOC
+        and not getattr(args, "by_chapter", False)
+    ):
+        print(
+            f"      [chunk-cap] {len(chunks)} Chunks bei {source_pages} S. → "
+            f"Fallback auf Word-Count-Split (max {MAX_CHUNKS_SHORT_DOC})"
+        )
         chunks = pdf_chunker._split_by_words(text)
     print(f"      {len(chunks)} Chunks")
     if len(chunks) > LARGE_DOC_THRESHOLD and not getattr(args, "by_chapter", False):
         print(f"      [WARN] {len(chunks)} Chunks - großes Dokument. Erwäge --by-chapter für Bücher.")
     acronym_dict = acronym_fix.extract_acronym_pairs(text)
     if acronym_dict:
-        print(f"      [schwartz-hearst] {len(acronym_dict)} Akronyme aus Quelle: "
-              f"{', '.join(list(acronym_dict.keys())[:8])}"
-              f"{'...' if len(acronym_dict) > 8 else ''}")
+        print(
+            f"      [schwartz-hearst] {len(acronym_dict)} Akronyme aus Quelle: "
+            f"{', '.join(list(acronym_dict.keys())[:8])}"
+            f"{'...' if len(acronym_dict) > 8 else ''}"
+        )
     overview = pdf_chunker.extract_overview(text)
     pdf_meta = pdf_meta_early
     if pdf_meta:
-        meta_line = (f"{pdf_meta.get('Title', '?')[:60]} | "
-                     f"{pdf_meta.get('Author', '?')[:40]} | "
-                     f"{pdf_meta.get('Year', '?')} | {pdf_meta.get('Pages', '?')} S.")
+        meta_line = (
+            f"{pdf_meta.get('Title', '?')[:60]} | "
+            f"{pdf_meta.get('Author', '?')[:40]} | "
+            f"{pdf_meta.get('Year', '?')} | {pdf_meta.get('Pages', '?')} S."
+        )
         print(f"      Metadata: {meta_line}")
 
     # --- Stage 0: PDF-Enrichment bei fehlenden Metadaten ---
@@ -1322,14 +1446,15 @@ def _run_extraction_stages(args, source_path: Path, runtime_config=None):  # mai
         print("[0/7] PDF-Enrichment — keine Metadaten im Dateinamen erkannt…")
         try:
             from generative.tools.pdf_enrich import enrich as _enrich
+
             # rename=False: Die Pipeline darf die Eingabedatei nie mutieren. Das
             # Enrichment-Ergebnis wird direkt in pdf_meta gemergt (statt über den
             # früheren Rename-Umweg), sodass korrekte Quellen weiterhin in die Note
             # fließen — aber ein (mit dem Title-Match-Gate verworfener) Fehltreffer
             # die Quelldatei nicht mehr umbenennt und damit die Quelle verfälscht.
-            _enrich_meta = _enrich(source_path, dry_run=args.dry_run,
-                                   llm_fallback=getattr(args, "llm_fallback", False),
-                                   rename=False)
+            _enrich_meta = _enrich(
+                source_path, dry_run=args.dry_run, llm_fallback=getattr(args, "llm_fallback", False), rename=False
+            )
             if _enrich_meta:
                 if _enrich_meta.get("title") and not pdf_meta.get("Title"):
                     pdf_meta["Title"] = _enrich_meta["title"]
@@ -1389,12 +1514,13 @@ def _run_extraction_stages(args, source_path: Path, runtime_config=None):  # mai
                 continue
 
             primary_authors = _extract_primary_authors(pdf_meta)
-            chapter_plan = planner.run(chunk.text, relevance_profile,
-                                       primary_authors=primary_authors)
+            chapter_plan = planner.run(chunk.text, relevance_profile, primary_authors=primary_authors)
             chapter_plan, hallucinated = planner.filter_hallucinated(chapter_plan, chunk.text)
             if hallucinated:
-                print(f"      {len(hallucinated)} halluzinierte Konzepte verworfen: "
-                      f"{', '.join(hallucinated[:3])}{'...' if len(hallucinated)>3 else ''}")
+                print(
+                    f"      {len(hallucinated)} halluzinierte Konzepte verworfen: "
+                    f"{', '.join(hallucinated[:3])}{'...' if len(hallucinated) > 3 else ''}"
+                )
             if runtime_config is not None:
                 chapter_plan.concepts, _capped = cap_actionable_concepts(
                     chapter_plan.concepts,
@@ -1410,23 +1536,28 @@ def _run_extraction_stages(args, source_path: Path, runtime_config=None):  # mai
                 kept_actionable = count_actionable(chapter_plan.concepts)
                 if remaining_concepts is not None:
                     remaining_concepts = max(0, remaining_concepts - kept_actionable)
-            ch_related = [c.title for c in chapter_plan.concepts
-                          if c.origin == "secondary_mention"]
-            actionable = [c for c in chapter_plan.concepts
-                          if c.action != "skip" and c.origin != "secondary_mention"]
+            ch_related = [c.title for c in chapter_plan.concepts if c.origin == "secondary_mention"]
+            actionable = [c for c in chapter_plan.concepts if c.action != "skip" and c.origin != "secondary_mention"]
             if not actionable:
                 print("      Keine Konzepte fuer dieses Kapitel")
                 continue
-            print(f"      {len(actionable)} Konzepte: "
-                  f"{', '.join(c.title for c in actionable[:4])}{'...' if len(actionable)>4 else ''}")
+            print(
+                f"      {len(actionable)} Konzepte: "
+                f"{', '.join(c.title for c in actionable[:4])}{'...' if len(actionable) > 4 else ''}"
+            )
 
-            ch_drafts, ch_map, ch_dropped = asyncio.run(run_extractors_per_concept(
-                chunk.text, chapter_plan, existing_concepts,
-                source_meta=pdf_meta, source_file=source_path.name,
-                tag_whitelist=tag_whitelist,
-                background_map={},
-                related_mentions=ch_related,
-            ))
+            ch_drafts, ch_map, ch_dropped = asyncio.run(
+                run_extractors_per_concept(
+                    chunk.text,
+                    chapter_plan,
+                    existing_concepts,
+                    source_meta=pdf_meta,
+                    source_file=source_path.name,
+                    tag_whitelist=tag_whitelist,
+                    background_map={},
+                    related_mentions=ch_related,
+                )
+            )
             for t in ch_related:
                 if t not in related_mentions:
                     related_mentions.append(t)
@@ -1442,12 +1573,13 @@ def _run_extraction_stages(args, source_path: Path, runtime_config=None):  # mai
         print("[4/7] Planner: Konzept-Plan erstellen…")
         primary_authors = _extract_primary_authors(pdf_meta)
         with _span("Planner", pdf=source_path.name, n_chunks=len(chunks)):
-            concept_plan = planner.run(overview, relevance_profile,
-                                       primary_authors=primary_authors)
+            concept_plan = planner.run(overview, relevance_profile, primary_authors=primary_authors)
             concept_plan, hallucinated = planner.filter_hallucinated(concept_plan, text)
         if hallucinated:
-            print(f"      {len(hallucinated)} halluzinierte Konzepte verworfen: "
-                  f"{', '.join(hallucinated[:3])}{'…' if len(hallucinated)>3 else ''}")
+            print(
+                f"      {len(hallucinated)} halluzinierte Konzepte verworfen: "
+                f"{', '.join(hallucinated[:3])}{'…' if len(hallucinated) > 3 else ''}"
+            )
         if runtime_config is not None:
             concept_plan.concepts, _capped = cap_actionable_concepts(
                 concept_plan.concepts,
@@ -1461,14 +1593,14 @@ def _run_extraction_stages(args, source_path: Path, runtime_config=None):  # mai
                     f"{'…' if len(_capped) > 3 else ''}"
                 )
 
-        related_mentions = [c.title for c in concept_plan.concepts
-                            if c.origin == "secondary_mention"]
+        related_mentions = [c.title for c in concept_plan.concepts if c.origin == "secondary_mention"]
         if related_mentions:
-            print(f"      {len(related_mentions)} Sekundär-Erwähnungen → Related Mentions: "
-                  f"{', '.join(related_mentions[:3])}{'…' if len(related_mentions)>3 else ''}")
+            print(
+                f"      {len(related_mentions)} Sekundär-Erwähnungen → Related Mentions: "
+                f"{', '.join(related_mentions[:3])}{'…' if len(related_mentions) > 3 else ''}"
+            )
 
-        actionable = [c for c in concept_plan.concepts
-                      if c.action != "skip" and c.origin != "secondary_mention"]
+        actionable = [c for c in concept_plan.concepts if c.action != "skip" and c.origin != "secondary_mention"]
         print(f"      {len(actionable)} Konzepte geplant ({len(concept_plan.concepts)} total)")
         for c in actionable:
             print(f"      [{c.priority:6s}] {c.action:6s} — {c.title}")
@@ -1482,32 +1614,64 @@ def _run_extraction_stages(args, source_path: Path, runtime_config=None):  # mai
             print("[4.5/7] Background-Extractor: deaktiviert (ENABLE_BACKGROUND_EXTRACTOR=0)")
 
         # --- Schritt 5: Extractor ---
-        actionable_count = sum(1 for c in concept_plan.concepts
-                               if c.action != "skip" and c.origin != "secondary_mention")
+        actionable_count = sum(
+            1 for c in concept_plan.concepts if c.action != "skip" and c.origin != "secondary_mention"
+        )
         print(f"\n[5/7] Extractor: {actionable_count} Konzepte parallel verarbeiten…")
         with _span("Extractor", pdf=source_path.name, n_concepts=actionable_count):
-            drafts, concept_map, dropped_total = asyncio.run(run_extractors_per_concept(
-                text, concept_plan, existing_concepts,
-                source_meta=pdf_meta, source_file=source_path.name,
-                tag_whitelist=tag_whitelist,
-                background_map=background_map,
-                related_mentions=related_mentions,
-            ))
+            drafts, concept_map, dropped_total = asyncio.run(
+                run_extractors_per_concept(
+                    text,
+                    concept_plan,
+                    existing_concepts,
+                    source_meta=pdf_meta,
+                    source_file=source_path.name,
+                    tag_whitelist=tag_whitelist,
+                    background_map=background_map,
+                    related_mentions=related_mentions,
+                )
+            )
         print(f"      {len(drafts)} Draft-Notes extrahiert")
 
-    return (drafts, concept_map, existing_concepts, concept_links,
-            text, chunks, acronym_dict, quality_report, pdf_meta,
-            source_path, tag_whitelist, background_map, fb.get("Year"),
-            dropped_total, word_count, related_mentions, q_title)
+    return (
+        drafts,
+        concept_map,
+        existing_concepts,
+        concept_links,
+        text,
+        chunks,
+        acronym_dict,
+        quality_report,
+        pdf_meta,
+        source_path,
+        tag_whitelist,
+        background_map,
+        fb.get("Year"),
+        dropped_total,
+        word_count,
+        related_mentions,
+        q_title,
+    )
 
 
-def _save_draft_state(path: str, *, drafts: list, concept_map: dict,
-                      existing_concepts: dict, concept_links: dict,
-                      text: str, chunks: list, acronym_dict: dict,
-                      quality_report, pdf_meta: dict, source_name: str,
-                      tag_whitelist: list, background_map: dict,
-                      filename_year: str | None,
-                      related_mentions: list[str] | None = None) -> None:
+def _save_draft_state(
+    path: str,
+    *,
+    drafts: list,
+    concept_map: dict,
+    existing_concepts: dict,
+    concept_links: dict,
+    text: str,
+    chunks: list,
+    acronym_dict: dict,
+    quality_report,
+    pdf_meta: dict,
+    source_name: str,
+    tag_whitelist: list,
+    background_map: dict,
+    filename_year: str | None,
+    related_mentions: list[str] | None = None,
+) -> None:
     state = {
         "drafts": [dataclasses.asdict(d) for d in drafts],
         "concept_map": {k: [dataclasses.asdict(v[0]), v[1]] for k, v in concept_map.items()},
@@ -1531,6 +1695,7 @@ def _save_draft_state(path: str, *, drafts: list, concept_map: dict,
 def _load_draft_state(path: str):
     from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor, QualityReport, ConceptItem
     from generative.pipeline.pdf_chunker import Chunk
+
     state = json.loads(Path(path).read_text(encoding="utf-8"))
 
     def _to_draft(d: dict) -> AtomicNoteDraft:
@@ -1543,12 +1708,18 @@ def _load_draft_state(path: str):
     quality_report = QualityReport(**state["quality_report"])
     chunks = [Chunk(**c) for c in state["chunks"]]
     return (
-        drafts, concept_map,
-        state["existing_concepts"], concept_links,
-        state["text"], chunks,
-        state["acronym_dict"], quality_report,
-        state["pdf_meta"], state["source_name"],
-        state["tag_whitelist"], state.get("background_map") or {},
+        drafts,
+        concept_map,
+        state["existing_concepts"],
+        concept_links,
+        state["text"],
+        chunks,
+        state["acronym_dict"],
+        quality_report,
+        state["pdf_meta"],
+        state["source_name"],
+        state["tag_whitelist"],
+        state.get("background_map") or {},
         state.get("filename_year"),
         state.get("related_mentions") or [],
     )
@@ -1559,34 +1730,56 @@ def main(argv: list[str] | None = None):
     ap.add_argument("--source", default=None, help="Pfad zur PDF-Datei")
     ap.add_argument("--doi", default=None, help="DOI für Qualitäts-Check (optional)")
     ap.add_argument("--dry-run", action="store_true", help="Kein Schreiben in Vault")
-    ap.add_argument("--by-chapter", action="store_true",
-                    help="Planner und Extractor kapitelweise ausführen (für große Bücher)")
-    ap.add_argument("--no-llm", action="store_true",
-                    help="Stage-6-Agents (Verifier/CrossRef/Critic) ohne LLM — "
-                         "FOSS-Alternativen (BM25, Embeddings, Regex). "
-                         "Extractor + Planner laufen weiterhin mit LLM.")
-    ap.add_argument("--target-tag", default=None,
-                    help="Tag-Hint für Auto-Note-Mover-Routing aus 00-inbox/. "
-                         "Wird allen Notes zusätzlich zu inferierten Tags angehängt. "
-                         "Mapping in CLAUDE.md (z.B. 'job', 'bike', 'private/fitness', "
-                         "'bachelorarbeit'). Ohne --target-tag bleiben Notes in Inbox "
-                         "wenn Tag-Inferenz keinen Routing-Tag liefert.")
-    ap.add_argument("--llm-fallback", action="store_true",
-                    help="LLM (Haiku) für PDF-Enrichment nutzen wenn CrossRef nichts findet")
-    ap.add_argument("--fresh-run", action="store_true",
-                    help="LLM-Cache-Namespace auf aktuelle Run-ID setzen — "
-                         "kein Cache-Hit aus früheren Runs. Nötig für Modell-Vergleiche "
-                         "und echte Qualitäts-Messungen. Retries innerhalb des Runs "
-                         "bleiben gecacht.")
-    ap.add_argument("--save-drafts", default=None, metavar="PATH",
-                    help="Drafts nach Stage 5 (Extractor) als JSON speichern — "
-                         "für A/B-Vergleich LLM vs. no-LLM in Stage 6.")
-    ap.add_argument("--load-drafts", default=None, metavar="PATH",
-                    help="Drafts aus --save-drafts laden und Stage 1–5 überspringen. "
-                         "--source wird dann ignoriert (Quelle steht im State).")
-    ap.add_argument("--inbox-dir", default=None, metavar="PATH",
-                    help="Zielordner statt 00-inbox/ (wird erstellt falls nicht vorhanden). "
-                         "Nützlich für A/B-Vergleiche: --inbox-dir 00-inbox/ab-llm/")
+    ap.add_argument(
+        "--by-chapter", action="store_true", help="Planner und Extractor kapitelweise ausführen (für große Bücher)"
+    )
+    ap.add_argument(
+        "--no-llm",
+        action="store_true",
+        help="Stage-6-Agents (Verifier/CrossRef/Critic) ohne LLM — "
+        "FOSS-Alternativen (BM25, Embeddings, Regex). "
+        "Extractor + Planner laufen weiterhin mit LLM.",
+    )
+    ap.add_argument(
+        "--target-tag",
+        default=None,
+        help="Tag-Hint für Auto-Note-Mover-Routing aus 00-inbox/. "
+        "Wird allen Notes zusätzlich zu inferierten Tags angehängt. "
+        "Mapping in CLAUDE.md (z.B. 'job', 'bike', 'private/fitness', "
+        "'bachelorarbeit'). Ohne --target-tag bleiben Notes in Inbox "
+        "wenn Tag-Inferenz keinen Routing-Tag liefert.",
+    )
+    ap.add_argument(
+        "--llm-fallback", action="store_true", help="LLM (Haiku) für PDF-Enrichment nutzen wenn CrossRef nichts findet"
+    )
+    ap.add_argument(
+        "--fresh-run",
+        action="store_true",
+        help="LLM-Cache-Namespace auf aktuelle Run-ID setzen — "
+        "kein Cache-Hit aus früheren Runs. Nötig für Modell-Vergleiche "
+        "und echte Qualitäts-Messungen. Retries innerhalb des Runs "
+        "bleiben gecacht.",
+    )
+    ap.add_argument(
+        "--save-drafts",
+        default=None,
+        metavar="PATH",
+        help="Drafts nach Stage 5 (Extractor) als JSON speichern — für A/B-Vergleich LLM vs. no-LLM in Stage 6.",
+    )
+    ap.add_argument(
+        "--load-drafts",
+        default=None,
+        metavar="PATH",
+        help="Drafts aus --save-drafts laden und Stage 1–5 überspringen. "
+        "--source wird dann ignoriert (Quelle steht im State).",
+    )
+    ap.add_argument(
+        "--inbox-dir",
+        default=None,
+        metavar="PATH",
+        help="Zielordner statt 00-inbox/ (wird erstellt falls nicht vorhanden). "
+        "Nützlich für A/B-Vergleiche: --inbox-dir 00-inbox/ab-llm/",
+    )
     args = ap.parse_args(argv)
     if not args.source and not args.load_drafts:
         ap.error("--source ist erforderlich (außer mit --load-drafts)")
@@ -1603,6 +1796,7 @@ def main(argv: list[str] | None = None):
 
     runtime_config = load_runtime_config()
     from generative.agents.base import set_llm_runtime_config
+
     set_llm_runtime_config(runtime_config)
     refine_budget = RunBudget(max_refines_per_run=runtime_config.refine.max_refines_per_run)
     print(
@@ -1617,23 +1811,38 @@ def main(argv: list[str] | None = None):
     if getattr(args, "fresh_run", False):
         from generative.agents.base import set_cache_namespace
         from generative.agents.tracing import _RUN_ID
+
         set_cache_namespace(_RUN_ID)
         print(f"  [cache] --fresh-run: Namespace={_RUN_ID} (kein Hit aus alten Runs)")
 
     if getattr(args, "no_llm", False):
         from generative import config as _cfg
+
         _cfg.ENABLE_LLM = False  # Modul-Attribut mutieren — sichtbar für alle Agents
         print("[no-llm] Stage-6-Agents im FOSS-Modus (Verifier/CrossRef/Critic ohne LLM)")
 
     import time as _time
+
     _run_start = _time.time()
     from generative.agents.base import trace_event as _trace_event
 
     if args.load_drafts:
-        (drafts, concept_map, existing_concepts, concept_links,
-         text, chunks, acronym_dict, quality_report, pdf_meta,
-         _src_name, tag_whitelist, background_map,
-         fb_year, related_mentions) = _load_draft_state(args.load_drafts)
+        (
+            drafts,
+            concept_map,
+            existing_concepts,
+            concept_links,
+            text,
+            chunks,
+            acronym_dict,
+            quality_report,
+            pdf_meta,
+            _src_name,
+            tag_whitelist,
+            background_map,
+            fb_year,
+            related_mentions,
+        ) = _load_draft_state(args.load_drafts)
         source_path = Path(_src_name)
         # q_title wird im Normalpfad von _run_extraction_stages durchgereicht;
         # der load-drafts-Pfad überspringt Stage 1–5, daher hier aus pdf_meta ableiten.
@@ -1647,18 +1856,41 @@ def main(argv: list[str] | None = None):
         if not source_path.exists():
             sys.exit(f"Datei nicht gefunden: {source_path}")
         print(f"\n=== Atomic Agent: {source_path.name} ===\n")
-        (drafts, concept_map, existing_concepts, concept_links,
-         text, chunks, acronym_dict, quality_report, pdf_meta,
-         source_path, tag_whitelist, background_map, fb_year,
-         dropped_total, word_count, related_mentions, q_title) = _run_extraction_stages(args, source_path, runtime_config)
+        (
+            drafts,
+            concept_map,
+            existing_concepts,
+            concept_links,
+            text,
+            chunks,
+            acronym_dict,
+            quality_report,
+            pdf_meta,
+            source_path,
+            tag_whitelist,
+            background_map,
+            fb_year,
+            dropped_total,
+            word_count,
+            related_mentions,
+            q_title,
+        ) = _run_extraction_stages(args, source_path, runtime_config)
         if args.save_drafts:
             _save_draft_state(
-                args.save_drafts, drafts=drafts, concept_map=concept_map,
-                existing_concepts=existing_concepts, concept_links=concept_links,
-                text=text, chunks=chunks, acronym_dict=acronym_dict,
-                quality_report=quality_report, pdf_meta=pdf_meta,
-                source_name=str(source_path), tag_whitelist=tag_whitelist,
-                background_map=background_map, filename_year=fb_year,
+                args.save_drafts,
+                drafts=drafts,
+                concept_map=concept_map,
+                existing_concepts=existing_concepts,
+                concept_links=concept_links,
+                text=text,
+                chunks=chunks,
+                acronym_dict=acronym_dict,
+                quality_report=quality_report,
+                pdf_meta=pdf_meta,
+                source_name=str(source_path),
+                tag_whitelist=tag_whitelist,
+                background_map=background_map,
+                filename_year=fb_year,
                 related_mentions=related_mentions,
             )
 
@@ -1695,6 +1927,7 @@ def main(argv: list[str] | None = None):
     # dort nicht. Modell-Übersichten (z.B. ADKAR-Modell mit Mentions zu seinen 5 Stages)
     # bleiben sonst fälschlich als atomic. Siehe pipeline/cross_draft_hub.py.
     from generative.pipeline import cross_draft_hub
+
     hub_resolved = cross_draft_hub.resolve(drafts)
     if hub_resolved:
         print(f"      [hub-resolution] {hub_resolved} Draft(s) als MoC erkannt (Cross-Mentions)")
@@ -1702,8 +1935,10 @@ def main(argv: list[str] | None = None):
     # nicht auto-anlegen (Fabrikations-Risiko, separate User-Entscheidung).
     for _token, _members in cross_draft_hub.suggest_unmarked_clusters(drafts):
         _preview = ", ".join(_members[:4]) + ("…" if len(_members) > 4 else "")
-        print(f"      [moc-suggestion] {len(_members)} marker-lose Drafts teilen "
-              f"'{_token}' → MoC-{_token.capitalize()}? ({_preview})")
+        print(
+            f"      [moc-suggestion] {len(_members)} marker-lose Drafts teilen "
+            f"'{_token}' → MoC-{_token.capitalize()}? ({_preview})"
+        )
 
     # --- Schritte 6a-c: Verifier + Cross-Reference + Critic pro Note (parallel) ---
     print(f"\n[6/7] Verifier + Cross-Reference + Critic für {len(drafts)} Notes…")
@@ -1711,17 +1946,25 @@ def main(argv: list[str] | None = None):
     chunk_map = {c.title: c.text for c in chunks}
 
     with _span("Stage6-Verifier-CrossRef-Critic", pdf=source_path.name, n_drafts=len(drafts)):
-        drafts = asyncio.run(process_all_notes_async(
-            drafts, existing_concepts, concept_links,
-            chunk_map, full_text=text,
-            acronym_dict=acronym_dict, concept_map=concept_map,
-            quality_report=quality_report, pdf_meta=pdf_meta,
-            source_path=source_path, tag_whitelist=tag_whitelist,
-            background_map=background_map,
-            related_mentions=related_mentions,
-            runtime_config=runtime_config,
-            refine_budget=refine_budget,
-        ))
+        drafts = asyncio.run(
+            process_all_notes_async(
+                drafts,
+                existing_concepts,
+                concept_links,
+                chunk_map,
+                full_text=text,
+                acronym_dict=acronym_dict,
+                concept_map=concept_map,
+                quality_report=quality_report,
+                pdf_meta=pdf_meta,
+                source_path=source_path,
+                tag_whitelist=tag_whitelist,
+                background_map=background_map,
+                related_mentions=related_mentions,
+                runtime_config=runtime_config,
+                refine_budget=refine_budget,
+            )
+        )
 
     # --- Dedup Stage C: Intra-Run-Sibling-Dedup (Befund D) ---
     # cross_reference setzt bei dup_risk=high action=extend + extend_path=<Sibling-Titel>.
@@ -1744,8 +1987,9 @@ def main(argv: list[str] | None = None):
     # Ebner-Audit) → seiteneffekt-freier Flag für den menschlichen Reviewer, kein Eingriff.
     drafts, n_redund = flag_redundant_siblings(drafts)
     if n_redund:
-        print(f"[redundanz-flag] {n_redund} Note-Paar(e) mit hoher Body-Überlappung markiert "
-              f"(Review-Hinweis, kein Merge)")
+        print(
+            f"[redundanz-flag] {n_redund} Note-Paar(e) mit hoher Body-Überlappung markiert (Review-Hinweis, kein Merge)"
+        )
 
     # --- Schritt 7: Vault-Writer ---
     # F2: enriched_meta = CrossRef-Daten überschreiben pdf_metadata wo vorhanden.
@@ -1755,14 +1999,16 @@ def main(argv: list[str] | None = None):
     # Autor, Jahr und alle Footnotes der Note.
     enriched_meta = dict(pdf_meta or {})
     from generative.tools.pdf_enrich import _title_match_confident
+
     _block_crossref_override = (
         quality_report.doi_from_title_match
         and quality_report.crossref_title
         and not _title_match_confident(q_title or "", quality_report.crossref_title)
     )
     if _block_crossref_override:
-        print(f"  [quality] CrossRef-Override verworfen (schwacher Titel-Match): "
-              f"'{quality_report.crossref_title[:60]}'")
+        print(
+            f"  [quality] CrossRef-Override verworfen (schwacher Titel-Match): '{quality_report.crossref_title[:60]}'"
+        )
     else:
         if quality_report.crossref_title:
             enriched_meta["Title"] = quality_report.crossref_title
@@ -1781,8 +2027,7 @@ def main(argv: list[str] | None = None):
     # geparst (deterministisch, idempotent — dieselbe Funktion wie in der
     # Extraction-Stage). Nur create-Notes werden markiert (extend/hub out-of-scope).
     _fb = vault_writer._parse_filename_fallback(source_path.name)
-    _source_unresolved = routing_report.is_source_unresolved(
-        enriched_meta, _fb, _block_crossref_override)
+    _source_unresolved = routing_report.is_source_unresolved(enriched_meta, _fb, _block_crossref_override)
     if _source_unresolved:
         _marked = 0
         for draft in drafts:
@@ -1814,11 +2059,11 @@ def main(argv: list[str] | None = None):
                 draft.quality_flags.append(
                     f"⚠️ Edition unverifiziert — Auszug ab Druckseite {_first_print_page} "
                     f"ohne DOI; Jahr+Seiten nur aus Dateiname. Auflage manuell prüfen "
-                    f"oder via --doi pinnen.")
+                    f"oder via --doi pinnen."
+                )
                 _ed_marked += 1
         if _ed_marked:
-            _ed_framing = routing_report.source_status_framing(
-                "edition-unverified", source_path.name)
+            _ed_framing = routing_report.source_status_framing("edition-unverified", source_path.name)
             if _ed_framing:
                 print(_ed_framing)
 
@@ -1846,30 +2091,42 @@ def main(argv: list[str] | None = None):
     # 1:1-Bindung Figur→Note via source_anchor-Seite, sonst skip. Siehe figure_alt.py.
     fig_report = figure_alt.embed_alt_figures(source_path, drafts)
     if fig_report.bound or fig_report.skipped:
-        print(f"[figures] {len(fig_report.bound)} Alt-Text-Figur(en) eingebettet, "
-              f"{len(fig_report.skipped)} ohne eindeutige Bindung übersprungen")
+        print(
+            f"[figures] {len(fig_report.bound)} Alt-Text-Figur(en) eingebettet, "
+            f"{len(fig_report.skipped)} ohne eindeutige Bindung übersprungen"
+        )
     elif fig_report.untagged:
         # #50/M11: untagged-PDF einmal melden statt stumm zu überspringen.
-        print("[figures] PDF nicht PDF-UA-getaggt — Abbildungen (falls vorhanden) "
-              "werden übersprungen (nur getaggte PDFs liefern Alt-Text).")
+        print(
+            "[figures] PDF nicht PDF-UA-getaggt — Abbildungen (falls vorhanden) "
+            "werden übersprungen (nur getaggte PDFs liefern Alt-Text)."
+        )
 
     print(f"\n[7/7] Vault-Writer…")
     written = 0
     written_targets: list[tuple[Path, bool]] = []
     with _span("VaultWriter", pdf=source_path.name, n_drafts=len(drafts), dry_run=args.dry_run):
         for draft in drafts:
-            target = vault_writer.write_note(draft, source_file=source_path.name,
-                                    dry_run=args.dry_run, source_meta=enriched_meta,
-                                    existing_concepts=existing_concepts,
-                                    inbox_dir=_inbox_dir)
+            target = vault_writer.write_note(
+                draft,
+                source_file=source_path.name,
+                dry_run=args.dry_run,
+                source_meta=enriched_meta,
+                existing_concepts=existing_concepts,
+                inbox_dir=_inbox_dir,
+            )
             will_vault, _ = vault_writer.auto_write_decision(draft)
             written_targets.append((target, will_vault))
-            _trace_event("orchestrator", "note_outcome", {
-                "title": draft.title,
-                "destination": "vault" if will_vault else "inbox",
-                "critic_score": draft.critic_score,
-                "hard_gates_pass": draft.hard_gates_pass,
-            })
+            _trace_event(
+                "orchestrator",
+                "note_outcome",
+                {
+                    "title": draft.title,
+                    "destination": "vault" if will_vault else "inbox",
+                    "critic_score": draft.critic_score,
+                    "hard_gates_pass": draft.hard_gates_pass,
+                },
+            )
             written += 1
 
     print(f"\n=== Fertig: {written} Notes {'(dry-run)' if args.dry_run else 'geschrieben'} ===")
@@ -1881,13 +2138,18 @@ def main(argv: list[str] | None = None):
     vault_count = _summary["vault"]
     inbox_count = _summary["inbox"]
 
-    _trace_event("orchestrator", "plan_stats", {
-        "written": written,
-        "vault": vault_count,
-        "inbox": inbox_count,
-        "vault_rate": round(vault_count / written, 3) if written > 0 else 0.0,
-    })
+    _trace_event(
+        "orchestrator",
+        "plan_stats",
+        {
+            "written": written,
+            "vault": vault_count,
+            "inbox": inbox_count,
+            "vault_rate": round(vault_count / written, 3) if written > 0 else 0.0,
+        },
+    )
     from generative.agents.tracing import flush_tracing as _flush_tracing
+
     _flush_tracing()
 
     # Token + Laufzeit-Summary (Pipeline Stages 1–7) — immer gedruckt (auch dry-run).
@@ -1897,10 +2159,13 @@ def main(argv: list[str] | None = None):
     try:
         from generative.agents.base import _RUN_ID, _RUN_DIR
         from generative import eval_agent_stats as _eas
+
         _trace_path = _RUN_DIR / f"{_RUN_ID}.jsonl"
         _pipe = _eas.run_totals(_trace_path)
         print(f"   -> Zeit:   {_wall_s_early}s")
-        print(f"   -> Tokens: {_pipe['total']:,} (In:{_pipe['input']:,} Out:{_pipe['output']:,} Cache-R:{_pipe['cache_read']:,} Cache-C:{_pipe['cache_create']:,})")
+        print(
+            f"   -> Tokens: {_pipe['total']:,} (In:{_pipe['input']:,} Out:{_pipe['output']:,} Cache-R:{_pipe['cache_read']:,} Cache-C:{_pipe['cache_create']:,})"
+        )
         print(f"   -> Quelle: {source_path.name}")
     except Exception:
         print(f"   -> Zeit:   {_wall_s_early}s  |  Tokens: n/a  |  Quelle: {source_path.name}")
@@ -1910,18 +2175,22 @@ def main(argv: list[str] | None = None):
     # Ergebnisse in .cache/quality_history.jsonl für Longitudinal-Vergleiche.
     # Abschaltbar via ATOMIC_AGENT_INLINE_EVAL=0 oder Profil (fast/balanced); retroaktive Eval via reeval_baseline.py.
     if not inline_eval_enabled(runtime_config):
-        print(f"\n[8/8] Qualitäts-Eval übersprungen (Profil: {runtime_config.profile}, inline_eval deaktiviert) — retro via reeval_baseline.py.")
+        print(
+            f"\n[8/8] Qualitäts-Eval übersprungen (Profil: {runtime_config.profile}, inline_eval deaktiviert) — retro via reeval_baseline.py."
+        )
         return
     print(f"\n[8/8] Qualitäts-Eval…")
     try:
         from generative import eval_quality_v4 as _eq
         from generative.config import CACHE_DIR as _CACHE_DIR
+
         # Dry-Run: Notes im Cache-Verzeichnis; Live: im Vault (00-inbox oder 04-wissen)
         if args.dry_run:
             cache_note_dir = _CACHE_DIR / "eval" / "baseline" / source_path.stem
             note_files = dry_run_eval_targets(written_targets, cache_note_dir)
         else:
             from generative.config import INBOX, WISSEN
+
             note_files = []
             _eval_search_dirs = ([_inbox_dir] if _inbox_dir else []) + [INBOX, WISSEN]
             for d in drafts:
@@ -1937,6 +2206,7 @@ def main(argv: list[str] | None = None):
         # bewusst NICHT in run_meta/DB attribuiert, nur am Run-Ende geprintet.
         from generative import eval_agent_stats as _eas
         from generative.agents.base import _RUN_ID, _RUN_DIR
+
         _trace_path = _RUN_DIR / f"{_RUN_ID}.jsonl"
         _wall_s = round(_time.time() - _run_start, 1)
         _pre = _eas.run_totals(_trace_path)
@@ -1959,27 +2229,31 @@ def main(argv: list[str] | None = None):
             from generative.agents.base import _RUN_ID as _db_run_id
             from generative import config as _db_cfg
             from generative import db as _db
+
             with _db.get_db() as _conn:
-                _db.insert_run(_conn, {
-                    "run_id":           _db_run_id,
-                    "pipeline_version": AGENT_VERSION,
-                    "pdf_source":       source_path.name,
-                    "pdf_key":          source_path.stem.split(" - ")[0].strip().lower(),
-                    "pdf_label":        source_path.stem.split(" - ")[0].strip(),
-                    "n_generated":      written,
-                    "n_vault":          vault_count,
-                    "n_inbox":          inbox_count,
-                    "n_merge":          sum(1 for d in drafts if getattr(d, "action", "") == "extend"),
-                    "n_dropped":        dropped_total,
-                    "n_words":          word_count,
-                    "model":            getattr(_db_cfg, "MODEL_PLANNER", ""),
-                    "cost_usd":         _cost_usd,
-                    "tokens_total":     _tok_total,
-                    "tokens_input":     _tok_in,
-                    "tokens_output":    _tok_out,
-                    "tokens_cache_read":_tok_cache_r,
-                    "duration_s":       _wall_s,
-                })
+                _db.insert_run(
+                    _conn,
+                    {
+                        "run_id": _db_run_id,
+                        "pipeline_version": AGENT_VERSION,
+                        "pdf_source": source_path.name,
+                        "pdf_key": source_path.stem.split(" - ")[0].strip().lower(),
+                        "pdf_label": source_path.stem.split(" - ")[0].strip(),
+                        "n_generated": written,
+                        "n_vault": vault_count,
+                        "n_inbox": inbox_count,
+                        "n_merge": sum(1 for d in drafts if getattr(d, "action", "") == "extend"),
+                        "n_dropped": dropped_total,
+                        "n_words": word_count,
+                        "model": getattr(_db_cfg, "MODEL_PLANNER", ""),
+                        "cost_usd": _cost_usd,
+                        "tokens_total": _tok_total,
+                        "tokens_input": _tok_in,
+                        "tokens_output": _tok_out,
+                        "tokens_cache_read": _tok_cache_r,
+                        "duration_s": _wall_s,
+                    },
+                )
         except Exception as _db_err:
             print(f"   [warn] DB-Write fehlgeschlagen: {_db_err}")
 
@@ -1991,13 +2265,19 @@ def main(argv: list[str] | None = None):
             eval_results.append(result)
 
         if eval_results:
-            hall_rates = [r["hallucination_rate"] for r in eval_results
-                          if "hallucination_rate" in r and r["hallucination_rate"] >= 0]
-            cov_rates  = [r.get("coverage_factual", r.get("coverage_rate", 0.0)) for r in eval_results
-                          if r.get("coverage_factual", r.get("coverage_rate", -1.0)) >= 0]
+            hall_rates = [
+                r["hallucination_rate"]
+                for r in eval_results
+                if "hallucination_rate" in r and r["hallucination_rate"] >= 0
+            ]
+            cov_rates = [
+                r.get("coverage_factual", r.get("coverage_rate", 0.0))
+                for r in eval_results
+                if r.get("coverage_factual", r.get("coverage_rate", -1.0)) >= 0
+            ]
             if hall_rates:
                 avg_hall = sum(hall_rates) / len(hall_rates)
-                avg_cov  = sum(cov_rates) / len(cov_rates) if cov_rates else 0.0
+                avg_cov = sum(cov_rates) / len(cov_rates) if cov_rates else 0.0
                 print(f"      Ø Halluzinationsrate: {avg_hall:.1%}  |  Ø Coverage (faktisch): {avg_cov:.1%}")
                 print(f"      {len(eval_results)} Notes → .cache/quality_history.jsonl")
 
@@ -2006,12 +2286,14 @@ def main(argv: list[str] | None = None):
         # Wandzeit) im Run-Ende-Print sichtbar (Reporting-Quirk-Fix).
         _final_wall = round(_time.time() - _run_start, 1)
         _grand = _eas.run_totals(_trace_path)
-        _eval_out  = _grand["output"] - _pre["output"]
+        _eval_out = _grand["output"] - _pre["output"]
         _eval_wall = round(_final_wall - _wall_s, 1)
-        _eval_pct  = (_eval_out / _grand["output"]) if _grand["output"] else 0.0
+        _eval_pct = (_eval_out / _grand["output"]) if _grand["output"] else 0.0
         print(f"\n   === Run-Gesamt (inkl. Stage-8-Eval) ===")
         print(f"   -> Zeit:   {_final_wall}s  (davon Stage-8: +{_eval_wall}s)")
-        print(f"   -> Tokens: {_grand['total']:,} (In:{_grand['input']:,} Out:{_grand['output']:,} Cache-R:{_grand['cache_read']:,} Cache-C:{_grand['cache_create']:,})")
+        print(
+            f"   -> Tokens: {_grand['total']:,} (In:{_grand['input']:,} Out:{_grand['output']:,} Cache-R:{_grand['cache_read']:,} Cache-C:{_grand['cache_create']:,})"
+        )
         print(f"   -> Stage-8-Eval: +{_eval_out:,} Out-Tok ({_eval_pct:.0%} des Out-Totals)")
     except Exception as e:
         print(f"      [eval-warn] Qualitäts-Eval übersprungen: {e}", file=sys.stderr)

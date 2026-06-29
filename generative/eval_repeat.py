@@ -13,6 +13,7 @@ Output:
     .cache/eval/baseline/<stem>_<version>_run<i>.log         pro Run
     .cache/eval/baseline/<version>_summary.md                aggregierter Report
 """
+
 from __future__ import annotations
 import argparse
 import os
@@ -25,7 +26,7 @@ from pathlib import Path
 from generative.config import LITERATURE_DIR as _LIT  # noqa: E402
 
 BASELINE_PDFS = {
-    "bates":    _LIT / "Bates - 2017 - Information Behavior.pdf",
+    "bates": _LIT / "Bates - 2017 - Information Behavior.pdf",
     "kuhlthau": _LIT / "Kuhlthau - INFORMATION SEARCH PROCESS.pdf",
     "schlebbe": _LIT / "Schlebbe und Greifeneder - 2022 - Information Need, Informationsbedarf und -bedürfnis.pdf",
 }
@@ -43,7 +44,8 @@ def run_one(pdf: Path, version: str, run_idx: int, key: str) -> Path:
             [sys.executable, "orchestrator.py", "--source", str(pdf), "--dry-run"],
             cwd=Path(__file__).parent,
             env=env,
-            stdout=fh, stderr=subprocess.STDOUT,
+            stdout=fh,
+            stderr=subprocess.STDOUT,
             check=False,
         )
     return log

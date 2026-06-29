@@ -3,6 +3,7 @@
 Resume-fähig: skippt Notes, die bereits in quality_history.jsonl stehen
 (via note_path + version-Match). Loggt Fortschritt + ETA.
 """
+
 from __future__ import annotations
 
 import json

@@ -15,6 +15,7 @@ Title ist „ADKAR Awareness" → impliziter Key „awareness"). Hub-Klassifikat
 wenn Title `_has_overview_marker()` triggert (Modell, Framework, MoC etc.) —
 verhindert False-Positives bei Stage-Notes die sich gegenseitig erwähnen.
 """
+
 from __future__ import annotations
 import re
 
@@ -25,8 +26,23 @@ HUB_MIN_CROSS_MENTIONS = 3
 SUGGEST_MIN_CLUSTER = 5  # ab wievielen marker-losen Drafts mit gemeinsamem Token ein MoC vorgeschlagen wird (#4)
 # Token-Stoppwörter, die nicht als impliziter Single-Token-Key zählen (zu generisch)
 _STOPWORD_TOKENS = {
-    "modell", "model", "framework", "moc", "übersicht", "atlas", "taxonomie",
-    "der", "die", "das", "und", "oder", "von", "the", "of", "and", "or",
+    "modell",
+    "model",
+    "framework",
+    "moc",
+    "übersicht",
+    "atlas",
+    "taxonomie",
+    "der",
+    "die",
+    "das",
+    "und",
+    "oder",
+    "von",
+    "the",
+    "of",
+    "and",
+    "or",
 }
 
 
@@ -68,16 +84,12 @@ def _build_pending_index(drafts: list[AtomicNoteDraft]) -> dict[str, str]:
             tokens = _TITLE_SPLIT_RE.split(d.title.strip())
             if tokens and tokens[0].lower() == common_prefix:
                 suffix = " ".join(tokens[1:]).lower().strip()
-                if (suffix
-                        and suffix not in _STOPWORD_TOKENS
-                        and suffix not in idx
-                        and len(suffix) >= 4):
+                if suffix and suffix not in _STOPWORD_TOKENS and suffix not in idx and len(suffix) >= 4:
                     idx[suffix] = d.title
     return idx
 
 
-def _find_cross_mentions(draft: AtomicNoteDraft,
-                          pending_idx: dict[str, str]) -> list[str]:
+def _find_cross_mentions(draft: AtomicNoteDraft, pending_idx: dict[str, str]) -> list[str]:
     """Liefert canonical Titles anderer Drafts, die im draft.body als Plain-Text
     oder Wikilink vorkommen. Self-Match wird gefiltert. Single-Token-Match
     erlaubt — pending_idx ist kuratierte Planner-Liste, kein Vault-weiter Index.
@@ -102,8 +114,7 @@ def _find_cross_mentions(draft: AtomicNoteDraft,
     return [c for c, _ in sorted(found.items(), key=lambda x: x[1])]
 
 
-def _embed_wikilinks(body: str, mentions: list[str],
-                      pending_idx: dict[str, str]) -> str:
+def _embed_wikilinks(body: str, mentions: list[str], pending_idx: dict[str, str]) -> str:
     """Ersetzt Plain-Text-Mentions durch [[Wikilinks]]. Pro mentioned Title nur
     erste Occurrence ersetzen (Über-Verlinkung vermeiden). Bestehende Wikilinks
     werden nicht doppelt gewrappt.
@@ -114,8 +125,7 @@ def _embed_wikilinks(body: str, mentions: list[str],
 
     for canonical in mentions:
         # Längsten Key zuerst (spezifischste Match-Form)
-        keys = sorted(canonical_to_keys.get(canonical, [canonical.lower()]),
-                      key=len, reverse=True)
+        keys = sorted(canonical_to_keys.get(canonical, [canonical.lower()]), key=len, reverse=True)
         replaced = False
         for key in keys:
             if replaced:
@@ -127,7 +137,7 @@ def _embed_wikilinks(body: str, mentions: list[str],
             )
             m = pattern.search(body)
             if m:
-                body = body[:m.start()] + f"[[{canonical}]]" + body[m.end():]
+                body = body[: m.start()] + f"[[{canonical}]]" + body[m.end() :]
                 replaced = True
     return body
 
@@ -142,8 +152,7 @@ def _extract_description_from_h1(body: str) -> str:
     return ""
 
 
-def suggest_unmarked_clusters(
-        drafts: list[AtomicNoteDraft]) -> list[tuple[str, list[str]]]:
+def suggest_unmarked_clusters(drafts: list[AtomicNoteDraft]) -> list[tuple[str, list[str]]]:
     """Findet thematische Cluster OHNE Übersichts-Marker (#4): ≥SUGGEST_MIN_CLUSTER
     Drafts, deren Title einen gemeinsamen nicht-generischen Token teilen, und die
     `resolve()` mangels Marker nie als Hub erkennt (z.B. 8 Agent-Notes aus einem
@@ -159,11 +168,12 @@ def suggest_unmarked_clusters(
     Token < 4 Zeichen und Stoppwörter zählen nicht; Token mit identischer
     Member-Menge werden dedupliziert (das stärkste/alphabetisch erste gewinnt).
     """
-    hub_member_titles = {title for d in drafts if d.action == "hub"
-                         for title in d.hub_subconcepts}
-    candidates = [d for d in drafts
-                  if d.action != "hub" and not _has_overview_marker(d.title)
-                  and d.title not in hub_member_titles]
+    hub_member_titles = {title for d in drafts if d.action == "hub" for title in d.hub_subconcepts}
+    candidates = [
+        d
+        for d in drafts
+        if d.action != "hub" and not _has_overview_marker(d.title) and d.title not in hub_member_titles
+    ]
     token_to_titles: dict[str, list[str]] = {}
     for d in candidates:
         seen: set[str] = set()
@@ -172,8 +182,7 @@ def suggest_unmarked_clusters(
             if len(t) >= 4 and t not in _STOPWORD_TOKENS and t not in seen:
                 seen.add(t)
                 token_to_titles.setdefault(t, []).append(d.title)
-    out = [(tok, titles) for tok, titles in token_to_titles.items()
-           if len(titles) >= SUGGEST_MIN_CLUSTER]
+    out = [(tok, titles) for tok, titles in token_to_titles.items() if len(titles) >= SUGGEST_MIN_CLUSTER]
     out.sort(key=lambda x: (-len(x[1]), x[0]))
     seen_member_sets: set[frozenset[str]] = set()
     deduped = []

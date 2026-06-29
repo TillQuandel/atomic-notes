@@ -1,4 +1,5 @@
 """Tests für den atomic-notes-Konsolen-Entry-Point (generative/cli.py)."""
+
 from __future__ import annotations
 
 
@@ -63,9 +64,9 @@ def test_gui_missing_port_value_returns_2_no_crash(capsys):
 def test_gui_parses_valid_args(monkeypatch):
     # Gültige Argumente werden korrekt an serve() durchgereicht.
     import generative.gui.app as gui_app
+
     captured = {}
-    monkeypatch.setattr(gui_app, "serve",
-                        lambda **kw: captured.update(kw))
+    monkeypatch.setattr(gui_app, "serve", lambda **kw: captured.update(kw))
     rc = cli.main(["gui", "--port", "9001", "--no-browser"])
     assert rc == 0
     assert captured == {"port": 9001, "open_browser": False}

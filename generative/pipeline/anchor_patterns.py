@@ -10,6 +10,7 @@ Pattern-Konventionen:
 - Page-Marker: `[S. N]` — nur in PDF-extrahiertem Volltext, vom pdf_chunker injiziert
 - Sentence-Split: nach `.!?` + Whitespace + Großbuchstabe oder Anführungszeichen
 """
+
 from __future__ import annotations
 import re
 

@@ -11,6 +11,7 @@ Schritte:
 
 Voraussetzung: run.py muss bereits gelaufen sein (sonst keine claim_scores zum Auswählen).
 """
+
 from __future__ import annotations
 
 import json
@@ -144,7 +145,7 @@ def perturb_note_body(body: str, original_claim: str, perturbed_claim: str) -> s
     pattern = escaped.replace(r"\ ", r"\s+").replace(" ", r"\s+")
     match = re.search(pattern, body)
     if match:
-        return body[: match.start()] + perturbed_claim + body[match.end():]
+        return body[: match.start()] + perturbed_claim + body[match.end() :]
     return None
 
 
@@ -161,10 +162,7 @@ def main() -> None:
         result = pipeline.get(s["note_name"])
         if result is None:
             continue
-        supported = [
-            (i, c) for i, c in enumerate(result.get("claim_scores", []))
-            if c.get("label") in SUPPORTED_LABELS
-        ]
+        supported = [(i, c) for i, c in enumerate(result.get("claim_scores", [])) if c.get("label") in SUPPORTED_LABELS]
         if len(supported) < CLAIMS_PER_NOTE:
             continue
         by_pair[s["language_pair"]].append({**s, "_supported": supported, "_result": result})
@@ -209,12 +207,14 @@ def main() -> None:
                 print(f"      → Original-Claim nicht im Body gefunden, skip")
                 continue
             perturbed_body = new_body
-            perturbed_claims_info.append({
-                "original_claim_idx": claim_idx,
-                "original_claim": original_claim,
-                "perturbed_claim": perturbed,
-                "perturbation_type": ptype,
-            })
+            perturbed_claims_info.append(
+                {
+                    "original_claim_idx": claim_idx,
+                    "original_claim": original_claim,
+                    "perturbed_claim": perturbed,
+                    "perturbation_type": ptype,
+                }
+            )
 
         if not perturbed_claims_info:
             print(f"  [{idx}] keine erfolgreichen Perturbationen, skip")
@@ -234,15 +234,17 @@ def main() -> None:
             print(f"      FEHLER bei Re-eval: {exc}")
             continue
 
-        adversarial_records.append({
-            "note": note_name,
-            "perturbed_note": perturbed_name,
-            "perturbed_path": str(perturbed_path).replace("\\", "/"),
-            "language_pair": pair,
-            "pdf_path": str(pdf_path).replace("\\", "/"),
-            "must_detect": True,
-            "perturbations": perturbed_claims_info,
-        })
+        adversarial_records.append(
+            {
+                "note": note_name,
+                "perturbed_note": perturbed_name,
+                "perturbed_path": str(perturbed_path).replace("\\", "/"),
+                "language_pair": pair,
+                "pdf_path": str(pdf_path).replace("\\", "/"),
+                "must_detect": True,
+                "perturbations": perturbed_claims_info,
+            }
+        )
 
     with ADVERSARIAL_OUT.open("w", encoding="utf-8") as fh:
         for rec in adversarial_records:

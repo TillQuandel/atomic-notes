@@ -1,4 +1,4 @@
-﻿# extractive/orchestrator.py
+# extractive/orchestrator.py
 from __future__ import annotations
 
 import argparse
@@ -29,7 +29,9 @@ def main():
     ap.add_argument("--source", required=True, help="Pfad zur PDF-Datei")
     ap.add_argument("--output", default="obsidian", choices=["obsidian", "md", "json"])
     ap.add_argument("--out-dir", default="./output", help="Ausgabe-Verzeichnis")
-    ap.add_argument("--eval-db", default=None, help="Pfad zur atomic_analytics.db (z.B. ../generative/.cache/atomic_analytics.db)")
+    ap.add_argument(
+        "--eval-db", default=None, help="Pfad zur atomic_analytics.db (z.B. ../generative/.cache/atomic_analytics.db)"
+    )
     ap.add_argument("--eval-jsonl", default=None, help="Optionaler JSONL-Eval-Output fuer Tests/Benchmarks")
     ap.add_argument("--device", default="cpu")
     ap.add_argument("--dry-run", action="store_true", help="Keine Dateien schreiben, nur Eval")

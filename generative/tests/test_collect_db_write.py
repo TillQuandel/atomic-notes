@@ -8,6 +8,7 @@ Hintergrund (Review-Findings zum #24-Branch):
   Warnung → agreement_rate still None für alle Notes.
 - Doppelte (note, claim_idx) über mehrere Label-Files: last-wins ohne Warnung.
 """
+
 from __future__ import annotations
 import json
 import sqlite3
@@ -33,8 +34,7 @@ def _setup(tmp_path, monkeypatch, files, sample_entries, history_lines=()):
     for name, rows in files:
         _write_label_file(notes_dir, name, rows)
     sample_file = tmp_path / "sample.jsonl"
-    sample_file.write_text(
-        "\n".join(json.dumps(e) for e in sample_entries) + "\n", encoding="utf-8")
+    sample_file.write_text("\n".join(json.dumps(e) for e in sample_entries) + "\n", encoding="utf-8")
     history = tmp_path / "quality_history.jsonl"
     history.write_text("\n".join(history_lines), encoding="utf-8")
     db_file = tmp_path / "analytics.db"
@@ -49,51 +49,54 @@ def _setup(tmp_path, monkeypatch, files, sample_entries, history_lines=()):
 
 def test_main_writes_calibration_labels_to_canonical_db(tmp_path, monkeypatch):
     db_file = _setup(
-        tmp_path, monkeypatch,
+        tmp_path,
+        monkeypatch,
         files=[("01__n.md", [(0, "s"), (1, "h")])],
         sample_entries=[{"note_name": "n.md", "language_pair": "de_de"}],
     )
     collect.main()
     conn = sqlite3.connect(str(db_file))
-    rows = conn.execute(
-        "SELECT note_path, n_claims, n_supported, n_hallucinated FROM calibration_labels"
-    ).fetchall()
+    rows = conn.execute("SELECT note_path, n_claims, n_supported, n_hallucinated FROM calibration_labels").fetchall()
     conn.close()
     assert rows == [("n.md", 2, 1, 1)]
 
 
 def test_agreement_rate_from_pipeline_labels_end_to_end(tmp_path, monkeypatch):
-    history = json.dumps({
-        "version": AGENT_VERSION,
-        "note": "n.md",
-        "claim_scores": [
-            {"claim_idx": 0, "label": "supported_exact"},    # → s, Mensch: s → einig
-            {"claim_idx": 1, "label": "not_in_context"},      # → h, Mensch: s → uneinig
-        ],
-    })
+    history = json.dumps(
+        {
+            "version": AGENT_VERSION,
+            "note": "n.md",
+            "claim_scores": [
+                {"claim_idx": 0, "label": "supported_exact"},  # → s, Mensch: s → einig
+                {"claim_idx": 1, "label": "not_in_context"},  # → h, Mensch: s → uneinig
+            ],
+        }
+    )
     db_file = _setup(
-        tmp_path, monkeypatch,
+        tmp_path,
+        monkeypatch,
         files=[("01__n.md", [(0, "s"), (1, "s")])],
         sample_entries=[{"note_name": "n.md", "language_pair": "de_de"}],
         history_lines=[history],
     )
     collect.main()
     conn = sqlite3.connect(str(db_file))
-    (agree,) = conn.execute(
-        "SELECT agreement_rate FROM calibration_labels WHERE note_path='n.md'"
-    ).fetchone()
+    (agree,) = conn.execute("SELECT agreement_rate FROM calibration_labels WHERE note_path='n.md'").fetchone()
     conn.close()
     assert agree == 0.5
 
 
 def test_warns_when_no_pipeline_labels_for_current_version(tmp_path, monkeypatch, capsys):
-    stale = json.dumps({
-        "version": "v0.0.1-stale",
-        "note": "n.md",
-        "claim_scores": [{"claim_idx": 0, "label": "supported_exact"}],
-    })
+    stale = json.dumps(
+        {
+            "version": "v0.0.1-stale",
+            "note": "n.md",
+            "claim_scores": [{"claim_idx": 0, "label": "supported_exact"}],
+        }
+    )
     _setup(
-        tmp_path, monkeypatch,
+        tmp_path,
+        monkeypatch,
         files=[("01__n.md", [(0, "s")])],
         sample_entries=[{"note_name": "n.md", "language_pair": "de_de"}],
         history_lines=[stale],
@@ -109,7 +112,8 @@ def test_conflicting_duplicate_labels_warn(tmp_path, monkeypatch, capsys):
     # claim 0 — per_note summiert beide, human_by_note behält still das letzte.
     # Mindestens eine Warnung muss den Konflikt sichtbar machen.
     _setup(
-        tmp_path, monkeypatch,
+        tmp_path,
+        monkeypatch,
         files=[("01__a.md", [(0, "s")]), ("02__b.md", [(0, "h")])],
         sample_entries=[
             {"note_name": "n.md", "language_pair": "de_de"},

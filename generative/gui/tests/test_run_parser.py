@@ -4,6 +4,7 @@ Der Parser uebersetzt die rohen stdout-Zeilen eines orchestrator-Laufs in
 strukturierte Events (Stage-Stepper, Pro-Note-Fortschritt, Dry-Run-Preview,
 Abschluss). Pure Logik, keine I/O.
 """
+
 from generative.gui.run_parser import RunParser, STAGES
 
 
@@ -20,8 +21,7 @@ def _events(lines):
 def test_stage_marker_emits_stage_event():
     p = RunParser()
     evs = p.feed("[1/7] PDF extrahieren und chunken…")
-    assert evs == [{"type": "stage", "num": 1, "total": 7,
-                    "label": "PDF extrahieren und chunken…"}]
+    assert evs == [{"type": "stage", "num": 1, "total": 7, "label": "PDF extrahieren und chunken…"}]
 
 
 def test_eval_stage_uses_total_8():
@@ -44,8 +44,7 @@ def test_per_note_progress_event():
     # NICHT Stage-Marker.
     p = RunParser()
     evs = p.feed("  [3/10] Zettelkasten als Denkwerkzeug")
-    assert evs == [{"type": "note_progress", "index": 3, "total": 10,
-                    "title": "Zettelkasten als Denkwerkzeug"}]
+    assert evs == [{"type": "note_progress", "index": 3, "total": 10, "title": "Zettelkasten als Denkwerkzeug"}]
 
 
 def test_stage_marker_has_no_leading_whitespace_per_note_has():
@@ -155,6 +154,7 @@ def test_golden_real_stdout_sample_parses_full_run():
     # bei Print-Format-Änderungen aus einem realen Lauf neu erzeugen) muss die erwartete
     # Eventfolge liefern. Fängt stillen Format-Drift, den synthetische Einzeltests nicht sehen.
     from pathlib import Path
+
     sample = (Path(__file__).parent / "fixtures" / "run_stdout_sample.txt").read_text(encoding="utf-8")
     evs = _events(sample.splitlines())
     stages = sorted({e["num"] for e in evs if e["type"] == "stage"})

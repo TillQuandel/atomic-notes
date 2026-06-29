@@ -1,4 +1,5 @@
 """Verifier-Agent: prüft jede Aussage in der Draft-Note gegen den Originaltext."""
+
 from __future__ import annotations
 import re
 
@@ -22,7 +23,7 @@ from generative.pipeline.anchor_patterns import PAGE_MARKER_RE, PAGE_ANCHOR_NUMS
 # „..." gefolgt von einer Seitenangabe `(S. N)`. Opening: U+201E (vom Extractor
 # erzwungen). Closing: in der Praxis U+201C, U+201D oder ASCII U+0022 — alle
 # zulassen, weil der Extractor-Output trotz Prompt-Verbot ASCII enthält.
-_BODY_QUOTE_RE = re.compile("„([^„“”\"]{4,200})[“”\"]")
+_BODY_QUOTE_RE = re.compile('„([^„“”"]{4,200})[“”"]')
 
 _PROMPT = """Du prüfst ob Aussagen in einer Atomic Note tatsächlich im Originaltext stehen.
 
@@ -85,7 +86,7 @@ def sync_anchors_from_body(draft: AtomicNoteDraft) -> AtomicNoteDraft:
         if not quote:
             continue
         # Look-ahead-Fenster für (S. N)
-        window = body[qm.end(): qm.end() + 120]
+        window = body[qm.end() : qm.end() + 120]
         pm = _NEAR_PAGE_RE.search(window)
         if not pm:
             continue
@@ -104,19 +105,23 @@ def sync_anchors_from_body(draft: AtomicNoteDraft) -> AtomicNoteDraft:
 
     if added or filled:
         import sys
-        print(f"      [anker-sync] {added} ergänzt, {filled} Page nachgetragen",
-              file=sys.stderr)
+
+        print(f"      [anker-sync] {added} ergänzt, {filled} Page nachgetragen", file=sys.stderr)
     return draft
 
 
 def _log_anchor_stats(title: str, total_in: int, final_anchors: list) -> None:
     confirmed = sum(1 for a in final_anchors if a.page or a.fuzzy_page)
-    trace_event("verifier", "anchor_stats", {
-        "title": title,
-        "total_in": total_in,
-        "confirmed": confirmed,
-        "confirmation_rate": round(confirmed / total_in, 3) if total_in > 0 else 0.0,
-    })
+    trace_event(
+        "verifier",
+        "anchor_stats",
+        {
+            "title": title,
+            "total_in": total_in,
+            "confirmed": confirmed,
+            "confirmation_rate": round(confirmed / total_in, 3) if total_in > 0 else 0.0,
+        },
+    )
 
 
 def run(draft: AtomicNoteDraft, chunk_text: str) -> AtomicNoteDraft:
@@ -160,20 +165,21 @@ def _run_inner(draft: AtomicNoteDraft, chunk_text: str) -> AtomicNoteDraft:
                     page = f"S. {last_marker}"
                     is_exact = True
             if page is None:
-                page = _fuzzy_find_page(
-                    orig.quote, chunk_text, threshold=FUZZY_PREPASS_THRESHOLD
-                )
+                page = _fuzzy_find_page(orig.quote, chunk_text, threshold=FUZZY_PREPASS_THRESHOLD)
         if page:
-            pre_resolved.append(TextAnchor(
-                quote=orig.quote,
-                page=page if is_exact else None,
-                fuzzy_page=None if is_exact else page,
-            ))
+            pre_resolved.append(
+                TextAnchor(
+                    quote=orig.quote,
+                    page=page if is_exact else None,
+                    fuzzy_page=None if is_exact else page,
+                )
+            )
         else:
             unresolved.append(orig)
 
     if not unresolved:
         import sys
+
         print(
             f"      [verifier-prepass] '{draft.title}' "
             f"{len(pre_resolved)}/{original_count} fuzzy≥{FUZZY_PREPASS_THRESHOLD} — LLM skip",
@@ -185,6 +191,7 @@ def _run_inner(draft: AtomicNoteDraft, chunk_text: str) -> AtomicNoteDraft:
 
     if pre_resolved:
         import sys
+
         print(
             f"      [verifier-prepass] '{draft.title}' "
             f"{len(pre_resolved)}/{original_count} fuzzy≥{FUZZY_PREPASS_THRESHOLD}, "
@@ -199,14 +206,14 @@ def _run_inner(draft: AtomicNoteDraft, chunk_text: str) -> AtomicNoteDraft:
     semantic_resolved: list[TextAnchor] = []
     remaining: list[TextAnchor] = []
     for anc in unresolved:
-        sp = _semantic_find_page(anc.quote, chunk_text,
-                                 cached_sections=cached_page_sections)
+        sp = _semantic_find_page(anc.quote, chunk_text, cached_sections=cached_page_sections)
         if sp:
             semantic_resolved.append(TextAnchor(quote=anc.quote, page=None, fuzzy_page=sp))
         else:
             remaining.append(anc)
     if semantic_resolved:
         import sys
+
         print(
             f"      [verifier-semantic] '{draft.title}' "
             f"{len(semantic_resolved)}/{len(unresolved)} semantic≥{SEMANTIC_PREPASS_THRESHOLD:.2f} — "
@@ -218,9 +225,9 @@ def _run_inner(draft: AtomicNoteDraft, chunk_text: str) -> AtomicNoteDraft:
 
     if not unresolved:
         import sys
+
         print(
-            f"      [verifier-prepass+semantic] '{draft.title}' "
-            f"{original_count}/{original_count} Anker ohne LLM",
+            f"      [verifier-prepass+semantic] '{draft.title}' {original_count}/{original_count} Anker ohne LLM",
             file=sys.stderr,
         )
         draft.source_anchors = pre_resolved
@@ -230,26 +237,18 @@ def _run_inner(draft: AtomicNoteDraft, chunk_text: str) -> AtomicNoteDraft:
     # no-LLM-Modus: verbleibende unresolved Anker unverifiziert lassen.
     if not _config.ENABLE_LLM:
         import sys
+
         print(
-            f"      [verifier-nollm] '{draft.title}' "
-            f"{len(unresolved)} Anker unverifiziert (no-LLM-Modus)",
+            f"      [verifier-nollm] '{draft.title}' {len(unresolved)} Anker unverifiziert (no-LLM-Modus)",
             file=sys.stderr,
         )
-        unresolved = [
-            TextAnchor(quote=anc.quote, page=None, fuzzy_page=None)
-            for anc in unresolved
-        ]
+        unresolved = [TextAnchor(quote=anc.quote, page=None, fuzzy_page=None) for anc in unresolved]
         draft.source_anchors = pre_resolved + unresolved
-        draft.quality_flags.append(
-            f"ℹ️ Verifier: {len(unresolved)} Anker unverifiziert (no-LLM-Modus)"
-        )
+        draft.quality_flags.append(f"ℹ️ Verifier: {len(unresolved)} Anker unverifiziert (no-LLM-Modus)")
         sync_anchors_from_body(draft)
         return draft
 
-    anchors_str = "\n".join(
-        f"- \"{a.quote}\" (Seite: {a.page or 'unbekannt'})"
-        for a in unresolved
-    )
+    anchors_str = "\n".join(f'- "{a.quote}" (Seite: {a.page or "unbekannt"})' for a in unresolved)
 
     prompt = _PROMPT.format(
         title=draft.title,
@@ -262,12 +261,13 @@ def _run_inner(draft: AtomicNoteDraft, chunk_text: str) -> AtomicNoteDraft:
         data, parse_warnings = parse_verifier_output(raw)
         if parse_warnings:
             import sys
+
             for w in parse_warnings:
                 print(f"      [verifier-warn] '{draft.title}': {w}", file=sys.stderr)
     except RuntimeError as e:
         import sys
-        print(f"      [verifier-fail] '{draft.title}' LLM-Call fehlgeschlagen: {str(e)[:80]}",
-              file=sys.stderr)
+
+        print(f"      [verifier-fail] '{draft.title}' LLM-Call fehlgeschlagen: {str(e)[:80]}", file=sys.stderr)
         # Pre-resolved Anker behalten, unresolved bleiben mit Original-Page (oder None)
         draft.source_anchors = pre_resolved + unresolved
         draft.quality_flags.append("⚠️ Verifier nicht ausgeführt — Anker unverifiziert")
@@ -279,9 +279,12 @@ def _run_inner(draft: AtomicNoteDraft, chunk_text: str) -> AtomicNoteDraft:
     # würde sonst alle Original-Anker stumm löschen (v16-Silent-Destructive-Pattern).
     if unresolved and not data["anchors"]:
         import sys
-        print(f"      [verifier-fail] '{draft.title}' LLM-Output ohne ANCHOR-Block "
-              f"(raw[:120]={raw[:120]!r}) — Anker bleiben unverifiziert",
-              file=sys.stderr)
+
+        print(
+            f"      [verifier-fail] '{draft.title}' LLM-Output ohne ANCHOR-Block "
+            f"(raw[:120]={raw[:120]!r}) — Anker bleiben unverifiziert",
+            file=sys.stderr,
+        )
         draft.source_anchors = pre_resolved + unresolved
         draft.quality_flags.append("⚠️ Verifier-Output unparsbar — Anker unverifiziert")
         return draft
@@ -297,19 +300,23 @@ def _run_inner(draft: AtomicNoteDraft, chunk_text: str) -> AtomicNoteDraft:
     for orig in unresolved:
         llm = llm_results.get(orig.quote, {})
         if llm.get("verified", False):
-            rebuilt.append(TextAnchor(
-                quote=orig.quote,
-                page=llm.get("page"),
-                fuzzy_page=None,
-            ))
+            rebuilt.append(
+                TextAnchor(
+                    quote=orig.quote,
+                    page=llm.get("page"),
+                    fuzzy_page=None,
+                )
+            )
             continue
         fp = _fuzzy_find_page(orig.quote, chunk_text)
         if fp:
-            rebuilt.append(TextAnchor(
-                quote=orig.quote,
-                page=None,
-                fuzzy_page=fp,
-            ))
+            rebuilt.append(
+                TextAnchor(
+                    quote=orig.quote,
+                    page=None,
+                    fuzzy_page=fp,
+                )
+            )
     draft.source_anchors = rebuilt
 
     # 50%-Schwelle bezieht sich auf alle Anker mit irgendeiner Page-Bestätigung
@@ -339,9 +346,11 @@ def _build_page_sections(chunk_text: str) -> list[tuple[str, list[str]]] | None:
     """
     try:
         from generative.pipeline import embeddings as _emb_mod
+
         if _emb_mod._MODEL is None:
             return None  # Modell nicht geladen → Tier-3 überspringen
         from generative.pipeline.embeddings import _sentences as _split_sents, _model
+
         model = _model()
     except Exception:
         return None
@@ -351,7 +360,7 @@ def _build_page_sections(chunk_text: str) -> list[tuple[str, list[str]]] | None:
     prev_page: str | None = None
     for m in PAGE_MARKER_RE.finditer(chunk_text):
         if prev_page is not None:
-            sents = _split_sents(chunk_text[prev_end:m.start()])
+            sents = _split_sents(chunk_text[prev_end : m.start()])
             if sents:
                 embs = model.encode(sents, show_progress_bar=False, normalize_embeddings=True)
                 result.append((prev_page, embs))
@@ -365,9 +374,9 @@ def _build_page_sections(chunk_text: str) -> list[tuple[str, list[str]]] | None:
     return result or None
 
 
-def _semantic_find_page(quote: str, chunk_text: str,
-                        threshold: float = SEMANTIC_PREPASS_THRESHOLD,
-                        cached_sections: list | None = None) -> str | None:
+def _semantic_find_page(
+    quote: str, chunk_text: str, threshold: float = SEMANTIC_PREPASS_THRESHOLD, cached_sections: list | None = None
+) -> str | None:
     """Tier-3 Pre-Pass: semantisches Satz-Matching via sentence-transformers.
 
     cached_sections: vorab berechnete [(page_num, sent_embs)] aus _build_page_sections().
@@ -379,6 +388,7 @@ def _semantic_find_page(quote: str, chunk_text: str,
 
     try:
         from generative.pipeline.embeddings import embed_title
+
         page_sections = cached_sections or _build_page_sections(chunk_text)
     except Exception:
         return None

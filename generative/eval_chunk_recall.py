@@ -10,6 +10,7 @@ Metriken:
                      Overlap-K holt einen Satz zurück, wenn er in ein um K Wörter
                      verlängertes Nachbar-Chunk vollständig passt.
 """
+
 from __future__ import annotations
 
 import re
@@ -129,14 +130,12 @@ def straddle_stats(text: str, size: int, overlap: int = 0) -> dict:
         contained = any(c_start <= s_start and s_end <= c_end for c_start, c_end in chunks)
         if not contained:
             n_straddling += 1
-    return {"n_sentences": len(sentences), "n_straddling": n_straddling,
-            "mode": "word_split"}
+    return {"n_sentences": len(sentences), "n_straddling": n_straddling, "mode": "word_split"}
 
 
 # ---- Runner (LLM-frei) ------------------------------------------------------
 
-_LABEL_TITLE_RE = re.compile(
-    r"^#\s*Label\b.*?—\s*(?:vault__|inbox__|merge__)?(.+?)\.md\s*$", re.MULTILINE)
+_LABEL_TITLE_RE = re.compile(r"^#\s*Label\b.*?—\s*(?:vault__|inbox__|merge__)?(.+?)\.md\s*$", re.MULTILINE)
 _LABEL_PDF_RE = re.compile(r"\*\*PDF\*\*:\s*`?([^`\n]+?)`?\s*$", re.MULTILINE)
 
 
@@ -144,8 +143,7 @@ def _label_concept(text: str) -> tuple[str | None, str | None]:
     """Parst (PDF-Pfad, Konzept-Titel) aus einer calibration/labels-active-Note."""
     t = _LABEL_TITLE_RE.search(text)
     p = _LABEL_PDF_RE.search(text)
-    return (p.group(1).strip() if p else None,
-            t.group(1).strip() if t else None)
+    return (p.group(1).strip() if p else None, t.group(1).strip() if t else None)
 
 
 def concepts_from_label_notes(label_dir, pdf_substring: str) -> list[str]:
@@ -156,6 +154,7 @@ def concepts_from_label_notes(label_dir, pdf_substring: str) -> list[str]:
     overview_coverage (stammt aus menschlichem Labeling, nicht aus dem Overview).
     """
     from pathlib import Path
+
     titles: list[str] = []
     for f in sorted(Path(label_dir).glob("*.md")):
         if f.name == "INDEX.md":
@@ -169,12 +168,13 @@ def concepts_from_label_notes(label_dir, pdf_substring: str) -> list[str]:
 def _concepts_from_baseline(baseline_dir) -> list[str]:
     """Konzept-Titel aus den Baseline-Cache-Notes als Referenzmenge (gold-frei)."""
     from pathlib import Path
+
     titles: list[str] = []
     for f in sorted(Path(baseline_dir).glob("*.md")):
         name = f.stem
         for pfx in ("vault__", "merge__"):
             if name.startswith(pfx):
-                name = name[len(pfx):]
+                name = name[len(pfx) :]
                 break
         name = re.sub(r"^MERGE\s*-\s*", "", name)
         titles.append(name)
@@ -191,16 +191,22 @@ def main(argv: list[str] | None = None) -> int:
 
     p = argparse.ArgumentParser(description="Phase-A Chunk-/Planner-Recall-Messung (LLM-frei)")
     p.add_argument("pdf", type=Path, help="Pfad zum Quell-PDF")
-    p.add_argument("--concepts", action="append", default=None,
-                   help="Konzept-Titel (mehrfach). Default: aus --baseline-dir.")
-    p.add_argument("--baseline-dir", type=Path, default=None,
-                   help="Baseline-Cache-Ordner mit *.md als Konzept-Referenz.")
-    p.add_argument("--label-dir", type=Path, default=None,
-                   help="calibration/labels-active-Ordner als (source-korrekte) Konzept-Referenz.")
-    p.add_argument("--pdf-match", default=None,
-                   help="Teilstring zum Filtern der Label-Notes nach **PDF** (z.B. 'Porst - 2014').")
-    p.add_argument("--overlaps", type=int, nargs="+", default=[0, 50, 100, 200],
-                   help="Zu testende Overlap-Wortzahlen.")
+    p.add_argument(
+        "--concepts", action="append", default=None, help="Konzept-Titel (mehrfach). Default: aus --baseline-dir."
+    )
+    p.add_argument(
+        "--baseline-dir", type=Path, default=None, help="Baseline-Cache-Ordner mit *.md als Konzept-Referenz."
+    )
+    p.add_argument(
+        "--label-dir",
+        type=Path,
+        default=None,
+        help="calibration/labels-active-Ordner als (source-korrekte) Konzept-Referenz.",
+    )
+    p.add_argument(
+        "--pdf-match", default=None, help="Teilstring zum Filtern der Label-Notes nach **PDF** (z.B. 'Porst - 2014')."
+    )
+    p.add_argument("--overlaps", type=int, nargs="+", default=[0, 50, 100, 200], help="Zu testende Overlap-Wortzahlen.")
     args = p.parse_args(argv)
 
     if not args.pdf.exists():

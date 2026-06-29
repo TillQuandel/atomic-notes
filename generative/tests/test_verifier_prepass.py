@@ -3,6 +3,7 @@
 Quality-Garantie: Pre-Pass mit Fuzzy ≥98 + Mindestlänge 30 löst hoch-konfidente
 Anker ohne LLM-Call auf. LLM-Pfad bleibt Safety-Net für Edge-Cases.
 """
+
 from __future__ import annotations
 from unittest.mock import patch
 
@@ -38,8 +39,10 @@ def test_prepass_full_resolve_skips_llm():
     ]
     draft = _draft(anchors)
 
-    with patch.object(verifier, "call_claude") as mock_llm, \
-         patch.object(verifier, "_semantic_find_page", return_value=None):
+    with (
+        patch.object(verifier, "call_claude") as mock_llm,
+        patch.object(verifier, "_semantic_find_page", return_value=None),
+    ):
         result = verifier.run(draft, CHUNK_WITH_MARKERS)
 
     assert not mock_llm.called, "LLM darf nicht gerufen werden wenn alle Anker pre-resolved sind"
@@ -71,8 +74,10 @@ def test_prepass_partial_only_unresolved_to_llm():
         "<!--END-->\n"
     )
 
-    with patch.object(verifier, "call_claude", return_value=llm_raw) as mock_llm, \
-         patch.object(verifier, "_semantic_find_page", return_value=None):
+    with (
+        patch.object(verifier, "call_claude", return_value=llm_raw) as mock_llm,
+        patch.object(verifier, "_semantic_find_page", return_value=None),
+    ):
         result = verifier.run(draft, CHUNK_WITH_MARKERS)
 
     assert mock_llm.call_count == 1
@@ -92,8 +97,10 @@ def test_short_quote_below_min_len_goes_to_llm():
     chunk = "[S. 1]\nkurz aber im text steht hier\n"
     draft = _draft(anchors)
 
-    with patch.object(verifier, "call_claude", return_value="all_verified: false\n<!--END-->\n") as mock_llm, \
-         patch.object(verifier, "_semantic_find_page", return_value=None):
+    with (
+        patch.object(verifier, "call_claude", return_value="all_verified: false\n<!--END-->\n") as mock_llm,
+        patch.object(verifier, "_semantic_find_page", return_value=None),
+    ):
         verifier.run(draft, chunk)
 
     assert mock_llm.call_count == 1, "Quote <30 chars → kein Pre-Pass, LLM-Pfad erwartet"
@@ -108,8 +115,10 @@ def test_low_fuzzy_score_not_prepassed():
     ]
     draft = _draft(anchors)
 
-    with patch.object(verifier, "call_claude", return_value="all_verified: false\n<!--END-->\n") as mock_llm, \
-         patch.object(verifier, "_semantic_find_page", return_value=None):
+    with (
+        patch.object(verifier, "call_claude", return_value="all_verified: false\n<!--END-->\n") as mock_llm,
+        patch.object(verifier, "_semantic_find_page", return_value=None),
+    ):
         verifier.run(draft, CHUNK_WITH_MARKERS)
 
     assert mock_llm.call_count == 1, "Score <98 → LLM-Pfad erwartet"
@@ -126,8 +135,7 @@ def test_exact_substring_sets_page_fuzzy_sets_fuzzy_page():
     ]
     draft = _draft(anchors)
 
-    with patch.object(verifier, "call_claude"), \
-         patch.object(verifier, "_semantic_find_page", return_value=None):
+    with patch.object(verifier, "call_claude"), patch.object(verifier, "_semantic_find_page", return_value=None):
         result = verifier.run(draft, CHUNK_WITH_MARKERS)
 
     by_quote = {a.quote: a for a in result.source_anchors}
@@ -150,8 +158,10 @@ def test_llm_fail_preserves_pre_resolved_and_original_unresolved():
     def boom(*a, **kw):
         raise RuntimeError("LLM down")
 
-    with patch.object(verifier, "call_claude", side_effect=boom), \
-         patch.object(verifier, "_semantic_find_page", return_value=None):
+    with (
+        patch.object(verifier, "call_claude", side_effect=boom),
+        patch.object(verifier, "_semantic_find_page", return_value=None),
+    ):
         result = verifier.run(draft, CHUNK_WITH_MARKERS)
 
     by_quote = {a.quote: a for a in result.source_anchors}
@@ -169,14 +179,14 @@ def test_prepass_uses_last_marker_before_match():
     ]
     draft = _draft(anchors)
 
-    with patch.object(verifier, "call_claude"), \
-         patch.object(verifier, "_semantic_find_page", return_value=None):
+    with patch.object(verifier, "call_claude"), patch.object(verifier, "_semantic_find_page", return_value=None):
         result = verifier.run(draft, CHUNK_WITH_MARKERS)
 
     assert result.source_anchors[0].page == "S. 2", "Letzter Marker vor Match-Position"
 
 
 # --- Tier-3: Semantischer Pre-Pass ---
+
 
 def test_semantic_prepass_resolves_without_llm():
     """Wenn semantic_find_page eine Seite liefert, darf LLM nicht gerufen werden."""
@@ -188,8 +198,10 @@ def test_semantic_prepass_resolves_without_llm():
     ]
     draft = _draft(anchors)
 
-    with patch.object(verifier, "call_claude") as mock_llm, \
-         patch.object(verifier, "_semantic_find_page", return_value="S. 3"):
+    with (
+        patch.object(verifier, "call_claude") as mock_llm,
+        patch.object(verifier, "_semantic_find_page", return_value="S. 3"),
+    ):
         result = verifier.run(draft, CHUNK_WITH_MARKERS)
 
     assert not mock_llm.called, "LLM darf nicht gerufen werden wenn semantic aufgelöst"
@@ -214,8 +226,10 @@ def test_semantic_prepass_only_for_unresolved():
         semantic_calls.append(quote)
         return "S. 3" if para_quote in quote else None
 
-    with patch.object(verifier, "call_claude") as mock_llm, \
-         patch.object(verifier, "_semantic_find_page", side_effect=capture_semantic):
+    with (
+        patch.object(verifier, "call_claude") as mock_llm,
+        patch.object(verifier, "_semantic_find_page", side_effect=capture_semantic),
+    ):
         result = verifier.run(draft, CHUNK_WITH_MARKERS)
 
     assert not mock_llm.called
@@ -238,8 +252,10 @@ def test_semantic_no_match_falls_through_to_llm():
     draft = _draft(anchors)
     llm_raw = "all_verified: false\n<!--END-->\n"
 
-    with patch.object(verifier, "call_claude", return_value=llm_raw) as mock_llm, \
-         patch.object(verifier, "_semantic_find_page", return_value=None):
+    with (
+        patch.object(verifier, "call_claude", return_value=llm_raw) as mock_llm,
+        patch.object(verifier, "_semantic_find_page", return_value=None),
+    ):
         verifier.run(draft, CHUNK_WITH_MARKERS)
 
     assert mock_llm.call_count == 1, "Kein semantic-Match → LLM-Pfad"
