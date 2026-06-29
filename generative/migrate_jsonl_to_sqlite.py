@@ -42,6 +42,8 @@ def migrate_quality_history(conn, dry_run: bool = False) -> int:
                 "note_path":         note_name,
                 "acceptance_status": None,
                 "hallucination_rate":r.get("hallucination_rate"),
+                "anchors_total":     r.get("anchors_total"),
+                "anchors_hallucinated": r.get("anchors_hallucinated"),
                 "coverage_factual":  r.get("coverage_factual"),
                 "coverage_rate":     r.get("coverage_rate"),
                 "tokens_total":      r.get("tokens_total"),

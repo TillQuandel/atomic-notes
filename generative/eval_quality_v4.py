@@ -706,6 +706,8 @@ def save_result(result: dict) -> None:
                 "note_path":         note_name,
                 "acceptance_status": None,  # wird vom orchestrator gesetzt
                 "hallucination_rate":result.get("hallucination_rate"),
+                "anchors_total":     result.get("anchors_total"),
+                "anchors_hallucinated": result.get("anchors_hallucinated"),
                 "coverage_factual":  result.get("coverage_factual"),
                 "coverage_rate":     result.get("coverage_rate"),
                 "tokens_total":      result.get("tokens_total"),

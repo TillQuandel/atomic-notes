@@ -373,7 +373,11 @@ def build_data(eval_version: str | None = None,
         import sys as _sys; print(f"[db-only-runs] Fehler: {_e}", file=_sys.stderr)
 
     # ── Dropdown-Optionen VOR allen Filtern snapshotten ──────────────
-    _all_models_opts = sorted({tr.get("model","") for tr in token_runs if tr.get("model")})
+    # Smoke-/Test-Modelle aus dem Filter halten (z. B. "m", "test", "smoke-model").
+    _MODEL_DENYLIST = {"m", "test", "smoke-model"}
+    _all_models_opts = sorted({m for tr in token_runs
+                               if (m := tr.get("model", ""))
+                               and m not in _MODEL_DENYLIST and "smoke" not in m.lower()})
 
     # ── token_runs + quality_rows + all_log_runs gemeinsam filtern ──────
     # Alle Filter auf token_runs anwenden → run_ids extrahieren → quality_rows + log_runs ebenfalls filtern
@@ -426,11 +430,43 @@ def build_data(eval_version: str | None = None,
         log_data = D._build_log_data(all_log_runs)
 
     # ── all_log_runs Dropdown-Optionen VOR all_log_runs-Filtern ──────
-    _all_pdfs_opts  = sorted({r["label"] for r in all_log_runs if r.get("label")})
-    _all_pvers_opts = sorted({r["ver"]   for r in all_log_runs
-                              if r.get("ver") and not D.is_foss_version(r["ver"])},
-                              key=lambda v: [int(x) for x in __import__("re").findall(r"\d+", v)],
-                              reverse=True)  # neueste generative Version oben (foss raus, #36)
+    # foss nur im ungefilterten Default-View ausblenden — sobald ein Modell-/
+    # Versions-Filter aktiv ist, bleibt foss einsehbar (#36, gleiche Bedingung
+    # wie der foss-Ausschluss aus quality_rows/all_log_runs unten).
+    _exclude_foss = not (model or pipeline_version)
+
+    # PDF-Dropdown: aus den Eval-Daten der aktiven eval_version statt aus
+    # all_log_runs — so erscheinen nur PDFs mit echten Daten im View (sonst
+    # listet das Dropdown z. B. foss-only evaluierte PDFs, die „0 Notes" ergeben,
+    # solange kein foss-Modell gewählt ist). Volltitel, dedupliziert.
+    _all_pdfs_opts  = D._dedupe_pdf_options(
+        r.get("pdf") for r in all_quality_rows
+        if r.get("eval_version") == eval_version and r.get("pdf")
+        and not (_exclude_foss
+                 and D.is_foss_version(r.get("version") or r.get("pipeline_version") or "")))
+    # Versions-Dropdown: nur Pipeline-Versionen MIT Eval-Daten in der aktiven
+    # eval_version, eingeschränkt auf den aktiven PDF-/Sprach-Filter. So
+    # verschwinden sowohl Alt-Versionen ohne 4.1-Daten als auch Versionen, die
+    # die gewählte PDF nie evaluiert haben (statt 61 log-basierte Versionen).
+    _pver_rows = [r for r in all_quality_rows if r.get("eval_version") == eval_version]
+    if language:
+        _pver_rows = [r for r in _pver_rows if r.get("language") == language]
+    if pdf:
+        _pver_rows = [r for r in _pver_rows
+                      if (r.get("pdf") or "").lower().startswith(pdf.lower())]
+    _pver_counts: dict[str, int] = {}
+    for r in _pver_rows:
+        pv = r.get("version") or r.get("pipeline_version")
+        if pv and not (_exclude_foss and D.is_foss_version(pv)):
+            _pver_counts[pv] = _pver_counts.get(pv, 0) + 1
+    if pdf:
+        # PDF-Filter aktiv: alle Versionen mit dieser PDF zeigen — pro PDF ist n
+        # naturgemäß klein, eine n≥3-Schwelle würde fast alles ausblenden.
+        _all_pvers_opts = sorted(_pver_counts, key=D._ver_sort_key, reverse=True)
+    else:
+        # Default: 15 neueste Versionen mit echter Stichprobe (n≥3), die
+        # allerneueste immer dabei (sonst füllen Einzel-Note-Läufe den Filter).
+        _all_pvers_opts = D._top_versions(_pver_counts, limit=15, min_n=3)
 
     # PDF + Language + Version + Model-Filter auf all_log_runs (nach DB-Fallback)
     if model:
@@ -455,7 +491,7 @@ def build_data(eval_version: str | None = None,
     # foss-Pipeline (gliner/extractive) nicht mit generativer mischen:
     # im ungefilterten Default-View foss ausschliessen — ueber Modell-/Versions-
     # Filter bleibt foss einsehbar (#36, User-Wunsch 2026-06-19)
-    if not (model or pipeline_version):
+    if _exclude_foss:
         all_log_runs = [r for r in all_log_runs if not D.is_foss_version(r.get("ver"))]
         log_data = D._build_log_data(all_log_runs)
         quality_rows = [r for r in quality_rows
@@ -491,7 +527,8 @@ def build_data(eval_version: str | None = None,
     for r in quality_rows:
         ver = r.get("version") or r.get("pipeline_version") or "unbekannt"
         if ver not in quality_by_version:
-            quality_by_version[ver] = {"hall": [], "cov": [], "accept": [], "n": 0}
+            quality_by_version[ver] = {"hall": [], "cov": [], "accept": [], "n": 0, "rows": []}
+        quality_by_version[ver]["rows"].append(r)
         hall_val = r.get("hallucination_rate")
         if hall_val is not None and float(hall_val) >= 0:
             quality_by_version[ver]["hall"].append(float(hall_val) * 100)
@@ -506,7 +543,10 @@ def build_data(eval_version: str | None = None,
     sorted_pipeline_versions = sorted(quality_by_version.keys(), key=_vkey)
 
     for ver, d2 in quality_by_version.items():
-        d2["avg_hall"]    = round(sum(d2["hall"]) / len(d2["hall"]), 1) if d2["hall"] else None
+        # avg_hall = gepoolte Rate (ankergewichtet, Mean-Fallback) — identische
+        # Definition wie die KPI-Kachel in _calc_kpis, damit Kachel und Sparkline
+        # denselben Wert zeigen.
+        d2["avg_hall"]    = D._pooled_hall_pct(d2["rows"])
         d2["avg_cov"]     = round(sum(d2["cov"])  / len(d2["cov"]),  1) if d2["cov"]  else None
         d2["median_hall"] = _safe_median(d2["hall"])
         d2["median_cov"]  = _safe_median(d2["cov"])
@@ -548,7 +588,10 @@ def build_data(eval_version: str | None = None,
 
     kpi_trend = {
         "versions": sorted_pipeline_versions,
-        "hall":     [quality_by_version[v].get("median_hall") for v in sorted_pipeline_versions],
+        # hall: Mean (avg_hall), passend zur KPI-Kachel in _calc_kpis — die
+        # zero-inflated Verteilung lässt den Median sonst auf 0 kollabieren.
+        # cov bleibt Median (nicht zero-inflated, robuster Lagewert).
+        "hall":     [quality_by_version[v].get("avg_hall")   for v in sorted_pipeline_versions],
         "cov":      [quality_by_version[v].get("median_cov")  for v in sorted_pipeline_versions],
         "n":        [quality_by_version[v]["n"]               for v in sorted_pipeline_versions],
         "accept":   [_pooled_accept(v) for v in sorted_pipeline_versions],

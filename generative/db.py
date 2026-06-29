@@ -54,6 +54,14 @@ def init_db(path: Path = DB_PATH) -> None:
         conn.execute("ALTER TABLE note_evals ADD COLUMN anchor_rate REAL")
     except sqlite3.OperationalError:
         pass
+    # Anker-Roh-Counts: für die gepoolte Halluzinationsrate (Σ halluziniert /
+    # Σ gesamt) im Dashboard — die Pipeline berechnet sie ohnehin, persistiert
+    # sie aber bisher nur ins JSONL, nicht in die DB.
+    for _col in ("anchors_total", "anchors_hallucinated"):
+        try:
+            conn.execute(f"ALTER TABLE note_evals ADD COLUMN {_col} INT")
+        except sqlite3.OperationalError:
+            pass
     conn.commit()
     conn.close()
 
@@ -138,12 +146,14 @@ def insert_eval(conn: sqlite3.Connection, data: dict) -> None:
     conn.execute("""
         INSERT OR REPLACE INTO note_evals
           (eval_id, run_id, note_path, acceptance_status,
-           hallucination_rate, coverage_factual, coverage_rate, anchor_rate,
+           hallucination_rate, anchors_total, anchors_hallucinated,
+           coverage_factual, coverage_rate, anchor_rate,
            tokens_total, tokens_input, tokens_output, tokens_cache_read,
            wall_time_s, pipeline_version, pdf, language, eval_version, timestamp)
         VALUES
           (:eval_id, :run_id, :note_path, :acceptance_status,
-           :hallucination_rate, :coverage_factual, :coverage_rate, :anchor_rate,
+           :hallucination_rate, :anchors_total, :anchors_hallucinated,
+           :coverage_factual, :coverage_rate, :anchor_rate,
            :tokens_total, :tokens_input, :tokens_output, :tokens_cache_read,
            :wall_time_s, :pipeline_version, :pdf, :language, :eval_version, :timestamp)
     """, {
@@ -152,6 +162,8 @@ def insert_eval(conn: sqlite3.Connection, data: dict) -> None:
         "note_path":         data.get("note_path") or data.get("note"),
         "acceptance_status": data.get("acceptance_status"),
         "hallucination_rate":data.get("hallucination_rate"),
+        "anchors_total":     data.get("anchors_total"),
+        "anchors_hallucinated": data.get("anchors_hallucinated"),
         "coverage_factual":  data.get("coverage_factual"),
         "coverage_rate":     data.get("coverage_rate"),
         "anchor_rate":       data.get("anchor_rate"),
