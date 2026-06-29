@@ -1,5 +1,4 @@
 import sys
-from pathlib import Path
 
 def test_extract_text_returns_string(tmp_path):
     """extract_text() gibt String zurück (auch bei leerer PDF)."""

@@ -8,8 +8,6 @@ Aufzählungs-Bulletpoints als Kapitel-Heading durchgehen — sowohl in
 split_by_chapters() als auch in drop_frontmatter_pages().
 """
 from __future__ import annotations
-import sys
-from pathlib import Path
 
 
 from generative.pipeline.pdf_chunker import (

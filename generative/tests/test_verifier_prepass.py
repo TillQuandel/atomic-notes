@@ -4,8 +4,6 @@ Quality-Garantie: Pre-Pass mit Fuzzy ≥98 + Mindestlänge 30 löst hoch-konfide
 Anker ohne LLM-Call auf. LLM-Pfad bleibt Safety-Net für Edge-Cases.
 """
 from __future__ import annotations
-import sys
-from pathlib import Path
 from unittest.mock import patch
 
 

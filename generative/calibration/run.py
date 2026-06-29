@@ -15,7 +15,6 @@ ROOT = Path(__file__).resolve().parent.parent
 from generative.eval_quality_v4 import (  # noqa: E402
     _QUALITY_HISTORY as HISTORY_PATH,
     eval_note,
-    print_summary,
     save_result,
 )
 from generative.config import AGENT_VERSION  # noqa: E402

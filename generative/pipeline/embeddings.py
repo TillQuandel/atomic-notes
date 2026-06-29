@@ -10,7 +10,6 @@ Token-Limit 128 wird durch Sentence-Chunking + Mean-Pooling überbrückt.
 from __future__ import annotations
 import re
 import threading
-from functools import lru_cache
 
 # Singleton-Modell — Lade-Zeit ~3s, danach pro Embedding ~10ms
 _MODEL = None

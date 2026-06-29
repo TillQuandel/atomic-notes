@@ -1,7 +1,5 @@
 """Tests für Schwartz-Hearst-basierte Akronym-Erkennung + Body-Insertion."""
 from __future__ import annotations
-import sys
-from pathlib import Path
 
 
 from generative.pipeline.acronym_fix import (

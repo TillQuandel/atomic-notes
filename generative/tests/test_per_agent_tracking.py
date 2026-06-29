@@ -48,7 +48,6 @@ def test_model_config_has_required_keys():
 
 
 def test_verifier_run_emits_anchor_stats(tmp_path, monkeypatch):
-    import generative.agents.base as base
     import generative.agents.tracing as tracing
     import generative.agents.verifier as verifier
     from generative.schemas.atomic_note import AtomicNoteDraft
@@ -111,8 +110,7 @@ def test_critic_run_emits_score_result(tmp_path, monkeypatch):
 
 
 def test_eval_agent_stats_aggregates_llm_calls(tmp_path):
-    import json, sys
-    from pathlib import Path
+    import json
 
     trace = tmp_path / "run.jsonl"
     entries = [
@@ -177,8 +175,7 @@ def test_run_totals_includes_eval_entries(tmp_path):
     """run_totals summiert flache Run-Tokens über ALLE Calls — inkl. Stage-8
     eval_quality-Einträge, die nach dem Pipeline-Print in den Trace kommen.
     Cached-Einträge werden ausgeschlossen (matcht orchestrator-Verhalten)."""
-    import json, sys
-    from pathlib import Path
+    import json
 
     trace = tmp_path / "run.jsonl"
     entries = [
@@ -214,8 +211,7 @@ def test_run_totals_includes_eval_entries(tmp_path):
 
 def test_run_totals_sums_cost_per_call(tmp_path, monkeypatch):
     """cost_usd summiert die Per-Call-Kosten via config.compute_cost_per_call."""
-    import json, sys
-    from pathlib import Path
+    import json
     from generative import config
 
     monkeypatch.setattr(config, "BACKEND", "api")
@@ -241,8 +237,7 @@ def test_run_totals_sums_cost_per_call(tmp_path, monkeypatch):
 def test_run_totals_tolerates_malformed_line(tmp_path):
     """Eine kaputte Zeile (z.B. null-Token-Feld) darf die Aggregation NICHT
     abbrechen — der Rest wird weiterverarbeitet (wie die alten Inline-Schleifen)."""
-    import json, sys
-    from pathlib import Path
+    import json
 
     trace = tmp_path / "run.jsonl"
     entries = [

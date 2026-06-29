@@ -1,7 +1,6 @@
 """Planner-Agent: TOC + Intro + Fazit + Relevanz-Profil → ConceptPlan."""
 from __future__ import annotations
 
-import re
 
 # Generika-Blacklist (portiert aus extractive/gliner_planner.py, angepasst für LLM-Output).
 # Fängt seltene LLM-"Ausrutscher" ab wenn trotz Prompt-Vorgabe abstrakte Einzel-Konzepte

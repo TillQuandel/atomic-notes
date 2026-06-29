@@ -11,14 +11,13 @@ import json
 import threading
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Optional
 
 from generative.config import MODEL_OPUS, CACHE_DIR, BACKEND
 
 # Re-Export für Backwards-Compat — Agenten importieren aus agents.base
 from generative.agents.tracing import trace_event, trace_run_start, set_tracing_backend, flush_tracing  # noqa: F401
-from generative.agents.tracing import _RUN_ID  # single source of truth for run ID
+from generative.agents.tracing import _RUN_ID  # noqa: F401  # re-export, extern genutzt (orchestrator, eval_quality)
 
 # OTel-Tracer für Phoenix. Bleibt None bis orchestrator._setup_phoenix_tracing()
 # ihn via set_llm_tracer() explizit setzt (nur bei ATOMIC_AGENT_TRACING=phoenix).

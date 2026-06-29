@@ -33,7 +33,7 @@ except ImportError:
     sys.exit("rapidfuzz fehlt: pip install rapidfuzz")
 
 from generative.agents import base
-from generative.config import AGENT_VERSION, CACHE_DIR, EVAL_ADAPTIVE_K_HIGH, EVAL_ADAPTIVE_K_MID, MODEL_OPUS, MODEL_CONFIG, QUALITY_HISTORY
+from generative.config import AGENT_VERSION, MODEL_OPUS, MODEL_CONFIG, QUALITY_HISTORY
 from decision_engine import ClaimDecision, ClaimInput, DEFAULT_CONFIG, Label, determine_decision
 from decision_engine.aggregation import aggregate as aggregate_decisions
 from decision_engine.models import QualityFlag
@@ -618,7 +618,6 @@ def _aggregate(
     # Atomic-Agent-spezifische Felder wie Wilson-CI, PDF-Chunk-Zahl und LLM-Usage an.
     valid_claims = int(engine_metrics["valid_claims"])
     parse_error_count = counts[PARSE_ERROR]
-    confirmed = counts[SUPPORTED_EXACT] + counts[SUPPORTED_PARAPHRASE]
     hallucinated = counts[NOT_IN_CONTEXT] + counts[CONTRADICTED]
     with_evidence = sum(1 for score in claim_scores if score["evidence"])
     evidence_verified_count = sum(1 for score in claim_scores if score["evidence_verified"] is True)

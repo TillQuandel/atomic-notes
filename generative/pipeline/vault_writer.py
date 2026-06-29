@@ -8,7 +8,7 @@ from pathlib import Path
 
 import yaml
 
-from generative.config import VAULT, WISSEN, INBOX, LITERATURE_DIR, CRITIC_AUTO_THRESHOLD
+from generative.config import VAULT, INBOX, LITERATURE_DIR, CRITIC_AUTO_THRESHOLD
 from generative.schemas.atomic_note import AtomicNoteDraft
 from shared.author_norm import drop_institutional_coauthors
 
@@ -603,7 +603,6 @@ def find_existing_in_inbox(source_file: str, title: str,
         if is_pristine_pipeline_note(text):
             return f
     return matches[0][0]
-    return None
 
 
 def _read_source_field(note_path: Path) -> str | None:

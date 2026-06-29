@@ -6,8 +6,6 @@ Konservative Variante (Codex-Empfehlung + Literatur-Konvergenz):
 - proposed-tags als getrenntes Schema-Feld für Bootstrap, KEIN Routing
 """
 from __future__ import annotations
-import sys
-from pathlib import Path
 
 
 from generative.agents.context_builder import score_tags_for_source

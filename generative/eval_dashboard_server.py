@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 import webbrowser
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -250,7 +249,7 @@ def _read_calibration_data(allowed_note_paths: set | None = None,
             "avg_agree": avg_agree,
             "has_labels": n_labeled > 0,
         }
-    except Exception as e:
+    except Exception:
         return {"rows": [], "n_eval": 0, "n_labeled": 0, "avg_agree": None, "has_labels": False}
 
 

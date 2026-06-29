@@ -600,7 +600,6 @@ def grobid_lookup(pdf_path: Path, grobid_url: str = "http://localhost:8070", tim
     Gibt None zurück wenn Server nicht erreichbar oder Parsing fehlschlägt.
     """
     import xml.etree.ElementTree as ET
-    import os
 
     url = f"{grobid_url.rstrip('/')}/api/processHeaderDocument"
     boundary = "AtomicAgentGrobid"

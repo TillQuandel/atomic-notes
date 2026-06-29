@@ -68,7 +68,6 @@ def test_blacklist_rejected_even_when_semantic_rescues_lexical():
 
 def test_rescue_respects_configurable_threshold():
     # Schwelle ist die config-Konstante; ein Wert knapp darunter wird verworfen.
-    from generative.agents import planner
     import generative.config as cfg
     # max-cos 0.49 < Default 0.50 → reject; 0.51 → rescue
     plan = _plan("Bildungs-Meta-Analyse-Selektion")

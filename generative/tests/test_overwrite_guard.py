@@ -4,7 +4,6 @@ Ein Re-Run desselben PDFs darf eine vom Nutzer editierte Inbox-Note nicht still
 überschreiben (Datenverlust). content-hash-Guard: pristine Pipeline-Notes dürfen
 idempotent überschrieben werden, editierte nicht.
 """
-from pathlib import Path
 
 from generative.schemas.atomic_note import AtomicNoteDraft
 

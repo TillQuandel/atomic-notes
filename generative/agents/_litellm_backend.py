@@ -9,7 +9,6 @@ Unterstützte Provider (Auswahl):
 Vollständige Provider-Liste: https://docs.litellm.ai/docs/providers
 """
 from __future__ import annotations
-import sys
 import time
 
 import litellm

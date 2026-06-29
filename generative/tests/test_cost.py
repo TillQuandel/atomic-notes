@@ -1,4 +1,3 @@
-import sys
 from unittest.mock import patch
 from generative.config import compute_cost_per_call
 
