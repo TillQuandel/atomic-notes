@@ -2,6 +2,7 @@
 
 Public API: determine_decision, Label, ClaimInput, ClaimDecision, Metric.
 """
+
 from __future__ import annotations
 
 from decision_engine.models import ClaimDecision, ClaimInput, Label, Metric, QualityFlag

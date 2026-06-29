@@ -12,6 +12,7 @@ Output:
 
 Verweigert die Berechnung wenn Labels unvollständig sind (Selection-Bias-Vermeidung).
 """
+
 from __future__ import annotations
 
 import json
@@ -92,6 +93,7 @@ def extract_pipeline_labels(pipeline: dict[str, dict]) -> dict[tuple[str, int], 
 
 # ---------- Statistik-Maße (manuell implementiert) ----------
 
+
 def percent_agreement(r1: list[str], r2: list[str]) -> float:
     if not r1:
         return float("nan")
@@ -161,6 +163,7 @@ def confusion_matrix(human: list[str], pipeline: list[str], categories=CATEGORIE
 
 # ---------- Report-Rendering ----------
 
+
 def ampel(value: float) -> str:
     if value != value:  # NaN
         return "⚪"
@@ -217,8 +220,7 @@ def check_completeness(humans: list[dict], pipeline_labels: dict) -> tuple[list[
     human_keys = {(h["note"], h["claim_idx"]) for h in humans}
     sampled_notes = {h["note"] for h in humans}
     missing_human = [
-        (note, idx) for (note, idx) in pipeline_keys
-        if note in sampled_notes and (note, idx) not in human_keys
+        (note, idx) for (note, idx) in pipeline_keys if note in sampled_notes and (note, idx) not in human_keys
     ]
     if missing_human:
         warnings.append(f"  {len(missing_human)} Pipeline-Claims ohne Human-Label (in Sample-Notes).")
@@ -260,7 +262,9 @@ def main() -> None:
     lines.append(f"- Pipeline-Eval: {len(pipeline_labels)} Claims über {len(pipeline)} Notes")
     lines.append("")
     lines.append("## Härtungs-Status")
-    lines.append("- Härtung #1 (Pipeline-Verdict verborgen): siehe `labeling_protocol.md` — strukturell durch build_labels.py.")
+    lines.append(
+        "- Härtung #1 (Pipeline-Verdict verborgen): siehe `labeling_protocol.md` — strukturell durch build_labels.py."
+    )
     lines.append("- Härtung #2 (Conditional Blind): User-Disziplin, im Pre-Reg dokumentiert.")
     lines.append(f"- Härtung #3 (Blind-Sub-Sample): {len(blind)} Blind-Labels gefunden.")
     lines.append("- Härtung #4 (Pre-Registration): `calibration/labeling_protocol.md`.")
@@ -302,11 +306,7 @@ def main() -> None:
             hb_p = [pipeline_labels[k] for k in common_keys]
             ac1_hybrid = gwet_ac1(hb_h, hb_p)
             ac1_blind = gwet_ac1(bl_h, hb_p)  # identische Pipeline-Items, beide Mensch-Modi vergleichen
-            delta = (
-                ac1_hybrid - ac1_blind
-                if ac1_hybrid == ac1_hybrid and ac1_blind == ac1_blind
-                else float("nan")
-            )
+            delta = ac1_hybrid - ac1_blind if ac1_hybrid == ac1_hybrid and ac1_blind == ac1_blind else float("nan")
             lines.append("\n## Blind-Kontroll-Δ (Härtung #3)")
             lines.append("")
             lines.append(f"- Schnittmenge (gleiche Items): n={len(common_keys)}")

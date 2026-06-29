@@ -9,6 +9,7 @@ Rules sind in zwei Klassen geteilt:
 # returnte hier ein ClaimDecision was Audit-Override blockierte → Regression zu v3.2.
 # Fix: Downgrade modifiziert nur das primary_label, danach kann Audit normal laufen.
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
@@ -31,6 +32,7 @@ class RulesConfig:
     # CLAUDE-PATTERN: RulesConfig ist autoritativ — Caller (z.B. eval_quality_v4)
     # importieren den Wert hier, statt eine eigene Konstante zu pflegen. Verhindert Drift.
     """
+
     retrieval_low_cosine_threshold: float = 0.4
 
 
@@ -48,6 +50,7 @@ def _source_for(label: Label) -> str:
 # ---------------------------------------------------------------------------
 # TERMINAL RULES — bei Match Pipeline-Ende
 # ---------------------------------------------------------------------------
+
 
 def rule_parse_error(inp: ClaimInput, config: RulesConfig = DEFAULT_CONFIG) -> ClaimDecision | None:
     """Höchste Priorität: parse_failed → PARSE_ERROR, immer terminal."""
@@ -70,7 +73,10 @@ def rule_low_cosine_system(inp: ClaimInput, config: RulesConfig = DEFAULT_CONFIG
 # MUTATOR — modifiziert ClaimInput, kein Pipeline-Ende
 # ---------------------------------------------------------------------------
 
-def apply_evidence_downgrade(inp: ClaimInput, config: RulesConfig = DEFAULT_CONFIG) -> tuple[ClaimInput, frozenset[QualityFlag]]:
+
+def apply_evidence_downgrade(
+    inp: ClaimInput, config: RulesConfig = DEFAULT_CONFIG
+) -> tuple[ClaimInput, frozenset[QualityFlag]]:
     """Downgrade supported_* Labels wenn Evidence nicht verifiziert.
 
     Returnt modifizierten ClaimInput + Flags zur Aufnahme in finale Decision.
@@ -81,7 +87,9 @@ def apply_evidence_downgrade(inp: ClaimInput, config: RulesConfig = DEFAULT_CONF
         return inp, frozenset()
 
     if inp.primary_label is Label.SUPPORTED_EXACT:
-        return replace(inp, primary_label=Label.NOT_IN_CONTEXT), frozenset({QualityFlag.EVIDENCE_UNVERIFIED, QualityFlag.EVIDENCE_FABRICATED})
+        return replace(inp, primary_label=Label.NOT_IN_CONTEXT), frozenset(
+            {QualityFlag.EVIDENCE_UNVERIFIED, QualityFlag.EVIDENCE_FABRICATED}
+        )
     if inp.primary_label is Label.SUPPORTED_PARAPHRASE:
         return replace(inp, primary_label=Label.PARTIALLY_SUPPORTED), frozenset({QualityFlag.EVIDENCE_UNVERIFIED})
     return inp, frozenset()
@@ -90,6 +98,7 @@ def apply_evidence_downgrade(inp: ClaimInput, config: RulesConfig = DEFAULT_CONF
 # ---------------------------------------------------------------------------
 # DECIDER — finale Entscheidung wenn nichts vorher terminal war
 # ---------------------------------------------------------------------------
+
 
 def rule_audit_stricter_override(inp: ClaimInput, config: RulesConfig = DEFAULT_CONFIG) -> ClaimDecision | None:
     """Audit-Override nur bei strengerem Label. Nie für/von Systemlabels."""
@@ -115,6 +124,7 @@ def rule_default_primary(inp: ClaimInput, config: RulesConfig = DEFAULT_CONFIG) 
 # ---------------------------------------------------------------------------
 # Label-Key-Mapping für Aggregation (mit assert_never für neue Labels)
 # ---------------------------------------------------------------------------
+
 
 def metric_count_key(label: Label) -> str:
     """Mapped Label-Enum auf JSON-Key. assert_never erzwingt Vollständigkeit.

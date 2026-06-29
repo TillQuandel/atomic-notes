@@ -10,6 +10,7 @@ Subkommandos:
 Der Orchestrator-Import passiert lazy im run-Zweig — `atomic-notes --help`
 bleibt dadurch schnell und funktioniert auch ohne schwere Dependencies.
 """
+
 from __future__ import annotations
 
 import sys
@@ -77,8 +78,7 @@ def main(argv: list[str] | None = None) -> int:
         try:
             from generative.gui.app import serve
         except ImportError:
-            print("GUI-Dependencies fehlen. Installation: pip install -e '.[gui]'",
-                  file=sys.stderr)
+            print("GUI-Dependencies fehlen. Installation: pip install -e '.[gui]'", file=sys.stderr)
             return 1
         serve(port=port, open_browser=open_browser)
         return 0

@@ -5,6 +5,7 @@ v3 bewertet atomare Claims gegen Top-K-PDF-Kontexte mit Claude als Judge,
 verifiziert angegebene Zitate programmatisch und aggregiert Retrieval-Failures
 separat von Halluzinationen.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -106,23 +107,27 @@ def _retrieve_claim_contexts(claims: list[str], chunks: list[Chunk]) -> list[Ret
         contexts: list[dict[str, Any]] = []
         for rank, (chunk_idx, score) in enumerate(ranked, start=1):
             chunk = chunks[chunk_idx]
-            contexts.append({
-                "rank": rank,
-                "chunk_idx": chunk_idx,
-                "pages": list(chunk.pages),
-                "cosine": round(float(score), 3),
-                "text": _expand_context(chunks, chunk_idx),
-            })
+            contexts.append(
+                {
+                    "rank": rank,
+                    "chunk_idx": chunk_idx,
+                    "pages": list(chunk.pages),
+                    "cosine": round(float(score), 3),
+                    "text": _expand_context(chunks, chunk_idx),
+                }
+            )
         best_idx = ranked[0][0] if ranked else None
         best_chunk = chunks[best_idx] if best_idx is not None else None
-        retrieved.append(RetrievedContext(
-            claim_idx=claim_idx,
-            claim=claim,
-            contexts=contexts,
-            top_cosine=round(float(ranked[0][1]), 3) if ranked else 0.0,
-            best_chunk_idx=best_idx,
-            best_page=best_chunk.pages[0] if best_chunk and best_chunk.pages else None,
-        ))
+        retrieved.append(
+            RetrievedContext(
+                claim_idx=claim_idx,
+                claim=claim,
+                contexts=contexts,
+                top_cosine=round(float(ranked[0][1]), 3) if ranked else 0.0,
+                best_chunk_idx=best_idx,
+                best_page=best_chunk.pages[0] if best_chunk and best_chunk.pages else None,
+            )
+        )
     return retrieved
 
 
@@ -170,19 +175,16 @@ def _format_claims_for_prompt(items: list[RetrievedContext]) -> str:
         ctx_lines = []
         for ctx in item.contexts:
             pages = ", ".join(str(p) for p in ctx["pages"]) or "unknown"
-            ctx_lines.append(
-                f"  Kontext {ctx['rank']} | Seiten {pages} | cosine {ctx['cosine']}:\n"
-                f"  {ctx['text']}"
-            )
+            ctx_lines.append(f"  Kontext {ctx['rank']} | Seiten {pages} | cosine {ctx['cosine']}:\n  {ctx['text']}")
         blocks.append(
-            f"Claim idx={item.claim_idx}: {item.claim}\n"
-            f"Top-Cosine: {item.top_cosine}\n"
-            + "\n".join(ctx_lines)
+            f"Claim idx={item.claim_idx}: {item.claim}\nTop-Cosine: {item.top_cosine}\n" + "\n".join(ctx_lines)
         )
     return "\n\n".join(blocks)
 
 
-def _split_for_prompt(note_title: str, note_body: str, items: list[RetrievedContext], *, variant: str) -> list[list[RetrievedContext]]:
+def _split_for_prompt(
+    note_title: str, note_body: str, items: list[RetrievedContext], *, variant: str
+) -> list[list[RetrievedContext]]:
     # CODEX-PATTERN: Single-call bleibt der Normalfall; nur bei langem Prompt wird deterministisch gesplittet,
     # damit der Judge nicht wegen Token-Limits ausfaellt und claim_idx trotzdem global stabil bleibt.
     batches: list[list[RetrievedContext]] = []
@@ -201,7 +203,11 @@ def _split_for_prompt(note_title: str, note_body: str, items: list[RetrievedCont
 
 
 def _build_prompt(note_title: str, note_body: str, items: list[RetrievedContext], *, variant: str = "primary") -> str:
-    return _prompt_header(note_title, note_body, variant=variant) + "\nClaims und Kontexte:\n" + _format_claims_for_prompt(items)
+    return (
+        _prompt_header(note_title, note_body, variant=variant)
+        + "\nClaims und Kontexte:\n"
+        + _format_claims_for_prompt(items)
+    )
 
 
 def _json_array_from_text(text: str) -> list[Any]:
@@ -212,7 +218,7 @@ def _json_array_from_text(text: str) -> list[Any]:
         end = text.rfind("]")
         if start == -1 or end == -1 or end <= start:
             raise
-        data = json.loads(text[start:end + 1])
+        data = json.loads(text[start : end + 1])
     if not isinstance(data, list):
         raise ValueError("Claude output is not a JSON array")
     return data
@@ -300,12 +306,16 @@ def _normalize_judge_rows(raw_rows: list[Any], items: list[RetrievedContext]) ->
     return normalized, sorted(set(quality_flags))
 
 
-def _call_judge(note_title: str, note_body: str, items: list[RetrievedContext], *, variant: str, use_cache: bool) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _call_judge(
+    note_title: str, note_body: str, items: list[RetrievedContext], *, variant: str, use_cache: bool
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     all_rows: list[dict[str, Any]] = []
     meta = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cached_calls": 0, "quality_flags": []}
     for batch in _split_for_prompt(note_title, note_body, items, variant=variant):
         prompt = _build_prompt(note_title, note_body, batch, variant=variant)
-        result = base.call_claude_full(prompt, model=MODEL_OPUS, agent=f"eval_quality_v3_{variant}", use_cache=use_cache)
+        result = base.call_claude_full(
+            prompt, model=MODEL_OPUS, agent=f"eval_quality_v3_{variant}", use_cache=use_cache
+        )
         meta["calls"] += 1
         meta["input_tokens"] += result.input_tokens
         meta["output_tokens"] += result.output_tokens
@@ -437,26 +447,30 @@ def _claim_scores_from_judge(
             elif label == SUPPORTED_PARAPHRASE:
                 label = PARTIALLY_SUPPORTED
                 flags.append("evidence_fabricated")
-        scores.append({
-            "claim_idx": row["claim_idx"],
-            "claim": claims[row["claim_idx"]],
-            "label": label,
-            "original_judge_label": row.get("original_judge_label"),
-            "evidence": row["evidence"],
-            "evidence_verified": verified,
-            "evidence_verification_score": verification_score,
-            "justification": row["justification"],
-            "best_page": row["best_page"],
-            "top_cosine": item.top_cosine,
-            "best_chunk_idx": item.best_chunk_idx,
-            "retrieved_contexts": item.contexts,
-            "quality_flags": flags,
-        })
+        scores.append(
+            {
+                "claim_idx": row["claim_idx"],
+                "claim": claims[row["claim_idx"]],
+                "label": label,
+                "original_judge_label": row.get("original_judge_label"),
+                "evidence": row["evidence"],
+                "evidence_verified": verified,
+                "evidence_verification_score": verification_score,
+                "justification": row["justification"],
+                "best_page": row["best_page"],
+                "top_cosine": item.top_cosine,
+                "best_chunk_idx": item.best_chunk_idx,
+                "retrieved_contexts": item.contexts,
+                "quality_flags": flags,
+            }
+        )
     scores.sort(key=lambda score: score["claim_idx"])
     return scores
 
 
-def _empty_result(note_path: Path, pdf_path: Path, pipeline_version: str, timestamp: str, error: str, total: int = 0) -> dict:
+def _empty_result(
+    note_path: Path, pdf_path: Path, pipeline_version: str, timestamp: str, error: str, total: int = 0
+) -> dict:
     return {
         "note": note_path.name,
         "pdf": pdf_path.name,
@@ -518,11 +532,9 @@ def _aggregate(
     hallucinated = counts[NOT_IN_CONTEXT] + counts[CONTRADICTED]
     with_evidence = sum(1 for score in claim_scores if score["evidence"])
     evidence_verified_count = sum(1 for score in claim_scores if score["evidence_verified"] is True)
-    quality_flags = sorted({
-        flag
-        for score in claim_scores
-        for flag in score["quality_flags"]
-    } | set(llm_meta.get("quality_flags", [])))
+    quality_flags = sorted(
+        {flag for score in claim_scores for flag in score["quality_flags"]} | set(llm_meta.get("quality_flags", []))
+    )
     if parse_error_count:
         quality_flags = sorted(set(quality_flags) | {"parse_errors_present"})
 
@@ -591,8 +603,9 @@ def _aggregate(
     return result
 
 
-def eval_note(note_path: Path | str, pdf_path: Path | str, pipeline_version: str = AGENT_VERSION,
-              no_cache: bool = False) -> dict:
+def eval_note(
+    note_path: Path | str, pdf_path: Path | str, pipeline_version: str = AGENT_VERSION, no_cache: bool = False
+) -> dict:
     """Evaluiert eine Note gegen ihre Quell-PDF und gibt v3-Metriken zurueck."""
     note_path = Path(note_path)
     pdf_path = Path(pdf_path)
@@ -634,7 +647,9 @@ def eval_note(note_path: Path | str, pdf_path: Path | str, pipeline_version: str
         llm_meta["input_tokens"] += audit_meta.get("input_tokens", 0)
         llm_meta["output_tokens"] += audit_meta.get("output_tokens", 0)
         llm_meta["cached_calls"] += audit_meta.get("cached_calls", 0)
-        llm_meta["quality_flags"] = sorted(set(llm_meta.get("quality_flags", [])) | set(audit_meta.get("quality_flags", [])))
+        llm_meta["quality_flags"] = sorted(
+            set(llm_meta.get("quality_flags", [])) | set(audit_meta.get("quality_flags", []))
+        )
 
     return _aggregate(note_path, pdf_path, pipeline_version, timestamp, language_pair, chunks, claim_scores, llm_meta)
 

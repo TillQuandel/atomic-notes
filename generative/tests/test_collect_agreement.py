@@ -5,6 +5,7 @@ Der alte Code rechnete `agreement_rate` auf Aggregat-Halluzinationsraten pro Not
 "Agreement", auch wenn sie bei keinem einzelnen Claim übereinstimmten.
 `note_claim_agreement` paart stattdessen Mensch- und Pipeline-Label pro claim_idx.
 """
+
 from __future__ import annotations
 
 

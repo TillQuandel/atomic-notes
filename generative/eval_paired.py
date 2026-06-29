@@ -22,6 +22,7 @@ Output:
     .cache/eval/baseline/vault-snapshot-<version>.json
     .cache/eval/baseline/<version>_paired.md
 """
+
 from __future__ import annotations
 import argparse
 import os
@@ -33,15 +34,15 @@ from pathlib import Path
 from generative.config import LITERATURE_DIR as _LIT  # noqa: E402
 
 BASELINE_PDFS = {
-    "bates":    _LIT / "Bates - 2017 - Information Behavior.pdf",
+    "bates": _LIT / "Bates - 2017 - Information Behavior.pdf",
     "kuhlthau": _LIT / "Kuhlthau - INFORMATION SEARCH PROCESS.pdf",
     "schlebbe": _LIT / "Schlebbe und Greifeneder - 2022 - Information Need, Informationsbedarf und -bedürfnis.pdf",
 }
 EVAL_DIR = Path(__file__).parent / ".cache" / "eval" / "baseline"
 
 CONFIGS = {
-    "v22":    {"ENABLE_ENTITY_RESOLUTION": "1"},
-    "no-er":  {"ENABLE_ENTITY_RESOLUTION": "0"},
+    "v22": {"ENABLE_ENTITY_RESOLUTION": "1"},
+    "no-er": {"ENABLE_ENTITY_RESOLUTION": "0"},
 }
 
 _NOTE_RE = re.compile(r"^\s*\[DRY-RUN\] -> (Vault|Inbox)[^:]*: (.+?)\.md\b")
@@ -59,7 +60,8 @@ def run_one(pdf: Path, key: str, version: str, config: str, snapshot: Path) -> P
             [sys.executable, "orchestrator.py", "--source", str(pdf), "--dry-run"],
             cwd=Path(__file__).parent,
             env=env,
-            stdout=fh, stderr=subprocess.STDOUT,
+            stdout=fh,
+            stderr=subprocess.STDOUT,
             check=False,
         )
     return log

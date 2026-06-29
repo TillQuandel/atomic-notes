@@ -8,6 +8,7 @@ nächsten Schritt; bei Setup-Problemen den `doctor`-Verweis.
 class TestScannedPdfHint:
     def test_names_file_and_suggests_ocr(self):
         from generative.pipeline.error_hints import scanned_pdf_hint
+
         msg = scanned_pdf_hint("Buch.pdf")
         assert "Buch.pdf" in msg
         assert "ocrmypdf" in msg
@@ -20,6 +21,7 @@ class TestScannedHintThinVariant:
         # Dünner (nicht leerer) Text: die "enthält keinen Text"-Formulierung wäre
         # sachlich falsch (G6/#27). words_per_page wird genannt, OCR-Schritt bleibt.
         from generative.pipeline.error_hints import scanned_pdf_hint
+
         msg = scanned_pdf_hint("Scan.pdf", words_per_page=12.0)
         assert "kaum" in msg.lower()
         assert "12" in msg
@@ -28,6 +30,7 @@ class TestScannedHintThinVariant:
     def test_empty_default_unchanged(self):
         # Ohne words_per_page bleibt die bestehende "keinen Text"-Meldung.
         from generative.pipeline.error_hints import scanned_pdf_hint
+
         msg = scanned_pdf_hint("Scan.pdf")
         assert "keinen extrahierbaren text" in msg.lower()
 
@@ -35,6 +38,7 @@ class TestScannedHintThinVariant:
 class TestPdftotextErrorHint:
     def test_actionable_with_doctor_pointer(self):
         from generative.pipeline.error_hints import pdftotext_error_hint
+
         msg = pdftotext_error_hint("some raw stderr")
         assert "doctor" in msg
         assert "pdftotext" in msg
@@ -45,6 +49,7 @@ class TestPdftotextErrorHint:
 class TestScannedHintUsesDistinctOcrOutput:
     def test_ocr_command_does_not_overwrite_input_in_place(self):
         from generative.pipeline.error_hints import scanned_pdf_hint
+
         msg = scanned_pdf_hint("Buch.pdf")
         # ocrmypdf akzeptiert nicht denselben In-/Out-Pfad → distinkter Output
         assert "Buch.pdf' 'Buch.pdf'" not in msg
@@ -54,11 +59,13 @@ class TestScannedHintUsesDistinctOcrOutput:
 class TestPdftotextHintRobust:
     def test_none_stderr_does_not_crash(self):
         from generative.pipeline.error_hints import pdftotext_error_hint
+
         msg = pdftotext_error_hint(None)
         assert "doctor" in msg
 
     def test_encrypted_pdf_gets_password_hint(self):
         from generative.pipeline.error_hints import pdftotext_error_hint
+
         msg = pdftotext_error_hint("Command Line Error: Incorrect password")
         assert "qpdf" in msg or "passwort" in msg.lower()
 
@@ -69,10 +76,13 @@ class TestPdfToPagesMissingBinary:
         # trotzdem die handlungsanleitende Meldung (+ doctor) liefern.
         import subprocess
         from generative.pipeline import pdf_chunker
+
         def _raise(*a, **k):
             raise FileNotFoundError("pdftotext not found")
+
         monkeypatch.setattr(subprocess, "run", _raise)
         import pytest
+
         with pytest.raises(SystemExit) as exc:
             pdf_chunker.pdf_to_pages(__import__("pathlib").Path("x.pdf"))
         assert "doctor" in str(exc.value)
@@ -81,6 +91,7 @@ class TestPdfToPagesMissingBinary:
 class TestLitellmErrorHint:
     def test_key_error_gets_targeted_hint(self):
         from generative.pipeline.error_hints import litellm_error_hint
+
         msg = litellm_error_hint("extractor", "gpt-4", "AuthenticationError: invalid api key")
         assert "doctor" in msg
         # weist auf den Key/das Backend hin
@@ -88,6 +99,7 @@ class TestLitellmErrorHint:
 
     def test_generic_error_still_actionable(self):
         from generative.pipeline.error_hints import litellm_error_hint
+
         msg = litellm_error_hint("planner", "claude-x", "Timeout reading response")
         assert "doctor" in msg
         assert "planner" in msg or "claude-x" in msg

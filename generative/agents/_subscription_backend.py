@@ -4,6 +4,7 @@ Modell-Mapping: vollständige Modell-IDs (anthropic/claude-opus-4-7) →
 CLI-Shorthand (opus/haiku) via _to_cli_model(). Erlaubt einheitliche
 Modell-IDs in config.py für beide Backends.
 """
+
 from __future__ import annotations
 import asyncio
 import json
@@ -19,9 +20,9 @@ _MAX_RETRIES = 2
 _TIMEOUT_RETRIES = int(os.getenv("ATOMIC_AGENT_TIMEOUT_RETRIES", "0"))
 
 _CLI_ALIASES: dict[str, str] = {
-    "anthropic/claude-opus-4-7":           "opus",
+    "anthropic/claude-opus-4-7": "opus",
     "anthropic/claude-haiku-4-5-20251001": "haiku",
-    "anthropic/claude-sonnet-4-6":         "sonnet",
+    "anthropic/claude-sonnet-4-6": "sonnet",
 }
 
 
@@ -39,8 +40,7 @@ _CLI_INSTALL_HINT = (
 )
 
 # Fehlerklassen, bei denen Retries sinnlos sind: sofort mit Handlungsanleitung scheitern.
-_AUTH_PATTERNS = ("/login", "not logged in", "invalid api key", "authentication",
-                  "unauthorized", "oauth token")
+_AUTH_PATTERNS = ("/login", "not logged in", "invalid api key", "authentication", "unauthorized", "oauth token")
 _RATE_PATTERNS = ("429", "rate_limit", "rate limit")
 
 
@@ -71,15 +71,19 @@ def _fail_fast_hint(text: str) -> str | None:
 
 def _build_argv(model: str) -> list[str]:
     return [
-        CLAUDE_BIN, "-p",
-        "--output-format", "json",
-        "--model", _to_cli_model(model),
+        CLAUDE_BIN,
+        "-p",
+        "--output-format",
+        "json",
+        "--model",
+        _to_cli_model(model),
         "--exclude-dynamic-system-prompt-sections",
     ]
 
 
 def _parse_cli_json(raw: str):
     from generative.agents.base import CallResult
+
     d = json.loads(raw)
     if d.get("is_error"):
         raise RuntimeError(f"claude CLI Fehler: {d.get('result', '')[:300]}")
@@ -112,7 +116,10 @@ def call_full(
             proc = subprocess.run(
                 _build_argv(model),
                 input=prompt,
-                capture_output=True, text=True, encoding="utf-8", errors="replace",
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=call_timeout_sec,
                 env=_env,
             )
@@ -121,19 +128,23 @@ def call_full(
             # remain bounded by the existing backend retry ceiling.
             effective_timeout_retries = min(_MAX_RETRIES, timeout_retries)
             if attempt < effective_timeout_retries:
-                print(f"      [cli-retry] {agent}/{model} timeout (attempt {attempt+1}/{effective_timeout_retries+1}) â€” 10s Pause", file=sys.stderr)
+                print(
+                    f"      [cli-retry] {agent}/{model} timeout (attempt {attempt + 1}/{effective_timeout_retries + 1}) â€” 10s Pause",
+                    file=sys.stderr,
+                )
                 time.sleep(10.0)
                 continue
             raise RuntimeError(f"claude CLI Timeout nach {call_timeout_sec}s ({agent}/{model})")
         except FileNotFoundError as e:
-            raise RuntimeError(
-                f"claude-CLI '{CLAUDE_BIN}' nicht gefunden. {_CLI_INSTALL_HINT}"
-            ) from e
+            raise RuntimeError(f"claude-CLI '{CLAUDE_BIN}' nicht gefunden. {_CLI_INSTALL_HINT}") from e
         except OSError as e:
             raise RuntimeError(f"claude CLI nicht aufrufbar: {e}") from e
 
         if proc.returncode in _TRANSIENT_RC and attempt < _MAX_RETRIES:
-            print(f"      [cli-retry] {agent}/{model} rc={proc.returncode} (attempt {attempt+1}/{_MAX_RETRIES+1})", file=sys.stderr)
+            print(
+                f"      [cli-retry] {agent}/{model} rc={proc.returncode} (attempt {attempt + 1}/{_MAX_RETRIES + 1})",
+                file=sys.stderr,
+            )
             time.sleep(1.0)
             continue
         if proc.returncode == 1:
@@ -144,11 +155,12 @@ def call_full(
             if d.get("is_error"):
                 hint = _fail_fast_hint(str(d.get("result", "")))
                 if hint:
-                    raise RuntimeError(
-                        f"claude CLI: {str(d.get('result', ''))[:200]} | {hint}"
-                    )
+                    raise RuntimeError(f"claude CLI: {str(d.get('result', ''))[:200]} | {hint}")
                 if attempt < _MAX_RETRIES:
-                    print(f"      [cli-retry] {agent}/{model} is_error (attempt {attempt+1}/{_MAX_RETRIES+1}) — 10s Pause", file=sys.stderr)
+                    print(
+                        f"      [cli-retry] {agent}/{model} is_error (attempt {attempt + 1}/{_MAX_RETRIES + 1}) — 10s Pause",
+                        file=sys.stderr,
+                    )
                     time.sleep(10.0)
                     continue
         break
@@ -157,10 +169,7 @@ def call_full(
     if proc.returncode != 0:
         err = (proc.stderr or proc.stdout or "")[:500]
         hint = _fail_fast_hint(err)
-        raise RuntimeError(
-            f"claude CLI fehlgeschlagen (rc={proc.returncode}): {err}"
-            + (f" | {hint}" if hint else "")
-        )
+        raise RuntimeError(f"claude CLI fehlgeschlagen (rc={proc.returncode}): {err}" + (f" | {hint}" if hint else ""))
 
     try:
         return _parse_cli_json(proc.stdout)
@@ -193,9 +202,7 @@ async def call_full_async(
                 env=_env,
             )
         except FileNotFoundError as e:
-            raise RuntimeError(
-                f"claude-CLI '{CLAUDE_BIN}' nicht gefunden. {_CLI_INSTALL_HINT}"
-            ) from e
+            raise RuntimeError(f"claude-CLI '{CLAUDE_BIN}' nicht gefunden. {_CLI_INSTALL_HINT}") from e
         except OSError as e:
             raise RuntimeError(f"claude CLI nicht aufrufbar: {e}") from e
         try:
@@ -210,7 +217,10 @@ async def call_full_async(
             # remain bounded by the existing backend retry ceiling.
             effective_timeout_retries = min(_MAX_RETRIES, timeout_retries)
             if attempt < effective_timeout_retries:
-                print(f"      [cli-retry] {agent}/{model} timeout (attempt {attempt+1}/{effective_timeout_retries+1}) â€” 10s Pause", file=sys.stderr)
+                print(
+                    f"      [cli-retry] {agent}/{model} timeout (attempt {attempt + 1}/{effective_timeout_retries + 1}) â€” 10s Pause",
+                    file=sys.stderr,
+                )
                 await asyncio.sleep(10.0)
                 continue
             raise RuntimeError(f"claude CLI Timeout nach {call_timeout_sec}s ({agent}/{model})")
@@ -220,7 +230,9 @@ async def call_full_async(
         rc = proc.returncode
 
         if rc in _TRANSIENT_RC and attempt < _MAX_RETRIES:
-            print(f"      [cli-retry] {agent}/{model} rc={rc} (attempt {attempt+1}/{_MAX_RETRIES+1})", file=sys.stderr)
+            print(
+                f"      [cli-retry] {agent}/{model} rc={rc} (attempt {attempt + 1}/{_MAX_RETRIES + 1})", file=sys.stderr
+            )
             await asyncio.sleep(1.0)
             continue
         if rc == 1:
@@ -231,11 +243,12 @@ async def call_full_async(
             if d.get("is_error"):
                 hint = _fail_fast_hint(str(d.get("result", "")))
                 if hint:
-                    raise RuntimeError(
-                        f"claude CLI: {str(d.get('result', ''))[:200]} | {hint}"
-                    )
+                    raise RuntimeError(f"claude CLI: {str(d.get('result', ''))[:200]} | {hint}")
                 if attempt < _MAX_RETRIES:
-                    print(f"      [cli-retry] {agent}/{model} is_error (attempt {attempt+1}/{_MAX_RETRIES+1}) — 10s Pause", file=sys.stderr)
+                    print(
+                        f"      [cli-retry] {agent}/{model} is_error (attempt {attempt + 1}/{_MAX_RETRIES + 1}) — 10s Pause",
+                        file=sys.stderr,
+                    )
                     await asyncio.sleep(10.0)
                     continue
         break
@@ -243,10 +256,7 @@ async def call_full_async(
     if rc != 0:
         err = (stderr or stdout or "")[:500]
         hint = _fail_fast_hint(err)
-        raise RuntimeError(
-            f"claude CLI fehlgeschlagen (rc={rc}): {err}"
-            + (f" | {hint}" if hint else "")
-        )
+        raise RuntimeError(f"claude CLI fehlgeschlagen (rc={rc}): {err}" + (f" | {hint}" if hint else ""))
 
     try:
         return _parse_cli_json(stdout)

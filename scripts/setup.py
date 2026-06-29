@@ -4,6 +4,7 @@
 Cross-platform (Windows + Linux). Loescht das .venv NICHT (uv synct in-place),
 bricht aber ab, wenn man versehentlich aus dem .venv heraus startet.
 """
+
 import shutil
 import subprocess
 import sys
@@ -27,9 +28,7 @@ def main() -> None:
     subprocess.run(["uv", "sync", "--extra", "dev"], cwd=ROOT, check=True)
 
     print("-> doctor (Preflight)")
-    subprocess.run(
-        ["uv", "run", "python", "-m", "generative.cli", "doctor"], cwd=ROOT, check=True
-    )
+    subprocess.run(["uv", "run", "python", "-m", "generative.cli", "doctor"], cwd=ROOT, check=True)
 
     print("\nSetup fertig. Tools laufen via 'uv run <cmd>'.")
 

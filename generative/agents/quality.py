@@ -1,4 +1,5 @@
 """Quality-Agent: CrossRef + OpenAlex + Retraction-Check → QualityReport."""
+
 from __future__ import annotations
 import json
 import urllib.parse
@@ -11,10 +12,7 @@ from generative.schemas.atomic_note import QualityReport
 
 def _http_json(url: str, timeout: int = 10) -> Optional[dict]:
     try:
-        req = urllib.request.Request(
-            url,
-            headers={"User-Agent": USER_AGENT, "Accept": "application/json"}
-        )
+        req = urllib.request.Request(url, headers={"User-Agent": USER_AGENT, "Accept": "application/json"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8"))
     except Exception:
@@ -34,8 +32,7 @@ def _openalex_work(doi: str) -> Optional[dict]:
     return _http_json(url)
 
 
-def _crossref_doi_lookup(title: str, author: Optional[str] = None,
-                         year: Optional[str] = None) -> Optional[str]:
+def _crossref_doi_lookup(title: str, author: Optional[str] = None, year: Optional[str] = None) -> Optional[str]:
     """Sucht DOI per CrossRef-Title-Match. Gibt nur DOI zurück wenn Match überzeugend."""
     if not title or len(title) < 10:
         return None
@@ -55,16 +52,16 @@ def _crossref_doi_lookup(title: str, author: Optional[str] = None,
     if score < 80:
         return None
     if year:
-        published = (top.get("published-print") or top.get("published-online")
-                     or top.get("issued") or {})
+        published = top.get("published-print") or top.get("published-online") or top.get("issued") or {}
         date_parts = (published.get("date-parts") or [[None]])[0]
         if date_parts and date_parts[0] and str(date_parts[0]) != str(year):
             return None
     return top.get("DOI")
 
 
-def check_quality(doi: Optional[str] = None, author: Optional[str] = None,
-                  year: Optional[str] = None, title: Optional[str] = None) -> QualityReport:
+def check_quality(
+    doi: Optional[str] = None, author: Optional[str] = None, year: Optional[str] = None, title: Optional[str] = None
+) -> QualityReport:
     flags: list[str] = []
     peer_reviewed: Optional[bool] = None
     citation_count: Optional[int] = None
@@ -94,11 +91,7 @@ def check_quality(doi: Optional[str] = None, author: Optional[str] = None,
             # andere Notice-Typen werden als separate (weiche) Quality-Flags geführt.
             if ctype == "retracted-article":
                 retracted = True
-            update_types = {
-                (u.get("type") or "").lower()
-                for u in (meta.get("update-to") or [])
-                if isinstance(u, dict)
-            }
+            update_types = {(u.get("type") or "").lower() for u in (meta.get("update-to") or []) if isinstance(u, dict)}
             if "retraction" in update_types or "withdrawal" in update_types:
                 retracted = True
             if "expression-of-concern" in update_types:
@@ -121,8 +114,7 @@ def check_quality(doi: Optional[str] = None, author: Optional[str] = None,
                         names.append(fam)
                 if names:
                     crossref_author = " & ".join(names) if len(names) <= 2 else names[0] + " et al."
-            published = (meta.get("published-print") or meta.get("published-online")
-                         or meta.get("issued") or {})
+            published = meta.get("published-print") or meta.get("published-online") or meta.get("issued") or {}
             date_parts = (published.get("date-parts") or [[None]])[0]
             if date_parts and date_parts[0]:
                 crossref_year = str(date_parts[0])

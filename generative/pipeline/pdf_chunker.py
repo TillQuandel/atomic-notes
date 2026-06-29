@@ -4,6 +4,7 @@ Seiten-Marker `[S. N]` werden an Seitenanfängen eingefügt (basierend auf pdfto
 \\f-Form-Feed-Markierung). Damit kann der Extractor Anker-Zitate mit korrekter Seitenzahl
 versehen und der Verifier die Seitenzahl gegen den Originaltext prüfen.
 """
+
 from __future__ import annotations
 import re
 import subprocess
@@ -16,8 +17,8 @@ from generative.config import CHUNK_WORDS, MIN_WORDS_PER_PAGE
 
 @dataclass
 class Chunk:
-    title: str                   # Kapitelüberschrift oder "Abschnitt N"
-    text: str                    # mit `[S. N]`-Markern an Seitenanfängen
+    title: str  # Kapitelüberschrift oder "Abschnitt N"
+    text: str  # mit `[S. N]`-Markern an Seitenanfängen
     index: int
     page_start: int | None = None
     page_end: int | None = None
@@ -42,6 +43,7 @@ def _pdf_page_labels(pdf_path: Path) -> list[str] | None:
     try:
         from pypdf import PdfReader
         from pypdf.generic import DictionaryObject
+
         reader = PdfReader(str(pdf_path))
         root = reader.trailer["/Root"].get_object()
         if not isinstance(root, DictionaryObject) or "/PageLabels" not in root:
@@ -82,9 +84,7 @@ def _usable_page_labels(labels: list | None) -> list | None:
     return labels
 
 
-def _resolve_page_numbers(
-    pages_raw: list[str], labels: list | None
-) -> list[tuple[int, str]]:
+def _resolve_page_numbers(pages_raw: list[str], labels: list | None) -> list[tuple[int, str]]:
     """Ordnet jeder Seite ihre zitierfähige Seitenzahl zu: das numerische
     Druckseiten-Label, sonst die 1-basierte Form-Feed-Position.
 
@@ -109,10 +109,14 @@ def pdf_to_pages(pdf_path: Path) -> list[tuple[int, str]]:
     PDF welche führt (Buch: PDF-Seite 179 → Druckseite „159"); sonst die 1-basierte
     pdftotext-Position (Paper ohne Labels — unverändertes Verhalten)."""
     from generative.pipeline.error_hints import pdftotext_error_hint
+
     try:
         result = subprocess.run(
             ["pdftotext", str(pdf_path), "-"],
-            capture_output=True, text=True, encoding="utf-8", errors="replace",
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
         )
     except OSError as e:
         # pdftotext-Binary fehlt/nicht ausführbar → genau der Setup-Fall, der den
@@ -142,14 +146,27 @@ def pages_to_marked_text(pages: list[tuple[int, str]]) -> str:
 # Frontmatter-Indikatoren: Phrasen die typischerweise vor dem ersten Kapitel auftauchen.
 # Englisch + Deutsch. Wortgrenzen-Match, case-insensitive.
 _FRONTMATTER_PHRASES = (
-    "advance praise", "praise for",
-    "acknowledgments", "acknowledgements", "danksagung",
-    "copyright", "all rights reserved", "alle rechte vorbehalten",
-    "dedication", "widmung",
-    "table of contents", "contents", "inhaltsverzeichnis", "inhalt",
-    "foreword", "vorwort",
-    "preface", "geleitwort",
-    "about the author", "über den autor", "über die autorin",
+    "advance praise",
+    "praise for",
+    "acknowledgments",
+    "acknowledgements",
+    "danksagung",
+    "copyright",
+    "all rights reserved",
+    "alle rechte vorbehalten",
+    "dedication",
+    "widmung",
+    "table of contents",
+    "contents",
+    "inhaltsverzeichnis",
+    "inhalt",
+    "foreword",
+    "vorwort",
+    "preface",
+    "geleitwort",
+    "about the author",
+    "über den autor",
+    "über die autorin",
     "isbn",
 )
 _FRONTMATTER_RE = re.compile(
@@ -188,10 +205,7 @@ def drop_frontmatter_pages(pages: list[tuple[int, str]]) -> tuple[list[tuple[int
         # Zusätzlich: Matches deren Titel selbst eine Frontmatter-Phrase enthält
         # (z.B. „I. Vorwort", „Part I Preface") gelten NICHT als erstes Body-Kapitel —
         # Vorwort/Preface/Acknowledgments gehören zum Frontmatter.
-        if any(
-            _is_real_chapter_match(m) and not _FRONTMATTER_RE.search(m.group(2))
-            for m in _CHAPTER_RE.finditer(txt)
-        ):
+        if any(_is_real_chapter_match(m) and not _FRONTMATTER_RE.search(m.group(2)) for m in _CHAPTER_RE.finditer(txt)):
             first_chapter_idx = i
             break
 
@@ -223,8 +237,7 @@ def pdf_to_text(pdf_path: Path, strip_frontmatter: bool = True) -> str:
         pages, dropped = drop_frontmatter_pages(pages)
         if dropped:
             print(
-                f"      [frontmatter-strip] {dropped} Seite(n) entfernt "
-                f"(vor erstem Kapitel-Heading)",
+                f"      [frontmatter-strip] {dropped} Seite(n) entfernt (vor erstem Kapitel-Heading)",
                 file=sys.stderr,
             )
     return pages_to_marked_text(pages)
@@ -241,11 +254,12 @@ def page_range_of_text(text: str) -> tuple[int | None, int | None]:
 @dataclass
 class TextQuality:
     """Ergebnis des Textqualitäts-Gates (G6/#27)."""
+
     total_words: int
     pages: int
     words_per_page: float
-    is_empty: bool   # gar kein extrahierbarer Text
-    is_thin: bool    # Text vorhanden, aber unter MIN_WORDS_PER_PAGE (gescannt/kaputt)
+    is_empty: bool  # gar kein extrahierbarer Text
+    is_thin: bool  # Text vorhanden, aber unter MIN_WORDS_PER_PAGE (gescannt/kaputt)
 
 
 def assess_text_quality(text: str) -> TextQuality:
@@ -275,8 +289,7 @@ def assess_text_quality(text: str) -> TextQuality:
     )
 
 
-def concept_text_window(full_text: str, search_terms: list[str],
-                        window_words: int = 400, max_chars: int = 8000) -> str:
+def concept_text_window(full_text: str, search_terms: list[str], window_words: int = 400, max_chars: int = 8000) -> str:
     """Sliding-Window Co-Occurrence Ranking — wählt die thematisch dichtesten
     Fenster aus dem Volltext (Option D, Gemini-Review 2026-05-17).
 
@@ -317,8 +330,7 @@ def concept_text_window(full_text: str, search_terms: list[str],
     # Fließtext NICHT (sonst erbt Folgetext die zitierte statt der echten Seite;
     # Codex-Review 2026-06-24). re.finditer(r"\S+") liefert dieselbe Token-Folge
     # wie full_text.split() oben, plus Positionen fürs Marker-Mapping.
-    _real_markers = [(m.start(), m.group(1)) for m in
-                     re.finditer(r"(?m)^[ \t]*\[S\.\s*(\d+)\][ \t]*$", full_text)]
+    _real_markers = [(m.start(), m.group(1)) for m in re.finditer(r"(?m)^[ \t]*\[S\.\s*(\d+)\][ \t]*$", full_text)]
     page_at_word: list[str | None] = []
     _cur_page: str | None = None
     _mi = 0
@@ -445,8 +457,7 @@ def pdf_metadata(pdf_path: Path) -> dict[str, str]:
     """Liest pdfinfo-Metadaten als dict (Title, Subject, Pages zitierfähig;
     Info-Dict-Autor/-CreationDate nur diagnostisch — siehe _parse_pdfinfo_output)."""
     result = subprocess.run(
-        ["pdfinfo", str(pdf_path)],
-        capture_output=True, text=True, encoding="utf-8", errors="replace"
+        ["pdfinfo", str(pdf_path)], capture_output=True, text=True, encoding="utf-8", errors="replace"
     )
     if result.returncode != 0:
         return {}
@@ -466,12 +477,12 @@ _CHAPTER_RE = re.compile(
     r"(?:Kapitel|Chapter|Teil|Part|Beitrag|Section)?"
     r"\s*"
     r"("
-        r"\d{1,2}(?:\.\d{1,2})*"            # arabisch (1, 2.3)
-        r"|"
-        r"[IVX]{1,4}"                        # römisch (Case-sensitive, max 4 Stellen)
-        r"|"
-        r"(?i:eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn"
-            r"|one|two|three|four|five|six|seven|eight|nine|ten)"
+    r"\d{1,2}(?:\.\d{1,2})*"  # arabisch (1, 2.3)
+    r"|"
+    r"[IVX]{1,4}"  # römisch (Case-sensitive, max 4 Stellen)
+    r"|"
+    r"(?i:eins|zwei|drei|vier|fünf|sechs|sieben|acht|neun|zehn"
+    r"|one|two|three|four|five|six|seven|eight|nine|ten)"
     r")"
     r"[.:]?\s+"
     r"([A-ZÄÖÜ][^\n]{3,120})"
@@ -512,10 +523,15 @@ def split_by_chapters(text: str) -> list[Chunk]:
         all_pages = ([prefix_pages[-1]] if prefix_pages else []) + chunk_pages
         page_start = min(all_pages) if all_pages else None
         page_end = max(all_pages) if all_pages else None
-        chunks.append(Chunk(
-            title=title, text=chunk_text, index=i,
-            page_start=page_start, page_end=page_end,
-        ))
+        chunks.append(
+            Chunk(
+                title=title,
+                text=chunk_text,
+                index=i,
+                page_start=page_start,
+                page_end=page_end,
+            )
+        )
     return chunks
 
 
@@ -525,14 +541,17 @@ def _split_by_words(text: str) -> list[Chunk]:
     words = text.split()
     chunks: list[Chunk] = []
     for i in range(0, len(words), CHUNK_WORDS):
-        block = " ".join(words[i:i + CHUNK_WORDS])
+        block = " ".join(words[i : i + CHUNK_WORDS])
         page_start, page_end = page_range_of_text(block)
-        chunks.append(Chunk(
-            title=f"Abschnitt {i // CHUNK_WORDS + 1}",
-            text=block,
-            index=i // CHUNK_WORDS,
-            page_start=page_start, page_end=page_end,
-        ))
+        chunks.append(
+            Chunk(
+                title=f"Abschnitt {i // CHUNK_WORDS + 1}",
+                text=block,
+                index=i // CHUNK_WORDS,
+                page_start=page_start,
+                page_end=page_end,
+            )
+        )
     return chunks
 
 
@@ -579,7 +598,7 @@ def extract_overview(text: str, max_words: int = 1500) -> str:
             if budget_used >= snippet_budget:
                 break
             take = min(per_sample, snippet_budget - budget_used)
-            samples.append(" ".join(words[start:start + take]))
+            samples.append(" ".join(words[start : start + take]))
             budget_used += take
         if samples:
             parts.append("[Stichproben:]\n" + "\n\n[...]\n\n".join(samples))

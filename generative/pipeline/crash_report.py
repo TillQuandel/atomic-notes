@@ -4,6 +4,7 @@ Bei einer Stage-6-Exception wird der unverifizierte Draft verworfen (nicht gesch
 und stattdessen ein strukturierter JSON-Report nach .cache/failed/<run-id>/<slug>.json
 abgelegt — damit der Crash diagnostizierbar bleibt statt in einer stderr-Zeile zu verschwinden.
 """
+
 from __future__ import annotations
 
 import json

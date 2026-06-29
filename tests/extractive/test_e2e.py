@@ -1,5 +1,6 @@
 # tests/extractive/test_e2e.py
 """E2E-Akzeptanztests auf Bates 2017 (EN, 12 Seiten)."""
+
 import json
 import subprocess
 import tempfile
@@ -22,10 +23,14 @@ def out_dir():
 
 def _run_pipeline(tmp_path, extra_args=None):
     cmd = [
-        "python", str(REPO / "extractive" / "orchestrator.py"),
-        "--source", str(BATES),
-        "--out-dir", str(tmp_path),
-        "--eval-jsonl", str(tmp_path / "eval.jsonl"),
+        "python",
+        str(REPO / "extractive" / "orchestrator.py"),
+        "--source",
+        str(BATES),
+        "--out-dir",
+        str(tmp_path),
+        "--eval-jsonl",
+        str(tmp_path / "eval.jsonl"),
     ] + (extra_args or [])
     return subprocess.run(cmd, capture_output=True, text=True, cwd=str(REPO))
 

@@ -5,6 +5,7 @@ Cache + Trace liegen hier; der eigentliche LLM-Call liegt im Backend.
 Response-Cache: ``.cache/llm/<sha256(prompt+model)[:16]>.json``
 Trace-Hook: jeder Call schreibt eine Zeile nach ``.cache/runs/<run-id>.jsonl``
 """
+
 from __future__ import annotations
 import hashlib
 import json
@@ -35,6 +36,7 @@ def set_llm_tracer(tracer) -> None:
     Aufruf aus orchestrator._setup_phoenix_tracing(). None = Tracing aus."""
     global _OTEL_TRACER
     _OTEL_TRACER = tracer
+
 
 # Backend-Dispatch
 if BACKEND == "litellm":
@@ -172,18 +174,30 @@ def _cache_get(key: str) -> Optional[CallResult]:
 def _cache_put(key: str, result: CallResult) -> None:
     _ensure_dirs()
     p = _LLM_CACHE_DIR / f"{key}.json"
-    p.write_text(json.dumps({
-        "text": result.text,
-        "input_tokens": result.input_tokens,
-        "output_tokens": result.output_tokens,
-        "cache_read_tokens": result.cache_read_tokens,
-        "cache_creation_tokens": result.cache_creation_tokens,
-        "duration_ms": result.duration_ms,
-    }, ensure_ascii=False), encoding="utf-8")
+    p.write_text(
+        json.dumps(
+            {
+                "text": result.text,
+                "input_tokens": result.input_tokens,
+                "output_tokens": result.output_tokens,
+                "cache_read_tokens": result.cache_read_tokens,
+                "cache_creation_tokens": result.cache_creation_tokens,
+                "duration_ms": result.duration_ms,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
 
 
-def _trace(agent: str, prompt: str, model: str, result: CallResult,
-           error: Optional[str] = None, cache_key: Optional[str] = None) -> None:
+def _trace(
+    agent: str,
+    prompt: str,
+    model: str,
+    result: CallResult,
+    error: Optional[str] = None,
+    cache_key: Optional[str] = None,
+) -> None:
     entry = {
         "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
         "agent": agent,
@@ -198,6 +212,7 @@ def _trace(agent: str, prompt: str, model: str, result: CallResult,
         "error": error,
     }
     from generative.agents.tracing import _backend as _tracing_backend
+
     _tracing_backend.write(entry)
 
 
@@ -221,8 +236,7 @@ def _llm_span(agent: str, prompt: str, model: str):
         yield span
 
 
-def _annotate_llm_span(span, result: "CallResult", *, cache_hit: bool = False,
-                       error: Optional[str] = None) -> None:
+def _annotate_llm_span(span, result: "CallResult", *, cache_hit: bool = False, error: Optional[str] = None) -> None:
     """Schreibt Output + Usage in den LLM-Span. No-op wenn span is None."""
     if span is None:
         return
@@ -234,14 +248,19 @@ def _annotate_llm_span(span, result: "CallResult", *, cache_hit: bool = False,
         span.set_status(_OtelStatus(_OtelStatusCode.ERROR, error))
 
 
-def call_claude(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
-                use_cache: bool = True) -> str:
+def call_claude(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown", use_cache: bool = True) -> str:
     """Synchroner Aufruf. Gibt nur den Text zurück (Backwards-Compat)."""
     return call_claude_full(prompt, model=model, agent=agent, use_cache=use_cache).text
 
 
-def call_claude_full(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
-                     use_cache: bool = True, cache_namespace: str | None = None) -> CallResult:
+def call_claude_full(
+    prompt: str,
+    *,
+    model: str = MODEL_OPUS,
+    agent: str = "unknown",
+    use_cache: bool = True,
+    cache_namespace: str | None = None,
+) -> CallResult:
     """Synchroner Aufruf mit vollem CallResult (text + usage).
 
     cache_namespace ueberschreibt den globalen Run-Salt (set_cache_namespace) fuer
@@ -274,13 +293,15 @@ def call_claude_full(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unkn
         return result
 
 
-async def call_claude_async(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
-                            use_cache: bool = True) -> str:
+async def call_claude_async(
+    prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown", use_cache: bool = True
+) -> str:
     return (await call_claude_full_async(prompt, model=model, agent=agent, use_cache=use_cache)).text
 
 
-async def call_claude_full_async(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
-                                 use_cache: bool = True) -> CallResult:
+async def call_claude_full_async(
+    prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown", use_cache: bool = True
+) -> CallResult:
     with _llm_span(agent, prompt, model) as span:
         key = _cache_key(prompt, model, agent)
         if use_cache:

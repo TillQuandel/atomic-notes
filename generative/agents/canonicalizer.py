@@ -9,6 +9,7 @@ keine Inhaltsfakten verloren, keine erfundenen Aussagen.
 Anker-Listen werden konkateniert (deterministisch, kein LLM-Schreiben), nur
 der Body-Text geht durch den LLM-Merge.
 """
+
 from __future__ import annotations
 from generative.agents.base import call_claude_async
 from generative.agents.structured_output import parse_canonicalizer_output
@@ -52,12 +53,7 @@ Darf beliebige Zeichen enthalten — auch ASCII-Quotes, Markdown-HR, Backticks.
 
 
 def _format_variant(idx: int, draft: AtomicNoteDraft) -> str:
-    return (
-        f"### Variante {idx}: {draft.title}\n"
-        f"Aliases: {draft.aliases}\n"
-        f"Tags: {draft.tags}\n"
-        f"Body:\n{draft.body}\n"
-    )
+    return f"### Variante {idx}: {draft.title}\nAliases: {draft.aliases}\nTags: {draft.tags}\nBody:\n{draft.body}\n"
 
 
 async def merge_cluster(cluster: list[AtomicNoteDraft]) -> AtomicNoteDraft:
@@ -79,6 +75,7 @@ async def merge_cluster(cluster: list[AtomicNoteDraft]) -> AtomicNoteDraft:
         data, parse_warnings = parse_canonicalizer_output(raw)
         if parse_warnings:
             import sys
+
             for w in parse_warnings:
                 print(f"      [canonicalizer-warn] {w}", file=sys.stderr)
         if not data:
@@ -117,6 +114,7 @@ async def merge_cluster(cluster: list[AtomicNoteDraft]) -> AtomicNoteDraft:
     # Tags-Schnittmenge: nur was in mindestens 2 Varianten steht (konservativ).
     # Bei nur 2 Varianten: Schnittmenge = Vereinigung (sonst leer wenn nicht identisch).
     from collections import Counter
+
     tag_counts = Counter()
     for d in cluster:
         tag_counts.update(set(d.tags))

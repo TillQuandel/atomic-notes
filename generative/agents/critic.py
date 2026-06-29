@@ -4,6 +4,7 @@ Hard-Gates (Glance, Future-Self, Quellen): einer fail → Note geht zwingend nac
 unabhängig vom Score. Future-Self-Test läuft als deterministische Regex-Vorprüfung
 vor dem LLM-Call (fängt 30–50% der Fails ohne Token-Verbrauch).
 """
+
 from __future__ import annotations
 import re
 
@@ -86,8 +87,13 @@ HUB_SIBLING_DENSITY_THRESHOLD = 0.5
 # den Bridging-Cluster-Test. Klein gehalten und kuratiert wachsen lassen, statt
 # spekulative Liste. Wikipedia/PKM-Systeme nutzen genau dieses Annotation-Pattern.
 HUB_OVERVIEW_MARKERS = {
-    "modell", "begriffsgeschichte", "framework", "moc",
-    "übersicht", "atlas", "taxonomie",
+    "modell",
+    "begriffsgeschichte",
+    "framework",
+    "moc",
+    "übersicht",
+    "atlas",
+    "taxonomie",
 }
 
 # Post-Critic Quellen-Test-Override: ab welcher Body-Anker-Coverage (Anteil der
@@ -96,7 +102,11 @@ HUB_OVERVIEW_MARKERS = {
 # Anker. Konservativ: deckt Critic-FPs (Halluzinations-Drift wie ISP-Collection)
 # ohne legitime Quellen-Luecken durchzulassen.
 ANCHOR_COVERAGE_OVERRIDE = 0.85
-from generative.pipeline.anchor_patterns import SENTENCE_SPLIT_RE as _SENTENCE_SPLIT_RE, PAGE_ANCHOR_RE as _PAGE_ANCHOR_RE
+from generative.pipeline.anchor_patterns import (
+    SENTENCE_SPLIT_RE as _SENTENCE_SPLIT_RE,
+    PAGE_ANCHOR_RE as _PAGE_ANCHOR_RE,
+)
+
 _MIN_SUBSTANTIVE_LEN = 40  # Saetze < 40 Zeichen werden nicht als „substantiell" gezaehlt
 
 
@@ -125,9 +135,9 @@ def _strip_disambig(s: str) -> str:
     return re.sub(r"\s*\([^)]*\)\s*", " ", s).strip()
 
 
-def _sibling_cluster_density(sub_keys: list[str],
-                              existing_concepts: dict[str, str],
-                              concept_links: dict[str, set[str]]) -> float:
+def _sibling_cluster_density(
+    sub_keys: list[str], existing_concepts: dict[str, str], concept_links: dict[str, set[str]]
+) -> float:
     """Anteil ungerichtet verlinkter Sub-Paare. 0.0 = vollständig unverlinkt
     (Hub-Pattern), 1.0 = vollständiger Cluster (Atomic-mit-Geschwistern).
 
@@ -156,13 +166,13 @@ def _canonical_title_from_path(path: str) -> str:
     liefern den Suffix; echte .md-Pfade den File-Stem. Damit landen Plain-Match-
     Treffer in MoC-Frontmatter mit korrektem Title-Casing statt lowercase-Key."""
     if path.startswith("<sibling:") and path.endswith(">"):
-        return path[len("<sibling:"):-1]
+        return path[len("<sibling:") : -1]
     from pathlib import Path as _P
+
     return _P(path).stem
 
 
-def hub_test(body: str, existing_concepts: dict[str, str],
-             self_keys: set[str] | None = None) -> list[str]:
+def hub_test(body: str, existing_concepts: dict[str, str], self_keys: set[str] | None = None) -> list[str]:
     """Listet existierende Atomic-Konzepte, die als Sub-Struktur im Body referenziert sind.
 
     Zwei Match-Kanäle: Wikilinks (`[[Title]]`) und Plain-Text-Mentions mit Wortgrenzen
@@ -298,16 +308,22 @@ score: 4
 
 
 def _log_score_result(draft) -> None:
-    trace_event("critic", "score_result", {
-        "title": draft.title,
-        "score": draft.critic_score,
-        "hard_gates_pass": draft.hard_gates_pass,
-    })
+    trace_event(
+        "critic",
+        "score_result",
+        {
+            "title": draft.title,
+            "score": draft.critic_score,
+            "hard_gates_pass": draft.hard_gates_pass,
+        },
+    )
 
 
-def run(draft: AtomicNoteDraft,
-        existing_concepts: dict[str, str] | None = None,
-        concept_links: dict[str, set[str]] | None = None) -> AtomicNoteDraft:
+def run(
+    draft: AtomicNoteDraft,
+    existing_concepts: dict[str, str] | None = None,
+    concept_links: dict[str, set[str]] | None = None,
+) -> AtomicNoteDraft:
     try:
         # Schritt 0: Hub-Detector (Hebel #4) — vor LLM-Call.
         # Notes mit ≥HUB_MIN_SUBCONCEPTS Wikilinks auf existierende Atomic-Notes im Body
@@ -323,10 +339,7 @@ def run(draft: AtomicNoteDraft,
                 # (z.B. „ISP-Modell (Kuhlthau)") werden über das explizite Naming-Signal
                 # gerettet. Recherche-Anker: Wikipedia-Disambig-Templates, Cat2Type
                 # Category-Embeddings, Burt 2000 Structural-Holes-Theorie.
-                density = (
-                    _sibling_cluster_density(sub, existing_concepts, concept_links)
-                    if concept_links else 0.0
-                )
+                density = _sibling_cluster_density(sub, existing_concepts, concept_links) if concept_links else 0.0
                 has_marker = _has_overview_marker(draft.title)
                 atomic_pattern = density >= HUB_SIBLING_DENSITY_THRESHOLD and not has_marker
 
@@ -342,7 +355,9 @@ def run(draft: AtomicNoteDraft,
                     draft.action = "hub"
                     draft.hub_subconcepts = sub
                     density_note = f", Sub-Dichte {density:.2f}" if concept_links else ""
-                    marker_note = " [Marker-Override]" if has_marker and density >= HUB_SIBLING_DENSITY_THRESHOLD else ""
+                    marker_note = (
+                        " [Marker-Override]" if has_marker and density >= HUB_SIBLING_DENSITY_THRESHOLD else ""
+                    )
                     draft.quality_flags.append(
                         f"Hub-Kandidat: referenziert {len(sub)} Sub-Konzepte "
                         f"({', '.join(sub[:4])}{density_note}){marker_note} → MoC-Routing"
@@ -354,9 +369,7 @@ def run(draft: AtomicNoteDraft,
         if not draft.source_anchors and body_words < 80:
             draft.hard_gates_pass = False
             draft.critic_score = 1
-            draft.quality_flags.append(
-                f"⚠️ Critic-Pre-Filter: keine Anker + Body {body_words} Wörter < 80 — Inbox"
-            )
+            draft.quality_flags.append(f"⚠️ Critic-Pre-Filter: keine Anker + Body {body_words} Wörter < 80 — Inbox")
             return draft
 
         # Schritt 1: Regex-Pre-Check (deterministisch, billig)
@@ -367,15 +380,14 @@ def run(draft: AtomicNoteDraft,
 
         regex_block = (
             "Keine Verstöße per Regex gefunden — du kannst future_self_test nach LLM-Urteil setzen."
-            if regex_pass else
-            "Bereits gefundene Verstöße (LLM darf future_self_test = false setzen, oder zusätzliche Verstöße benennen):\n"
+            if regex_pass
+            else "Bereits gefundene Verstöße (LLM darf future_self_test = false setzen, oder zusätzliche Verstöße benennen):\n"
             + "\n".join(f"- {v}" for v in violations)
         )
 
-        anchors_str = "\n".join(
-            f'- "{a.quote}" ({a.page or "keine Seite"})'
-            for a in draft.source_anchors
-        ) or "(keine Anker)"
+        anchors_str = (
+            "\n".join(f'- "{a.quote}" ({a.page or "keine Seite"})' for a in draft.source_anchors) or "(keine Anker)"
+        )
 
         # Body-Truncation: Atomic-Notes bleiben i.d.R. < 6000 Zeichen. Wenn die Note
         # länger ist, urteilt der Critic nur über den Head — Anker/Aussagen am Tail

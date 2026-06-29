@@ -6,14 +6,24 @@ verpufft das beim Writer und BEIDE Notes werden geschrieben. resolve_sibling_dup
 wertet genau dieses vorhandene Signal aus und mergt/skippt die Siblings VOR dem
 Schreiben — ohne Eingriff ins Title-Blocking (kein False-Positive-Risiko).
 """
+
 from generative.orchestrator import resolve_sibling_dups
 from generative.agents.cross_reference import MAX_RELATED
 from generative.pipeline.vault_writer import write_note
 from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor
 
 
-def _draft(title, *, body="", action="create", extend_path=None,
-           related=None, source_anchors=None, critic_score=0, aliases=None):
+def _draft(
+    title,
+    *,
+    body="",
+    action="create",
+    extend_path=None,
+    related=None,
+    source_anchors=None,
+    critic_score=0,
+    aliases=None,
+):
     return AtomicNoteDraft(
         title=title,
         body=body or f"Body von {title}",
@@ -30,19 +40,24 @@ def _draft(title, *, body="", action="create", extend_path=None,
 
 def test_pair_extend_to_sibling_merges_to_one():
     # d_b ist ein Near-Dup von d_a und zeigt per extend_path auf dessen Titel.
-    d_a = _draft("Affective Access", body="Langer verifizierter Body " * 5,
-                 critic_score=4, related=["[[Information Behavior]]"])
-    d_b = _draft("Affektiver Zugang", action="extend",
-                 extend_path="Affective Access", critic_score=2,
-                 related=["[[Kuhlthau ISP]]"])
+    d_a = _draft(
+        "Affective Access", body="Langer verifizierter Body " * 5, critic_score=4, related=["[[Information Behavior]]"]
+    )
+    d_b = _draft(
+        "Affektiver Zugang",
+        action="extend",
+        extend_path="Affective Access",
+        critic_score=2,
+        related=["[[Kuhlthau ISP]]"],
+    )
 
     kept, dropped = resolve_sibling_dups([d_a, d_b])
 
     assert dropped == 1
     assert len(kept) == 1
     survivor = kept[0]
-    assert survivor.title == "Affective Access"        # höherer critic_score + längerer Body
-    assert survivor.action == "create"                  # kein dangling extend
+    assert survivor.title == "Affective Access"  # höherer critic_score + längerer Body
+    assert survivor.action == "create"  # kein dangling extend
     # related des gedroppten Drafts wandern verlustarm in den Survivor
     assert "[[Kuhlthau ISP]]" in survivor.related
     # gedroppter Titel lebt als Alias weiter → [[Affektiver Zugang]] löst auf den Survivor auf
@@ -58,8 +73,8 @@ def test_cycle_a_to_b_and_b_to_a_resolves_to_one():
 
     assert dropped == 1
     assert len(kept) == 1
-    assert kept[0].title == "A"                          # höherer critic_score gewinnt
-    assert kept[0].action == "create"                   # Zyklus aufgelöst, kein dangling extend
+    assert kept[0].title == "A"  # höherer critic_score gewinnt
+    assert kept[0].action == "create"  # Zyklus aufgelöst, kein dangling extend
 
 
 def test_chain_a_b_c_collapses_to_one():
@@ -72,15 +87,14 @@ def test_chain_a_b_c_collapses_to_one():
 
     assert dropped == 2
     assert len(kept) == 1
-    assert kept[0].title == "B"                          # höchster critic_score
+    assert kept[0].title == "B"  # höchster critic_score
 
 
 def test_vault_extend_is_not_touched():
     # extend_path zeigt auf eine echte Vault-Note (Stem matcht KEINEN Sibling-Titel)
     # → legitimer Vault-Extend, darf NICHT angefasst werden.
     d_a = _draft("Concept A", critic_score=3)
-    d_b = _draft("Concept B", action="extend",
-                 extend_path="04-wissen/Some Vault Note.md", critic_score=2)
+    d_b = _draft("Concept B", action="extend", extend_path="04-wissen/Some Vault Note.md", critic_score=2)
 
     kept, dropped = resolve_sibling_dups([d_a, d_b])
 
@@ -96,10 +110,14 @@ def test_related_union_capped_and_no_dangling_self_link():
     # (cross_reference fügt [[dup-stem]] ein). Nach dem Drop darf kein Link auf
     # den gedroppten Titel als Dead-Link überleben (Alias-Auflösung übernimmt),
     # und die Gesamtzahl ist auf MAX_RELATED gedeckelt.
-    d_a = _draft("Survivor", critic_score=5,
-                 related=["[[Affektiver Zugang]]", "[[L1]]", "[[L2]]"])
-    d_b = _draft("Affektiver Zugang", action="extend", extend_path="Survivor",
-                 critic_score=1, related=["[[L3]]", "[[L4]]", "[[L5]]"])
+    d_a = _draft("Survivor", critic_score=5, related=["[[Affektiver Zugang]]", "[[L1]]", "[[L2]]"])
+    d_b = _draft(
+        "Affektiver Zugang",
+        action="extend",
+        extend_path="Survivor",
+        critic_score=1,
+        related=["[[L3]]", "[[L4]]", "[[L5]]"],
+    )
 
     kept, dropped = resolve_sibling_dups([d_a, d_b])
 
@@ -121,13 +139,13 @@ def test_no_extend_drafts_is_noop():
 
 # --- Cross-Model-Review-Befunde (Codex 2026-06-23) ---
 
+
 def test_vault_extend_propagates_to_survivor():
     # HIGH#2: A (bester Body) ist Near-Dup von B, B ist zugleich Dup einer EXISTIERENDEN
     # Vault-Note V. Survivor A behält seinen besseren Body, MUSS aber B's Vault-Bezug erben
     # — sonst wird eine Dublette der Vault-Note geschrieben. Vault-Stem wird Alias, damit der
     # title-/alias-basierte Writer die Vault-Note findet.
-    d_a = _draft("A", body="Langer Body " * 10, action="extend",
-                 extend_path="B", critic_score=5)
+    d_a = _draft("A", body="Langer Body " * 10, action="extend", extend_path="B", critic_score=5)
     d_b = _draft("B", action="extend", extend_path="Vault Concept", critic_score=1)
     existing = {"vault concept": "01-studium/Vault Concept.md"}
 
@@ -135,8 +153,8 @@ def test_vault_extend_propagates_to_survivor():
 
     assert dropped == 1
     survivor = kept[0]
-    assert survivor.title == "A"                         # besserer Body bleibt Survivor
-    assert survivor.action == "extend"                   # Vault-Bezug NICHT verloren
+    assert survivor.title == "A"  # besserer Body bleibt Survivor
+    assert survivor.action == "extend"  # Vault-Bezug NICHT verloren
     assert survivor.extend_path == "Vault Concept"
     assert any("vault concept" == a.lower() for a in survivor.aliases)  # Writer findet Vault-Note
 
@@ -170,8 +188,7 @@ def test_survivor_tiebreak_is_order_independent():
 
 def test_heading_self_link_removed():
     # LOW#6: [[Titel#Abschnitt]]-Self-Link auf den absorbierten Titel muss entfernt werden.
-    d_a = _draft("Survivor", critic_score=5,
-                 related=["[[Affektiver Zugang#Definition]]", "[[Keep]]"])
+    d_a = _draft("Survivor", critic_score=5, related=["[[Affektiver Zugang#Definition]]", "[[Keep]]"])
     d_b = _draft("Affektiver Zugang", action="extend", extend_path="Survivor", critic_score=1)
 
     kept, dropped = resolve_sibling_dups([d_a, d_b])
@@ -186,11 +203,20 @@ def test_e2e_two_near_dups_write_one_note(tmp_path):
     # realen cross_reference-Signal (B.action=extend, extend_path=<A-Titel>) ergeben nach
     # resolve_sibling_dups + Writer GENAU EINE Note-Datei (ohne Fix wären es zwei).
     anchors = [TextAnchor(quote="Webinare wirken vergleichbar", page="S. 5")]
-    d_a = _draft("Webinar-Wirksamkeit", body="Webinare zeigen vergleichbare Lerneffekte. " * 4,
-                 source_anchors=list(anchors), critic_score=4)
-    d_b = _draft("Wirksamkeit von Webinaren", body="Webinare sind ähnlich wirksam. " * 3,
-                 source_anchors=list(anchors), action="extend",
-                 extend_path="Webinar-Wirksamkeit", critic_score=2)
+    d_a = _draft(
+        "Webinar-Wirksamkeit",
+        body="Webinare zeigen vergleichbare Lerneffekte. " * 4,
+        source_anchors=list(anchors),
+        critic_score=4,
+    )
+    d_b = _draft(
+        "Wirksamkeit von Webinaren",
+        body="Webinare sind ähnlich wirksam. " * 3,
+        source_anchors=list(anchors),
+        action="extend",
+        extend_path="Webinar-Wirksamkeit",
+        critic_score=2,
+    )
 
     kept, dropped = resolve_sibling_dups([d_a, d_b], existing_concepts={})
     assert dropped == 1 and len(kept) == 1

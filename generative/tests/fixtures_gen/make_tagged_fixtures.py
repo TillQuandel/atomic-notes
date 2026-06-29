@@ -7,6 +7,7 @@ Roh-PDF mit korrekten xref-Offsets, damit PyMuPDF die Objekte ueber xref_object
 parsen kann (gleicher Pfad wie der reale Felsmann-2025-Korpus). Kein externer
 Pfad, keine Abhaengigkeit ausser der Stdlib.
 """
+
 from __future__ import annotations
 
 from pathlib import Path

@@ -9,6 +9,7 @@ Log-Version und der Dashboard-Versionsfilter funktioniert fuer Fehlerquote/Abdec
 
 Usage: python eval_batch.py [--dry-run]
 """
+
 from __future__ import annotations
 import argparse
 import re
@@ -24,24 +25,23 @@ BASELINE_DIR = Path(__file__).parent / ".cache" / "eval" / "baseline"
 _LIT_BASE = Path.home() / "OneDrive" / "Dokumente" / "Literatur"
 
 PDF_MAP = {
-    "Bates - 2017 - Information Behavior":
-        _LIT_BASE / "Bates - 2017 - Information Behavior.pdf",
-    "Kuhlthau - INFORMATION SEARCH PROCESS":
-        _LIT_BASE / "Kuhlthau - INFORMATION SEARCH PROCESS.pdf",
-    "Schlebbe und Greifeneder - 2022 - Information Need, Informationsbedarf und -bedürfnis":
-        _LIT_BASE / "Schlebbe und Greifeneder - 2022 - Information Need, Informationsbedarf und -bedürfnis.pdf",
-    "6.openAI guide to building practical agents":
-        _LIT_BASE / "ai-ml-bookshelf" / "6.openAI guide to building practical agents.pdf",
-    "Venkatesh et al. - 2003 - User Acceptance of Information Technology Toward A Unified View1":
-        _LIT_BASE / "Venkatesh et al. - 2003 - User Acceptance of Information Technology Toward A Unified View1.pdf",
-    "Forster - 2017 - Information literacy in the workplace":
-        _LIT_BASE / "Forster - 2017 - Information literacy in the workplace.pdf",
+    "Bates - 2017 - Information Behavior": _LIT_BASE / "Bates - 2017 - Information Behavior.pdf",
+    "Kuhlthau - INFORMATION SEARCH PROCESS": _LIT_BASE / "Kuhlthau - INFORMATION SEARCH PROCESS.pdf",
+    "Schlebbe und Greifeneder - 2022 - Information Need, Informationsbedarf und -bedürfnis": _LIT_BASE
+    / "Schlebbe und Greifeneder - 2022 - Information Need, Informationsbedarf und -bedürfnis.pdf",
+    "6.openAI guide to building practical agents": _LIT_BASE
+    / "ai-ml-bookshelf"
+    / "6.openAI guide to building practical agents.pdf",
+    "Venkatesh et al. - 2003 - User Acceptance of Information Technology Toward A Unified View1": _LIT_BASE
+    / "Venkatesh et al. - 2003 - User Acceptance of Information Technology Toward A Unified View1.pdf",
+    "Forster - 2017 - Information literacy in the workplace": _LIT_BASE
+    / "Forster - 2017 - Information literacy in the workplace.pdf",
 }
 
 # Patterns
 _NOTE_RE = re.compile(r"^\s*\[DRY-RUN\] -> (?:Vault|Inbox)[^:]*: (.+?)\.md\b")
-_VER_RE  = re.compile(r"_(v[\d.]+(?:\.\d+)*)(?:_run\d+)?\.log$")
-_KEY_RE  = re.compile(r"^([a-z]+)_")
+_VER_RE = re.compile(r"_(v[\d.]+(?:\.\d+)*)(?:_run\d+)?\.log$")
+_KEY_RE = re.compile(r"^([a-z]+)_")
 
 
 def _build_note_version_map() -> dict[str, str]:
@@ -69,9 +69,9 @@ def _build_note_version_map() -> dict[str, str]:
         if not pdf_key_m:
             continue
         pdf_key = pdf_key_m.group(1)
-        ver_m   = _VER_RE.search(log.name)
-        ver     = ver_m.group(1) if ver_m else "unknown"
-        folder  = key_to_folder.get(pdf_key)
+        ver_m = _VER_RE.search(log.name)
+        ver = ver_m.group(1) if ver_m else "unknown"
+        folder = key_to_folder.get(pdf_key)
         if not folder:
             continue
 
@@ -79,7 +79,7 @@ def _build_note_version_map() -> dict[str, str]:
             m = _NOTE_RE.match(line)
             if not m:
                 continue
-            stem     = m.group(1)
+            stem = m.group(1)
             full_key = f"{folder}/{stem}"
             existing = note_version.get(full_key)
             if existing is None or ver_key(ver) > ver_key(existing):
@@ -115,8 +115,8 @@ def main() -> None:
 
         # Version aus Log-Mapping; Fallback auf AGENT_VERSION
         note_stem = note_path.stem
-        full_key  = f"{folder}/{note_stem}"
-        version   = note_version_map.get(full_key, AGENT_VERSION)
+        full_key = f"{folder}/{note_stem}"
+        version = note_version_map.get(full_key, AGENT_VERSION)
 
         try:
             result = eval_note(note_path, pdf_path, pipeline_version=version)

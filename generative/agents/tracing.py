@@ -7,6 +7,7 @@ Swap-Beispiel (nach SDK-Migration):
 LLM-call tracing in agents/base.py routet über _backend.write(); strukturierte
 Events fließen via trace_event()/trace_run_start() in denselben Backend-Pfad.
 """
+
 from __future__ import annotations
 import json
 import os
@@ -62,22 +63,26 @@ def flush_tracing() -> None:
 
 def trace_event(agent: str, event_type: str, data: dict) -> None:
     """Schreibt ein strukturiertes Event. Backend-agnostisch."""
-    _backend.write({
-        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "type": event_type,
-        "agent": agent,
-        **data,
-    })
+    _backend.write(
+        {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "type": event_type,
+            "agent": agent,
+            **data,
+        }
+    )
 
 
 def trace_run_start(model_config: dict) -> None:
     """Schreibt Run-Start-Entry mit Model-Config."""
-    _backend.write({
-        "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
-        "type": "run_start",
-        "run_id": _RUN_ID,
-        "model_config": model_config,
-    })
+    _backend.write(
+        {
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
+            "type": "run_start",
+            "run_id": _RUN_ID,
+            "model_config": model_config,
+        }
+    )
 
 
 # Auto-Aktivierung via ATOMIC_AGENT_TRACING=langfuse
@@ -85,6 +90,7 @@ if os.getenv("ATOMIC_AGENT_TRACING") == "langfuse":
     try:
         import atexit
         from generative.agents.langfuse_backend import LangfuseBackend as _LF  # type: ignore[import]
+
         _backend = _LF()
         atexit.register(_backend.flush)
     except Exception:

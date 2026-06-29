@@ -8,6 +8,7 @@ Assoziationsnetz", Body-cos 0,97) teilten 0 Tokens → Geschwister verworfen →
 Token-Treffer bleiben unverändert, kein Regressionsrisiko). Schwelle 0,85 empirisch
 kalibriert (verwandt 0,97–0,99, fremd 0,73–0,76).
 """
+
 from __future__ import annotations
 
 from generative.agents.cross_reference import _rank_sibling_candidates, _tokens
@@ -15,9 +16,16 @@ from generative.agents.cross_reference import _rank_sibling_candidates, _tokens
 
 def _d(title, body="b", aliases=None):
     from generative.schemas.atomic_note import AtomicNoteDraft
-    return AtomicNoteDraft(title=title, body=body, source_anchors=[], related=[],
-                           tags=[], synthesis_confidence="low",
-                           aliases=aliases or [])
+
+    return AtomicNoteDraft(
+        title=title,
+        body=body,
+        source_anchors=[],
+        related=[],
+        tags=[],
+        synthesis_confidence="low",
+        aliases=aliases or [],
+    )
 
 
 def _q(draft):
@@ -32,8 +40,11 @@ def test_token_overlap_sibling_included_without_embedding():
     draft = _d("ISP Stage Collection")
     sibs = {"ISP Stage Exploration": _d("ISP Stage Exploration")}
     called = []
+
     def cos_fn(s):
-        called.append(s); return 0.0
+        called.append(s)
+        return 0.0
+
     out = _rank_sibling_candidates(draft, sibs, _q(draft), cos_fn, threshold=0.85)
     assert [t for t, _ in out] == ["ISP Stage Exploration"]
     assert called == []  # Token-Treffer → kein Embedding nötig
@@ -42,8 +53,7 @@ def test_token_overlap_sibling_included_without_embedding():
 def test_lexically_disjoint_but_semantic_included():
     # Der echte Fall: 0 gemeinsame Tokens, aber Body-cos 0,97 → Kandidat.
     draft = _d("Wissensorganisation")
-    sibs = {"Semantisches Retrieval mit Assoziationsnetz":
-            _d("Semantisches Retrieval mit Assoziationsnetz")}
+    sibs = {"Semantisches Retrieval mit Assoziationsnetz": _d("Semantisches Retrieval mit Assoziationsnetz")}
     out = _rank_sibling_candidates(draft, sibs, _q(draft), lambda s: 0.97, threshold=0.85)
     assert [t for t, _ in out] == ["Semantisches Retrieval mit Assoziationsnetz"]
 
@@ -67,7 +77,7 @@ def test_lexical_ranks_above_semantic():
     # Token-Treffer (starkes Signal) muss vor reinem Embedding-Treffer ranken.
     draft = _d("ISP Stage Collection")
     sibs = {
-        "ISP Stage Exploration": _d("ISP Stage Exploration"),       # Token-Overlap ("ISP","Stage")
+        "ISP Stage Exploration": _d("ISP Stage Exploration"),  # Token-Overlap ("ISP","Stage")
         "Affektives Paradigma der Suche": _d("Affektives Paradigma der Suche"),  # nur semantisch
     }
     out = _rank_sibling_candidates(draft, sibs, _q(draft), lambda s: 0.95, threshold=0.85)

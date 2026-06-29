@@ -1,4 +1,5 @@
 """Cross-Reference-Agent: prüft Aussagen gegen existierende Vault-Notes."""
+
 from __future__ import annotations
 import re
 from pathlib import Path
@@ -6,7 +7,14 @@ from pathlib import Path
 from generative.agents.base import call_claude
 from generative.agents.structured_output import parse_cross_reference_output
 from generative import config as _config
-from generative.config import VAULT, MODEL_CROSS_REF, ENABLE_NLI_VALIDATION, NLI_MODEL_NAME, NLI_CONTRADICTION_THRESHOLD, SIBLING_SEMANTIC_COSINE_THRESHOLD
+from generative.config import (
+    VAULT,
+    MODEL_CROSS_REF,
+    ENABLE_NLI_VALIDATION,
+    NLI_MODEL_NAME,
+    NLI_CONTRADICTION_THRESHOLD,
+    SIBLING_SEMANTIC_COSINE_THRESHOLD,
+)
 from generative.schemas.atomic_note import AtomicNoteDraft
 
 # Mindest-Anzahl `related`-Wikilinks für eine Schema-konforme Note (siehe Schema-Konzept §5)
@@ -58,6 +66,7 @@ def _resolve_vault_path(dup_path: str, existing_concepts: dict[str, str] | None)
     aufgelöst. None, wenn kein Vault-Treffer (z.B. Intra-Run-Sibling — bisheriges Verhalten).
     """
     from generative.agents.context_builder import resolve_vault_relpath
+
     rel = resolve_vault_relpath(dup_path, existing_concepts)
     return VAULT / rel if rel else None
 
@@ -74,7 +83,9 @@ def _dup_target_eligible(dup_path: str, existing_concepts: dict[str, str] | None
     if target is None:
         return True
     from generative.agents.context_builder import is_dedup_eligible
+
     return is_dedup_eligible(target)
+
 
 # Lazy-loaded NLI CrossEncoder — wird nur bei ENABLE_NLI_VALIDATION=1 geladen
 _nli_encoder = None
@@ -101,10 +112,12 @@ def _nli_validate_contradictions(
     try:
         from sentence_transformers import CrossEncoder
         from generative.pipeline.embeddings import embed_body, cosine as cos_sim
+
         if _nli_encoder is None:
             with _nli_lock:
                 if _nli_encoder is None:  # Double-Checked Locking
                     import sys
+
                     print(f"      [nli] Lade {NLI_MODEL_NAME} (einmalig ~70MB)…", file=sys.stderr)
                     _nli_encoder = CrossEncoder(NLI_MODEL_NAME)
 
@@ -121,15 +134,13 @@ def _nli_validate_contradictions(
             except Exception:
                 pass  # Prefilter nicht kritisch — NLI trotzdem laufen lassen
 
-            scores = _nli_encoder.predict(
-                [(note_short, vault_short)], apply_softmax=True
-            )
+            scores = _nli_encoder.predict([(note_short, vault_short)], apply_softmax=True)
             # DeBERTa NLI Labels: [contradiction, entailment, neutral]
             contradiction_score = float(scores[0][0])
             import sys
+
             print(
-                f"      [nli] contradiction={contradiction_score:.2f} "
-                f"(threshold={NLI_CONTRADICTION_THRESHOLD})",
+                f"      [nli] contradiction={contradiction_score:.2f} (threshold={NLI_CONTRADICTION_THRESHOLD})",
                 file=sys.stderr,
             )
             if contradiction_score >= NLI_CONTRADICTION_THRESHOLD:
@@ -137,29 +148,89 @@ def _nli_validate_contradictions(
         return False
     except Exception as e:
         import sys
+
         print(f"      [nli] Fehler bei Validation: {e}", file=sys.stderr)
         return True  # Fallback: Haiku-Urteil beibehalten
 
+
 # Stoppwörter (DE+EN) für Tokenize-Match — verhindern False-Positives auf Füllwörtern
 _STOPWORDS = {
-    "der", "die", "das", "den", "dem", "des", "ein", "eine", "einer", "eines", "einem", "einen",
-    "und", "oder", "aber", "doch", "von", "vom", "zum", "zur", "als", "wie", "für", "mit", "bei",
-    "auf", "in", "im", "an", "am", "zu", "über", "unter", "vor", "nach", "ist", "sind", "war",
-    "the", "a", "an", "and", "or", "but", "of", "to", "in", "on", "at", "for", "with", "by",
-    "is", "are", "was", "were", "be", "been", "as", "from", "that", "this", "it",
+    "der",
+    "die",
+    "das",
+    "den",
+    "dem",
+    "des",
+    "ein",
+    "eine",
+    "einer",
+    "eines",
+    "einem",
+    "einen",
+    "und",
+    "oder",
+    "aber",
+    "doch",
+    "von",
+    "vom",
+    "zum",
+    "zur",
+    "als",
+    "wie",
+    "für",
+    "mit",
+    "bei",
+    "auf",
+    "in",
+    "im",
+    "an",
+    "am",
+    "zu",
+    "über",
+    "unter",
+    "vor",
+    "nach",
+    "ist",
+    "sind",
+    "war",
+    "the",
+    "a",
+    "an",
+    "and",
+    "or",
+    "but",
+    "of",
+    "to",
+    "in",
+    "on",
+    "at",
+    "for",
+    "with",
+    "by",
+    "is",
+    "are",
+    "was",
+    "were",
+    "be",
+    "been",
+    "as",
+    "from",
+    "that",
+    "this",
+    "it",
 }
 _TOKEN_RE = re.compile(r"\w+", re.UNICODE)
 
 
 def _tokens(text: str) -> set[str]:
     """Lower-case Content-Tokens, ohne Stoppwörter und kurze (<3) Tokens."""
-    return {t for t in (m.group(0).lower() for m in _TOKEN_RE.finditer(text))
-            if len(t) >= 3 and t not in _STOPWORDS}
+    return {t for t in (m.group(0).lower() for m in _TOKEN_RE.finditer(text)) if len(t) >= 3 and t not in _STOPWORDS}
 
 
 def _matches(query_tokens: set[str], concept_key: str) -> bool:
     """≥1 Content-Token-Overlap mit Wortgrenze (kein Substring-Bleed)."""
     return bool(query_tokens & _tokens(concept_key))
+
 
 _PROMPT = """Du prüfst eine neue Atomic Note gegen verwandte Vault-Notes — drei Aufgaben:
 
@@ -217,10 +288,7 @@ def _rank_vault_candidates(
     """
     import numpy as np
 
-    valid_items = [
-        (k, p) for k, p in existing_concepts.items()
-        if (VAULT / p).exists()
-    ]
+    valid_items = [(k, p) for k, p in existing_concepts.items() if (VAULT / p).exists()]
     if not valid_items:
         return []
     n = len(valid_items)
@@ -233,6 +301,7 @@ def _rank_vault_candidates(
     # BM25 über tokenisierte Konzept-Titel — Index einmal pro Run via id()-Cache
     try:
         from rank_bm25 import BM25Okapi
+
         cache_key = id(existing_concepts)
         if cache_key not in _bm25_cache or _bm25_cache[cache_key][0] is not keys:
             tokenized_keys = [list(_tokens(k)) or ["_"] for k in keys]
@@ -242,18 +311,16 @@ def _rank_vault_candidates(
         bm25_scores = np.array(bm25.get_scores(query_toks), dtype=float)
     except Exception:
         # Fallback auf einfachen Token-Overlap
-        bm25_scores = np.array([
-            float(len(query_tokens & _tokens(k))) for k in keys
-        ], dtype=float)
+        bm25_scores = np.array([float(len(query_tokens & _tokens(k))) for k in keys], dtype=float)
 
     # Embedding-Cosine nur wenn Modell bereits geladen (kein cold-start durch CrossRef)
     cos_scores: "np.ndarray | None" = None
     try:
         from generative.pipeline import embeddings as _emb_mod
+
         if _emb_mod._MODEL is not None:
             query_emb = _emb_mod.embed_title(query_title)
-            key_embs = _emb_mod._model().encode(keys, show_progress_bar=False,
-                                                 normalize_embeddings=True)
+            key_embs = _emb_mod._model().encode(keys, show_progress_bar=False, normalize_embeddings=True)
             cos_scores = np.array(key_embs.dot(query_emb), dtype=float)
     except Exception:
         pass
@@ -277,7 +344,7 @@ def _read_excerpt(path: Path, max_words: int = 150) -> str:
         # Frontmatter überspringen
         if text.startswith("---"):
             end = text.find("---", 3)
-            text = text[end + 3:] if end != -1 else text
+            text = text[end + 3 :] if end != -1 else text
         words = text.split()
         return " ".join(words[:max_words])
     except OSError:
@@ -289,12 +356,13 @@ def _excerpt_from_body(body: str, max_words: int = 150) -> str:
     return " ".join(body.split()[:max_words])
 
 
-def _rank_sibling_candidates(draft: AtomicNoteDraft,
-                             siblings: dict[str, AtomicNoteDraft] | None,
-                             query_tokens: set,
-                             sib_cosine_fn,
-                             threshold: float | None = None
-                             ) -> list[tuple[str, AtomicNoteDraft]]:
+def _rank_sibling_candidates(
+    draft: AtomicNoteDraft,
+    siblings: dict[str, AtomicNoteDraft] | None,
+    query_tokens: set,
+    sib_cosine_fn,
+    threshold: float | None = None,
+) -> list[tuple[str, AtomicNoteDraft]]:
     """Pipeline-Geschwister als related-Kandidaten ranken — ADDITIV.
 
     Signal 1 (unverändert): Titel-/Alias-Token-Overlap (≥1) — starkes lexikalisches
@@ -330,8 +398,9 @@ def _rank_sibling_candidates(draft: AtomicNoteDraft,
     return [(t, d) for _, t, d in scored[:5]]
 
 
-def run(draft: AtomicNoteDraft, existing_concepts: dict[str, str],
-        siblings: dict[str, AtomicNoteDraft] | None = None) -> AtomicNoteDraft:
+def run(
+    draft: AtomicNoteDraft, existing_concepts: dict[str, str], siblings: dict[str, AtomicNoteDraft] | None = None
+) -> AtomicNoteDraft:
     # Relevante existierende Notes finden via Content-Token-Overlap.
     # Aliases der draft mit-suchen, weil draft.title oft generisch ("Information Need")
     # ist und die spezifischeren Aliase zusätzliche Match-Tokens liefern.
@@ -358,6 +427,7 @@ def run(draft: AtomicNoteDraft, existing_concepts: dict[str, str],
     sibling_candidates: list[tuple[str, AtomicNoteDraft]] = []
     if siblings:
         from generative.pipeline import embeddings as _emb
+
         _draft_emb: dict[str, object] = {}
 
         def _sib_cos(sib_draft: AtomicNoteDraft) -> float:
@@ -366,8 +436,7 @@ def run(draft: AtomicNoteDraft, existing_concepts: dict[str, str],
                 _draft_emb["e"] = _emb.embed_body(draft.body or "")
             return _emb.cosine(_draft_emb["e"], _emb.embed_body(sib_draft.body or ""))
 
-        sibling_candidates = _rank_sibling_candidates(
-            draft, siblings, query_tokens, _sib_cos)
+        sibling_candidates = _rank_sibling_candidates(draft, siblings, query_tokens, _sib_cos)
 
     total_candidates = len(vault_candidates) + len(sibling_candidates)
     if total_candidates == 0:
@@ -399,7 +468,9 @@ def run(draft: AtomicNoteDraft, existing_concepts: dict[str, str],
             if not draft_tokens or not cand_tokens:
                 continue
             overlap = len(draft_tokens & cand_tokens) / max(len(draft_tokens), len(cand_tokens))
-            if overlap >= 0.7:  # ≥70% Token-Überlap → wahrscheinliches Duplikat (0.8 war zu hoch: "Konzept (Autor)"-Pattern ergibt nur 75%)
+            if (
+                overlap >= 0.7
+            ):  # ≥70% Token-Überlap → wahrscheinliches Duplikat (0.8 war zu hoch: "Konzept (Autor)"-Pattern ergibt nur 75%)
                 draft.action = "extend"
                 draft.extend_path = str(VAULT / cand_path)
                 draft.quality_flags.append(f"⚠️ Duplikat-Risiko (no-LLM, overlap={overlap:.0%}) — prüfe: {cand_title}")
@@ -412,9 +483,7 @@ def run(draft: AtomicNoteDraft, existing_concepts: dict[str, str],
             related.append(f"[[{sib_title}]]")
         draft.related = related[:MAX_RELATED]
         if len(draft.related) < MIN_RELATED:
-            draft.quality_flags.append(
-                f"⚠️ Nur {len(draft.related)} related-Links (no-LLM-Modus) — manuell prüfen"
-            )
+            draft.quality_flags.append(f"⚠️ Nur {len(draft.related)} related-Links (no-LLM-Modus) — manuell prüfen")
         vault_excerpts_for_nli = [_read_excerpt(VAULT / p) for _, p in vault_candidates]
         if ENABLE_NLI_VALIDATION:
             nli_confirmed = _nli_validate_contradictions(draft.body, vault_excerpts_for_nli)
@@ -447,16 +516,17 @@ def run(draft: AtomicNoteDraft, existing_concepts: dict[str, str],
 
     try:
         raw = call_claude(prompt, model=MODEL_CROSS_REF, agent="cross_reference")
-    except (RuntimeError) as e:
+    except RuntimeError as e:
         import sys
-        print(f"      [cross-ref-fail] '{draft.title}' LLM-Call fehlgeschlagen: {str(e)[:80]}",
-              file=sys.stderr)
+
+        print(f"      [cross-ref-fail] '{draft.title}' LLM-Call fehlgeschlagen: {str(e)[:80]}", file=sys.stderr)
         draft.quality_flags.append("⚠️ Cross-Reference nicht ausgeführt — related-Links manuell prüfen")
         return draft
 
     data, parse_warnings = parse_cross_reference_output(raw)
     if parse_warnings:
         import sys
+
         for w in parse_warnings:
             print(f"      [cross-ref-warn] '{draft.title}': {w}", file=sys.stderr)
 
@@ -487,8 +557,7 @@ def run(draft: AtomicNoteDraft, existing_concepts: dict[str, str],
         # action=extend (man kann nicht in mehrere Notes mergen). Mutually exclusive
         # zum Einzel-Target-Pfad unten (elif), damit der Roh-String nie als ein
         # Merge-Ziel verwendet wird.
-        draft.quality_flags.append(
-            "⚠️ Mehrere Duplikat-Kandidaten — prüfe: " + ", ".join(dup_targets))
+        draft.quality_flags.append("⚠️ Mehrere Duplikat-Kandidaten — prüfe: " + ", ".join(dup_targets))
         for stem in dup_targets:
             dup_link = f"[[{stem}]]"
             if dup_link not in data["related"]:

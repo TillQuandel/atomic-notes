@@ -6,6 +6,7 @@ Importiert:
 
 Aufruf: python migrate_jsonl_to_sqlite.py [--dry-run]
 """
+
 from __future__ import annotations
 
 import argparse
@@ -15,7 +16,7 @@ from pathlib import Path
 from generative import db
 
 QUALITY_HISTORY = Path(__file__).parent / ".cache" / "quality_history.jsonl"
-RUNS_DIR        = Path(__file__).parent / ".cache" / "runs"
+RUNS_DIR = Path(__file__).parent / ".cache" / "runs"
 
 
 def migrate_quality_history(conn, dry_run: bool = False) -> int:
@@ -30,32 +31,35 @@ def migrate_quality_history(conn, dry_run: bool = False) -> int:
             continue  # Fehler-Rows überspringen
 
         note_name = r.get("note", "")
-        ts        = r.get("timestamp", "")
-        pver      = r.get("version") or r.get("pipeline_version") or "unknown"
-        eval_id   = f"migrated__{pver}__{note_name}"
+        ts = r.get("timestamp", "")
+        pver = r.get("version") or r.get("pipeline_version") or "unknown"
+        eval_id = f"migrated__{pver}__{note_name}"
 
         if not dry_run:
-            db.insert_eval(conn, {
-                "eval_id":           eval_id,
-                "run_id":            None,  # kein run_id verfügbar aus alten Daten
-                "note_path":         note_name,
-                "acceptance_status": None,
-                "hallucination_rate":r.get("hallucination_rate"),
-                "anchors_total":     r.get("anchors_total"),
-                "anchors_hallucinated": r.get("anchors_hallucinated"),
-                "coverage_factual":  r.get("coverage_factual"),
-                "coverage_rate":     r.get("coverage_rate"),
-                "tokens_total":      r.get("tokens_total"),
-                "tokens_input":      r.get("tokens_input"),
-                "tokens_output":     r.get("tokens_output"),
-                "tokens_cache_read": r.get("tokens_cache_read"),
-                "wall_time_s":       r.get("wall_time_s"),
-                "pipeline_version":  pver,
-                "pdf":               r.get("pdf"),
-                "language":          r.get("language"),
-                "eval_version":      r.get("eval_version"),
-                "timestamp":         ts,
-            })
+            db.insert_eval(
+                conn,
+                {
+                    "eval_id": eval_id,
+                    "run_id": None,  # kein run_id verfügbar aus alten Daten
+                    "note_path": note_name,
+                    "acceptance_status": None,
+                    "hallucination_rate": r.get("hallucination_rate"),
+                    "anchors_total": r.get("anchors_total"),
+                    "anchors_hallucinated": r.get("anchors_hallucinated"),
+                    "coverage_factual": r.get("coverage_factual"),
+                    "coverage_rate": r.get("coverage_rate"),
+                    "tokens_total": r.get("tokens_total"),
+                    "tokens_input": r.get("tokens_input"),
+                    "tokens_output": r.get("tokens_output"),
+                    "tokens_cache_read": r.get("tokens_cache_read"),
+                    "wall_time_s": r.get("wall_time_s"),
+                    "pipeline_version": pver,
+                    "pdf": r.get("pdf"),
+                    "language": r.get("language"),
+                    "eval_version": r.get("eval_version"),
+                    "timestamp": ts,
+                },
+            )
         migrated += 1
 
     return migrated
@@ -81,8 +85,9 @@ def main() -> None:
         trend = db.query_kpi_trend()
         print(f"Gesamt in DB: {len(evals)} note_evals, {len(trend)} Pipeline-Versionen")
         for row in trend:
-            print(f"  {row['pipeline_version']:12}  n={row['n']:3}  "
-                  f"hall={row['avg_hall']:.1%}  cov={row['avg_cov']:.1%}")
+            print(
+                f"  {row['pipeline_version']:12}  n={row['n']:3}  hall={row['avg_hall']:.1%}  cov={row['avg_cov']:.1%}"
+            )
 
 
 if __name__ == "__main__":

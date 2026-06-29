@@ -10,6 +10,7 @@ Reviewer auf die Überlappung hinweist. Kein Body-Eingriff, kein Kollabieren.
 flag_redundant_siblings() läuft NACH resolve_sibling_dups + dedup_hub_subconcepts (echte
 Dups/Hub-Sub schon behandelt) und vor dem Writer (Flag landet im Frontmatter).
 """
+
 import pytest
 
 from generative.orchestrator import flag_redundant_siblings
@@ -31,8 +32,10 @@ def _draft(title, *, body="", action="create", extend_path=None):
 
 def _cos_map(pairs):
     """Injizierbare body_cosine_fn aus einem {(i,j): cos}-Dict (symmetrisch)."""
+
     def fn(i, j):
         return pairs.get((i, j), pairs.get((j, i), 0.0))
+
     return fn
 
 
@@ -40,8 +43,7 @@ def test_two_distinct_create_drafts_above_threshold_flag_both():
     d_a = _draft("Kirkpatrick-Modell")
     d_b = _draft("Satisfaction-Learning-Dissoziation")
 
-    kept, n = flag_redundant_siblings(
-        [d_a, d_b], threshold=0.90, body_cosine_fn=_cos_map({(0, 1): 0.967}))
+    kept, n = flag_redundant_siblings([d_a, d_b], threshold=0.90, body_cosine_fn=_cos_map({(0, 1): 0.967}))
 
     assert n == 1
     assert len(kept) == 2  # nichts kollabiert — beide bleiben distinkt
@@ -56,8 +58,7 @@ def test_below_threshold_no_flag():
     d_a = _draft("Webinar als Lernformat")
     d_b = _draft("Kirkpatrick-Modell")
 
-    kept, n = flag_redundant_siblings(
-        [d_a, d_b], threshold=0.90, body_cosine_fn=_cos_map({(0, 1): 0.70}))
+    kept, n = flag_redundant_siblings([d_a, d_b], threshold=0.90, body_cosine_fn=_cos_map({(0, 1): 0.70}))
 
     assert n == 0
     assert d_a.quality_flags == []
@@ -73,8 +74,8 @@ def test_extend_drafts_excluded():
 
     # alle Paare hoch — aber d_c ist extend und darf nicht verglichen werden
     kept, n = flag_redundant_siblings(
-        [d_a, d_b, d_c], threshold=0.90,
-        body_cosine_fn=_cos_map({(0, 1): 0.95, (0, 2): 0.95, (1, 2): 0.95}))
+        [d_a, d_b, d_c], threshold=0.90, body_cosine_fn=_cos_map({(0, 1): 0.95, (0, 2): 0.95, (1, 2): 0.95})
+    )
 
     assert n == 1  # nur das create/create-Paar (a,b)
     assert d_c.quality_flags == []  # extend nie geflaggt
@@ -83,8 +84,7 @@ def test_extend_drafts_excluded():
 
 def test_single_create_draft_noop():
     d_a = _draft("Allein")
-    kept, n = flag_redundant_siblings([d_a], threshold=0.90,
-                                      body_cosine_fn=_cos_map({}))
+    kept, n = flag_redundant_siblings([d_a], threshold=0.90, body_cosine_fn=_cos_map({}))
     assert n == 0
     assert d_a.quality_flags == []
 
@@ -109,8 +109,7 @@ def test_one_high_one_low_among_three():
     # a~b hoch, a~c und b~c niedrig
     cos = _cos_map({(0, 1): 0.95, (0, 2): 0.40, (1, 2): 0.42})
 
-    kept, n = flag_redundant_siblings([d_a, d_b, d_c], threshold=0.90,
-                                      body_cosine_fn=cos)
+    kept, n = flag_redundant_siblings([d_a, d_b, d_c], threshold=0.90, body_cosine_fn=cos)
     assert n == 1
     assert d_c.quality_flags == []  # C überlappt mit niemandem
     assert any("[[B]]" in f for f in d_a.quality_flags)
@@ -121,9 +120,11 @@ def test_one_high_one_low_among_three():
 def test_real_embeddings_default_path():
     """Ohne Injection: echtes Embedding-Modell, zwei fast identische Bodies → Flag.
     Validiert dass der Default-Pfad (config-Schwelle, embeddings.embed_body/cosine) wirkt."""
-    shared = ("Lernumgebungen lassen sich nach Synchronizität und Modalität "
-              "klassifizieren. Die Meta-Analyse fand einen kleinen positiven Effekt "
-              "auf die Lernleistung mit großer Heterogenität zwischen den Studien.")
+    shared = (
+        "Lernumgebungen lassen sich nach Synchronizität und Modalität "
+        "klassifizieren. Die Meta-Analyse fand einen kleinen positiven Effekt "
+        "auf die Lernleistung mit großer Heterogenität zwischen den Studien."
+    )
     d_a = _draft("Note A", body=shared)
     d_b = _draft("Note B", body=shared + " Geringfügige Ergänzung.")
 

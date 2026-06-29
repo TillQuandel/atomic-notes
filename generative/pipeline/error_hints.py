@@ -4,13 +4,24 @@ clig.dev: „Catch errors and rewrite them for humans." Jede Meldung nennt den
 nächsten konkreten Schritt; bei Setup-/Umgebungsproblemen den `doctor`-Verweis.
 Pure Funktionen — der Caller druckt/erhebt.
 """
+
 from __future__ import annotations
 
 _DOCTOR = "→ atomic-notes doctor"
 
 # Substrings, die auf ein Key-/Auth-/Backend-Konfigurationsproblem hindeuten.
-_AUTH_MARKERS = ("auth", "api key", "api_key", "apikey", "401", "403",
-                 "unauthorized", "permission", "credential", "invalid key")
+_AUTH_MARKERS = (
+    "auth",
+    "api key",
+    "api_key",
+    "apikey",
+    "401",
+    "403",
+    "unauthorized",
+    "permission",
+    "credential",
+    "invalid key",
+)
 
 
 def scanned_pdf_hint(pdf_name: str, words_per_page: float | None = None) -> str:
@@ -45,8 +56,10 @@ def pdftotext_error_hint(stderr: str | None) -> str:
         f"  Original-Fehler: {detail}"
     )
     if "password" in detail.lower() or "encrypted" in detail.lower():
-        msg += ("\n  Das PDF ist passwortgeschützt/verschlüsselt — Schutz entfernen, "
-                "z. B. `qpdf --decrypt 'input.pdf' 'output.pdf'`, dann erneut starten.")
+        msg += (
+            "\n  Das PDF ist passwortgeschützt/verschlüsselt — Schutz entfernen, "
+            "z. B. `qpdf --decrypt 'input.pdf' 'output.pdf'`, dann erneut starten."
+        )
     return msg
 
 

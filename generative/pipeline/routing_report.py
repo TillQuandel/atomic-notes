@@ -9,6 +9,7 @@ Pure Helper: keine Seiteneffekte, kein I/O. Der Orchestrator/vault_writer druckt
 die Rückgaben. Friction-Gating (nur Low-Confidence/Inbox-Pfad) liegt beim Caller —
 diese Helper beschreiben nur, was angezeigt wird.
 """
+
 from __future__ import annotations
 
 from generative.schemas.atomic_note import AtomicNoteDraft
@@ -17,6 +18,7 @@ from generative.schemas.atomic_note import AtomicNoteDraft
 def _decide(note: AtomicNoteDraft) -> tuple[bool, str]:
     # Lazy import: vault_writer importiert dieses Modul → Zirkel vermeiden.
     from generative.pipeline.vault_writer import auto_write_decision
+
     return auto_write_decision(note)
 
 
@@ -32,8 +34,7 @@ def routing_status_line(note: AtomicNoteDraft) -> str:
     status = "[Vault]" if auto else f"[Inbox: {reason}]"
     if note.action == "hub":
         status = f"[MoC] {status}"
-    line = (f"Score: {note.critic_score}/5 | Hard-Gates: {gates} | "
-            f"Confidence: {note.synthesis_confidence} {status}")
+    line = f"Score: {note.critic_score}/5 | Hard-Gates: {gates} | Confidence: {note.synthesis_confidence} {status}"
     if note.quality_flags:
         line += f"\n        Gründe: {', '.join(note.quality_flags)}"
     return line
@@ -81,8 +82,7 @@ def final_report_lines(drafts: list[AtomicNoteDraft]) -> list[str]:
     ]
 
 
-def is_source_unresolved(enriched_meta: dict, fb: dict,
-                         block_crossref_override: bool) -> bool:
+def is_source_unresolved(enriched_meta: dict, fb: dict, block_crossref_override: bool) -> bool:
     """True wenn die Quelle nicht zuverlässig aufgelöst werden konnte.
 
     Nutzt dieselbe Quellen-SSoT wie Renderer/Quality-Check: enriched_meta ODER
@@ -123,16 +123,20 @@ def source_status_framing(source_status: str | None, source_name: str) -> str | 
     aktiv — High-Confidence/aufgelöste Quellen bleiben frictionless.
     """
     if source_status == "edition-unverified":
-        return (f"  [Quelle] '{source_name}' ist ein Auszug ohne DOI — ich kann die "
-                f"Auflage/Edition nicht belegen (Jahr+Seiten stammen nur aus dem "
-                f"Dateinamen). Bei mehrfach aufgelegten Werken weicht die Seitenzählung "
-                f"je Auflage ab; ich habe die Notes mit `source-status: edition-unverified` "
-                f"markiert und nicht für den Vault empfohlen. Mit `--doi` pinnen behebt es.")
+        return (
+            f"  [Quelle] '{source_name}' ist ein Auszug ohne DOI — ich kann die "
+            f"Auflage/Edition nicht belegen (Jahr+Seiten stammen nur aus dem "
+            f"Dateinamen). Bei mehrfach aufgelegten Werken weicht die Seitenzählung "
+            f"je Auflage ab; ich habe die Notes mit `source-status: edition-unverified` "
+            f"markiert und nicht für den Vault empfohlen. Mit `--doi` pinnen behebt es."
+        )
     if source_status != "unresolved":
         return None
     # Wahrheitsgemäß: source-status ist ein Sichtbarkeits-Flag, kein Routing-Gate.
     # Garantiert ist nur: PDF nicht umbenannt (rename=False) + Note markiert.
-    return (f"  [Quelle] Ich konnte die Quelle von '{source_name}' nicht "
-            f"zuverlässig auflösen (Autor/Jahr/DOI) — ich habe die Eingabedatei "
-            f"nicht umbenannt und die betroffenen Notes mit "
-            f"`source-status: unresolved` zur Prüfung markiert.")
+    return (
+        f"  [Quelle] Ich konnte die Quelle von '{source_name}' nicht "
+        f"zuverlässig auflösen (Autor/Jahr/DOI) — ich habe die Eingabedatei "
+        f"nicht umbenannt und die betroffenen Notes mit "
+        f"`source-status: unresolved` zur Prüfung markiert."
+    )

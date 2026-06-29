@@ -6,20 +6,19 @@ die meisten Records gar keine LLM-Calls sind. Fix: nur Records mit `model`-Feld
 zählen. (Der KPI-Min-N-Guard ist bereits im Frontend über `n_notes < 20`
 abgedeckt — kein Backend-Eingriff nötig.)
 """
+
 from __future__ import annotations
 
 from generative.eval_dashboard_server import _is_llm_call_record
 
 
 def test_llm_call_record_recognised_by_model():
-    rec = {"agent": "verifier", "model": "anthropic/claude-haiku-4-5",
-           "input_tokens": 9, "output_tokens": 713}
+    rec = {"agent": "verifier", "model": "anthropic/claude-haiku-4-5", "input_tokens": 9, "output_tokens": 713}
     assert _is_llm_call_record(rec) is True
 
 
 def test_anchor_stats_event_is_not_a_call():
-    rec = {"type": "anchor_stats", "agent": "verifier",
-           "total_in": 1, "confirmed": 3}
+    rec = {"type": "anchor_stats", "agent": "verifier", "total_in": 1, "confirmed": 3}
     assert _is_llm_call_record(rec) is False
 
 

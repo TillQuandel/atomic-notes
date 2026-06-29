@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 
-
 from decision_engine import ClaimDecision, ClaimInput, DEFAULT_CONFIG, Label, determine_decision
 from decision_engine.aggregation import aggregate
 from decision_engine.models import QualityFlag
@@ -36,9 +35,7 @@ def test_unverified_exact_evidence_is_downgraded_to_not_in_context() -> None:
 
     assert decision.label is Label.NOT_IN_CONTEXT
     assert decision.source == "downgrade"
-    assert decision.flags == frozenset(
-        {QualityFlag.EVIDENCE_UNVERIFIED, QualityFlag.EVIDENCE_FABRICATED}
-    )
+    assert decision.flags == frozenset({QualityFlag.EVIDENCE_UNVERIFIED, QualityFlag.EVIDENCE_FABRICATED})
 
 
 def test_audit_can_only_override_with_stricter_judge_label() -> None:

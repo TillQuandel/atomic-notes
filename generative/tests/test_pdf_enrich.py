@@ -1,8 +1,10 @@
 import sys
 
+
 def test_extract_text_returns_string(tmp_path):
     """extract_text() gibt String zurück (auch bei leerer PDF)."""
     from generative.tools.pdf_enrich import extract_text
+
     pdf_bytes = b"""%PDF-1.4
 1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj
 2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj
@@ -26,6 +28,7 @@ startxref
 def test_is_scanned_detects_empty():
     """is_scanned() gibt True zurück bei leerem Text."""
     from generative.tools.pdf_enrich import is_scanned
+
     assert is_scanned("") is True
     assert is_scanned("   \n  ") is True
     assert is_scanned("Some text here") is False
@@ -33,40 +36,47 @@ def test_is_scanned_detects_empty():
 
 def test_extract_doi_finds_doi_in_text():
     from generative.tools.pdf_enrich import extract_doi
+
     text = "See also doi:10.1016/j.ipm.2019.05.003 for details."
     assert extract_doi(text) == "10.1016/j.ipm.2019.05.003"
 
 
 def test_extract_doi_finds_https_doi():
     from generative.tools.pdf_enrich import extract_doi
+
     text = "Available at https://doi.org/10.3389/fpsyg.2019.02730"
     assert extract_doi(text) == "10.3389/fpsyg.2019.02730"
 
 
 def test_extract_doi_returns_none_when_missing():
     from generative.tools.pdf_enrich import extract_doi
+
     assert extract_doi("No DOI here, just text.") is None
 
 
 def test_extract_isbn_finds_isbn13():
     from generative.tools.pdf_enrich import extract_isbn
+
     text = "ISBN: 978-3-16-148410-0"
     assert extract_isbn(text) == "9783161484100"
 
 
 def test_extract_isbn_finds_isbn10():
     from generative.tools.pdf_enrich import extract_isbn
+
     text = "ISBN 0-596-51774-2 is the identifier."
     assert extract_isbn(text) == "0596517742"
 
 
 def test_extract_isbn_returns_none_when_missing():
     from generative.tools.pdf_enrich import extract_isbn
+
     assert extract_isbn("No ISBN here.") is None
 
 
 def test_extract_isbn_strips_hyphens_and_spaces():
     from generative.tools.pdf_enrich import extract_isbn
+
     text = "ISBN 978 0 596 51774 8"
     assert extract_isbn(text) == "9780596517748"
 
@@ -78,9 +88,14 @@ def test_crossref_lookup_returns_dict_on_valid_doi(monkeypatch):
     fake_response = b'{"status":"ok","message":{"title":["Information Behavior"],"author":[{"family":"Bates","given":"Marcia J."}],"published":{"date-parts":[[2017]]},"DOI":"10.1002/asi.23681","type":"journal-article"}}'
 
     class FakeResp:
-        def read(self): return fake_response
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
+        def read(self):
+            return fake_response
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
 
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: FakeResp())
     result = crossref_lookup("10.1002/asi.23681")
@@ -93,7 +108,12 @@ def test_crossref_lookup_returns_dict_on_valid_doi(monkeypatch):
 def test_crossref_lookup_returns_none_on_error(monkeypatch):
     from generative.tools.pdf_enrich import crossref_lookup
     import urllib.request, urllib.error
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: (_ for _ in ()).throw(urllib.error.HTTPError(None, 404, "Not Found", {}, None)))
+
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda *a, **kw: (_ for _ in ()).throw(urllib.error.HTTPError(None, 404, "Not Found", {}, None)),
+    )
     assert crossref_lookup("10.9999/fake") is None
 
 
@@ -104,9 +124,14 @@ def test_openalex_title_search_returns_result(monkeypatch):
     fake = b'{"results":[{"title":"Information Behavior","authorships":[{"author":{"display_name":"Marcia J. Bates"}}],"publication_year":2017,"doi":"https://doi.org/10.1002/asi.23681","type":"journal-article"}]}'
 
     class FakeResp:
-        def read(self): return fake
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
+        def read(self):
+            return fake
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
 
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: FakeResp())
     result = openalex_title_search("Information Behavior")
@@ -118,18 +143,27 @@ def test_openalex_title_search_returns_result(monkeypatch):
 def test_openalex_returns_none_on_empty_results(monkeypatch):
     from generative.tools.pdf_enrich import openalex_title_search
     import urllib.request
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: type("R", (), {"read": lambda s: b'{"results":[]}', "__enter__": lambda s: s, "__exit__": lambda s, *a: None})())
+
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda *a, **kw: type(
+            "R", (), {"read": lambda s: b'{"results":[]}', "__enter__": lambda s: s, "__exit__": lambda s, *a: None}
+        )(),
+    )
     assert openalex_title_search("zzz_nonexistent_zzz") is None
 
 
 def test_build_filename_standard():
     from generative.tools.pdf_enrich import build_filename
+
     meta = {"author": "Bates", "year": 2017, "title": "Information Behavior"}
     assert build_filename(meta) == "Bates - 2017 - Information Behavior.pdf"
 
 
 def test_build_filename_truncates_long_title():
     from generative.tools.pdf_enrich import build_filename
+
     long = "A" * 150
     result = build_filename({"author": "X", "year": 2020, "title": long})
     assert len(result) <= 120
@@ -138,6 +172,7 @@ def test_build_filename_truncates_long_title():
 
 def test_build_filename_sanitizes_special_chars():
     from generative.tools.pdf_enrich import build_filename
+
     meta = {"author": "Müller", "year": 2021, "title": "Test/Paper: Results"}
     result = build_filename(meta)
     assert "/" not in result
@@ -146,6 +181,7 @@ def test_build_filename_sanitizes_special_chars():
 
 def test_rename_pdf_renames_file(tmp_path):
     from generative.tools.pdf_enrich import rename_pdf
+
     src = tmp_path / "paper123.pdf"
     src.write_bytes(b"%PDF-1.4")
     meta = {"author": "Bates", "year": 2017, "title": "Information Behavior"}
@@ -157,6 +193,7 @@ def test_rename_pdf_renames_file(tmp_path):
 
 def test_rename_pdf_dry_run_does_not_rename(tmp_path):
     from generative.tools.pdf_enrich import rename_pdf
+
     src = tmp_path / "paper123.pdf"
     src.write_bytes(b"%PDF-1.4")
     meta = {"author": "Bates", "year": 2017, "title": "Information Behavior"}
@@ -167,6 +204,7 @@ def test_rename_pdf_dry_run_does_not_rename(tmp_path):
 
 def test_ocr_available_returns_bool():
     from generative.tools.pdf_enrich import ocr_available
+
     result = ocr_available()
     assert isinstance(result, bool)
 
@@ -181,10 +219,12 @@ def test_run_ocr_returns_path_when_available(tmp_path, monkeypatch):
     def fake_run(cmd, capture_output=False, timeout=None):
         class R:
             returncode = 0
+
         # cmd ist eine Liste wie ["ocrmypdf", "--quiet", "--skip-text", "in.pdf", "out.pdf"]
         # Das letzte Element ist der Output-Pfad
         out_path = cmd[-1]
         import pathlib
+
         pathlib.Path(out_path).write_bytes(b"%PDF-1.4 OCR")
         return R()
 
@@ -201,14 +241,22 @@ def test_enrich_returns_meta_for_pdf_with_doi(tmp_path, monkeypatch):
     from generative.tools.pdf_enrich import enrich
     import urllib.request
 
-    monkeypatch.setattr("generative.tools.pdf_enrich.extract_text",
-                        lambda path, max_pages=3: "See doi:10.1002/asi.23681 for details")
+    monkeypatch.setattr(
+        "generative.tools.pdf_enrich.extract_text", lambda path, max_pages=3: "See doi:10.1002/asi.23681 for details"
+    )
 
     fake_cr = b'{"status":"ok","message":{"title":["Information Behavior"],"author":[{"family":"Bates"}],"published":{"date-parts":[[2017]]},"DOI":"10.1002/asi.23681","type":"journal-article"}}'
+
     class FakeResp:
-        def read(self): return fake_cr
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
+        def read(self):
+            return fake_cr
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: FakeResp())
 
     pdf = tmp_path / "paper.pdf"
@@ -222,6 +270,7 @@ def test_enrich_returns_meta_for_pdf_with_doi(tmp_path, monkeypatch):
 def test_read_pdf_metadata_returns_dict(tmp_path, monkeypatch):
     from generative.tools.pdf_enrich import read_pdf_metadata
     from unittest.mock import MagicMock
+
     mock_reader = MagicMock()
     mock_reader.metadata = {"/Title": "Information Behavior", "/Author": "Bates", "/Subject": "2017"}
     monkeypatch.setattr("generative.tools.pdf_enrich.PdfReader", lambda *a, **kw: mock_reader)
@@ -235,6 +284,7 @@ def test_read_pdf_metadata_returns_dict(tmp_path, monkeypatch):
 def test_read_pdf_metadata_returns_none_when_no_author(tmp_path, monkeypatch):
     from generative.tools.pdf_enrich import read_pdf_metadata
     from unittest.mock import MagicMock
+
     mock_reader = MagicMock()
     mock_reader.metadata = {"/Title": "Some Title"}
     monkeypatch.setattr("generative.tools.pdf_enrich.PdfReader", lambda *a, **kw: mock_reader)
@@ -244,6 +294,7 @@ def test_read_pdf_metadata_returns_none_when_no_author(tmp_path, monkeypatch):
 def test_read_pdf_metadata_returns_none_when_empty(tmp_path, monkeypatch):
     from generative.tools.pdf_enrich import read_pdf_metadata
     from unittest.mock import MagicMock
+
     mock_reader = MagicMock()
     mock_reader.metadata = {}
     monkeypatch.setattr("generative.tools.pdf_enrich.PdfReader", lambda *a, **kw: mock_reader)
@@ -253,11 +304,19 @@ def test_read_pdf_metadata_returns_none_when_empty(tmp_path, monkeypatch):
 def test_open_library_lookup_returns_dict(monkeypatch):
     from generative.tools.pdf_enrich import open_library_lookup
     import urllib.request
+
     fake = b'{"ISBN:9780596517748":{"title":"JavaScript: The Good Parts","authors":[{"name":"Douglas Crockford"}],"publish_date":"May 2008"}}'
+
     class FakeResp:
-        def read(self): return fake
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
+        def read(self):
+            return fake
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: FakeResp())
     result = open_library_lookup("9780596517748")
     assert result is not None
@@ -266,20 +325,37 @@ def test_open_library_lookup_returns_dict(monkeypatch):
     assert result["year"] == 2008
     assert result["type"] == "book"
 
+
 def test_open_library_lookup_returns_none_on_empty(monkeypatch):
     from generative.tools.pdf_enrich import open_library_lookup
     import urllib.request
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: type("R", (), {"read": lambda s: b'{}', "__enter__": lambda s: s, "__exit__": lambda s, *a: None})())
+
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda *a, **kw: type(
+            "R", (), {"read": lambda s: b"{}", "__enter__": lambda s: s, "__exit__": lambda s, *a: None}
+        )(),
+    )
     assert open_library_lookup("9999999999999") is None
+
 
 def test_google_books_lookup_returns_dict(monkeypatch):
     from generative.tools.pdf_enrich import google_books_lookup
     import urllib.request
+
     fake = b'{"items":[{"volumeInfo":{"title":"JavaScript: The Good Parts","authors":["Douglas Crockford"],"publishedDate":"2008-05-01"}}]}'
+
     class FakeResp:
-        def read(self): return fake
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
+        def read(self):
+            return fake
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: FakeResp())
     result = google_books_lookup("9780596517748")
     assert result is not None
@@ -288,31 +364,46 @@ def test_google_books_lookup_returns_dict(monkeypatch):
     assert result["year"] == 2008
     assert result["type"] == "book"
 
+
 def test_google_books_lookup_returns_none_on_empty(monkeypatch):
     from generative.tools.pdf_enrich import google_books_lookup
     import urllib.request
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: type("R", (), {"read": lambda s: b'{"items":[]}', "__enter__": lambda s: s, "__exit__": lambda s, *a: None})())
+
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda *a, **kw: type(
+            "R", (), {"read": lambda s: b'{"items":[]}', "__enter__": lambda s: s, "__exit__": lambda s, *a: None}
+        )(),
+    )
     assert google_books_lookup("9999999999999") is None
 
 
 def test_extract_arxiv_id_finds_new_format():
     from generative.tools.pdf_enrich import extract_arxiv_id
+
     text = "See arXiv:2301.12345 for the preprint."
     assert extract_arxiv_id(text) == "2301.12345"
 
+
 def test_extract_arxiv_id_finds_old_format():
     from generative.tools.pdf_enrich import extract_arxiv_id
+
     text = "Available at arXiv:cs.AI/0612072"
     assert extract_arxiv_id(text) == "cs.AI/0612072"
 
+
 def test_extract_arxiv_id_returns_none_when_missing():
     from generative.tools.pdf_enrich import extract_arxiv_id
+
     assert extract_arxiv_id("No arXiv ID here.") is None
+
 
 def test_arxiv_lookup_returns_dict(monkeypatch):
     from generative.tools.pdf_enrich import arxiv_lookup
     import urllib.request
-    fake = b'''<?xml version="1.0" encoding="UTF-8"?>
+
+    fake = b"""<?xml version="1.0" encoding="UTF-8"?>
 <feed xmlns="http://www.w3.org/2005/Atom">
   <title>ArXiv Query</title>
   <entry>
@@ -321,11 +412,18 @@ def test_arxiv_lookup_returns_dict(monkeypatch):
     <published>2017-06-12T00:00:00Z</published>
     <id>http://arxiv.org/abs/1706.03762v5</id>
   </entry>
-</feed>'''
+</feed>"""
+
     class FakeResp:
-        def read(self): return fake
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
+        def read(self):
+            return fake
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: FakeResp())
     result = arxiv_lookup("1706.03762")
     assert result is not None
@@ -334,35 +432,56 @@ def test_arxiv_lookup_returns_dict(monkeypatch):
     assert result["year"] == 2017
     assert result["type"] == "preprint"
 
+
 def test_arxiv_lookup_returns_none_on_empty(monkeypatch):
     from generative.tools.pdf_enrich import arxiv_lookup
     import urllib.request
+
     fake = b'<?xml version="1.0"?><feed xmlns="http://www.w3.org/2005/Atom"></feed>'
+
     class FakeResp:
-        def read(self): return fake
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
+        def read(self):
+            return fake
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: FakeResp())
     assert arxiv_lookup("9999.99999") is None
 
 
 def test_extract_pmid_finds_pmid():
     from generative.tools.pdf_enrich import extract_pmid
+
     text = "PMID: 30049270 — see also the supplementary."
     assert extract_pmid(text) == "30049270"
 
+
 def test_extract_pmid_returns_none_when_missing():
     from generative.tools.pdf_enrich import extract_pmid
+
     assert extract_pmid("No PMID here.") is None
+
 
 def test_pubmed_lookup_returns_dict(monkeypatch):
     from generative.tools.pdf_enrich import pubmed_lookup
     import urllib.request
+
     fake = b'{"result":{"30049270":{"title":"Information Behavior","authors":[{"name":"Bates MJ"}],"pubdate":"2017 Nov","fulljournalname":"Annual Review","elocationid":"doi: 10.1002/asi.23681"}}}'
+
     class FakeResp:
-        def read(self): return fake
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
+        def read(self):
+            return fake
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: FakeResp())
     result = pubmed_lookup("30049270")
     assert result is not None
@@ -371,10 +490,18 @@ def test_pubmed_lookup_returns_dict(monkeypatch):
     assert result["year"] == 2017
     assert result["type"] == "journal-article"
 
+
 def test_pubmed_lookup_returns_none_on_missing_result(monkeypatch):
     from generative.tools.pdf_enrich import pubmed_lookup
     import urllib.request
-    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: type("R", (), {"read": lambda s: b'{"result":{}}', "__enter__": lambda s: s, "__exit__": lambda s, *a: None})())
+
+    monkeypatch.setattr(
+        urllib.request,
+        "urlopen",
+        lambda *a, **kw: type(
+            "R", (), {"read": lambda s: b'{"result":{}}', "__enter__": lambda s: s, "__exit__": lambda s, *a: None}
+        )(),
+    )
     assert pubmed_lookup("99999999") is None
 
 
@@ -384,6 +511,7 @@ def test_enrich_uses_embedded_metadata_first(tmp_path, monkeypatch):
     der Datei-Ersteller, nicht der Werk-Autor — Codex-Review 2026-06-25)."""
     from generative.tools.pdf_enrich import enrich
     from unittest.mock import MagicMock
+
     mock_reader = MagicMock()
     mock_reader.metadata = {"/Title": "Information Behavior", "/Author": "Marcia Bates", "/Subject": "2017"}
     monkeypatch.setattr("generative.tools.pdf_enrich.PdfReader", lambda *a, **kw: mock_reader)
@@ -395,45 +523,58 @@ def test_enrich_uses_embedded_metadata_first(tmp_path, monkeypatch):
     assert meta["title"] == "Information Behavior"
     assert meta["author"] == "Bates"
 
+
 def test_title_match_confident_rejects_weak_overlap():
     """Generischer Guess matcht fremden Titel mit nur 1 gemeinsamen Wort -> verwerfen.
     Realer Bug-Fall: 'zettelkasten primer' vs. spanischer Torres-Salinas-Titel."""
     from generative.tools.pdf_enrich import _title_match_confident
-    assert _title_match_confident(
-        "zettelkasten primer",
-        "Curso de escritura académica. Tomar notas con el método Zettelkasten y Zotero",
-    ) is False
+
+    assert (
+        _title_match_confident(
+            "zettelkasten primer",
+            "Curso de escritura académica. Tomar notas con el método Zettelkasten y Zotero",
+        )
+        is False
+    )
 
 
 def test_title_match_confident_accepts_exact():
     from generative.tools.pdf_enrich import _title_match_confident
+
     assert _title_match_confident("Information Behavior", "Information Behavior") is True
 
 
 def test_title_match_confident_accepts_subtitle_extension():
     """Guess ist Haupttitel, Treffer hat Untertitel -> trotzdem vertrauenswürdig."""
     from generative.tools.pdf_enrich import _title_match_confident
-    assert _title_match_confident(
-        "Information Search Process",
-        "The Information Search Process: A Cognitive Approach",
-    ) is True
+
+    assert (
+        _title_match_confident(
+            "Information Search Process",
+            "The Information Search Process: A Cognitive Approach",
+        )
+        is True
+    )
 
 
 def test_title_match_confident_rejects_single_generic_token():
     """Ein gemeinsames bedeutungstragendes Wort reicht nicht."""
     from generative.tools.pdf_enrich import _title_match_confident
+
     assert _title_match_confident("information", "Information Behavior Research") is False
 
 
 def test_title_match_confident_handles_none_result():
     """OpenAlex kann title=null liefern -> kein Crash, sondern False."""
     from generative.tools.pdf_enrich import _title_match_confident
+
     assert _title_match_confident("Information Behavior", None) is False
 
 
 def test_title_match_confident_folds_accents():
     """Akzent-Varianten gelten als gleich (método == metodo)."""
     from generative.tools.pdf_enrich import _title_match_confident
+
     assert _title_match_confident("Método Único", "Metodo Unico") is True
 
 
@@ -443,15 +584,22 @@ def test_title_match_confident_rejects_generic_two_token_in_long_foreign_title()
     nicht — der Haupttitel des Treffers (vor dem Untertitel) darf nicht wesentlich
     mehr als die Query-Tokens enthalten. Fail-closed."""
     from generative.tools.pdf_enrich import _title_match_confident
-    assert _title_match_confident(
-        "Information Behavior",
-        "Information Behavior in Everyday Contexts: A Study of Organizational "
-        "Knowledge Workers and Their Information Practices",
-    ) is False
-    assert _title_match_confident(
-        "Knowledge Management",
-        "Knowledge Management Systems in Modern Enterprise Architecture Design",
-    ) is False
+
+    assert (
+        _title_match_confident(
+            "Information Behavior",
+            "Information Behavior in Everyday Contexts: A Study of Organizational "
+            "Knowledge Workers and Their Information Practices",
+        )
+        is False
+    )
+    assert (
+        _title_match_confident(
+            "Knowledge Management",
+            "Knowledge Management Systems in Modern Enterprise Architecture Design",
+        )
+        is False
+    )
 
 
 def test_title_match_confident_accepts_short_main_title_long_subtitle():
@@ -461,24 +609,35 @@ def test_title_match_confident_accepts_short_main_title_long_subtitle():
     Belegte Titel: Wenger 1998 (Communities of Practice), Lave & Wenger 1991
     (Situated Learning)."""
     from generative.tools.pdf_enrich import _title_match_confident
-    assert _title_match_confident(
-        "Communities of Practice",
-        "Communities of Practice: Learning, Meaning, and Identity",
-    ) is True
-    assert _title_match_confident(
-        "Situated Learning",
-        "Situated Learning: Legitimate Peripheral Participation",
-    ) is True
+
+    assert (
+        _title_match_confident(
+            "Communities of Practice",
+            "Communities of Practice: Learning, Meaning, and Identity",
+        )
+        is True
+    )
+    assert (
+        _title_match_confident(
+            "Situated Learning",
+            "Situated Learning: Legitimate Peripheral Participation",
+        )
+        is True
+    )
 
 
 def test_title_match_confident_accepts_colon_subtitle_without_space():
     """#41-R1: Untertitel-Trenner ':' wird auch ohne folgendes Leerzeichen erkannt
     (OpenAlex normalisiert ': ' nicht immer)."""
     from generative.tools.pdf_enrich import _title_match_confident
-    assert _title_match_confident(
-        "Communities of Practice",
-        "Communities of Practice:Learning, Meaning, and Identity",
-    ) is True
+
+    assert (
+        _title_match_confident(
+            "Communities of Practice",
+            "Communities of Practice:Learning, Meaning, and Identity",
+        )
+        is True
+    )
 
 
 def test_title_match_confident_rejects_generic_subset_of_specific_query():
@@ -490,12 +649,9 @@ def test_title_match_confident_rejects_generic_subset_of_specific_query():
     Title-Pfad. OpenAlex speichert Titel praktisch immer voll (21 Live-Abfragen
     2026-06-16), ein echter gekürzter Treffer ist kaum legitim. Fail-closed."""
     from generative.tools.pdf_enrich import _title_match_confident
-    assert _title_match_confident(
-        "Situated Learning Theory", "Situated Learning"
-    ) is False
-    assert _title_match_confident(
-        "Cognitive Load Theory Foundations", "Cognitive Load"
-    ) is False
+
+    assert _title_match_confident("Situated Learning Theory", "Situated Learning") is False
+    assert _title_match_confident("Cognitive Load Theory Foundations", "Cognitive Load") is False
 
 
 def test_title_match_confident_accepts_full_title_with_subtitle_query():
@@ -505,12 +661,11 @@ def test_title_match_confident_accepts_full_title_with_subtitle_query():
     liegen vollständig im Treffer-Volltitel (q ⊆ r_full). Nur Query-Tokens, die im
     GANZEN Treffer fehlen (q - r_full ≠ ∅), signalisieren den Generischer-Kurztitel-Bug."""
     from generative.tools.pdf_enrich import _title_match_confident
+
     full = "Communities of Practice: Learning, Meaning, and Identity"
     assert _title_match_confident(full, full) is True
     # Query ohne Doppelpunkt (Dateiname-Variante), Treffer mit Untertitel
-    assert _title_match_confident(
-        "Communities of Practice Learning Meaning and Identity", full
-    ) is True
+    assert _title_match_confident("Communities of Practice Learning Meaning and Identity", full) is True
 
 
 def test_title_match_confident_strips_html_in_result_title():
@@ -520,12 +675,9 @@ def test_title_match_confident_strips_html_in_result_title():
     Checks — hier schlüpfte der Generischer-Kurztitel-Bug durch, weil 'span' das r_main⊊q
     unterlief. Nach HTML-Strip wird korrekt fail-closed verworfen."""
     from generative.tools.pdf_enrich import _title_match_confident
-    assert _title_match_confident(
-        "Situated Learning Theory", "<span>Situated Learning</span>"
-    ) is False
-    assert _title_match_confident(
-        "Situated Learning Theory", "&lt;span&gt;Situated Learning&lt;/span&gt;"
-    ) is False
+
+    assert _title_match_confident("Situated Learning Theory", "<span>Situated Learning</span>") is False
+    assert _title_match_confident("Situated Learning Theory", "&lt;span&gt;Situated Learning&lt;/span&gt;") is False
 
 
 def test_enrich_discards_weak_openalex_match(tmp_path, monkeypatch):
@@ -533,16 +685,26 @@ def test_enrich_discards_weak_openalex_match(tmp_path, monkeypatch):
     from generative.tools.pdf_enrich import enrich
     import urllib.request
     from unittest.mock import MagicMock
+
     mock_reader = MagicMock()
     mock_reader.metadata = {}
     monkeypatch.setattr("generative.tools.pdf_enrich.PdfReader", lambda *a, **kw: mock_reader)
-    monkeypatch.setattr("generative.tools.pdf_enrich.extract_text",
-                        lambda path, max_pages=3: "Zettelkasten Primer\nEine kurze Einfuehrung in atomare Notizen.")
+    monkeypatch.setattr(
+        "generative.tools.pdf_enrich.extract_text",
+        lambda path, max_pages=3: "Zettelkasten Primer\nEine kurze Einfuehrung in atomare Notizen.",
+    )
     fake = b'{"results":[{"title":"Curso de escritura acad\xc3\xa9mica. Tomar notas con el m\xc3\xa9todo Zettelkasten y Zotero","authorships":[{"author":{"display_name":"Daniel Torres-Salinas"}}],"publication_year":2024,"doi":"https://doi.org/10.3145/infonomy.24.055","type":"article"}]}'
+
     class FakeResp:
-        def read(self): return fake
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
+        def read(self):
+            return fake
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: FakeResp())
     pdf = tmp_path / "zettelkasten-primer.pdf"
     pdf.write_bytes(b"%PDF")
@@ -555,13 +717,22 @@ def test_enrich_rename_false_keeps_original_file(tmp_path, monkeypatch):
     auch ohne dry_run."""
     from generative.tools.pdf_enrich import enrich
     import urllib.request
-    monkeypatch.setattr("generative.tools.pdf_enrich.extract_text",
-                        lambda path, max_pages=3: "See doi:10.1002/asi.23681 for details")
+
+    monkeypatch.setattr(
+        "generative.tools.pdf_enrich.extract_text", lambda path, max_pages=3: "See doi:10.1002/asi.23681 for details"
+    )
     fake_cr = b'{"status":"ok","message":{"title":["Information Behavior"],"author":[{"family":"Bates"}],"published":{"date-parts":[[2017]]},"DOI":"10.1002/asi.23681","type":"journal-article"}}'
+
     class FakeResp:
-        def read(self): return fake_cr
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
+        def read(self):
+            return fake_cr
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: FakeResp())
     pdf = tmp_path / "paper.pdf"
     pdf.write_bytes(b"%PDF")
@@ -577,16 +748,25 @@ def test_enrich_uses_isbn_when_no_doi(tmp_path, monkeypatch):
     from generative.tools.pdf_enrich import enrich
     import urllib.request
     from unittest.mock import MagicMock
+
     mock_reader = MagicMock()
     mock_reader.metadata = {}
     monkeypatch.setattr("generative.tools.pdf_enrich.PdfReader", lambda *a, **kw: mock_reader)
-    monkeypatch.setattr("generative.tools.pdf_enrich.extract_text",
-                        lambda path, max_pages=3: "ISBN 978-0-596-51774-8\nBook content.")
+    monkeypatch.setattr(
+        "generative.tools.pdf_enrich.extract_text", lambda path, max_pages=3: "ISBN 978-0-596-51774-8\nBook content."
+    )
     fake_ol = b'{"ISBN:9780596517748":{"title":"JavaScript: The Good Parts","authors":[{"name":"Douglas Crockford"}],"publish_date":"2008"}}'
+
     class FakeResp:
-        def read(self): return fake_ol
-        def __enter__(self): return self
-        def __exit__(self, *a): pass
+        def read(self):
+            return fake_ol
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
     monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: FakeResp())
     pdf = tmp_path / "book.pdf"
     pdf.write_bytes(b"%PDF")
@@ -600,6 +780,7 @@ def test_cli_does_not_rename_by_default(tmp_path, monkeypatch):
     """#41-Restrisiko R3: Standalone-CLI mutiert getrackte PDFs nicht mehr.
     Umbenennen + In-PDF-Metadaten-Write ist jetzt Opt-in (rename=False per Default)."""
     from generative.tools import pdf_enrich
+
     captured = {}
 
     def fake_enrich(path, dry_run=False, llm_fallback=False, rename=True):
@@ -617,6 +798,7 @@ def test_cli_does_not_rename_by_default(tmp_path, monkeypatch):
 def test_cli_renames_with_flag(tmp_path, monkeypatch):
     """--rename aktiviert das Umbenennen explizit (Opt-in)."""
     from generative.tools import pdf_enrich
+
     captured = {}
 
     def fake_enrich(path, dry_run=False, llm_fallback=False, rename=True):
@@ -637,12 +819,15 @@ def test_cli_renames_with_flag(tmp_path, monkeypatch):
 # Seite) wird so zur Dokument-Quelle. Fix: IDs nur aus dem Kopfbereich (erste Seite)
 # ziehen — für alle vier Extraktoren konsistent.
 
+
 def _front_matter_aware_extract(header: str, full: str):
     """Mock für extract_text: die volle 10-Seiten-Extraktion sieht die zitierte ID,
     die Kopfbereich-Extraktion (weniger Seiten) nicht. Simuliert eine zitierte ID, die
     erst auf einer späteren Seite steht."""
+
     def fake(path, max_pages=3):
         return full if max_pages >= 10 else header
+
     return fake
 
 
@@ -650,17 +835,23 @@ def test_enrich_ignores_cited_doi_on_later_page(tmp_path, monkeypatch):
     """#41-R2: eine zitierte DOI (Literaturverzeichnis, spätere Seite) darf nicht zur
     Dokument-Quelle werden. Kopfbereich hat keine DOI -> keine Attribution."""
     from generative.tools import pdf_enrich
-    monkeypatch.setattr(pdf_enrich, "extract_text", _front_matter_aware_extract(
-        header="Eine kurze Notiz\nVon der Autorin\nEinleitende Bemerkungen ohne Kennung.",
-        full="Eine kurze Notiz\nVon der Autorin\nEinleitende Bemerkungen ohne Kennung.\n"
-             "Literatur\n[1] Bates 2017. doi:10.1002/asi.23681"))
+
+    monkeypatch.setattr(
+        pdf_enrich,
+        "extract_text",
+        _front_matter_aware_extract(
+            header="Eine kurze Notiz\nVon der Autorin\nEinleitende Bemerkungen ohne Kennung.",
+            full="Eine kurze Notiz\nVon der Autorin\nEinleitende Bemerkungen ohne Kennung.\n"
+            "Literatur\n[1] Bates 2017. doi:10.1002/asi.23681",
+        ),
+    )
     monkeypatch.setattr(pdf_enrich, "openalex_title_search", lambda *a, **k: None)
     called = {}
 
     def spy(doi):
         called["doi"] = doi
-        return {"author": "Bates", "year": 2017, "title": "Information Behavior",
-                "doi": doi, "type": "journal-article"}
+        return {"author": "Bates", "year": 2017, "title": "Information Behavior", "doi": doi, "type": "journal-article"}
+
     monkeypatch.setattr(pdf_enrich, "crossref_lookup", spy)
     pdf = tmp_path / "kurze-notiz.pdf"
     pdf.write_bytes(b"%PDF")
@@ -672,16 +863,22 @@ def test_enrich_ignores_cited_doi_on_later_page(tmp_path, monkeypatch):
 def test_enrich_ignores_cited_isbn_on_later_page(tmp_path, monkeypatch):
     """#41-R2-Geschwister: zitierte ISBN auf späterer Seite darf nicht attribuieren."""
     from generative.tools import pdf_enrich
-    monkeypatch.setattr(pdf_enrich, "extract_text", _front_matter_aware_extract(
-        header="Kapiteltitel\nFließtext ohne Kennung.",
-        full="Kapiteltitel\nFließtext ohne Kennung.\nLiteratur\nCrockford, ISBN 978-0-596-51774-8."))
+
+    monkeypatch.setattr(
+        pdf_enrich,
+        "extract_text",
+        _front_matter_aware_extract(
+            header="Kapiteltitel\nFließtext ohne Kennung.",
+            full="Kapiteltitel\nFließtext ohne Kennung.\nLiteratur\nCrockford, ISBN 978-0-596-51774-8.",
+        ),
+    )
     monkeypatch.setattr(pdf_enrich, "openalex_title_search", lambda *a, **k: None)
     called = {}
 
     def spy(isbn):
         called["isbn"] = isbn
-        return {"author": "Crockford", "year": 2008, "title": "JavaScript",
-                "doi": "", "type": "book"}
+        return {"author": "Crockford", "year": 2008, "title": "JavaScript", "doi": "", "type": "book"}
+
     monkeypatch.setattr(pdf_enrich, "open_library_lookup", spy)
     monkeypatch.setattr(pdf_enrich, "google_books_lookup", spy)
     pdf = tmp_path / "kapitel-auszug.pdf"
@@ -694,16 +891,22 @@ def test_enrich_ignores_cited_isbn_on_later_page(tmp_path, monkeypatch):
 def test_enrich_ignores_cited_arxiv_on_later_page(tmp_path, monkeypatch):
     """#41-R2-Geschwister: zitierte arXiv-ID auf späterer Seite darf nicht attribuieren."""
     from generative.tools import pdf_enrich
-    monkeypatch.setattr(pdf_enrich, "extract_text", _front_matter_aware_extract(
-        header="Seminararbeit\nÜberblick ohne Kennung.",
-        full="Seminararbeit\nÜberblick ohne Kennung.\nReferenzen\n[3] Vaswani et al., arXiv:1706.03762."))
+
+    monkeypatch.setattr(
+        pdf_enrich,
+        "extract_text",
+        _front_matter_aware_extract(
+            header="Seminararbeit\nÜberblick ohne Kennung.",
+            full="Seminararbeit\nÜberblick ohne Kennung.\nReferenzen\n[3] Vaswani et al., arXiv:1706.03762.",
+        ),
+    )
     monkeypatch.setattr(pdf_enrich, "openalex_title_search", lambda *a, **k: None)
     called = {}
 
     def spy(arxiv_id):
         called["arxiv"] = arxiv_id
-        return {"author": "Vaswani", "year": 2017, "title": "Attention",
-                "doi": "", "type": "preprint"}
+        return {"author": "Vaswani", "year": 2017, "title": "Attention", "doi": "", "type": "preprint"}
+
     monkeypatch.setattr(pdf_enrich, "arxiv_lookup", spy)
     pdf = tmp_path / "seminararbeit-text.pdf"
     pdf.write_bytes(b"%PDF")
@@ -715,16 +918,22 @@ def test_enrich_ignores_cited_arxiv_on_later_page(tmp_path, monkeypatch):
 def test_enrich_ignores_cited_pmid_on_later_page(tmp_path, monkeypatch):
     """#41-R2-Geschwister: zitierte PMID auf späterer Seite darf nicht attribuieren."""
     from generative.tools import pdf_enrich
-    monkeypatch.setattr(pdf_enrich, "extract_text", _front_matter_aware_extract(
-        header="Studienprotokoll\nMethodischer Überblick ohne Kennung.",
-        full="Studienprotokoll\nMethodischer Überblick ohne Kennung.\nReferences\n[7] Bates MJ. PMID: 30049270."))
+
+    monkeypatch.setattr(
+        pdf_enrich,
+        "extract_text",
+        _front_matter_aware_extract(
+            header="Studienprotokoll\nMethodischer Überblick ohne Kennung.",
+            full="Studienprotokoll\nMethodischer Überblick ohne Kennung.\nReferences\n[7] Bates MJ. PMID: 30049270.",
+        ),
+    )
     monkeypatch.setattr(pdf_enrich, "openalex_title_search", lambda *a, **k: None)
     called = {}
 
     def spy(pmid):
         called["pmid"] = pmid
-        return {"author": "Bates", "year": 2017, "title": "Information Behavior",
-                "doi": "", "type": "journal-article"}
+        return {"author": "Bates", "year": 2017, "title": "Information Behavior", "doi": "", "type": "journal-article"}
+
     monkeypatch.setattr(pdf_enrich, "pubmed_lookup", spy)
     pdf = tmp_path / "studienprotokoll-text.pdf"
     pdf.write_bytes(b"%PDF")
@@ -737,13 +946,19 @@ def test_enrich_uses_doi_from_front_matter(tmp_path, monkeypatch):
     """Gegenprobe zu R2: eine DOI im Kopfbereich (erste Seite) wird weiterhin genutzt,
     und zwar die Kopf-DOI — nicht eine zitierte DOI weiter unten."""
     from generative.tools import pdf_enrich
-    monkeypatch.setattr(pdf_enrich, "extract_text", _front_matter_aware_extract(
-        header="Titel\nAutor\nhttps://doi.org/10.1002/asi.23681",
-        full="Titel\nAutor\nhttps://doi.org/10.1002/asi.23681\nLiteratur\ndoi:10.9999/cited"))
+
+    monkeypatch.setattr(
+        pdf_enrich,
+        "extract_text",
+        _front_matter_aware_extract(
+            header="Titel\nAutor\nhttps://doi.org/10.1002/asi.23681",
+            full="Titel\nAutor\nhttps://doi.org/10.1002/asi.23681\nLiteratur\ndoi:10.9999/cited",
+        ),
+    )
 
     def spy(doi):
-        return {"author": "Bates", "year": 2017, "title": "Information Behavior",
-                "doi": doi, "type": "journal-article"}
+        return {"author": "Bates", "year": 2017, "title": "Information Behavior", "doi": doi, "type": "journal-article"}
+
     monkeypatch.setattr(pdf_enrich, "crossref_lookup", spy)
     pdf = tmp_path / "titel-doc.pdf"
     pdf.write_bytes(b"%PDF")
@@ -757,16 +972,30 @@ def test_enrich_book_chapter_doi_ignores_cited_isbn(tmp_path, monkeypatch):
     eine ZITIERTE ISBN (spätere Seite) nicht den ISBN-Lookup-Umweg triggern und die
     Quelle auf das zitierte Buch verfälschen. Header hat keine ISBN -> Kapitel-Meta bleibt."""
     from generative.tools import pdf_enrich
-    monkeypatch.setattr(pdf_enrich, "extract_text", _front_matter_aware_extract(
-        header="Buchkapitel-Titel\nAutor\ndoi:10.1007/978-3-540-chapter",
-        full="Buchkapitel-Titel\nAutor\ndoi:10.1007/978-3-540-chapter\nLiteratur\nISBN 978-0-596-51774-8."))
-    monkeypatch.setattr(pdf_enrich, "crossref_lookup",
-        lambda doi: {"author": "Kapitelautor", "year": 2010, "title": "Das Kapitel",
-                     "doi": doi, "type": "book-chapter"})
+
+    monkeypatch.setattr(
+        pdf_enrich,
+        "extract_text",
+        _front_matter_aware_extract(
+            header="Buchkapitel-Titel\nAutor\ndoi:10.1007/978-3-540-chapter",
+            full="Buchkapitel-Titel\nAutor\ndoi:10.1007/978-3-540-chapter\nLiteratur\nISBN 978-0-596-51774-8.",
+        ),
+    )
+    monkeypatch.setattr(
+        pdf_enrich,
+        "crossref_lookup",
+        lambda doi: {
+            "author": "Kapitelautor",
+            "year": 2010,
+            "title": "Das Kapitel",
+            "doi": doi,
+            "type": "book-chapter",
+        },
+    )
 
     def isbn_spy(isbn):
-        return {"author": "FremderAutor", "year": 2008, "title": "Zitiertes Buch",
-                "doi": "", "type": "book"}
+        return {"author": "FremderAutor", "year": 2008, "title": "Zitiertes Buch", "doi": "", "type": "book"}
+
     monkeypatch.setattr(pdf_enrich, "open_library_lookup", isbn_spy)
     monkeypatch.setattr(pdf_enrich, "google_books_lookup", isbn_spy)
     pdf = tmp_path / "buchkapitel.pdf"
@@ -782,15 +1011,16 @@ def test_enrich_header_from_ocr_source(tmp_path, monkeypatch):
     dry_run=True bleibt pdf_path das Original, also muss header_text aus source_path (ocr)
     kommen, sonst geht die Kopf-DOI verloren."""
     from generative.tools import pdf_enrich
+
     ocr_pdf = tmp_path / "scan.ocr.pdf"
 
     def fake_extract(path, max_pages=3):
         if str(path).endswith("scan.ocr.pdf"):
             if max_pages >= 10:
-                return ("Titel\nAutor\nhttps://doi.org/10.1002/asi.23681\n"
-                        "Literatur\ndoi:10.9999/cited")
+                return "Titel\nAutor\nhttps://doi.org/10.1002/asi.23681\nLiteratur\ndoi:10.9999/cited"
             return "Titel\nAutor\nhttps://doi.org/10.1002/asi.23681"
         return ""  # Original ist gescannt -> leer
+
     monkeypatch.setattr(pdf_enrich, "extract_text", fake_extract)
     monkeypatch.setattr(pdf_enrich, "ocr_available", lambda: True)
     monkeypatch.setattr(pdf_enrich, "run_ocr", lambda p: ocr_pdf)
@@ -798,8 +1028,8 @@ def test_enrich_header_from_ocr_source(tmp_path, monkeypatch):
 
     def spy(doi):
         called["doi"] = doi
-        return {"author": "Bates", "year": 2017, "title": "Information Behavior",
-                "doi": doi, "type": "journal-article"}
+        return {"author": "Bates", "year": 2017, "title": "Information Behavior", "doi": doi, "type": "journal-article"}
+
     monkeypatch.setattr(pdf_enrich, "crossref_lookup", spy)
     pdf = tmp_path / "scan.pdf"
     pdf.write_bytes(b"%PDF")
@@ -819,13 +1049,11 @@ from generative.tools.pdf_enrich import _zotero_author_matches_embedded
 
 
 def test_filename_author_confirms_embedded():
-    assert _zotero_author_matches_embedded(
-        _Path("Knowles - From Pedagogy to Andragogy.pdf"), "Knowles") is True
+    assert _zotero_author_matches_embedded(_Path("Knowles - From Pedagogy to Andragogy.pdf"), "Knowles") is True
 
 
 def test_filename_author_contradicts_embedded():
-    assert _zotero_author_matches_embedded(
-        _Path("Knowles - From Pedagogy to Andragogy.pdf"), "Landry") is False
+    assert _zotero_author_matches_embedded(_Path("Knowles - From Pedagogy to Andragogy.pdf"), "Landry") is False
 
 
 def test_unparseable_filename_does_not_confirm_embedded_author():
@@ -838,11 +1066,9 @@ def test_short_filename_surname_does_not_falsely_confirm_unrelated_embedded():
     # Substring-Falle (Codex-Pass-2 2026-06-25): Dateiname-Nachname "Li" ist Substring
     # von embedded "Williams" → darf NICHT als Bestätigung gelten. Zotero-Format mit
     # Jahr, damit der Dateiname PARSBAR ist (sonst greift der not-parsed→False-Pfad).
-    assert _zotero_author_matches_embedded(
-        _Path("Li - 2020 - Some Title.pdf"), "Williams") is False
+    assert _zotero_author_matches_embedded(_Path("Li - 2020 - Some Title.pdf"), "Williams") is False
 
 
 def test_exact_surname_confirms_embedded():
     # Gegenprobe: exakter Nachname-Match bestätigt weiterhin korrekt.
-    assert _zotero_author_matches_embedded(
-        _Path("Bates - 2017 - Information Behavior.pdf"), "Bates") is True
+    assert _zotero_author_matches_embedded(_Path("Bates - 2017 - Information Behavior.pdf"), "Bates") is True

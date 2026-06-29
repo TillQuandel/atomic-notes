@@ -5,6 +5,7 @@ None ist (z.B. quality_history ohne AGENT_VERSION-Einträge → collect.py schre
 NULL), ergab `sum(...)/max(1, count)` 0.0 — das Frontend zeigte "0 %"
 (katastrophale Fehlkalibrierung) statt "–" (keine Daten).
 """
+
 from __future__ import annotations
 
 

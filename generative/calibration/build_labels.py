@@ -8,6 +8,7 @@ Tabellen → labels_human.jsonl.
 
 Output: .cache/eval/calibration/notes/<NN>__<slug>.md + INDEX.md
 """
+
 from __future__ import annotations
 
 import json
@@ -76,13 +77,7 @@ def trim_context(text: str, radius: int = CONTEXT_RADIUS) -> str:
 
 def escape_md_cell(text: str) -> str:
     """Markdown-Tabellen-Zelle: pipe, newlines, backslash-escaping."""
-    return (
-        text.replace("\\", "\\\\")
-        .replace("|", "\\|")
-        .replace("\n", " ")
-        .replace("\r", " ")
-        .strip()
-    )
+    return text.replace("\\", "\\\\").replace("|", "\\|").replace("\n", " ").replace("\r", " ").strip()
 
 
 def slugify(text: str) -> str:
@@ -112,11 +107,15 @@ def render_note_md(idx: int, sample: dict, result: dict, *, blind: bool, total: 
         lines.append("## BLIND-Modus (Härtung #3)")
         lines.append("- **Kein Kontext-Snippet** wird gezeigt. Quelle: ausschließlich volle PDF.")
         lines.append("- Öffne die PDF und suche eigenständig nach Belegen für jeden Claim.")
-        lines.append("- Diese Labels gehen in `labels_blind.jsonl` und werden für Δκ-Kontrolle vs. Hybrid-Labels gerechnet.")
+        lines.append(
+            "- Diese Labels gehen in `labels_blind.jsonl` und werden für Δκ-Kontrolle vs. Hybrid-Labels gerechnet."
+        )
     else:
         lines.append("## Härtungs-Reminder")
         lines.append("- **Härtung #1**: Pipeline-Verdict ist NICHT sichtbar — nur Claim + Kontext.")
-        lines.append("- **Härtung #2**: Wenn Kontext den Claim NICHT stützt → STOP, PDF auf Seite öffnen, Voll-Suche, erst dann `h`.")
+        lines.append(
+            "- **Härtung #2**: Wenn Kontext den Claim NICHT stützt → STOP, PDF auf Seite öffnen, Voll-Suche, erst dann `h`."
+        )
         lines.append("- **Snippet-Reihenfolge**: zufällig gemischt (kein Cosine-Ranking sichtbar).")
         lines.append("- **`?`-Regel**: nur bei genuiner Mehrdeutigkeit (siehe `labeling_protocol.md`).")
     lines.append("")
@@ -165,12 +164,19 @@ def render_note_md(idx: int, sample: dict, result: dict, *, blind: bool, total: 
 
     lines.append("---")
     lines.append("")
-    lines.append("**Beim Speichern**: Label-Spalte in jeder Tabelle ausfüllen (`s`, `h`, oder `?`). `collect.py` parsed später.")
+    lines.append(
+        "**Beim Speichern**: Label-Spalte in jeder Tabelle ausfüllen (`s`, `h`, oder `?`). `collect.py` parsed später."
+    )
     return "\n".join(lines) + "\n"
 
 
 def render_index(samples: list[dict], missing: list[str], blind_names: list[str]) -> str:
-    lines = ["# Labeling-Index", "", "Reihenfolge: Sprachpaar gemischt (siehe `labeling_protocol.md` §Praktische Hinweise).", ""]
+    lines = [
+        "# Labeling-Index",
+        "",
+        "Reihenfolge: Sprachpaar gemischt (siehe `labeling_protocol.md` §Praktische Hinweise).",
+        "",
+    ]
     lines.append(f"- **Total Notes (Hybrid)**: {len(samples)}")
     lines.append(f"- **Blind-Sub-Sample**: {len(blind_names)} (in `../blind/`)")
     lines.append(f"- **Pipeline-Eval fehlend**: {len(missing)} (siehe Liste unten)")
@@ -189,7 +195,9 @@ def render_index(samples: list[dict], missing: list[str], blind_names: list[str]
     if blind_names:
         lines.append("## Blind-Sub-Sample (Härtung #3)")
         lines.append("")
-        lines.append("Dieselben Notes wie oben markiert, aber ohne Kontext-Snippets. Labels gehen separat in `labels_blind.jsonl`.")
+        lines.append(
+            "Dieselben Notes wie oben markiert, aber ohne Kontext-Snippets. Labels gehen separat in `labels_blind.jsonl`."
+        )
         lines.append("")
         for b_idx, name in enumerate(blind_names, start=1):
             slug = slugify(name)

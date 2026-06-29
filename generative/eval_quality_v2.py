@@ -10,6 +10,7 @@ Bekannte Failure-Modes:
 - Quer-Satz-Synthesen aus weit entfernten PDF-Stellen können false-positive sein.
 - Mehrspaltige PDFs hängen weiter von der Block-Reihenfolge der PDF-Extraktion ab.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -42,17 +43,30 @@ EXPANSION_MAX_TOKENS = 450
 _NLI_CACHE: dict[str, object] = {}
 
 _ABBREVIATIONS = [
-    "z.B.", "d.h.", "bzw.", "vgl.", "bspw.", "usw.", "etc.", "ggf.",
-    "Hrsg.", "Jg.", "Bd.", "S.", "Nr.", "Abb.", "Tab.", "Kap.", "ff.",
+    "z.B.",
+    "d.h.",
+    "bzw.",
+    "vgl.",
+    "bspw.",
+    "usw.",
+    "etc.",
+    "ggf.",
+    "Hrsg.",
+    "Jg.",
+    "Bd.",
+    "S.",
+    "Nr.",
+    "Abb.",
+    "Tab.",
+    "Kap.",
+    "ff.",
 ]
 
 _CAPTION_RE = re.compile(r"^\s*(Abb\.|Abbildung|Fig\.|Figure|Tab\.|Tabelle)\s*\d+[:.]", re.I)
 _FOOTNOTE_DEF_RE = re.compile(r"^\[\^\d+\]:.*$", re.MULTILINE)
 _FOOTNOTE_MARKER_RE = re.compile(r"\[\^\d+\]")
 _BIB_START_RE = re.compile(r"^\s*(literatur|bibliographie|references|bibliography)\s*$", re.I)
-_BIB_ENTRY_RE = re.compile(
-    r"^\s*[A-ZÄÖÜ][A-Za-zÄÖÜäöüß'`-]+,\s+.*\b(19|20)\d{2}\b"
-)
+_BIB_ENTRY_RE = re.compile(r"^\s*[A-ZÄÖÜ][A-Za-zÄÖÜäöüß'`-]+,\s+.*\b(19|20)\d{2}\b")
 _SENTENCE_BOUNDARY_RE = re.compile(r"(?<=[.!?])\s+")
 
 
@@ -72,15 +86,15 @@ def _read_note_body(note_path: Path) -> str:
     if text.startswith("---"):
         fm_end = text.find("\n---", 3)
         if fm_end != -1:
-            text = text[text.find("\n", fm_end + 4) + 1:]
+            text = text[text.find("\n", fm_end + 4) + 1 :]
 
     title = re.search(r"^#\s+.+$", text, flags=re.MULTILINE)
     if title:
-        text = text[title.start():]
+        text = text[title.start() :]
 
     sources = re.search(r"^##\s+Quellen\b", text, flags=re.MULTILINE | re.I)
     if sources:
-        text = text[:sources.start()]
+        text = text[: sources.start()]
     return text
 
 
@@ -329,10 +343,7 @@ def _label_index_map(model) -> dict[str, int]:
 def _nli_batch(premises: list[str], hypothesis: str) -> list[dict[str, float]]:
     tokenizer, model, torch = _nli_model()
     if tokenizer is None or model is None or torch is None:
-        return [
-            {"entailment": 0.0, "neutral": 1.0, "contradiction": 0.0}
-            for _ in premises
-        ]
+        return [{"entailment": 0.0, "neutral": 1.0, "contradiction": 0.0} for _ in premises]
 
     inputs = tokenizer(
         premises,
@@ -375,7 +386,9 @@ def _detect_language_pair(note_text: str, pdf_text: str) -> str:
     en_words_re = re.compile(r"\b(the|and|is|are|not|with|from|this|that)\b", re.I)
 
     def lang(sample: str) -> str:
-        if umlaut_re.search(sample) or len(de_words_re.findall(sample[:2000])) >= len(en_words_re.findall(sample[:2000])):
+        if umlaut_re.search(sample) or len(de_words_re.findall(sample[:2000])) >= len(
+            en_words_re.findall(sample[:2000])
+        ):
             return "DE"
         return "EN"
 
@@ -409,20 +422,23 @@ def _score_claims(claims: list[str], chunks: list[Chunk]) -> list[dict]:
         best_chunk = chunks[best_chunk_idx]
         label = _label_claim(max_entailment, max_contradiction)
 
-        scores.append({
-            "claim": claim,
-            "entailment": round(max_entailment, 3),
-            "contradiction": round(max_contradiction, 3),
-            "neutral": round(max_neutral, 3),
-            "label": label,
-            "best_chunk_idx": best_chunk_idx,
-            "best_page": best_chunk.pages[0] if best_chunk.pages else None,
-        })
+        scores.append(
+            {
+                "claim": claim,
+                "entailment": round(max_entailment, 3),
+                "contradiction": round(max_contradiction, 3),
+                "neutral": round(max_neutral, 3),
+                "label": label,
+                "best_chunk_idx": best_chunk_idx,
+                "best_page": best_chunk.pages[0] if best_chunk.pages else None,
+            }
+        )
     return scores
 
 
-def eval_note(note_path: Path | str, pdf_path: Path | str, pipeline_version: str = AGENT_VERSION,
-              no_cache: bool = False) -> dict:
+def eval_note(
+    note_path: Path | str, pdf_path: Path | str, pipeline_version: str = AGENT_VERSION, no_cache: bool = False
+) -> dict:
     """Evaluiert eine Note gegen ihre Quell-PDF und gibt v2-Metriken zurück."""
     del no_cache  # Akzeptiert für CLI-Kompatibilität; v2 nutzt keinen Disk-Cache.
     note_path = Path(note_path)
@@ -431,15 +447,23 @@ def eval_note(note_path: Path | str, pdf_path: Path | str, pipeline_version: str
 
     if not note_path.exists():
         return {
-            "note": note_path.name, "pdf": pdf_path.name, "version": pipeline_version,
-            "eval_version": EVAL_VERSION, "timestamp": timestamp,
-            "error": "note_not_found", "claims_total": 0,
+            "note": note_path.name,
+            "pdf": pdf_path.name,
+            "version": pipeline_version,
+            "eval_version": EVAL_VERSION,
+            "timestamp": timestamp,
+            "error": "note_not_found",
+            "claims_total": 0,
         }
     if not pdf_path.exists():
         return {
-            "note": note_path.name, "pdf": pdf_path.name, "version": pipeline_version,
-            "eval_version": EVAL_VERSION, "timestamp": timestamp,
-            "error": "pdf_not_found", "claims_total": 0,
+            "note": note_path.name,
+            "pdf": pdf_path.name,
+            "version": pipeline_version,
+            "eval_version": EVAL_VERSION,
+            "timestamp": timestamp,
+            "error": "pdf_not_found",
+            "claims_total": 0,
         }
 
     note_body = _read_note_body(note_path)
@@ -456,12 +480,11 @@ def eval_note(note_path: Path | str, pdf_path: Path | str, pipeline_version: str
     contradiction = sum(1 for score in claim_scores if score["label"] == "contradiction")
     support_rate = confirmed / total if total else 0.0
     hallucination_rate = (hallucinated + contradiction) / total if total else 0.0
-    mean_entailment = (
-        sum(score["entailment"] for score in claim_scores) / total if total else 0.0
-    )
+    mean_entailment = sum(score["entailment"] for score in claim_scores) / total if total else 0.0
     low_entailment = sum(1 for score in claim_scores if score["entailment"] < 0.70)
     confirmed_chunks = {
-        score["best_chunk_idx"] for score in claim_scores
+        score["best_chunk_idx"]
+        for score in claim_scores
         if score["label"] == "confirmed" and score["best_chunk_idx"] is not None
     }
     source_span_diversity = len(confirmed_chunks) / len(chunks) if chunks else 0.0

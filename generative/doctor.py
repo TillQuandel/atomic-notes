@@ -4,6 +4,7 @@ Checks: poppler-Tools (pdftotext/pdfinfo), LLM-Backend (subscription: claude-CLI
 vorhanden + eingeloggt; litellm: API-Key gesetzt), Vault-Pfad, optionale Imports.
 Alle Checks sind pure Funktionen mit injizierbaren Abhängigkeiten (testbar ohne System).
 """
+
 from __future__ import annotations
 
 import importlib.util
@@ -58,7 +59,8 @@ def check_backend(
         cli = which(CLAUDE_BIN)
         if not cli:
             return CheckResult(
-                name="backend (subscription)", ok=False,
+                name="backend (subscription)",
+                ok=False,
                 detail=f"claude-CLI '{CLAUDE_BIN}' nicht im PATH",
                 hint=(
                     "Claude-Code-CLI installieren: `npm install -g @anthropic-ai/claude-code`, "
@@ -69,7 +71,8 @@ def check_backend(
         credentials = home / ".claude" / ".credentials.json"
         if not credentials.exists():
             return CheckResult(
-                name="backend (subscription)", ok=False,
+                name="backend (subscription)",
+                ok=False,
                 detail=f"claude-CLI gefunden ({cli}), aber {credentials} fehlt",
                 hint=(
                     "Vermutlich nicht eingeloggt: einmal `claude` starten und den "
@@ -78,7 +81,8 @@ def check_backend(
                 ),
             )
         return CheckResult(
-            name="backend (subscription)", ok=True,
+            name="backend (subscription)",
+            ok=True,
             detail=f"claude-CLI: {cli}, Credentials-Datei vorhanden (Login nicht live verifiziert)",
         )
 
@@ -86,19 +90,19 @@ def check_backend(
         set_vars = [v for v in _LITELLM_KEY_VARS if env.get(v)]
         if not set_vars:
             return CheckResult(
-                name="backend (litellm)", ok=False,
+                name="backend (litellm)",
+                ok=False,
                 detail="kein Provider-Key in der Umgebung",
                 hint=(
                     "API-Key setzen, z. B. ANTHROPIC_API_KEY oder OPENAI_API_KEY "
                     "(in .env oder Umgebung). Geprüft: " + ", ".join(_LITELLM_KEY_VARS)
                 ),
             )
-        return CheckResult(
-            name="backend (litellm)", ok=True, detail="gesetzt: " + ", ".join(set_vars)
-        )
+        return CheckResult(name="backend (litellm)", ok=True, detail="gesetzt: " + ", ".join(set_vars))
 
     return CheckResult(
-        name=f"backend ({backend})", ok=False,
+        name=f"backend ({backend})",
+        ok=False,
         detail="unbekannter Backend-Wert",
         hint="ATOMIC_AGENT_BACKEND auf 'subscription' (Default) oder 'litellm' setzen.",
     )
@@ -108,7 +112,8 @@ def check_vault(vault: Path) -> CheckResult:
     """Vault-Pfad vorhanden und beschreibbar? (Schreibprobe statt os.access — Windows.)"""
     if not vault.is_dir():
         return CheckResult(
-            name="vault", ok=False,
+            name="vault",
+            ok=False,
             detail=f"Vault-Pfad existiert nicht: {vault}",
             hint=(
                 "ATOMIC_AGENT_VAULT_PATH auf den Obsidian-Vault (oder einen "
@@ -123,7 +128,8 @@ def check_vault(vault: Path) -> CheckResult:
         probe.unlink()
     except OSError as e:
         return CheckResult(
-            name="vault", ok=False,
+            name="vault",
+            ok=False,
             detail=f"Vault nicht beschreibbar: {vault} ({e})",
             hint="Schreibrechte des Ordners prüfen.",
         )
@@ -146,8 +152,7 @@ def run_all() -> list[CheckResult]:
         check_backend(BACKEND),
         check_vault(VAULT),
         check_import("pypdf", "pip install pypdf (PDF-Metadaten-Enrichment)"),
-        check_import("sentence_transformers",
-                     "pip install sentence-transformers (Embeddings/Entity-Resolution)"),
+        check_import("sentence_transformers", "pip install sentence-transformers (Embeddings/Entity-Resolution)"),
     ]
     if BACKEND == "litellm":
         results.append(check_import("litellm", "pip install litellm"))

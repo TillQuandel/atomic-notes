@@ -72,8 +72,14 @@ def test_aggregate_empty_decisions_all_metrics_invalid():
     assert result["claims_total"] == 0
     assert result["valid_claims"] == 0
     # Alle Rates invalid
-    for name in ("hallucination_rate", "confirmed_rate", "partial_rate",
-                 "uncertain_rate", "parse_error_rate", "claim_support_rate"):
+    for name in (
+        "hallucination_rate",
+        "confirmed_rate",
+        "partial_rate",
+        "uncertain_rate",
+        "parse_error_rate",
+        "claim_support_rate",
+    ):
         assert result["metrics"][name]["valid"] is False
         assert result["metrics"][name]["value"] == -1.0
 

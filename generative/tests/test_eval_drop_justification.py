@@ -7,6 +7,7 @@ Die AC1-Neutralitaet ist per separatem Label-Stabilitaets-A/B empirisch zu beleg
 (NICHT Teil dieser Unit-Tests): das Entfernen der Few-Shot-Rationales aus dem
 Prompt-Kontext koennte die Label-Kalibrierung theoretisch beeinflussen.
 """
+
 from __future__ import annotations
 
 import generative.eval_quality_v4 as eq
@@ -31,12 +32,14 @@ def test_normalize_judge_rows_without_justification():
         best_chunk_idx=0,
         best_page=1,
     )
-    raw = [{
-        "claim_idx": 0,
-        "label": "supported_paraphrase",
-        "evidence": "ein woertliches Zitat aus dem Kontext",
-        "best_page": 1,
-    }]
+    raw = [
+        {
+            "claim_idx": 0,
+            "label": "supported_paraphrase",
+            "evidence": "ein woertliches Zitat aus dem Kontext",
+            "best_page": 1,
+        }
+    ]
 
     rows, _flags = eq._normalize_judge_rows(raw, [item])
 
@@ -59,13 +62,15 @@ def test_normalize_judge_rows_ignores_legacy_justification():
         best_chunk_idx=0,
         best_page=1,
     )
-    raw = [{
-        "claim_idx": 0,
-        "label": "contradicted",
-        "evidence": "ein Zitat",
-        "justification": "veraltetes Feld aus altem Cache",
-        "best_page": 1,
-    }]
+    raw = [
+        {
+            "claim_idx": 0,
+            "label": "contradicted",
+            "evidence": "ein Zitat",
+            "justification": "veraltetes Feld aus altem Cache",
+            "best_page": 1,
+        }
+    ]
 
     rows, _flags = eq._normalize_judge_rows(raw, [item])
 

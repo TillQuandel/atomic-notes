@@ -159,6 +159,7 @@ def test_decisions_immutable():
 # Fix 1 regression tests — Evidence-Downgrade must NOT block Audit-Override
 # -----------------------------------------------------------------------------
 
+
 def test_evidence_downgrade_does_not_block_audit_override():
     """v4.0 Regression: supported_exact + evidence=False + audit=contradicted MUST → contradicted.
 
@@ -186,6 +187,7 @@ def test_evidence_downgrade_preserved_when_audit_softer():
 # -----------------------------------------------------------------------------
 # Fix 3 — ClaimInput-Validierung
 # -----------------------------------------------------------------------------
+
 
 def test_claim_input_rejects_nan_cosine():
     with pytest.raises(ValueError, match="finite"):

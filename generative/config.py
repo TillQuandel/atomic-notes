@@ -9,10 +9,7 @@ load_dotenv(Path(__file__).resolve().parent / ".env")
 
 BACKEND = os.getenv("ATOMIC_AGENT_BACKEND", "subscription")
 
-VAULT = Path(os.environ.get(
-    "ATOMIC_AGENT_VAULT_PATH",
-    str(Path.home() / "Obsidian_Vault")
-))
+VAULT = Path(os.environ.get("ATOMIC_AGENT_VAULT_PATH", str(Path.home() / "Obsidian_Vault")))
 INBOX = VAULT / "00-inbox"
 WISSEN = VAULT / "04-wissen"
 BA_DIR = VAULT / "01-studium" / "bachelorarbeit"
@@ -24,10 +21,7 @@ CACHE_DIR = SCRIPTS_DIR / ".cache"
 QUALITY_HISTORY = CACHE_DIR / "quality_history.jsonl"
 # Externe Quell-PDFs. Renderer baut hieraus den `file://`-Link
 # in den Quellen-Callout, damit User die PDF aus der Note öffnen kann.
-LITERATURE_DIR = Path(os.environ.get(
-    "ATOMIC_AGENT_PDF_BASE",
-    str(Path.home() / "Documents" / "Literatur")
-))
+LITERATURE_DIR = Path(os.environ.get("ATOMIC_AGENT_PDF_BASE", str(Path.home() / "Documents" / "Literatur")))
 
 _contact = os.environ.get("ATOMIC_AGENT_CONTACT", "atomic-agent-user")
 USER_AGENT = f"AtomicAgent/1.0 (mailto:{_contact})"
@@ -37,31 +31,28 @@ USER_AGENT = f"AtomicAgent/1.0 (mailto:{_contact})"
 # damit der Server-venv-Pfad nicht hartkodiert ist (fremde Installs ohne
 # .venv-phoenix bleiben unberührt, weil Tracing per Default aus ist).
 PHOENIX_PORT = int(os.environ.get("ATOMIC_AGENT_PHOENIX_PORT", "6006"))
-PHOENIX_VENV = Path(os.environ.get(
-    "ATOMIC_AGENT_PHOENIX_VENV",
-    str(SCRIPTS_DIR.parent / ".venv-phoenix")
-))
+PHOENIX_VENV = Path(os.environ.get("ATOMIC_AGENT_PHOENIX_VENV", str(SCRIPTS_DIR.parent / ".venv-phoenix")))
 
 # Claude-Aufruf via CLI-Subprocess (Pro/Max-Subscription, OAuth)
 CLAUDE_BIN = "claude"
 
 # Modell-Routing: Sonnet als Default (A/B-Test 2026-05-20: niedrigere Halluzinationsrate als Opus,
 # 3x günstiger per API, gleiche Note-Anzahl). Opus per ENV überschreibbar für Vergleichstests.
-MODEL_OPUS  = os.getenv("ATOMIC_AGENT_MODEL_OPUS",  "anthropic/claude-sonnet-4-6")
+MODEL_OPUS = os.getenv("ATOMIC_AGENT_MODEL_OPUS", "anthropic/claude-sonnet-4-6")
 MODEL_HAIKU = os.getenv("ATOMIC_AGENT_MODEL_HAIKU", "anthropic/claude-haiku-4-5-20251001")
 
 # Pro-Agent Mapping (siehe Plan Milestone 2.1)
 MODEL_PLANNER = MODEL_OPUS
 MODEL_EXTRACTOR = MODEL_OPUS
-MODEL_EXTENDER = MODEL_OPUS         # Backlog v1.1
+MODEL_EXTENDER = MODEL_OPUS  # Backlog v1.1
 MODEL_VERIFIER = MODEL_HAIKU
 MODEL_CROSS_REF = MODEL_HAIKU
 MODEL_CONFIDENCE = MODEL_HAIKU
 MODEL_CRITIC = MODEL_HAIKU
-MODEL_SUMMARY = MODEL_HAIKU         # Map-Reduce-Summary für lange PDFs (Backlog)
+MODEL_SUMMARY = MODEL_HAIKU  # Map-Reduce-Summary für lange PDFs (Backlog)
 
 # Critic-Schwelle: Auto-Write nur bei Score >= Schwelle UND alle Hard-Gates pass
-CRITIC_AUTO_THRESHOLD = 4   # von 5 Tests, siehe Schema-Konzept Milestone 1.1
+CRITIC_AUTO_THRESHOLD = 4  # von 5 Tests, siehe Schema-Konzept Milestone 1.1
 
 # Cross-lingualer Rettungsanker für filter_hallucinated (planner.py): der lexikalische
 # Token-Coverage-Filter ist sprachblind — ein deutscher (paraphrasierter) Konzept-Titel
@@ -94,8 +85,7 @@ DEDUP_EXCLUDE_TYPES = frozenset({"literature", "moc", "merge-stub"})
 # ist ein Flag für den menschlichen Reviewer. Default 0.90 liegt deutlich über typischer
 # Distinkt-Note-Cosine, unter dem gemessenen #8-Paar (0.967). Tiefer als der ER-Hard-Merge-
 # Gate (0.985), weil ein Flag risikolos ist; ENV-überschreibbar für Kalibrierung.
-REDUNDANT_SIBLING_COSINE_THRESHOLD = float(
-    os.getenv("ATOMIC_AGENT_REDUNDANT_SIBLING_COSINE", "0.90"))
+REDUNDANT_SIBLING_COSINE_THRESHOLD = float(os.getenv("ATOMIC_AGENT_REDUNDANT_SIBLING_COSINE", "0.90"))
 
 # Stage-B-Sibling-Linking: ab dieser Body-Cosine wird ein Pipeline-Geschwister
 # OHNE Titel-/Alias-Token-Overlap trotzdem als related-Kandidat aufgenommen (additiv
@@ -105,8 +95,7 @@ REDUNDANT_SIBLING_COSINE_THRESHOLD = float(
 # Empirisch kalibriert 2026-06-27: verwandte Geschwister 0.97–0.985, fremde Paare
 # 0.73–0.76 → 0.85 trennt mit Marge. Kandidatur ist looser als der Redundanz-Flag
 # (0.90); der LLM bleibt finaler Arbiter über den Link. ENV-überschreibbar.
-SIBLING_SEMANTIC_COSINE_THRESHOLD = float(
-    os.getenv("ATOMIC_AGENT_SIBLING_SEMANTIC_COSINE", "0.85"))
+SIBLING_SEMANTIC_COSINE_THRESHOLD = float(os.getenv("ATOMIC_AGENT_SIBLING_SEMANTIC_COSINE", "0.85"))
 
 # Chunk-Größe Fallback (Wörter)
 CHUNK_WORDS = 3000
@@ -124,7 +113,7 @@ MIN_WORDS_PER_PAGE = 50
 # aber kein echtes Buch sind. 28 Chunks bei 12-Seiten-Paper war der v35-Bug.
 # Bei Überschreitung: Fallback auf Word-Count-Splitting.
 MAX_CHUNKS_SHORT_DOC = 10
-MAX_PAGES_SHORT_DOC  = 50
+MAX_PAGES_SHORT_DOC = 50
 
 # Token-Budget pro Pipeline-Lauf (Hard-Cap, Fail-Fast bei Überschreitung)
 MAX_TOKENS_PER_RUN = 500_000
@@ -192,11 +181,24 @@ ER_MAX_TOKEN_DIFF = 1
 # wahrscheinlich ein Hub-Konzept, kein Duplikat-Kandidat. Codex-Cross-Review-Empfehlung
 # (2026-05-09): Token-Differenz allein greift „Information Need" vs „Wilson Information Need"
 # nicht ab.
-ER_HUB_GENERIC_TOKENS = frozenset({
-    "information", "need", "needs", "behavior", "behaviour",
-    "search", "process", "system", "user", "model", "concept",
-    "theory", "framework", "principle",
-})
+ER_HUB_GENERIC_TOKENS = frozenset(
+    {
+        "information",
+        "need",
+        "needs",
+        "behavior",
+        "behaviour",
+        "search",
+        "process",
+        "system",
+        "user",
+        "model",
+        "concept",
+        "theory",
+        "framework",
+        "principle",
+    }
+)
 # Canonicalization-Modell: Body-Merge ist kreativ-synthetische Aufgabe → Opus
 MODEL_CANONICALIZER = MODEL_OPUS
 
@@ -212,11 +214,11 @@ MODEL_LLM_DEDUP = MODEL_HAIKU  # binäre Entscheidung, kein Opus nötig
 
 # Snapshot aller Agent-Modell-Zuweisungen — für Run-Trace und Eval-Vergleiche.
 MODEL_CONFIG = {
-    "planner":       MODEL_PLANNER,
-    "extractor":     MODEL_EXTRACTOR,
-    "verifier":      MODEL_VERIFIER,
-    "cross_ref":     MODEL_CROSS_REF,
-    "critic":        MODEL_CRITIC,
+    "planner": MODEL_PLANNER,
+    "extractor": MODEL_EXTRACTOR,
+    "verifier": MODEL_VERIFIER,
+    "cross_ref": MODEL_CROSS_REF,
+    "critic": MODEL_CRITIC,
     "canonicalizer": MODEL_CANONICALIZER,
 }
 
@@ -230,7 +232,7 @@ SEMANTIC_PREPASS_THRESHOLD = float(os.getenv("SEMANTIC_PREPASS_THRESHOLD", "0.75
 # Gemini-Review 2026-05-18: Thresholds modell-spezifisch (paraphrase-multilingual-MiniLM-L12-v2).
 # Bei Modellwechsel neu kalibrieren — stummes Kaputtgehen ohne diese Konstanten nicht möglich.
 EVAL_ADAPTIVE_K_HIGH = float(os.getenv("EVAL_ADAPTIVE_K_HIGH", "0.85"))  # → TOP_K=2
-EVAL_ADAPTIVE_K_MID  = float(os.getenv("EVAL_ADAPTIVE_K_MID",  "0.65"))  # → TOP_K=3
+EVAL_ADAPTIVE_K_MID = float(os.getenv("EVAL_ADAPTIVE_K_MID", "0.65"))  # → TOP_K=3
 
 # NLI-Validation: AND-Kombination mit Haiku für CrossRef-Widerspruchserkennung.
 # Haiku identifiziert Widersprüche, DeBERTa bestätigt — nur bei Übereinstimmung
@@ -264,17 +266,17 @@ MDEBERTA_THRESHOLD_CONTRA = float(os.getenv("MDEBERTA_THRESHOLD_CONTRA", "0.3"))
 # cache_read: Anthropic berechnet Cache-Reads als eigene günstige Zeile
 MODEL_PRICING: dict[str, dict[str, float]] = {
     # Claude (Anthropic API) — https://anthropic.com/pricing
-    "claude-opus-4-7":   {"input": 15.0,  "output": 75.0,  "cache_read": 1.50},
-    "claude-sonnet-4-6": {"input": 3.0,   "output": 15.0,  "cache_read": 0.30},
-    "claude-haiku-4-5":  {"input": 0.80,  "output": 4.0,   "cache_read": 0.03},
+    "claude-opus-4-7": {"input": 15.0, "output": 75.0, "cache_read": 1.50},
+    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0, "cache_read": 0.30},
+    "claude-haiku-4-5": {"input": 0.80, "output": 4.0, "cache_read": 0.03},
     # Gemini (Google API) — https://ai.google.dev/pricing
-    "gemini-3.1-pro":    {"input": 2.50,  "output": 10.0,  "cache_read": 0.0},
-    "gemini-2.5-flash":  {"input": 0.075, "output": 0.30,  "cache_read": 0.0},
+    "gemini-3.1-pro": {"input": 2.50, "output": 10.0, "cache_read": 0.0},
+    "gemini-2.5-flash": {"input": 0.075, "output": 0.30, "cache_read": 0.0},
     # OpenAI
-    "gpt-4o":            {"input": 5.0,   "output": 15.0,  "cache_read": 0.0},
-    "gpt-4o-mini":       {"input": 0.15,  "output": 0.60,  "cache_read": 0.0},
+    "gpt-4o": {"input": 5.0, "output": 15.0, "cache_read": 0.0},
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60, "cache_read": 0.0},
     # Subscription-Aliase → kein Preis (kein API-Key nötig)
-    "opus":  {},
+    "opus": {},
     "haiku": {},
 }
 
@@ -298,8 +300,8 @@ def compute_cost_per_call(
         return 0.0
     per_m = 1_000_000
     return round(
-        pricing.get("input",      0.0) * input_tokens      / per_m +
-        pricing.get("output",     0.0) * output_tokens     / per_m +
-        pricing.get("cache_read", 0.0) * cache_read_tokens / per_m,
+        pricing.get("input", 0.0) * input_tokens / per_m
+        + pricing.get("output", 0.0) * output_tokens / per_m
+        + pricing.get("cache_read", 0.0) * cache_read_tokens / per_m,
         6,
     )

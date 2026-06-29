@@ -6,6 +6,7 @@ verifiziert angegebene Zitate programmatisch und aggregiert Retrieval-Failures
 separat von Halluzinationen. Die finale Decision-Logic lebt im modularen
 decision_engine-Paket.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -42,7 +43,9 @@ from generative.eval_quality_v2 import TOP_K, Chunk, _detect_language_pair, _exp
 from generative.eval_quality_v2 import build_chunks, extract_claims
 from generative.pipeline.embeddings import _model, cosine
 
-_QUALITY_HISTORY = QUALITY_HISTORY  # SSoT: config.QUALITY_HISTORY; Alias für bestehende Importer (run.py, adversarial.py)
+_QUALITY_HISTORY = (
+    QUALITY_HISTORY  # SSoT: config.QUALITY_HISTORY; Alias für bestehende Importer (run.py, adversarial.py)
+)
 EVAL_VERSION = "4.1"
 # Eval-Judge-Cache ist content-adressiert und vom --fresh-run-Run-Salt entkoppelt:
 # eine inhaltlich unveraenderte Note wird nicht erneut evaluiert, auch wenn die uebrige
@@ -107,9 +110,7 @@ def apply_source_presence_fallback(
             continue
         s["source_presence_score"] = round(float(score), 3)
         if score >= threshold:
-            s["quality_flags"] = sorted(
-                set(s.get("quality_flags") or []) | {"possible_retrieval_miss"}
-            )
+            s["quality_flags"] = sorted(set(s.get("quality_flags") or []) | {"possible_retrieval_miss"})
     return claim_scores
 
 
@@ -119,6 +120,7 @@ def _build_presence_scorer(pdf_path: Path, claim_scores: list[dict[str, Any]]):
     if not any(s.get("label") == NOT_IN_CONTEXT for s in claim_scores):
         return lambda claim: None
     from generative.eval_quality_v2 import _pdf_sentences
+
     with fitz.open(str(pdf_path)) as doc:
         sentences = [s for s, _ in _pdf_sentences(doc)]
     if not sentences:
@@ -183,23 +185,27 @@ def _retrieve_claim_contexts(claims: list[str], chunks: list[Chunk]) -> list[Ret
         contexts: list[dict[str, Any]] = []
         for rank, (chunk_idx, score) in enumerate(ranked, start=1):
             chunk = chunks[chunk_idx]
-            contexts.append({
-                "rank": rank,
-                "chunk_idx": chunk_idx,
-                "pages": list(chunk.pages),
-                "cosine": round(float(score), 3),
-                "text": _expand_context(chunks, chunk_idx),
-            })
+            contexts.append(
+                {
+                    "rank": rank,
+                    "chunk_idx": chunk_idx,
+                    "pages": list(chunk.pages),
+                    "cosine": round(float(score), 3),
+                    "text": _expand_context(chunks, chunk_idx),
+                }
+            )
         best_idx = ranked[0][0] if ranked else None
         best_chunk = chunks[best_idx] if best_idx is not None else None
-        retrieved.append(RetrievedContext(
-            claim_idx=claim_idx,
-            claim=claim,
-            contexts=contexts,
-            top_cosine=round(float(ranked[0][1]), 3) if ranked else 0.0,
-            best_chunk_idx=best_idx,
-            best_page=best_chunk.pages[0] if best_chunk and best_chunk.pages else None,
-        ))
+        retrieved.append(
+            RetrievedContext(
+                claim_idx=claim_idx,
+                claim=claim,
+                contexts=contexts,
+                top_cosine=round(float(ranked[0][1]), 3) if ranked else 0.0,
+                best_chunk_idx=best_idx,
+                best_page=best_chunk.pages[0] if best_chunk and best_chunk.pages else None,
+            )
+        )
     return retrieved
 
 
@@ -281,14 +287,11 @@ def _format_claims_for_prompt(
     blocks: list[str] = []
     for item in items:
         # dict.fromkeys: Reihenfolge erhalten + Duplikate entfernen falls chunk_idx mehrfach vorkommt
-        kids = list(dict.fromkeys(
-            chunk_to_kid[ctx["chunk_idx"]]
-            for ctx in item.contexts
-            if ctx["chunk_idx"] in chunk_to_kid
-        ))
+        kids = list(
+            dict.fromkeys(chunk_to_kid[ctx["chunk_idx"]] for ctx in item.contexts if ctx["chunk_idx"] in chunk_to_kid)
+        )
         blocks.append(
-            f"idx={item.claim_idx} | top-cosine={item.top_cosine} | Kontexte: {', '.join(kids)}\n"
-            f"Claim: \"{item.claim}\""
+            f'idx={item.claim_idx} | top-cosine={item.top_cosine} | Kontexte: {", ".join(kids)}\nClaim: "{item.claim}"'
         )
     return "\n\n".join(blocks)
 
@@ -331,7 +334,7 @@ def _json_array_from_text(text: str) -> list[Any]:
         end = text.rfind("]")
         if start == -1 or end == -1 or end <= start:
             raise
-        data = json.loads(text[start:end + 1])
+        data = json.loads(text[start : end + 1])
     if not isinstance(data, list):
         raise ValueError("Claude output is not a JSON array")
     return data
@@ -350,7 +353,13 @@ Gib ausschliesslich JSON zurueck.
 TEXT:
 {raw_text}
 """
-    repaired = base.call_llm_full(prompt, model=MODEL_OPUS, agent="eval_quality_v3_json_repair", use_cache=use_cache, cache_namespace=EVAL_CACHE_NAMESPACE)
+    repaired = base.call_llm_full(
+        prompt,
+        model=MODEL_OPUS,
+        agent="eval_quality_v3_json_repair",
+        use_cache=use_cache,
+        cache_namespace=EVAL_CACHE_NAMESPACE,
+    )
     return _json_array_from_text(repaired.text)
 
 
@@ -412,12 +421,20 @@ def _normalize_judge_rows(raw_rows: list[Any], items: list[RetrievedContext]) ->
     return normalized, sorted(set(quality_flags))
 
 
-def _call_judge(note_title: str, items: list[RetrievedContext], *, variant: str, use_cache: bool) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+def _call_judge(
+    note_title: str, items: list[RetrievedContext], *, variant: str, use_cache: bool
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     all_rows: list[dict[str, Any]] = []
     meta = {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cached_calls": 0, "quality_flags": []}
     for batch in _split_for_prompt(note_title, items, variant=variant):
         prompt = _build_prompt(note_title, batch, variant=variant)
-        result = base.call_llm_full(prompt, model=MODEL_OPUS, agent=f"eval_quality_v3_{variant}", use_cache=use_cache, cache_namespace=EVAL_CACHE_NAMESPACE)
+        result = base.call_llm_full(
+            prompt,
+            model=MODEL_OPUS,
+            agent=f"eval_quality_v3_{variant}",
+            use_cache=use_cache,
+            cache_namespace=EVAL_CACHE_NAMESPACE,
+        )
         meta["calls"] += 1
         meta["input_tokens"] += result.input_tokens
         meta["output_tokens"] += result.output_tokens
@@ -497,9 +514,7 @@ def _audit_indices(claim_scores: list[dict[str, Any]], note_title: str = "") -> 
             rows,
             # Hash ueber note_title|claim — stabil auch bei Index-Verschiebung,
             # eindeutig auch wenn gleicher Claim-Text in verschiedenen Notes vorkommt.
-            key=lambda row: hashlib.sha256(
-                f"{note_title}|{row['claim']}".encode("utf-8")
-            ).hexdigest(),
+            key=lambda row: hashlib.sha256(f"{note_title}|{row['claim']}".encode("utf-8")).hexdigest(),
         )
         triggers.update(row["claim_idx"] for row in ranked[:sample_n])
     return triggers
@@ -522,36 +537,42 @@ def _claim_scores_from_judge(
         audit_label = Label(audit["label"]) if audit else None
         # CODEX-PATTERN: v4 converts Judge rows into a domain-agnostic ClaimInput and lets
         # decision_engine own low-cosine, evidence downgrade, and audit precedence.
-        decision = determine_decision(ClaimInput(
-            primary_label=Label(row["label"]),
-            audit_label=audit_label,
-            cosine=item.top_cosine,
-            evidence_verified=verified,
-            parse_failed=row["label"] == PARSE_ERROR,
-        ))
+        decision = determine_decision(
+            ClaimInput(
+                primary_label=Label(row["label"]),
+                audit_label=audit_label,
+                cosine=item.top_cosine,
+                evidence_verified=verified,
+                parse_failed=row["label"] == PARSE_ERROR,
+            )
+        )
         flags = [flag.value for flag in decision.flags]
-        scores.append({
-            "claim_idx": row["claim_idx"],
-            "claim": claims[row["claim_idx"]],
-            "label": decision.label.value,
-            "decision_source": decision.source,
-            "original_judge_label": row.get("original_judge_label"),
-            "label_original": row["label"] if decision.label.value != row["label"] else None,
-            "audit_label": audit["label"] if audit else None,
-            "evidence": row["evidence"],
-            "evidence_verified": verified,
-            "evidence_verification_score": verification_score,
-            "best_page": row["best_page"],
-            "top_cosine": item.top_cosine,
-            "best_chunk_idx": item.best_chunk_idx,
-            "retrieved_contexts": item.contexts,
-            "quality_flags": flags,
-        })
+        scores.append(
+            {
+                "claim_idx": row["claim_idx"],
+                "claim": claims[row["claim_idx"]],
+                "label": decision.label.value,
+                "decision_source": decision.source,
+                "original_judge_label": row.get("original_judge_label"),
+                "label_original": row["label"] if decision.label.value != row["label"] else None,
+                "audit_label": audit["label"] if audit else None,
+                "evidence": row["evidence"],
+                "evidence_verified": verified,
+                "evidence_verification_score": verification_score,
+                "best_page": row["best_page"],
+                "top_cosine": item.top_cosine,
+                "best_chunk_idx": item.best_chunk_idx,
+                "retrieved_contexts": item.contexts,
+                "quality_flags": flags,
+            }
+        )
     scores.sort(key=lambda score: score["claim_idx"])
     return scores
 
 
-def _empty_result(note_path: Path, pdf_path: Path, pipeline_version: str, timestamp: str, error: str, total: int = 0) -> dict:
+def _empty_result(
+    note_path: Path, pdf_path: Path, pipeline_version: str, timestamp: str, error: str, total: int = 0
+) -> dict:
     return {
         "note": note_path.name,
         "pdf": pdf_path.name,
@@ -621,11 +642,9 @@ def _aggregate(
     hallucinated = counts[NOT_IN_CONTEXT] + counts[CONTRADICTED]
     with_evidence = sum(1 for score in claim_scores if score["evidence"])
     evidence_verified_count = sum(1 for score in claim_scores if score["evidence_verified"] is True)
-    quality_flags = sorted({
-        flag
-        for score in claim_scores
-        for flag in score["quality_flags"]
-    } | set(llm_meta.get("quality_flags", [])))
+    quality_flags = sorted(
+        {flag for score in claim_scores for flag in score["quality_flags"]} | set(llm_meta.get("quality_flags", []))
+    )
     if parse_error_count:
         quality_flags = sorted(set(quality_flags) | {"parse_errors_present"})
 
@@ -698,8 +717,9 @@ def _aggregate(
     return result
 
 
-def eval_note(note_path: Path | str, pdf_path: Path | str, pipeline_version: str = AGENT_VERSION,
-              no_cache: bool = False) -> dict:
+def eval_note(
+    note_path: Path | str, pdf_path: Path | str, pipeline_version: str = AGENT_VERSION, no_cache: bool = False
+) -> dict:
     """Evaluiert eine Note gegen ihre Quell-PDF und gibt v3-Metriken zurueck."""
     note_path = Path(note_path)
     pdf_path = Path(pdf_path)
@@ -741,13 +761,13 @@ def eval_note(note_path: Path | str, pdf_path: Path | str, pipeline_version: str
         llm_meta["input_tokens"] += audit_meta.get("input_tokens", 0)
         llm_meta["output_tokens"] += audit_meta.get("output_tokens", 0)
         llm_meta["cached_calls"] += audit_meta.get("cached_calls", 0)
-        llm_meta["quality_flags"] = sorted(set(llm_meta.get("quality_flags", [])) | set(audit_meta.get("quality_flags", [])))
+        llm_meta["quality_flags"] = sorted(
+            set(llm_meta.get("quality_flags", [])) | set(audit_meta.get("quality_flags", []))
+        )
 
     # Fix B (flag-only): not_in_context-Claims, die semantisch im Volltext stehen, als
     # mögliche Retrieval-Misses flaggen (kein Relabel → kein Masking; nur sichtbar machen).
-    claim_scores = apply_source_presence_fallback(
-        claim_scores, _build_presence_scorer(pdf_path, claim_scores)
-    )
+    claim_scores = apply_source_presence_fallback(claim_scores, _build_presence_scorer(pdf_path, claim_scores))
 
     return _aggregate(note_path, pdf_path, pipeline_version, timestamp, language_pair, chunks, claim_scores, llm_meta)
 
@@ -762,32 +782,37 @@ def save_result(result: dict) -> None:
     try:
         from generative import db as _db
         from generative.agents.base import _RUN_ID as _run_id
+
         note_name = result.get("note", "")
         eval_id = f"{_run_id}__{note_name}"
         with _db.get_db() as _conn:
-            _db.insert_eval(_conn, {
-                "eval_id":           eval_id,
-                "run_id":            _run_id,
-                "note_path":         note_name,
-                "acceptance_status": None,  # wird vom orchestrator gesetzt
-                "hallucination_rate":result.get("hallucination_rate"),
-                "anchors_total":     result.get("anchors_total"),
-                "anchors_hallucinated": result.get("anchors_hallucinated"),
-                "coverage_factual":  result.get("coverage_factual"),
-                "coverage_rate":     result.get("coverage_rate"),
-                "tokens_total":      result.get("tokens_total"),
-                "tokens_input":      result.get("tokens_input"),
-                "tokens_output":     result.get("tokens_output"),
-                "tokens_cache_read": result.get("tokens_cache_read"),
-                "wall_time_s":       result.get("wall_time_s"),
-                "pipeline_version":  result.get("version"),
-                "pdf":               result.get("pdf"),
-                "language":          result.get("language"),
-                "eval_version":      result.get("eval_version", EVAL_VERSION),
-                "timestamp":         result.get("timestamp"),
-            })
+            _db.insert_eval(
+                _conn,
+                {
+                    "eval_id": eval_id,
+                    "run_id": _run_id,
+                    "note_path": note_name,
+                    "acceptance_status": None,  # wird vom orchestrator gesetzt
+                    "hallucination_rate": result.get("hallucination_rate"),
+                    "anchors_total": result.get("anchors_total"),
+                    "anchors_hallucinated": result.get("anchors_hallucinated"),
+                    "coverage_factual": result.get("coverage_factual"),
+                    "coverage_rate": result.get("coverage_rate"),
+                    "tokens_total": result.get("tokens_total"),
+                    "tokens_input": result.get("tokens_input"),
+                    "tokens_output": result.get("tokens_output"),
+                    "tokens_cache_read": result.get("tokens_cache_read"),
+                    "wall_time_s": result.get("wall_time_s"),
+                    "pipeline_version": result.get("version"),
+                    "pdf": result.get("pdf"),
+                    "language": result.get("language"),
+                    "eval_version": result.get("eval_version", EVAL_VERSION),
+                    "timestamp": result.get("timestamp"),
+                },
+            )
     except Exception as _db_err:
         import sys as _sys
+
         print(f"  [warn] DB-Write fehlgeschlagen: {_db_err}", file=_sys.stderr)
 
     print(f"  -> gespeichert: {_QUALITY_HISTORY}")

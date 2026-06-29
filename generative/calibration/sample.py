@@ -6,6 +6,7 @@ und sampelt deterministisch SAMPLE_PER_PAIR Notes je Sprachpaar.
 
 Output: .cache/eval/calibration/sample.jsonl
 """
+
 from __future__ import annotations
 
 import json
@@ -23,6 +24,7 @@ from generative.pipeline.pdf_chunker import pdf_to_text  # noqa: E402
 BASELINE = ROOT / ".cache" / "eval" / "baseline"
 CALIB = ROOT / ".cache" / "eval" / "calibration"
 from generative.config import LITERATURE_DIR as _LIT  # noqa: E402
+
 LITERATUR_DIRS = [_LIT]
 SAMPLE_PER_PAIR = 15
 TARGET_PAIRS = ("DE→DE", "EN→DE")  # EN→EN aktuell leer (Vault primär deutsch)
@@ -36,13 +38,7 @@ def pdf_language_sample(pdf_text: str, budget: int = PDF_TEXT_BUDGET) -> str:
         return pdf_text
     third = budget // 3
     mid_start = max(0, len(pdf_text) // 2 - third // 2)
-    return (
-        pdf_text[:third]
-        + "\n\n"
-        + pdf_text[mid_start: mid_start + third]
-        + "\n\n"
-        + pdf_text[-third:]
-    )
+    return pdf_text[:third] + "\n\n" + pdf_text[mid_start : mid_start + third] + "\n\n" + pdf_text[-third:]
 
 
 def find_pdf(folder_name: str) -> Path | None:
@@ -60,10 +56,7 @@ def find_pdf(folder_name: str) -> Path | None:
 
 
 def candidate_notes(folder: Path) -> list[Path]:
-    return sorted(
-        p for p in folder.glob("*.md")
-        if re.match(r"^(inbox|vault)__", p.name)
-    )
+    return sorted(p for p in folder.glob("*.md") if re.match(r"^(inbox|vault)__", p.name))
 
 
 def main() -> None:
@@ -120,7 +113,9 @@ def main() -> None:
             other_counts[p] += 1
         print("  (außerhalb Target):", dict(other_counts))
     if skipped_no_pdf:
-        print(f"  {len(skipped_no_pdf)} Folder ohne PDF-Match: {skipped_no_pdf[:5]}{'…' if len(skipped_no_pdf) > 5 else ''}")
+        print(
+            f"  {len(skipped_no_pdf)} Folder ohne PDF-Match: {skipped_no_pdf[:5]}{'…' if len(skipped_no_pdf) > 5 else ''}"
+        )
 
     rng = random.Random(SEED)
     sample: list[dict] = []

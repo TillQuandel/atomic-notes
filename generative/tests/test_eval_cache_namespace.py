@@ -6,6 +6,7 @@ So wird eine inhaltlich unveraenderte Note nicht erneut evaluiert, auch wenn die
 uebrige Pipeline mit ``--fresh-run`` frisch generiert. AC1-neutral: der Cache
 liefert die bit-identische frueher gezogene Judge-Antwort, kein neues Sampling.
 """
+
 from __future__ import annotations
 
 import pytest
@@ -29,8 +30,8 @@ def test_cache_key_namespace_override_is_run_independent():
     base.set_cache_namespace("RUN_B")
     override_b = base._cache_key("prompt", "model", "agent", namespace="")
 
-    assert override_a == override_b          # stabil ueber Runs hinweg
-    assert override_a != salted              # entkoppelt vom Run-Salt
+    assert override_a == override_b  # stabil ueber Runs hinweg
+    assert override_a != salted  # entkoppelt vom Run-Salt
 
 
 def test_call_llm_full_namespace_override_hits_cache_across_runs(tmp_path, monkeypatch):
@@ -48,13 +49,11 @@ def test_call_llm_full_namespace_override_hits_cache_across_runs(tmp_path, monke
     monkeypatch.setattr(base, "_backend_call_full", fake_backend)
 
     base.set_cache_namespace("RUN_A")
-    base.call_llm_full("p", model="m", agent="eval_quality_v3_primary",
-                       cache_namespace="")
+    base.call_llm_full("p", model="m", agent="eval_quality_v3_primary", cache_namespace="")
     base.set_cache_namespace("RUN_B")
-    second = base.call_llm_full("p", model="m", agent="eval_quality_v3_primary",
-                                cache_namespace="")
+    second = base.call_llm_full("p", model="m", agent="eval_quality_v3_primary", cache_namespace="")
 
-    assert len(backend_calls) == 1           # zweiter Lauf war ein Cache-Hit
+    assert len(backend_calls) == 1  # zweiter Lauf war ein Cache-Hit
     assert second.cached is True
     assert second.text == "judge-rows"
 
@@ -90,8 +89,7 @@ def test_call_llm_full_traces_real_cache_key(tmp_path, monkeypatch):
     """Der Trace-Eintrag fuehrt den ECHTEN Cache-Key (inkl. agent + Override-Namespace),
     nicht den global-gesalzenen agent-losen Hash — sonst luegt die Cache-Hit-Analyse."""
     monkeypatch.setattr(base, "_LLM_CACHE_DIR", tmp_path / "llm")
-    monkeypatch.setattr(base, "_backend_call_full",
-                        lambda prompt, *, model, agent, **k: base.CallResult(text="x"))
+    monkeypatch.setattr(base, "_backend_call_full", lambda prompt, *, model, agent, **k: base.CallResult(text="x"))
     traced: dict = {}
 
     def fake_trace(agent, prompt, model, result, error=None, cache_key=None):
@@ -100,8 +98,7 @@ def test_call_llm_full_traces_real_cache_key(tmp_path, monkeypatch):
     monkeypatch.setattr(base, "_trace", fake_trace)
 
     base.set_cache_namespace("RUN_X")
-    base.call_llm_full("p", model="m", agent="eval_quality_v3_primary",
-                       cache_namespace="eval-vX")
+    base.call_llm_full("p", model="m", agent="eval_quality_v3_primary", cache_namespace="eval-vX")
 
     expected = base._cache_key("p", "m", "eval_quality_v3_primary", namespace="eval-vX")
     assert traced["cache_key"] == expected

@@ -10,6 +10,7 @@ Usage:
 Requires: pip install pypdf
 Optional: ocrmypdf (für gescannte PDFs)
 """
+
 from __future__ import annotations
 import argparse
 import html
@@ -62,9 +63,21 @@ _FRONT_MATTER_PAGES = 1
 
 
 _GARBAGE_AUTHORS = {
-    "someauthor", "author", "unknown", "user", "administrator", "admin",
-    "root", "owner", "creator", "microsoft", "adobe",
-    "none", "n/a", "anonymous", "null",
+    "someauthor",
+    "author",
+    "unknown",
+    "user",
+    "administrator",
+    "admin",
+    "root",
+    "owner",
+    "creator",
+    "microsoft",
+    "adobe",
+    "none",
+    "n/a",
+    "anonymous",
+    "null",
 }
 _GARBAGE_TITLE_PREFIXES = re.compile(r"^(endnotes?[\s\d]|sometitle|untitled|document\b)", re.IGNORECASE)
 _TITLE_FILE_EXTS = re.compile(r"\.(pdf|docx?|odt|pptx?)$", re.IGNORECASE)
@@ -111,10 +124,10 @@ def read_pdf_metadata(pdf_path: Path) -> dict | None:
         return None
     if not (_plausible_author(author) and _plausible_title(title)):
         return None
-    subject = (info.get("/Subject") or "")
+    subject = info.get("/Subject") or ""
     year_match = re.search(r"\d{4}", subject)
     year = int(year_match.group()) if year_match else None
-    doi = (info.get("/Keywords") or "")
+    doi = info.get("/Keywords") or ""
     doi = doi if doi.startswith("10.") else ""
     return {
         "title": title,
@@ -161,12 +174,15 @@ _ARXIV_RE = re.compile(
     re.IGNORECASE,
 )
 
+
 def extract_arxiv_id(text: str) -> str | None:
     """Extrahiert erste arXiv-ID per Regex. Gibt ID-String oder None zurueck."""
     m = _ARXIV_RE.search(text)
     return m.group(1) if m else None
 
+
 _ARXIV_API = "https://export.arxiv.org/api/query"
+
 
 def arxiv_lookup(arxiv_id: str) -> dict | None:
     """Fragt arXiv Atom-API mit ID ab. Gibt normalisiertes Dict oder None zurueck."""
@@ -191,19 +207,22 @@ def arxiv_lookup(arxiv_id: str) -> dict | None:
     raw = author_m.group(1).strip() if author_m else ""
     author = raw.split(",")[0].strip() if "," in raw else raw.split()[-1] if raw else ""
     year = int(date_m.group(1)) if date_m else None
-    doi_m = re.search(r'<arxiv:doi[^>]*>([^<]+)</arxiv:doi>', entry)
+    doi_m = re.search(r"<arxiv:doi[^>]*>([^<]+)</arxiv:doi>", entry)
     doi = doi_m.group(1).strip() if doi_m else ""
     return {"title": title, "author": author, "year": year, "doi": doi, "type": "preprint"}
 
 
 _PMID_RE = re.compile(r"PMID[:\s]+(\d{6,9})", re.IGNORECASE)
 
+
 def extract_pmid(text: str) -> str | None:
     """Extrahiert erste PubMed-ID per Regex. Gibt ID-String oder None zurueck."""
     m = _PMID_RE.search(text)
     return m.group(1) if m else None
 
+
 _PUBMED_API = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
+
 
 def pubmed_lookup(pmid: str) -> dict | None:
     """Fragt PubMed E-Utilities mit PMID ab. Gibt normalisiertes Dict oder None zurueck."""
@@ -268,6 +287,7 @@ def _normalize_crossref(data: dict) -> dict:
 
 _OPEN_LIBRARY_BASE = "https://openlibrary.org/api/books"
 
+
 def open_library_lookup(isbn: str) -> dict | None:
     """Fragt Open Library mit ISBN ab. Gibt normalisiertes Dict oder None zurueck."""
     params = urllib.parse.urlencode({"bibkeys": f"ISBN:{isbn}", "format": "json", "jscmd": "data"})
@@ -283,6 +303,7 @@ def open_library_lookup(isbn: str) -> dict | None:
         return None
     return _normalize_open_library(data[key])
 
+
 def _normalize_open_library(item: dict) -> dict:
     """Extrahiert title, author, year, doi, type aus Open-Library-Response."""
     title = item.get("title", "")
@@ -295,7 +316,9 @@ def _normalize_open_library(item: dict) -> dict:
     year = int(year_match.group()) if year_match else None
     return {"title": title, "author": first_author, "year": year, "doi": "", "type": "book"}
 
+
 _GOOGLE_BOOKS_BASE = "https://www.googleapis.com/books/v1/volumes"
+
 
 def google_books_lookup(isbn: str) -> dict | None:
     """Fragt Google Books mit ISBN ab. Gibt normalisiertes Dict oder None zurueck."""
@@ -326,9 +349,9 @@ _OPENALEX_BASE = "https://api.openalex.org/works"
 # Title-Match-Gate: Die OpenAlex-Titel-Suche ist der einzige Enrichment-Pfad ohne
 # harte ID (DOI/ISBN/arXiv/PMID). Ein generischer Guess matcht sonst einen fremden
 # Treffer und schreibt dessen Autor/Jahr/DOI in die Note (Fabrikation). Fail-closed.
-_MIN_SIGNIFICANT_TOKEN_LEN = 4   # kürzere Wörter (de, the, y, …) tragen keine Titel-Identität
-_MIN_TITLE_TOKEN_OVERLAP = 2     # mind. 2 bedeutungstragende Wörter müssen übereinstimmen
-_MIN_TITLE_CONTAINMENT = 0.5     # Anteil der Query-Tokens, der im Treffer vorkommen muss
+_MIN_SIGNIFICANT_TOKEN_LEN = 4  # kürzere Wörter (de, the, y, …) tragen keine Titel-Identität
+_MIN_TITLE_TOKEN_OVERLAP = 2  # mind. 2 bedeutungstragende Wörter müssen übereinstimmen
+_MIN_TITLE_CONTAINMENT = 0.5  # Anteil der Query-Tokens, der im Treffer vorkommen muss
 # Reverse-Containment: Anteil der HAUPTTITEL-Tokens (vor dem Untertitel), die aus der
 # Query stammen. Schützt gegen 2 generische Query-Wörter, die Präfix eines längeren
 # fremden Haupttitels sind ("Information Behavior" ⊂ "Information Behavior in Everyday
@@ -454,6 +477,7 @@ def ocr_available() -> bool:
         return True
     try:
         import ocrmypdf as _ocr  # noqa: F401
+
         return True
     except ImportError:
         return False
@@ -464,14 +488,12 @@ def run_ocr(pdf_path: Path) -> Path | None:
     if not ocr_available():
         return None
     out_path = pdf_path.parent / f"_ocr_{pdf_path.name}"
-    cmd = (
-        ["ocrmypdf"] if shutil.which("ocrmypdf")
-        else [sys.executable, "-m", "ocrmypdf"]
-    )
+    cmd = ["ocrmypdf"] if shutil.which("ocrmypdf") else [sys.executable, "-m", "ocrmypdf"]
     try:
         result = subprocess.run(
             cmd + ["--quiet", "--skip-text", str(pdf_path), str(out_path)],
-            capture_output=True, timeout=120,
+            capture_output=True,
+            timeout=120,
         )
         if result.returncode == 0 and out_path.exists():
             return out_path
@@ -493,11 +515,11 @@ _HEADER_RE = re.compile(
 )
 
 # Dateinamen-Erkennung: DOI, arXiv, Jahr-basiert, kein-Jahr
-_FILENAME_DOI_RE = re.compile(r'^10[._]\d{4,9}[._]\S{3,}')
-_FILENAME_ARXIV_RE = re.compile(r'^(\d{4}\.\d{4,5})(v\d+)?$')
-_YEAR_BOUNDARY_RE = re.compile(r'(?<![0-9])(1[89]\d{2}|20[012]\d)(?![0-9])')
-_SEPARATORS = [' - ', '_', '-', ' ']
-_ZOTERO_NO_YEAR_RE = re.compile(r'^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s,\.]+?)\s+-\s+([A-Z].{10,})$')
+_FILENAME_DOI_RE = re.compile(r"^10[._]\d{4,9}[._]\S{3,}")
+_FILENAME_ARXIV_RE = re.compile(r"^(\d{4}\.\d{4,5})(v\d+)?$")
+_YEAR_BOUNDARY_RE = re.compile(r"(?<![0-9])(1[89]\d{2}|20[012]\d)(?![0-9])")
+_SEPARATORS = [" - ", "_", "-", " "]
+_ZOTERO_NO_YEAR_RE = re.compile(r"^([A-Za-zÀ-ÿ][A-Za-zÀ-ÿ\s,\.]+?)\s+-\s+([A-Z].{10,})$")
 
 
 def _extract_doi_from_filename(stem: str) -> str | None:
@@ -505,8 +527,8 @@ def _extract_doi_from_filename(stem: str) -> str | None:
     m = _FILENAME_DOI_RE.match(stem)
     if not m:
         return None
-    doi = re.sub(r'[_]', '/', m.group(), count=1)
-    doi = doi.rstrip('.')
+    doi = re.sub(r"[_]", "/", m.group(), count=1)
+    doi = doi.rstrip(".")
     return doi if doi.startswith("10.") else None
 
 
@@ -527,10 +549,10 @@ def _parse_filename_dynamic(pdf_path: Path) -> dict | None:
     stem = pdf_path.stem
 
     # Primaer: Zotero-Format " - " mit Jahr
-    m = re.match(r'^(.+?)\s+-\s+(\d{4})\s+-\s+(.+)$', stem)
+    m = re.match(r"^(.+?)\s+-\s+(\d{4})\s+-\s+(.+)$", stem)
     if m:
         author_raw, year, title = m.group(1).strip(), int(m.group(2)), m.group(3).strip()
-        author = re.sub(r'\s+et al\.?$', '', author_raw, flags=re.IGNORECASE).strip()
+        author = re.sub(r"\s+et al\.?$", "", author_raw, flags=re.IGNORECASE).strip()
         author = drop_institutional_coauthors(author)
         return {"title": title, "author": author, "year": year, "doi": "", "type": ""}
 
@@ -538,27 +560,26 @@ def _parse_filename_dynamic(pdf_path: Path) -> dict | None:
     year_m = _YEAR_BOUNDARY_RE.search(stem)
     if year_m:
         year = int(year_m.group())
-        before = stem[:year_m.start()].strip(' -_')
-        after = stem[year_m.end():].strip(' -_')
+        before = stem[: year_m.start()].strip(" -_")
+        after = stem[year_m.end() :].strip(" -_")
         if not before and after:
             # Jahr steht am Anfang: "2020-Smith-Title" -> split after on first separator
-            sep_m = re.search(r'[-_]', after)
+            sep_m = re.search(r"[-_]", after)
             if sep_m:
-                before = after[:sep_m.start()].strip()
-                after = after[sep_m.end():].strip(' -_')
+                before = after[: sep_m.start()].strip()
+                after = after[sep_m.end() :].strip(" -_")
         if before and after and len(before) >= 2 and len(after) >= 4:
-            author_raw = re.sub(r'[_]', ' ', before).strip()
-            title = re.sub(r'[_]', ' ', after).strip()
-            author = re.sub(r'\s+et al\.?$', '', author_raw, flags=re.IGNORECASE).strip()
+            author_raw = re.sub(r"[_]", " ", before).strip()
+            title = re.sub(r"[_]", " ", after).strip()
+            author = re.sub(r"\s+et al\.?$", "", author_raw, flags=re.IGNORECASE).strip()
             author = drop_institutional_coauthors(author)
-            return {"title": title, "author": author.split()[-1] if author else "",
-                    "year": year, "doi": "", "type": ""}
+            return {"title": title, "author": author.split()[-1] if author else "", "year": year, "doi": "", "type": ""}
 
     # Fallback: kein Jahr (z.B. "Kuhlthau - INFORMATION SEARCH PROCESS")
     m2 = _ZOTERO_NO_YEAR_RE.match(stem)
     if m2:
         author_raw, title = m2.group(1).strip(), m2.group(2).strip()
-        author = re.sub(r'\s+et al\.?$', '', author_raw, flags=re.IGNORECASE).strip()
+        author = re.sub(r"\s+et al\.?$", "", author_raw, flags=re.IGNORECASE).strip()
         author = drop_institutional_coauthors(author)
         return {"title": title, "author": author, "year": None, "doi": "", "type": ""}
 
@@ -613,7 +634,8 @@ def grobid_lookup(pdf_path: Path, grobid_url: str = "http://localhost:8070", tim
         ).encode("utf-8")
         body = header + pdf_data + f"\r\n--{boundary}--\r\n".encode()
         req = urllib.request.Request(
-            url, data=body,
+            url,
+            data=body,
             headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
         )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -655,8 +677,7 @@ def grobid_lookup(pdf_path: Path, grobid_url: str = "http://localhost:8070", tim
         return None
 
 
-def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False,
-           rename: bool = True) -> dict | None:
+def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False, rename: bool = True) -> dict | None:
     """Haupt-Pipeline: EmbeddedMeta -> DOI -> ISBN -> arXiv -> PMID -> Titel(OpenAlex) -> LLM -> Rename.
 
     Gibt Metadaten-Dict zurueck oder None wenn nichts gefunden.
@@ -769,15 +790,11 @@ def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False,
     # Stage 6: Titel-Suche -> OpenAlex
     # Kandidaten-Reihenfolge: (1) Dateiname wenn Title-artig, (2) erste nicht-header Textzeile
     if not meta:
-        fn_stem = re.sub(r'[_\-]', ' ', pdf_path.stem).strip()
-        _CODE_PREFIX = re.compile(r'^[A-Z0-9]{3,}\d', re.ASCII)
-        fn_title_candidate = (
-            fn_stem if len(fn_stem) > 10 and not _CODE_PREFIX.match(fn_stem)
-            else ""
-        )
-        _AUTHOR_LINE_RE = re.compile(
-            r'^[A-Z][a-zÀ-ÿ]+(\s+[A-Z][a-zÀ-ÿ]+)?\s+and\s+[A-Z]', re.UNICODE
-        )
+        fn_stem = re.sub(r"[_\-]", " ", pdf_path.stem).strip()
+        _CODE_PREFIX = re.compile(r"^[A-Z0-9]{3,}\d", re.ASCII)
+        fn_title_candidate = fn_stem if len(fn_stem) > 10 and not _CODE_PREFIX.match(fn_stem) else ""
+        _AUTHOR_LINE_RE = re.compile(r"^[A-Z][a-zÀ-ÿ]+(\s+[A-Z][a-zÀ-ÿ]+)?\s+and\s+[A-Z]", re.UNICODE)
+
         def _title_block(text: str, max_chars: int = 150) -> str:
             """Sammelt aufeinanderfolgende nicht-header Zeilen zu einem Titelblock."""
             block: list[str] = []
@@ -803,8 +820,7 @@ def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False,
             print(f"  -> Kein ID, suche Titel ({src}): '{title_guess[:60]}'")
             meta = openalex_title_search(title_guess)
             if meta and not _title_match_confident(title_guess, meta.get("title", "")):
-                print(f"  -> OpenAlex-Treffer verworfen (schwacher Titel-Match): "
-                      f"'{meta.get('title', '')[:60]}'")
+                print(f"  -> OpenAlex-Treffer verworfen (schwacher Titel-Match): '{meta.get('title', '')[:60]}'")
                 meta = None
             elif meta:
                 print(f"  -> OpenAlex: {meta['author']} ({meta['year']}) -- {meta['title'][:60]}")
@@ -848,23 +864,26 @@ def _llm_extract(text: str) -> dict | None:
     """Haiku-Fallback: extrahiert Titel/Autor/Jahr aus Rohtext."""
     try:
         import subprocess as _sp
+
         prompt = (
             "Extrahiere aus diesem Anfang eines akademischen Papers: Titel, Erstautor (Nachname), Jahr.\n"
             "Antworte NUR in diesem Format (eine Zeile je Feld):\n"
             "title: <Titel>\nauthor: <Nachname>\nyear: <Jahr>\n\n"
             f"Text:\n{text}"
         )
-        r = _sp.run(["claude", "-p", "--model", "haiku"],
-                    input=prompt, capture_output=True, text=True, timeout=30)
-        lines = {l.split(":")[0].strip(): l.split(":", 1)[1].strip()
-                 for l in r.stdout.splitlines() if ":" in l}
-        return {
-            "title": lines.get("title", ""),
-            "author": lines.get("author", ""),
-            "year": int(lines["year"]) if lines.get("year", "").isdigit() else None,
-            "doi": "",
-            "type": "",
-        } if lines.get("title") else None
+        r = _sp.run(["claude", "-p", "--model", "haiku"], input=prompt, capture_output=True, text=True, timeout=30)
+        lines = {l.split(":")[0].strip(): l.split(":", 1)[1].strip() for l in r.stdout.splitlines() if ":" in l}
+        return (
+            {
+                "title": lines.get("title", ""),
+                "author": lines.get("author", ""),
+                "year": int(lines["year"]) if lines.get("year", "").isdigit() else None,
+                "doi": "",
+                "type": "",
+            }
+            if lines.get("title")
+            else None
+        )
     except Exception:
         return None
 
@@ -874,16 +893,19 @@ def _write_pdf_metadata(pdf_path: Path, meta: dict) -> None:
     try:
         import tempfile
         from pypdf import PdfReader, PdfWriter
+
         reader = PdfReader(str(pdf_path))
         writer = PdfWriter()
         for page in reader.pages:
             writer.add_page(page)
-        writer.add_metadata({
-            "/Title": meta.get("title", ""),
-            "/Author": meta.get("author", ""),
-            "/Subject": str(meta.get("year", "")),
-            "/Keywords": meta.get("doi", ""),
-        })
+        writer.add_metadata(
+            {
+                "/Title": meta.get("title", ""),
+                "/Author": meta.get("author", ""),
+                "/Subject": str(meta.get("year", "")),
+                "/Keywords": meta.get("doi", ""),
+            }
+        )
         with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf", dir=pdf_path.parent) as tmp:
             writer.write(tmp)
             tmp_path = Path(tmp.name)
@@ -893,18 +915,20 @@ def _write_pdf_metadata(pdf_path: Path, meta: dict) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(
-        description="PDF Metadata Enrichment — DOI → CrossRef → Metadaten (Rename opt-in)"
-    )
+    parser = argparse.ArgumentParser(description="PDF Metadata Enrichment — DOI → CrossRef → Metadaten (Rename opt-in)")
     parser.add_argument("pdf", nargs="+", help="PDF-Datei(en) oder Glob-Pattern")
     parser.add_argument("--dry-run", action="store_true", help="Nicht umbenennen, nur ausgeben")
     parser.add_argument("--llm-fallback", action="store_true", help="Haiku nutzen wenn CrossRef nichts findet")
-    parser.add_argument("--rename", action="store_true",
-                        help="PDF umbenennen + Metadaten in die Datei schreiben "
-                             "(Default: aus — schützt git-getrackte PDFs vor Mutation)")
+    parser.add_argument(
+        "--rename",
+        action="store_true",
+        help="PDF umbenennen + Metadaten in die Datei schreiben "
+        "(Default: aus — schützt git-getrackte PDFs vor Mutation)",
+    )
     args = parser.parse_args()
 
     import glob
+
     paths = [Path(p) for pattern in args.pdf for p in glob.glob(pattern)]
     if not paths:
         print("Keine PDFs gefunden.", file=sys.stderr)

@@ -5,6 +5,7 @@ machte Path(dup_path).stem (strippt nur ".md", nicht Klammern) und wrappte erneu
 → related-Eintrag "[[[[Titel]]]]" + verklammertes Duplikat-Flag. Der nachträgliche
 insert in data["related"] umging den _WIKILINK_RE-Validator des Parsers.
 """
+
 from generative.agents import cross_reference as cr
 
 
@@ -46,8 +47,10 @@ def test_rewrapped_link_is_single_pair():
 # "[[A, B, C, D]]". duplicate_path ist als EIN Ziel modelliert; Mehrfachziele
 # müssen in saubere Einzelziele zerlegt werden, nie als ein Link gerendert.
 def test_clean_dup_targets_splits_comma_list():
-    raw = ("Readiness to Learn (Andragogy), Self-directed Learning, "
-           "Experience as Learning Resource, Problem-centered Learning Orientation")
+    raw = (
+        "Readiness to Learn (Andragogy), Self-directed Learning, "
+        "Experience as Learning Resource, Problem-centered Learning Orientation"
+    )
     assert cr._clean_dup_targets(raw) == [
         "Readiness to Learn (Andragogy)",
         "Self-directed Learning",

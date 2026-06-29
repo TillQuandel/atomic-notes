@@ -1,4 +1,5 @@
 """Context-Builder: scannt Vault → Relevanz-Profil für Planner + Dedup."""
+
 from __future__ import annotations
 import json
 import os
@@ -48,6 +49,7 @@ def is_dedup_eligible(path: Path) -> bool:
     ausgeschlossen. Quelle der Liste: config.DEDUP_EXCLUDE_TYPES.
     """
     from generative.config import DEDUP_EXCLUDE_TYPES
+
     return note_type(path) not in DEDUP_EXCLUDE_TYPES
 
 
@@ -96,8 +98,9 @@ def build_existing_concepts(scan_dirs: list[Path] | None = None) -> dict[str, st
 
     if scan_dirs is None:
         # Top-Level-Vault scannen, SKIP_DIRS auslassen
-        scan_dirs = [d for d in VAULT.iterdir()
-                     if d.is_dir() and d.name not in SKIP_DIRS and not d.name.startswith(".")]
+        scan_dirs = [
+            d for d in VAULT.iterdir() if d.is_dir() and d.name not in SKIP_DIRS and not d.name.startswith(".")
+        ]
     concepts: dict[str, str] = {}
     # Gemini-Finding G3 (2026-05-10): Root-Vault-MD-Files (z.B. CLAUDE.md, Home.md)
     # wurden vom Subdir-Scan ignoriert. Explizit mitnehmen — System-Files wie
@@ -195,6 +198,7 @@ def _load_registry_tags() -> set[str]:
     if not isinstance(approved, list):
         return set()
     from generative.agents.extractor import is_valid_schema_tag
+
     valid: set[str] = set()
     for t in approved:
         if not isinstance(t, str):
@@ -205,8 +209,7 @@ def _load_registry_tags() -> set[str]:
     return valid
 
 
-def build_tag_whitelist(scan_dirs: list[Path] | None = None,
-                         min_count: int = 2) -> list[str]:
+def build_tag_whitelist(scan_dirs: list[Path] | None = None, min_count: int = 2) -> list[str]:
     """Sammelt approved Tags aus zwei Quellen — Union als Whitelist:
       1. Vault-Frequenz (organisch gewachsene Tags mit min_count≥2)
       2. tag_registry.yml (User-kuratiert, autoritativ — Bootstrap für neue Domains)
@@ -217,9 +220,11 @@ def build_tag_whitelist(scan_dirs: list[Path] | None = None,
     ersetzt die Frequenz-Evidenz.
     """
     from collections import Counter
+
     if scan_dirs is None:
-        scan_dirs = [d for d in VAULT.iterdir()
-                     if d.is_dir() and d.name not in SKIP_DIRS and not d.name.startswith(".")]
+        scan_dirs = [
+            d for d in VAULT.iterdir() if d.is_dir() and d.name not in SKIP_DIRS and not d.name.startswith(".")
+        ]
     # CLAUDE.md-Konvention: lowercase kebab-case, hierarchisch via '/'.
     valid_tag = re.compile(r"^[a-z0-9][a-z0-9\-/]*$")
     counter: Counter = Counter()
@@ -246,11 +251,58 @@ def build_tag_whitelist(scan_dirs: list[Path] | None = None,
 # Stoppwörter aus dem Source-Text bei Token-Match ignorieren — sehr häufig und
 # diskriminieren schlecht. Liste klein gehalten (kein NLTK-Stopword-Import-Aufwand).
 _TAG_SCORE_STOPWORDS = {
-    "der", "die", "das", "den", "des", "dem", "ein", "eine", "einer", "einen",
-    "und", "oder", "aber", "auch", "noch", "nur", "wie", "was", "wer", "wo",
-    "ist", "sind", "war", "waren", "wird", "werden", "hat", "haben", "kann", "können",
-    "the", "and", "for", "with", "from", "this", "that", "are", "was", "will",
-    "von", "zu", "in", "im", "an", "am", "auf", "mit", "nach", "bei", "um", "über",
+    "der",
+    "die",
+    "das",
+    "den",
+    "des",
+    "dem",
+    "ein",
+    "eine",
+    "einer",
+    "einen",
+    "und",
+    "oder",
+    "aber",
+    "auch",
+    "noch",
+    "nur",
+    "wie",
+    "was",
+    "wer",
+    "wo",
+    "ist",
+    "sind",
+    "war",
+    "waren",
+    "wird",
+    "werden",
+    "hat",
+    "haben",
+    "kann",
+    "können",
+    "the",
+    "and",
+    "for",
+    "with",
+    "from",
+    "this",
+    "that",
+    "are",
+    "was",
+    "will",
+    "von",
+    "zu",
+    "in",
+    "im",
+    "an",
+    "am",
+    "auf",
+    "mit",
+    "nach",
+    "bei",
+    "um",
+    "über",
 }
 
 # Codex-Finding 3 Schwäche 4: generische Tag-Tokens diskriminieren schlecht zwischen
@@ -258,14 +310,30 @@ _TAG_SCORE_STOPWORDS = {
 # Methoden-Text. Filter aus Tag-Tokens raus, damit nur quellnah-spezifische
 # Hits priorisiert werden.
 _TAG_GENERIC_TOKENS = {
-    "model", "method", "methods", "system", "systems", "theory", "framework",
-    "process", "approach", "concept", "concepts", "data", "information",
-    "research", "study", "studies", "analysis", "review", "uni", "konzept",
+    "model",
+    "method",
+    "methods",
+    "system",
+    "systems",
+    "theory",
+    "framework",
+    "process",
+    "approach",
+    "concept",
+    "concepts",
+    "data",
+    "information",
+    "research",
+    "study",
+    "studies",
+    "analysis",
+    "review",
+    "uni",
+    "konzept",
 }
 
 
-def score_tags_for_source(whitelist: list[str], source_text: str,
-                            top_n: int = 30) -> tuple[list[str], list[str]]:
+def score_tags_for_source(whitelist: list[str], source_text: str, top_n: int = 30) -> tuple[list[str], list[str]]:
     """Source-bezogenes Tag-Ranking. Whitelist bleibt unverändert (Anti-Halluzination),
     aber wird für den Extractor-Prompt in zwei Blöcke geteilt: priorisierte
     Tags (Token-Match mit Source) + übrige.
@@ -284,6 +352,7 @@ def score_tags_for_source(whitelist: list[str], source_text: str,
     # schützt vor Mojibake/Latin-1-Fragmenten. Space (nicht Empty) damit Wort-
     # grenzen erhalten bleiben: `change�management` → `change management`.
     import unicodedata
+
     source_text = unicodedata.normalize("NFC", source_text).replace("�", " ")
     source_tokens = {t.lower() for t in re.findall(r"\b[a-zA-ZäöüÄÖÜß\-]{3,}\b", source_text)}
     source_tokens -= _TAG_SCORE_STOPWORDS

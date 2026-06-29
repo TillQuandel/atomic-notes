@@ -7,6 +7,7 @@ Funktionen OHNE LLM-Call. Zwei Metriken:
   2. overview_coverage — welche Konzepte ihre Titel-Token-Evidenz im
                          extract_overview()-Output behalten (Planner-Recall-Decke).
 """
+
 from __future__ import annotations
 
 
@@ -16,6 +17,7 @@ from generative.eval_chunk_recall import straddle_stats, overview_coverage, _lab
 
 
 # ---- straddle_stats: Boundary-Loss ohne Overlap ----------------------------
+
 
 def test_no_straddle_when_chunk_holds_whole_sentence():
     text = "alpha beta gamma."
@@ -63,6 +65,7 @@ def test_straddle_stats_rejects_invalid_params(size, overlap):
 
 # ---- overview_coverage: Planner-Recall-Decke -------------------------------
 
+
 def test_concept_in_intro_covered_at_all_thresholds():
     # Konzept-Tokens stehen ganz am Anfang → immer im Intro-Budget von extract_overview
     text = "Zebra Quantum " + "lorem " * 2000
@@ -108,6 +111,7 @@ def test_partial_token_overlap_is_threshold_artifact():
 
 
 # ---- _label_concept: Quelle→Konzept-Referenz aus Kalibrierungs-Notes -------
+
 
 def test_label_concept_parses_pdf_and_title():
     text = (

@@ -3,6 +3,7 @@
 Edge-Cases aus 4 Review-Runden — Format-Spec gegen pathologische Outputs härten.
 Ohne diese Suite wiederholen wir das v16-Silent-Fail-Pattern (anchor_patterns).
 """
+
 from __future__ import annotations
 import unittest
 
@@ -25,6 +26,7 @@ from generative.agents.structured_output import (
 
 
 # ---------- Low-level helpers ----------
+
 
 class TestNormalizeLines(unittest.TestCase):
     def test_lf(self):
@@ -66,6 +68,7 @@ class TestSplitSentinels(unittest.TestCase):
 
 # ---------- Header parsing ----------
 
+
 class TestParseHeader(unittest.TestCase):
     def test_basic(self):
         self.assertEqual(_parse_header_line("title: Foo"), ("title", "Foo"))
@@ -106,6 +109,7 @@ class TestParseHeadersBlock(unittest.TestCase):
 
 
 # ---------- Value parsers ----------
+
 
 class TestParseBool(unittest.TestCase):
     def test_truthy(self):
@@ -263,6 +267,7 @@ second body
 
 # ---------- Canonicalizer ----------
 
+
 class TestCanonicalizerParse(unittest.TestCase):
     def test_single_note(self):
         text = """<!--NOTE-->
@@ -281,6 +286,7 @@ Merged body with "all" content
 
 
 # ---------- Verifier ----------
+
 
 class TestVerifierParse(unittest.TestCase):
     def test_two_anchors(self):
@@ -308,6 +314,7 @@ unverified quote
 
 
 # ---------- Critic ----------
+
 
 class TestCriticParse(unittest.TestCase):
     def test_full_critic(self):
@@ -347,6 +354,7 @@ Improve the "title" — it has two ideas.
 
 
 # ---------- Planner ----------
+
 
 class TestPlannerParse(unittest.TestCase):
     def test_two_concepts(self):
@@ -447,6 +455,7 @@ extend_path:
 
 
 # ---------- Cross-Reference ----------
+
 
 class TestCrossReferenceParse(unittest.TestCase):
     def test_full(self):

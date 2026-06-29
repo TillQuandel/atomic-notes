@@ -4,6 +4,7 @@
 # und den `if __name__ == "types"`-Workaround. Modul-Internes File-Layout ist
 # besser als Konventions-Bruch (Python's `types` ist stdlib seit Anfang).
 """
+
 from __future__ import annotations
 
 import math
@@ -39,9 +40,9 @@ class QualityFlag(Enum):
     EVIDENCE_UNVERIFIED = "evidence_unverified"
     EVIDENCE_FABRICATED = "evidence_fabricated"
     RETRIEVAL_LOW_COSINE = "retrieval_low_cosine"
-    LOW_COSINE = "low_cosine"              # deprecated alias
+    LOW_COSINE = "low_cosine"  # deprecated alias
     AUDIT_OVERRIDDEN = "audit_overridden"
-    AUDIT_OVERRODE = "audit_overrode"      # deprecated alias
+    AUDIT_OVERRODE = "audit_overrode"  # deprecated alias
     JUDGE_UNEINIG = "judge_uneinig"
     AUDIT_DISAGREES_SOFTER = "audit_disagrees_softer"
     AUDIT_DISAGREES_WITH_SYSTEM = "audit_disagrees_with_system"
@@ -56,6 +57,7 @@ class ClaimInput:
     # die Garantie zur Modul-Boundary — Rules dürfen davon ausgehen dass cosine
     # finite und in [0,1] ist, parse_failed konsistent ist, etc.
     """
+
     primary_label: Label
     audit_label: Label | None
     cosine: float
@@ -92,6 +94,7 @@ class ClaimDecision:
 @dataclass(frozen=True)
 class Metric:
     """Rate-Metrik mit Validity-Flag. value=-1.0 sentinel wenn nicht messbar."""
+
     value: float
     valid: bool
 

@@ -4,6 +4,7 @@ Bei einer Stage-6-Exception wird der unverifizierte Draft NICHT geschrieben,
 stattdessen ein strukturierter JSON-Crash-Report nach .cache/failed/<run-id>/<slug>.json,
 damit der Crash diagnostizierbar ist (Schritt, Exception, Prompt, roher Output, Draft, Phase).
 """
+
 import json
 
 from generative.pipeline.crash_report import write_crash_report

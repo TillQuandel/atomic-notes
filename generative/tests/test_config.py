@@ -6,8 +6,6 @@ import sys
 import pytest
 
 
-
-
 @pytest.fixture(autouse=True)
 def restore_config_defaults(monkeypatch):
     yield

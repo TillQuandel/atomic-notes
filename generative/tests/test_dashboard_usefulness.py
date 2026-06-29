@@ -4,6 +4,7 @@
   absteigend (None ans Ende), gelabelte danach.
 - kpi_vault_n: Vault-Notes der KPI-Version (Basis des Eval-Coverage-Hinweises).
 """
+
 from __future__ import annotations
 
 import sqlite3
@@ -54,18 +55,25 @@ def worklist_db(tmp_path, monkeypatch):
 def test_calibration_rows_sorted_as_worklist(worklist_db):
     rows = _read_calibration_data()["rows"]
     assert [r["note"] for r in rows] == [
-        "a-hoch",        # ungelabelt, hall 40 %
-        "b-niedrig",     # ungelabelt, hall 10 %
-        "c-ohne-rate",   # ungelabelt, keine Rate → ans Ende der ungelabelten
-        "d-gelabelt",    # gelabelt → ganz unten
+        "a-hoch",  # ungelabelt, hall 40 %
+        "b-niedrig",  # ungelabelt, hall 10 %
+        "c-ohne-rate",  # ungelabelt, keine Rate → ans Ende der ungelabelten
+        "d-gelabelt",  # gelabelt → ganz unten
     ]
 
 
 def _log_run(**over):
     base = {
-        "key": "bates", "label": "Bates 2017", "ver": "v0.3.135",
-        "n_total": 4, "n_vault": 2, "n_merge": 0, "n_inbox": 0,
-        "accept_pct": 50.0, "words": 9000, "pages": 12,
+        "key": "bates",
+        "label": "Bates 2017",
+        "ver": "v0.3.135",
+        "n_total": 4,
+        "n_vault": 2,
+        "n_merge": 0,
+        "n_inbox": 0,
+        "accept_pct": 50.0,
+        "words": 9000,
+        "pages": 12,
     }
     base.update(over)
     return base
@@ -73,13 +81,13 @@ def _log_run(**over):
 
 def test_calc_kpis_vault_n_counts_only_kpi_version():
     runs = [
-        _log_run(ver="v0.1.0", n_total=10, n_vault=5),   # alte Version: zählt nicht
+        _log_run(ver="v0.1.0", n_total=10, n_vault=5),  # alte Version: zählt nicht
         _log_run(ver="v0.3.135", n_total=4, n_vault=2),
         _log_run(ver="v0.3.135", n_total=3, n_vault=3),
     ]
     kpis = _calc_kpis({}, runs, [], [])
-    assert kpis["kpi_vault_n"] == 5      # 2 + 3, nur v0.3.135
-    assert kpis["kpi_accept_n"] == 7     # 4 + 3 generiert
+    assert kpis["kpi_vault_n"] == 5  # 2 + 3, nur v0.3.135
+    assert kpis["kpi_accept_n"] == 7  # 4 + 3 generiert
     assert kpis["avg_accept"] == pytest.approx(71.4)
 
 

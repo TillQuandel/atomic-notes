@@ -8,6 +8,7 @@ Stack (lt. Plan „atomic-notes Frontend-Stack-Entscheidung"): FastAPI + HTMX/SS
 + vanilla CSS, kein React/npm. Der eigentliche Lauf laeuft als Subprocess
 (generative/gui/runner.py); diese App orchestriert nur Start + Event-Stream.
 """
+
 from __future__ import annotations
 
 import json
@@ -37,6 +38,7 @@ def _is_same_origin(request: Request) -> bool:
     if origin is None:
         return True
     from urllib.parse import urlparse
+
     return urlparse(origin).hostname in _LOCAL_HOSTS
 
 
@@ -120,10 +122,10 @@ def create_app(
 
     if pdf_dirs is None or vault_path is None or backend is None:
         from generative import config as _cfg
+
         if pdf_dirs is None:
             _repo = Path(__file__).resolve().parents[2]  # …/atomic-notes
-            pdf_dirs = [_repo / "examples",
-                        getattr(_cfg, "LITERATURE_DIR", None)]
+            pdf_dirs = [_repo / "examples", getattr(_cfg, "LITERATURE_DIR", None)]
         if vault_path is None:
             vault_path = _cfg.VAULT
         if backend is None:
@@ -131,6 +133,7 @@ def create_app(
     pdf_dirs = [Path(d) for d in pdf_dirs if d]
     if uploads_dir is None:
         import tempfile
+
         uploads_dir = Path(tempfile.gettempdir()) / "atomic-notes-gui-uploads"
     uploads_dir = Path(uploads_dir)
     # #2: Lauf-Quellen auf gelistete PDF-Verzeichnisse + Upload-Ablage begrenzen —
@@ -147,13 +150,11 @@ def create_app(
 
     @app.get("/app.css")
     def css():
-        return StreamingResponse(iter([(_STATIC / "app.css").read_bytes()]),
-                                 media_type="text/css")
+        return StreamingResponse(iter([(_STATIC / "app.css").read_bytes()]), media_type="text/css")
 
     @app.get("/app.js")
     def js():
-        return StreamingResponse(iter([(_STATIC / "app.js").read_bytes()]),
-                                 media_type="text/javascript")
+        return StreamingResponse(iter([(_STATIC / "app.js").read_bytes()]), media_type="text/javascript")
 
     @app.get("/api/pdfs")
     def list_pdfs() -> JSONResponse:
@@ -177,8 +178,7 @@ def create_app(
         raw = file.filename or "upload.pdf"
         safe_name = Path(raw.replace("\\", "/")).name
         if not safe_name.lower().endswith(".pdf"):
-            return JSONResponse({"error": "Nur PDF-Dateien werden akzeptiert."},
-                                status_code=400)
+            return JSONResponse({"error": "Nur PDF-Dateien werden akzeptiert."}, status_code=400)
         data = await file.read()
         if not data:
             return JSONResponse({"error": "Leere Datei."}, status_code=400)
@@ -193,20 +193,24 @@ def create_app(
     def doctor() -> JSONResponse:
         checks = []
         for chk in doctor_fn():
-            checks.append({
-                "name": getattr(chk, "name", "?"),
-                "ok": bool(getattr(chk, "ok", False)),
-                "detail": getattr(chk, "detail", ""),
-                "hint": getattr(chk, "hint", ""),
-                "required": bool(getattr(chk, "required", True)),
-            })
+            checks.append(
+                {
+                    "name": getattr(chk, "name", "?"),
+                    "ok": bool(getattr(chk, "ok", False)),
+                    "detail": getattr(chk, "detail", ""),
+                    "hint": getattr(chk, "hint", ""),
+                    "required": bool(getattr(chk, "required", True)),
+                }
+            )
         ok = all(c["ok"] for c in checks if c["required"])
-        return JSONResponse({
-            "backend": backend,
-            "vault": str(Path(vault_path)),
-            "ok": ok,
-            "checks": checks,
-        })
+        return JSONResponse(
+            {
+                "backend": backend,
+                "vault": str(Path(vault_path)),
+                "ok": ok,
+                "checks": checks,
+            }
+        )
 
     @app.post("/api/run")
     async def start_run(request: Request) -> JSONResponse:
@@ -219,18 +223,14 @@ def create_app(
             return JSONResponse({"error": f"PDF nicht gefunden: {pdf}"}, status_code=400)
         # #2: Quelle muss unter einem erlaubten Root liegen (gelistet/hochgeladen).
         if not any(_is_within(pdf, root) for root in _allowed_roots):
-            return JSONResponse(
-                {"error": "PDF liegt ausserhalb der erlaubten Verzeichnisse."},
-                status_code=400)
+            return JSONResponse({"error": "PDF liegt ausserhalb der erlaubten Verzeichnisse."}, status_code=400)
         # Server-seitige Revalidierung (Client-Gate könnte umgangen/veraltet sein):
         # der Vault wird auch im Dry-Run gebraucht (Context-Builder scannt ihn).
         if not Path(vault_path).exists():
-            return JSONResponse({"error": f"Vault nicht gefunden: {vault_path}"},
-                                status_code=400)
+            return JSONResponse({"error": f"Vault nicht gefunden: {vault_path}"}, status_code=400)
         with app.state.session_lock:
             if app.state.session is not None and app.state.session.active:
-                return JSONResponse({"error": "Es läuft bereits ein Pipeline-Lauf."},
-                                    status_code=409)
+                return JSONResponse({"error": "Es läuft bereits ein Pipeline-Lauf."}, status_code=409)
             session = RunSession()
             session.pdf = pdf
             session.dry_run = dry_run
@@ -248,9 +248,7 @@ def create_app(
         s = app.state.session
         if s is None or not s.active:
             return JSONResponse({"active": False})
-        return JSONResponse({"active": True,
-                             "pdf": getattr(s, "pdf", None),
-                             "dry_run": getattr(s, "dry_run", None)})
+        return JSONResponse({"active": True, "pdf": getattr(s, "pdf", None), "dry_run": getattr(s, "dry_run", None)})
 
     @app.post("/api/cancel")
     def cancel_run(request: Request) -> JSONResponse:
@@ -266,8 +264,9 @@ def create_app(
     def stream() -> StreamingResponse:
         session = app.state.session
         if session is None:
-            return StreamingResponse(iter(["event: log\ndata: {\"text\": \"kein Lauf\"}\n\n"]),
-                                     media_type="text/event-stream")
+            return StreamingResponse(
+                iter(['event: log\ndata: {"text": "kein Lauf"}\n\n']), media_type="text/event-stream"
+            )
         return StreamingResponse(_event_stream(session), media_type="text/event-stream")
 
     @app.get("/api/preview")
@@ -296,6 +295,7 @@ def create_app(
 
 def _event_stream(session: RunSession) -> Iterator[str]:
     import time
+
     i = 0
     while True:
         while i < len(session.events):
@@ -320,6 +320,7 @@ def serve(port: int = 8052, open_browser: bool = True) -> None:  # pragma: no co
     if open_browser:
         import webbrowser
         from threading import Timer
+
         Timer(1.0, lambda: webbrowser.open(f"http://127.0.0.1:{port}")).start()
     print(f"[gui] atomic-notes GUI → http://127.0.0.1:{port}  (Strg+C zum Beenden)")
     uvicorn.run(app, host="127.0.0.1", port=port, log_level="warning")

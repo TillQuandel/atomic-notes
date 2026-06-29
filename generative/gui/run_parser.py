@@ -14,6 +14,7 @@ Events (dict mit "type"):
 Die Marker stammen aus generative/orchestrator.py (Stage-Prints, Pro-Note-Print
 orchestrator.py:539) und generative/pipeline/vault_writer.py:874-905 (Dry-Run).
 """
+
 from __future__ import annotations
 
 import re
@@ -36,9 +37,7 @@ _STAGE_RE = re.compile(r"^\[(\d+(?:\.\d+)?(?:-\d+)?)/(\d)\]\s*(.*)$")
 _NOTE_RE = re.compile(r"^\s+\[(\d+)/(\d+)\]\s+(.+)$")
 # Dry-Run-Block (vault_writer.py:880-883).
 _DRYRUN_RE = re.compile(r"^\s+\[DRY-RUN\] -> Inbox:\s+(.+?)\s\s+(\[.+\])\s*$")
-_SCORE_RE = re.compile(
-    r"^\s+Score:\s*(\d+)/5\s*\|\s*Hard-Gates:\s*(pass|fail)\s*\|\s*Confidence:\s*(\w+)"
-)
+_SCORE_RE = re.compile(r"^\s+Score:\s*(\d+)/5\s*\|\s*Hard-Gates:\s*(pass|fail)\s*\|\s*Confidence:\s*(\w+)")
 _FLAGS_RE = re.compile(r"^\s+Flags:\s*(.+)$")
 # Abschluss (orchestrator.py:1536).
 _DONE_RE = re.compile(r"^=== Fertig:\s*(\d+)\s*Notes\s*(\(dry-run\)|geschrieben)\s*===")
@@ -46,9 +45,20 @@ _DONE_RE = re.compile(r"^=== Fertig:\s*(\d+)\s*Notes\s*(\(dry-run\)|geschrieben)
 # Bekannte Backend-/Setup-Fehlersignaturen (Kleinschreibung-Substrings) — Quelle:
 # _subscription_backend.py (_fail_fast_hint), error_hints.py, doctor.py.
 _ERROR_SIGNATURES = (
-    "nicht eingeloggt", "session abgelaufen", "rate-limit", "rate limit", "429",
-    "pdftotext nicht gefunden", "poppler", "kein api-key", "api_key", "not found",
-    "nicht gefunden:", "nicht aufrufbar", "→ doctor", "-> doctor",
+    "nicht eingeloggt",
+    "session abgelaufen",
+    "rate-limit",
+    "rate limit",
+    "429",
+    "pdftotext nicht gefunden",
+    "poppler",
+    "kein api-key",
+    "api_key",
+    "not found",
+    "nicht gefunden:",
+    "nicht aufrufbar",
+    "→ doctor",
+    "-> doctor",
 )
 
 
@@ -88,8 +98,12 @@ class RunParser:
         if m:
             out = self._flush_pending()
             self._pending = {
-                "type": "preview", "name": m.group(1).strip(),
-                "score": None, "hard_gates": None, "confidence": None, "flags": "",
+                "type": "preview",
+                "name": m.group(1).strip(),
+                "score": None,
+                "hard_gates": None,
+                "confidence": None,
+                "flags": "",
                 **_parse_marker(m.group(2)),
             }
             return out
@@ -115,29 +129,32 @@ class RunParser:
         # 4) Pro-Note-Marker (eingerueckt).
         m = _NOTE_RE.match(line)
         if m:
-            return prefix + [{"type": "note_progress", "index": int(m.group(1)),
-                              "total": int(m.group(2)), "title": m.group(3).strip()}]
+            return prefix + [
+                {
+                    "type": "note_progress",
+                    "index": int(m.group(1)),
+                    "total": int(m.group(2)),
+                    "title": m.group(3).strip(),
+                }
+            ]
 
         # 5) Stage-Marker (nicht eingerueckt).
         m = _STAGE_RE.match(line)
         if m:
             num = int(float(m.group(1).split("-")[0]))  # "4.5"/"4-5" → 4
-            return prefix + [{"type": "stage", "num": num,
-                              "total": int(m.group(2)), "label": m.group(3).strip()}]
+            return prefix + [{"type": "stage", "num": num, "total": int(m.group(2)), "label": m.group(3).strip()}]
 
         # 6) Abschluss.
         m = _DONE_RE.match(line)
         if m:
-            return prefix + [{"type": "done", "written": int(m.group(1)),
-                              "dry_run": m.group(2) == "(dry-run)"}]
+            return prefix + [{"type": "done", "written": int(m.group(1)), "dry_run": m.group(2) == "(dry-run)"}]
 
         # 7) Bekannte Backend-/Setup-Fehlersignaturen prominent als error_hint
         # hochziehen (sonst gehen sie in hunderten Log-Zeilen unter) — zusätzlich
         # zum normalen Log.
         low = line.lower()
         if any(sig in low for sig in _ERROR_SIGNATURES):
-            return prefix + [{"type": "error_hint", "text": line.strip()},
-                             {"type": "log", "text": line}]
+            return prefix + [{"type": "error_hint", "text": line.strip()}, {"type": "log", "text": line}]
 
         # 8) Sonst: roher Log.
         return prefix + [{"type": "log", "text": line}]

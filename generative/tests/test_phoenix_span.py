@@ -5,6 +5,7 @@ Verifiziert die Review-kritischen Punkte (Gemini + Qwen 2026-05-27):
 - Cache-Hit-Pfad erzeugt ebenfalls einen Span (sonst fehlen Re-Run-Calls in Phoenix)
 - Verschachtelung: Call-Span ist Kind eines umgebenden Stage-Spans
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -31,9 +32,9 @@ def exporter(monkeypatch):
 
 def test_live_call_emits_llm_span_with_io(exporter, monkeypatch):
     monkeypatch.setattr(
-        base, "_backend_call_full",
-        lambda prompt, *, model, agent: base.CallResult(
-            text="ANTWORT", input_tokens=5, output_tokens=7),
+        base,
+        "_backend_call_full",
+        lambda prompt, *, model, agent: base.CallResult(text="ANTWORT", input_tokens=5, output_tokens=7),
     )
     base.call_claude_full("PROMPT", model="m", agent="extractor", use_cache=False)
 
@@ -50,8 +51,7 @@ def test_live_call_emits_llm_span_with_io(exporter, monkeypatch):
 
 
 def test_cache_hit_still_emits_span(exporter, monkeypatch):
-    monkeypatch.setattr(base, "_cache_get",
-                        lambda key: base.CallResult(text="CACHED", input_tokens=1, output_tokens=2))
+    monkeypatch.setattr(base, "_cache_get", lambda key: base.CallResult(text="CACHED", input_tokens=1, output_tokens=2))
     base.call_claude_full("PROMPT", model="m", agent="critic", use_cache=True)
 
     spans = exporter.get_finished_spans()
@@ -62,7 +62,8 @@ def test_cache_hit_still_emits_span(exporter, monkeypatch):
 
 def test_call_span_nested_under_stage_span(exporter, monkeypatch):
     monkeypatch.setattr(
-        base, "_backend_call_full",
+        base,
+        "_backend_call_full",
         lambda prompt, *, model, agent: base.CallResult(text="X"),
     )
     tracer = base._OTEL_TRACER
@@ -81,7 +82,8 @@ def test_no_tracer_is_noop(monkeypatch):
     """Tracing aus (kein Provider) → kein Span, Hot-Path unverändert."""
     monkeypatch.setattr(base, "_OTEL_TRACER", None)
     monkeypatch.setattr(
-        base, "_backend_call_full",
+        base,
+        "_backend_call_full",
         lambda prompt, *, model, agent: base.CallResult(text="X"),
     )
     # Darf nicht crashen und liefert normal das Ergebnis
@@ -90,8 +92,10 @@ def test_no_tracer_is_noop(monkeypatch):
 
 def test_async_call_span_nested_under_stage(exporter, monkeypatch):
     """call_claude_full_async (asyncio.gather/Semaphore-Pfad) bleibt unter dem Stage-Span."""
+
     async def _backend(prompt, *, model, agent):
         return base.CallResult(text="ASYNC")
+
     monkeypatch.setattr(base, "_backend_call_full_async", _backend)
 
     tracer = base._OTEL_TRACER
@@ -108,13 +112,13 @@ def test_async_call_span_nested_under_stage(exporter, monkeypatch):
 def test_to_thread_call_span_nested_under_stage(exporter, monkeypatch):
     """Stage-6-Pfad: sync call_claude_full via asyncio.to_thread bleibt unter dem Stage-Span."""
     monkeypatch.setattr(
-        base, "_backend_call_full",
+        base,
+        "_backend_call_full",
         lambda prompt, *, model, agent: base.CallResult(text="THREADED"),
     )
 
     async def _runner():
-        return await asyncio.to_thread(
-            base.call_claude_full, "P", model="m", agent="critic", use_cache=False)
+        return await asyncio.to_thread(base.call_claude_full, "P", model="m", agent="critic", use_cache=False)
 
     tracer = base._OTEL_TRACER
     with tracer.start_as_current_span("Stage6") as stage:

@@ -4,6 +4,7 @@
 # Wenn Evidence-Downgrade als terminale Rule lief, konnte Audit-Override danach nicht
 # mehr greifen. Jetzt ist Downgrade eine Input-Mutation, danach läuft Audit normal.
 """
+
 from __future__ import annotations
 
 from collections.abc import Callable
@@ -59,5 +60,7 @@ def determine_decision(inp: ClaimInput, config: RulesConfig = DEFAULT_CONFIG) ->
     if downgrade_flags:
         merged_flags = default.flags | downgrade_flags
         # Kanonischer Source-Wert laut models.py-Contract: "downgrade" (#32)
-        return ClaimDecision(label=default.label, flags=merged_flags, source="downgrade" if downgrade_flags else default.source)
+        return ClaimDecision(
+            label=default.label, flags=merged_flags, source="downgrade" if downgrade_flags else default.source
+        )
     return default

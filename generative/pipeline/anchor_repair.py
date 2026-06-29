@@ -18,10 +18,14 @@ Konservativ:
   Schlusssatz-Konvention statt eigenstaendiger Aussage
 - Anker wird vor dem letzten Satzzeichen eingefuegt: `Schlusssatz (S. N).`
 """
+
 from __future__ import annotations
 import re
 
-from generative.pipeline.anchor_patterns import PAGE_ANCHOR_RE as _PAGE_ANCHOR_RE, SENTENCE_SPLIT_RE as _SENTENCE_SPLIT_RE
+from generative.pipeline.anchor_patterns import (
+    PAGE_ANCHOR_RE as _PAGE_ANCHOR_RE,
+    SENTENCE_SPLIT_RE as _SENTENCE_SPLIT_RE,
+)
 
 _TRAILING_PUNCT_RE = re.compile(r"([.!?]\"?\s*)$")
 MAX_TRAILING_LEN = 240
@@ -41,7 +45,7 @@ def _inject_anchor(sentence: str, anchor: str) -> str:
         # Kein klares Satzende — anker am String-Ende anfuegen
         return f"{sentence.rstrip()} {anchor}"
     end_punct = m.group(1)
-    head = sentence[:m.start()].rstrip()
+    head = sentence[: m.start()].rstrip()
     return f"{head} {anchor}{end_punct}"
 
 

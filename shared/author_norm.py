@@ -7,6 +7,7 @@ Die Affiliation ist kein Koautor; sie als solchen zu behandeln verfälscht jede
 Inline-Zitation ("Mahmood & Punjab"), die Planner-origin-Klassifikation und das
 Footnote-Label ("et al.").
 """
+
 from __future__ import annotations
 
 import re

@@ -1,4 +1,5 @@
 """Tests für _subscription_backend und _litellm_backend."""
+
 import asyncio
 import json
 import subprocess
@@ -16,6 +17,7 @@ from generative.runtime_config import load_runtime_config
 @pytest.fixture(autouse=True)
 def clear_base_runtime_config():
     import generative.agents.base as base_mod
+
     base_mod.clear_llm_runtime_config()
     yield
     base_mod.clear_llm_runtime_config()
@@ -23,17 +25,22 @@ def clear_base_runtime_config():
 
 # --- _to_cli_model Mapping ---
 
+
 def test_to_cli_model_maps_opus():
     assert _to_cli_model("anthropic/claude-opus-4-7") == "opus"
+
 
 def test_to_cli_model_maps_haiku():
     assert _to_cli_model("anthropic/claude-haiku-4-5-20251001") == "haiku"
 
+
 def test_to_cli_model_maps_sonnet():
     assert _to_cli_model("anthropic/claude-sonnet-4-6") == "sonnet"
 
+
 def test_to_cli_model_passthrough_unknown():
     assert _to_cli_model("ollama/llama3") == "ollama/llama3"
+
 
 def test_to_cli_model_passthrough_openai():
     assert _to_cli_model("openai/gpt-4o") == "openai/gpt-4o"
@@ -41,20 +48,23 @@ def test_to_cli_model_passthrough_openai():
 
 # --- Subscription sync call ---
 
+
 def test_sub_call_full_returns_callresult(tmp_path, monkeypatch):
     monkeypatch.setenv("ATOMIC_AGENT_BACKEND", "subscription")
 
-    fake_response = json.dumps({
-        "result": "hello world",
-        "is_error": False,
-        "duration_ms": 123,
-        "usage": {
-            "input_tokens": 10,
-            "output_tokens": 5,
-            "cache_read_input_tokens": 0,
-            "cache_creation_input_tokens": 0,
-        },
-    })
+    fake_response = json.dumps(
+        {
+            "result": "hello world",
+            "is_error": False,
+            "duration_ms": 123,
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
+        }
+    )
     mock_proc = MagicMock()
     mock_proc.returncode = 0
     mock_proc.stdout = fake_response
@@ -81,17 +91,19 @@ def test_sub_call_full_does_not_retry_timeout_by_default(monkeypatch):
 
 
 def test_sub_call_full_retries_timeout_when_enabled(monkeypatch):
-    fake_response = json.dumps({
-        "result": "recovered",
-        "is_error": False,
-        "duration_ms": 123,
-        "usage": {
-            "input_tokens": 10,
-            "output_tokens": 5,
-            "cache_read_input_tokens": 0,
-            "cache_creation_input_tokens": 0,
-        },
-    })
+    fake_response = json.dumps(
+        {
+            "result": "recovered",
+            "is_error": False,
+            "duration_ms": 123,
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
+        }
+    )
     mock_proc = MagicMock()
     mock_proc.returncode = 0
     mock_proc.stdout = fake_response
@@ -99,13 +111,16 @@ def test_sub_call_full_retries_timeout_when_enabled(monkeypatch):
 
     monkeypatch.setattr(sub_backend, "_TIMEOUT_RETRIES", 1)
 
-    with patch(
-        "subprocess.run",
-        side_effect=[
-            subprocess.TimeoutExpired(cmd=["claude"], timeout=300),
-            mock_proc,
-        ],
-    ) as run_mock, patch("time.sleep"):
+    with (
+        patch(
+            "subprocess.run",
+            side_effect=[
+                subprocess.TimeoutExpired(cmd=["claude"], timeout=300),
+                mock_proc,
+            ],
+        ) as run_mock,
+        patch("time.sleep"),
+    ):
         result = sub_call_full("test prompt", model="anthropic/claude-opus-4-7", agent="test")
 
     assert result.text == "recovered"
@@ -113,17 +128,19 @@ def test_sub_call_full_retries_timeout_when_enabled(monkeypatch):
 
 
 def test_sub_call_full_uses_runtime_timeout_args():
-    fake_response = json.dumps({
-        "result": "custom timeout",
-        "is_error": False,
-        "duration_ms": 123,
-        "usage": {
-            "input_tokens": 10,
-            "output_tokens": 5,
-            "cache_read_input_tokens": 0,
-            "cache_creation_input_tokens": 0,
-        },
-    })
+    fake_response = json.dumps(
+        {
+            "result": "custom timeout",
+            "is_error": False,
+            "duration_ms": 123,
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
+        }
+    )
     mock_proc = MagicMock()
     mock_proc.returncode = 0
     mock_proc.stdout = fake_response
@@ -143,30 +160,35 @@ def test_sub_call_full_uses_runtime_timeout_args():
 
 
 def test_sub_call_full_runtime_timeout_retries_override_module_default(monkeypatch):
-    fake_response = json.dumps({
-        "result": "runtime recovered",
-        "is_error": False,
-        "duration_ms": 123,
-        "usage": {
-            "input_tokens": 10,
-            "output_tokens": 5,
-            "cache_read_input_tokens": 0,
-            "cache_creation_input_tokens": 0,
-        },
-    })
+    fake_response = json.dumps(
+        {
+            "result": "runtime recovered",
+            "is_error": False,
+            "duration_ms": 123,
+            "usage": {
+                "input_tokens": 10,
+                "output_tokens": 5,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
+        }
+    )
     mock_proc = MagicMock()
     mock_proc.returncode = 0
     mock_proc.stdout = fake_response
     mock_proc.stderr = ""
     monkeypatch.setattr(sub_backend, "_TIMEOUT_RETRIES", 0)
 
-    with patch(
-        "subprocess.run",
-        side_effect=[
-            subprocess.TimeoutExpired(cmd=["claude"], timeout=111),
-            mock_proc,
-        ],
-    ) as run_mock, patch("time.sleep"):
+    with (
+        patch(
+            "subprocess.run",
+            side_effect=[
+                subprocess.TimeoutExpired(cmd=["claude"], timeout=111),
+                mock_proc,
+            ],
+        ) as run_mock,
+        patch("time.sleep"),
+    ):
         result = sub_call_full(
             "test prompt",
             model="anthropic/claude-opus-4-7",
@@ -181,23 +203,28 @@ def test_sub_call_full_runtime_timeout_retries_override_module_default(monkeypat
 
 # --- Subscription async call ---
 
+
 @pytest.mark.asyncio
 async def test_sub_call_full_async_returns_callresult(monkeypatch):
     monkeypatch.setenv("ATOMIC_AGENT_BACKEND", "subscription")
 
-    fake_response = json.dumps({
-        "result": "async hello",
-        "is_error": False,
-        "duration_ms": 99,
-        "usage": {"input_tokens": 8, "output_tokens": 3,
-                  "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
-    })
+    fake_response = json.dumps(
+        {
+            "result": "async hello",
+            "is_error": False,
+            "duration_ms": 99,
+            "usage": {
+                "input_tokens": 8,
+                "output_tokens": 3,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
+        }
+    )
 
     mock_proc = AsyncMock()
     mock_proc.returncode = 0
-    mock_proc.communicate = AsyncMock(
-        return_value=(fake_response.encode(), b"")
-    )
+    mock_proc.communicate = AsyncMock(return_value=(fake_response.encode(), b""))
 
     with patch("asyncio.create_subprocess_exec", return_value=mock_proc):
         result = await sub_call_full_async("test prompt", model="anthropic/claude-opus-4-7", agent="test")
@@ -229,13 +256,19 @@ async def test_sub_call_full_async_does_not_retry_timeout_by_default(monkeypatch
 
 @pytest.mark.asyncio
 async def test_sub_call_full_async_retries_timeout_when_enabled(monkeypatch):
-    fake_response = json.dumps({
-        "result": "async recovered",
-        "is_error": False,
-        "duration_ms": 99,
-        "usage": {"input_tokens": 8, "output_tokens": 3,
-                  "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
-    })
+    fake_response = json.dumps(
+        {
+            "result": "async recovered",
+            "is_error": False,
+            "duration_ms": 99,
+            "usage": {
+                "input_tokens": 8,
+                "output_tokens": 3,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
+        }
+    )
 
     timed_out_proc = AsyncMock()
     timed_out_proc.returncode = None
@@ -245,16 +278,17 @@ async def test_sub_call_full_async_retries_timeout_when_enabled(monkeypatch):
 
     recovered_proc = AsyncMock()
     recovered_proc.returncode = 0
-    recovered_proc.communicate = AsyncMock(
-        return_value=(fake_response.encode(), b"")
-    )
+    recovered_proc.communicate = AsyncMock(return_value=(fake_response.encode(), b""))
 
     monkeypatch.setattr(sub_backend, "_TIMEOUT_RETRIES", 1)
 
-    with patch(
-        "asyncio.create_subprocess_exec",
-        side_effect=[timed_out_proc, recovered_proc],
-    ) as create_mock, patch("asyncio.sleep", new_callable=AsyncMock):
+    with (
+        patch(
+            "asyncio.create_subprocess_exec",
+            side_effect=[timed_out_proc, recovered_proc],
+        ) as create_mock,
+        patch("asyncio.sleep", new_callable=AsyncMock),
+    ):
         result = await sub_call_full_async(
             "test prompt",
             model="anthropic/claude-opus-4-7",
@@ -269,22 +303,28 @@ async def test_sub_call_full_async_retries_timeout_when_enabled(monkeypatch):
 
 @pytest.mark.asyncio
 async def test_sub_call_full_async_uses_runtime_timeout_args(monkeypatch):
-    fake_response = json.dumps({
-        "result": "async custom timeout",
-        "is_error": False,
-        "duration_ms": 99,
-        "usage": {"input_tokens": 8, "output_tokens": 3,
-                  "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
-    })
+    fake_response = json.dumps(
+        {
+            "result": "async custom timeout",
+            "is_error": False,
+            "duration_ms": 99,
+            "usage": {
+                "input_tokens": 8,
+                "output_tokens": 3,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
+        }
+    )
 
     mock_proc = AsyncMock()
     mock_proc.returncode = 0
-    mock_proc.communicate = AsyncMock(
-        return_value=(fake_response.encode(), b"")
-    )
+    mock_proc.communicate = AsyncMock(return_value=(fake_response.encode(), b""))
 
-    with patch("asyncio.create_subprocess_exec", return_value=mock_proc), \
-            patch("asyncio.wait_for", wraps=asyncio.wait_for) as wait_mock:
+    with (
+        patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        patch("asyncio.wait_for", wraps=asyncio.wait_for) as wait_mock,
+    ):
         result = await sub_call_full_async(
             "test prompt",
             model="anthropic/claude-opus-4-7",
@@ -304,8 +344,7 @@ from generative.agents._litellm_backend import call_full_async as lit_call_full_
 import generative.agents._litellm_backend as lit_backend
 
 
-def _make_litellm_response(text: str, in_tok: int = 10, out_tok: int = 5,
-                            cache_read: int = 0, cache_create: int = 0):
+def _make_litellm_response(text: str, in_tok: int = 10, out_tok: int = 5, cache_read: int = 0, cache_create: int = 0):
     usage = MagicMock()
     usage.prompt_tokens = in_tok
     usage.completion_tokens = out_tok
@@ -435,34 +474,45 @@ async def test_lit_call_full_async_returns_callresult():
 
 # --- Dispatch in base.py ---
 
+
 def test_dispatch_subscription_calls_subprocess(monkeypatch, tmp_path):
     monkeypatch.setenv("ATOMIC_AGENT_BACKEND", "subscription")
     # config und base neu laden damit BACKEND-Env-Wert greift
     import importlib
     from generative import config as cfg_mod
+
     importlib.reload(cfg_mod)
     import generative.agents._subscription_backend as sub_mod
+
     importlib.reload(sub_mod)
     import generative.agents.base as base_mod
+
     importlib.reload(base_mod)
 
     (tmp_path / ".cache" / "llm").mkdir(parents=True)
     (tmp_path / ".cache" / "runs").mkdir(parents=True)
     monkeypatch.chdir(tmp_path)
 
-    fake_response = json.dumps({
-        "result": "sub dispatch", "is_error": False, "duration_ms": 50,
-        "usage": {"input_tokens": 1, "output_tokens": 1,
-                  "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
-    })
+    fake_response = json.dumps(
+        {
+            "result": "sub dispatch",
+            "is_error": False,
+            "duration_ms": 50,
+            "usage": {
+                "input_tokens": 1,
+                "output_tokens": 1,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
+        }
+    )
     mock_proc = MagicMock()
     mock_proc.returncode = 0
     mock_proc.stdout = fake_response
     mock_proc.stderr = ""
 
     with patch("subprocess.run", return_value=mock_proc):
-        result = base_mod.call_claude_full("hello", model="anthropic/claude-opus-4-7",
-                                           agent="test", use_cache=False)
+        result = base_mod.call_claude_full("hello", model="anthropic/claude-opus-4-7", agent="test", use_cache=False)
 
     assert result.text == "sub dispatch"
 
@@ -471,30 +521,43 @@ def test_dispatch_subscription_uses_runtime_config(monkeypatch, tmp_path):
     monkeypatch.setenv("ATOMIC_AGENT_BACKEND", "subscription")
     import importlib
     from generative import config as cfg_mod
+
     importlib.reload(cfg_mod)
     import generative.agents._subscription_backend as sub_mod
+
     importlib.reload(sub_mod)
     import generative.agents.base as base_mod
+
     importlib.reload(base_mod)
 
     (tmp_path / ".cache" / "llm").mkdir(parents=True)
     (tmp_path / ".cache" / "runs").mkdir(parents=True)
     monkeypatch.chdir(tmp_path)
 
-    fake_response = json.dumps({
-        "result": "runtime dispatch", "is_error": False, "duration_ms": 50,
-        "usage": {"input_tokens": 1, "output_tokens": 1,
-                  "cache_read_input_tokens": 0, "cache_creation_input_tokens": 0},
-    })
+    fake_response = json.dumps(
+        {
+            "result": "runtime dispatch",
+            "is_error": False,
+            "duration_ms": 50,
+            "usage": {
+                "input_tokens": 1,
+                "output_tokens": 1,
+                "cache_read_input_tokens": 0,
+                "cache_creation_input_tokens": 0,
+            },
+        }
+    )
     mock_proc = MagicMock()
     mock_proc.returncode = 0
     mock_proc.stdout = fake_response
     mock_proc.stderr = ""
 
-    runtime_config = load_runtime_config(env={
-        "ATOMIC_AGENT_CALL_TIMEOUT": "123",
-        "ATOMIC_AGENT_TIMEOUT_RETRIES": "1",
-    })
+    runtime_config = load_runtime_config(
+        env={
+            "ATOMIC_AGENT_CALL_TIMEOUT": "123",
+            "ATOMIC_AGENT_TIMEOUT_RETRIES": "1",
+        }
+    )
     base_mod.set_llm_runtime_config(runtime_config)
 
     with patch("subprocess.run", return_value=mock_proc) as run_mock:
@@ -512,10 +575,12 @@ def test_dispatch_subscription_uses_runtime_config(monkeypatch, tmp_path):
 def test_base_runtime_config_clear_restores_backend_defaults():
     import generative.agents.base as base_mod
 
-    runtime_config = load_runtime_config(env={
-        "ATOMIC_AGENT_CALL_TIMEOUT": "123",
-        "ATOMIC_AGENT_TIMEOUT_RETRIES": "1",
-    })
+    runtime_config = load_runtime_config(
+        env={
+            "ATOMIC_AGENT_CALL_TIMEOUT": "123",
+            "ATOMIC_AGENT_TIMEOUT_RETRIES": "1",
+        }
+    )
     base_mod.set_llm_runtime_config(runtime_config)
     assert base_mod._backend_runtime_kwargs() == {
         "call_timeout_sec": 123,
@@ -531,10 +596,13 @@ def test_dispatch_litellm_calls_litellm(monkeypatch, tmp_path):
     monkeypatch.setenv("ATOMIC_AGENT_BACKEND", "litellm")
     import importlib
     from generative import config as cfg_mod
+
     importlib.reload(cfg_mod)
     import generative.agents._litellm_backend as lit_mod
+
     importlib.reload(lit_mod)
     import generative.agents.base as base_mod
+
     importlib.reload(base_mod)
 
     (tmp_path / ".cache" / "llm").mkdir(parents=True)
@@ -544,17 +612,19 @@ def test_dispatch_litellm_calls_litellm(monkeypatch, tmp_path):
     fake_resp = _make_litellm_response("lit dispatch", in_tok=3, out_tok=2)
 
     with patch("litellm.completion", return_value=fake_resp):
-        result = base_mod.call_claude_full("hello", model="anthropic/claude-opus-4-7",
-                                           agent="test", use_cache=False)
+        result = base_mod.call_claude_full("hello", model="anthropic/claude-opus-4-7", agent="test", use_cache=False)
 
     assert result.text == "lit dispatch"
 
 
 # --- M1-S2: Fehlerpfade (CLI fehlt / nicht eingeloggt / Rate-Limit) ---
 
+
 def test_sub_cli_fehlt_actionable_meldung():
-    with patch("generative.agents._subscription_backend.subprocess.run",
-               side_effect=FileNotFoundError(2, "No such file", "claude")):
+    with patch(
+        "generative.agents._subscription_backend.subprocess.run",
+        side_effect=FileNotFoundError(2, "No such file", "claude"),
+    ):
         with pytest.raises(RuntimeError) as exc:
             sub_call_full("hi", model="anthropic/claude-haiku-4-5-20251001")
     msg = str(exc.value)
@@ -569,8 +639,7 @@ def test_sub_auth_fehler_faellt_sofort_durch_ohne_retry():
         calls.append(1)
         m = MagicMock()
         m.returncode = 1
-        m.stdout = json.dumps({"is_error": True,
-                               "result": "Invalid API key . Please run /login"})
+        m.stdout = json.dumps({"is_error": True, "result": "Invalid API key . Please run /login"})
         m.stderr = ""
         return m
 
@@ -588,8 +657,7 @@ def test_sub_rate_limit_meldung_mit_fenster_hinweis():
         calls.append(1)
         m = MagicMock()
         m.returncode = 1
-        m.stdout = json.dumps({"is_error": True,
-                               "result": "API Error: 429 rate_limit_error"})
+        m.stdout = json.dumps({"is_error": True, "result": "API Error: 429 rate_limit_error"})
         m.stderr = ""
         return m
 
@@ -601,8 +669,7 @@ def test_sub_rate_limit_meldung_mit_fenster_hinweis():
 
 
 def test_sub_async_auth_fehler_faellt_sofort_durch():
-    payload = json.dumps({"is_error": True,
-                          "result": "Not logged in. Please run /login"}).encode()
+    payload = json.dumps({"is_error": True, "result": "Not logged in. Please run /login"}).encode()
 
     calls = []
 
@@ -615,8 +682,7 @@ def test_sub_async_auth_fehler_faellt_sofort_durch():
             calls.append(1)
             return mock_proc
 
-        with patch("generative.agents._subscription_backend.asyncio.create_subprocess_exec",
-                   fake_exec):
+        with patch("generative.agents._subscription_backend.asyncio.create_subprocess_exec", fake_exec):
             await sub_call_full_async("hi", model="anthropic/claude-haiku-4-5-20251001")
 
     with pytest.raises(RuntimeError) as exc:
