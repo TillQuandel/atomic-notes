@@ -51,6 +51,22 @@ def _canonical_agent(name: str) -> str | None:
         return "eval"
     return name
 
+
+def _is_llm_call_record(r: dict) -> bool:
+    """True nur für echte LLM-Call-Records.
+
+    Schema-Invariante (agents/base.py): ``_trace`` schreibt für jeden LLM-Call
+    ein ``model``-Feld; ``trace_event`` schreibt für Bookkeeping-Events ein
+    ``type``-Feld (verifier ``anchor_stats``, critic ``score_result``,
+    orchestrator ``note_outcome``/``plan_stats``) und NIE ein ``model``. Beide
+    schließen sich aus → ``model``-Präsenz ist der zuverlässige Diskriminator.
+
+    Ohne diesen Filter zählt z.B. der Verifier „10 calls / 0 Tokens", weil seine
+    anchor_stats-Events als Calls mitzählen, obwohl der deterministische
+    Pre-Pass gar keinen LLM gerufen hat. Error-Records tragen ``model`` und
+    werden bewusst weiter gezählt (fehlgeschlagene Calls sind echte Calls)."""
+    return "model" in r
+
 def _read_agent_stats(allowed_run_ids: set | None = None) -> dict:
     """Aggregiert Token- und Dauer-Statistiken je Agent aus runs/*.jsonl.
     Nur Runs der aktuellen (höchsten) Pipeline-Version werden berücksichtigt.
@@ -93,6 +109,8 @@ def _read_agent_stats(allowed_run_ids: set | None = None) -> dict:
                 a = _canonical_agent(r.get("agent", ""))
                 if a is None:
                     continue
+                if not _is_llm_call_record(r):
+                    continue  # Bookkeeping-Event (anchor_stats etc.) — kein Call
                 stats[a]["calls"]   += 1
                 stats[a]["input"]   += r.get("input_tokens", 0) or 0
                 stats[a]["output"]  += r.get("output_tokens", 0) or 0
@@ -683,13 +701,18 @@ def _live_run_data() -> dict:
         # Eval-Agents zusammenfassen
         if agent.startswith("eval_quality"):
             agent = "eval"
-        a = agents[agent]
-        a["calls"] += 1
-        a["cached"] += 1 if e.get("cached") else 0
-        a["tokens_in"]  += e.get("input_tokens", 0)
-        a["tokens_out"] += e.get("output_tokens", 0)
-        a["dur_ms"]     += e.get("duration_ms", 0)
-        a["errors"]     += 1 if e.get("error") else 0
+        # Nur echte LLM-Calls in die Per-Agent-Stats (Bookkeeping-Events wie
+        # anchor_stats tragen kein model/keine Tokens). Timing/last-activity
+        # unten gilt aber für ALLE Events — sonst zeigt die Live-Ansicht einen
+        # zu frühen „letzten Schritt", wenn das letzte Event Bookkeeping war.
+        if _is_llm_call_record(e):
+            a = agents[agent]
+            a["calls"] += 1
+            a["cached"] += 1 if e.get("cached") else 0
+            a["tokens_in"]  += e.get("input_tokens", 0)
+            a["tokens_out"] += e.get("output_tokens", 0)
+            a["dur_ms"]     += e.get("duration_ms", 0)
+            a["errors"]     += 1 if e.get("error") else 0
         ts = e.get("ts", "")
         if not first_ts:
             first_ts = ts
