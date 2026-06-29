@@ -230,13 +230,13 @@ best_page ist die passendste PDF-Seite als Integer oder null.
 Few-Shot:
 Claim: "Information Seeking umfasst aktive Suchhandlungen."
 Kontext: "Information seeking is the purposive seeking for information..."
-Output: {{"claim_idx": 0, "label": "supported_paraphrase", "evidence": "Information seeking is the purposive seeking for information", "justification": "Der Kontext belegt die aktive, zweckgerichtete Suche.", "best_page": 12}}
+Output: {{"claim_idx": 0, "label": "supported_paraphrase", "evidence": "Information seeking is the purposive seeking for information", "best_page": 12}}
 Claim: "Das Modell wurde 1999 empirisch repliziert."
 Kontext: "The model was proposed in 1981."
-Output: {{"claim_idx": 1, "label": "not_in_context", "evidence": null, "justification": "Eine Replikation 1999 wird nicht genannt.", "best_page": null}}
+Output: {{"claim_idx": 1, "label": "not_in_context", "evidence": null, "best_page": null}}
 Claim: "Die Studie fand keine Unterschiede."
 Kontext: "The study found significant differences between groups."
-Output: {{"claim_idx": 2, "label": "contradicted", "evidence": "The study found significant differences between groups.", "justification": "Der Kontext sagt das Gegenteil.", "best_page": 4}}
+Output: {{"claim_idx": 2, "label": "contradicted", "evidence": "The study found significant differences between groups.", "best_page": 4}}
 
 Gib ausschliesslich ein JSON-Array zurueck. Keine Markdown-Fences, kein Begleittext.
 """
@@ -336,7 +336,7 @@ def _repair_json_with_claude(raw_text: str, expected_indices: list[int], *, use_
     # CODEX-PATTERN: Reparatur ist ein eigener JSON-Normalisierungs-Call statt stiller Regex-Magie,
     # weil Schemafehler sonst schwer von echten Judge-Entscheidungen zu unterscheiden sind.
     prompt = f"""Extrahiere aus dem folgenden Text ein gueltiges JSON-Array.
-Jedes Objekt braucht claim_idx, label, evidence, justification, best_page.
+Jedes Objekt braucht claim_idx, label, evidence, best_page.
 Erwartete claim_idx-Werte: {expected_indices}
 Erlaubte Labels: {sorted(JUDGE_LABELS)}
 Wenn ein Feld fehlt, setze evidence/best_page auf null und label auf "{PARSE_ERROR}".
@@ -388,7 +388,6 @@ def _normalize_judge_rows(raw_rows: list[Any], items: list[RetrievedContext]) ->
             "label": label,
             "original_judge_label": original_judge_label,
             "evidence": evidence,
-            "justification": str(raw.get("justification") or "").strip(),
             "best_page": best_page,
         }
 
@@ -401,7 +400,6 @@ def _normalize_judge_rows(raw_rows: list[Any], items: list[RetrievedContext]) ->
                 "label": PARSE_ERROR,
                 "original_judge_label": PARSE_ERROR,
                 "evidence": None,
-                "justification": "Judge lieferte kein Ergebnis fuer diesen Claim.",
                 "best_page": item.best_page,
             }
         normalized.append(rows_by_idx[idx])
@@ -434,7 +432,6 @@ def _call_judge(note_title: str, items: list[RetrievedContext], *, variant: str,
                         "claim_idx": idx,
                         "label": PARSE_ERROR,
                         "evidence": None,
-                        "justification": "Judge-Ausgabe konnte nicht als JSON geparst werden.",
                         "best_page": None,
                     }
                     for idx in expected
@@ -536,11 +533,9 @@ def _claim_scores_from_judge(
             "original_judge_label": row.get("original_judge_label"),
             "label_original": row["label"] if decision.label.value != row["label"] else None,
             "audit_label": audit["label"] if audit else None,
-            "audit_justification": audit["justification"] if audit else None,
             "evidence": row["evidence"],
             "evidence_verified": verified,
             "evidence_verification_score": verification_score,
-            "justification": row["justification"],
             "best_page": row["best_page"],
             "top_cosine": item.top_cosine,
             "best_chunk_idx": item.best_chunk_idx,
