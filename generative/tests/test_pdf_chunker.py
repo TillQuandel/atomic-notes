@@ -292,6 +292,70 @@ def test_inline_page_ref_not_treated_as_page_start():
     )
 
 
+# ---- _resolve_page_numbers (Druckseiten-Labels statt Form-Feed-Index) -----
+
+def test_resolve_page_numbers_uses_numeric_labels():
+    """Echte (arabische) Druckseiten-Labels werden als Seitenzahl genutzt — nicht
+    die Form-Feed-Position. Buch-Kapitel/-Extrakt: PDF-Seite 1 trägt Druckseite 159."""
+    from generative.pipeline.pdf_chunker import _resolve_page_numbers
+    assert _resolve_page_numbers(["a", "b", "c"], ["159", "160", "161"]) == [
+        (159, "a"), (160, "b"), (161, "c")
+    ]
+
+
+def test_resolve_page_numbers_roman_falls_back_to_index():
+    """Nicht-numerische Labels (römisches Frontmatter) dürfen die \\d+-Anker-Kette
+    nicht brechen → Fallback auf 1-basierten Form-Feed-Index."""
+    from generative.pipeline.pdf_chunker import _resolve_page_numbers
+    assert _resolve_page_numbers(["a", "b", "c"], ["xi", "xii", "1"]) == [
+        (1, "a"), (2, "b"), (1, "c")
+    ]
+
+
+def test_resolve_page_numbers_no_labels_is_index():
+    """Kein PageLabels-Eintrag (labels=None) → exakt das alte Verhalten (i+1)."""
+    from generative.pipeline.pdf_chunker import _resolve_page_numbers
+    assert _resolve_page_numbers(["a", "b"], None) == [(1, "a"), (2, "b")]
+
+
+def test_resolve_page_numbers_length_mismatch_safe():
+    """pdftotext kann eine Extraseite liefern (finaler \\f) → überzählige Seiten
+    fallen sauber auf den Index zurück, kein IndexError."""
+    from generative.pipeline.pdf_chunker import _resolve_page_numbers
+    assert _resolve_page_numbers(["a", "b", "c"], ["159", "160"]) == [
+        (159, "a"), (160, "b"), (3, "c")
+    ]
+
+
+def test_resolve_page_numbers_strips_whitespace_and_coerces_nonstr():
+    """pypdf-Labels können Whitespace (' 159 ') oder (selten) non-str tragen →
+    robust strippen/coercen statt aufs Form-Feed zurückzufallen oder zu crashen
+    (Qwen-Review HIGH/MED, 2. Durchgang)."""
+    from generative.pipeline.pdf_chunker import _resolve_page_numbers
+    assert _resolve_page_numbers(["a", "b"], [" 159 ", 160]) == [(159, "a"), (160, "b")]
+
+
+def test_usable_page_labels_gate_requires_numeric_and_unique():
+    """Label-Modus nur bei vollständig numerischen UND eindeutigen Labels — sonst
+    None. Verhindert Namespace-Kollision römisch↔arabisch (False-Bind in figure_alt)
+    und mehrdeutige Index-Abbildung bei Duplikaten (Codex-Review, 2. Durchgang)."""
+    from generative.pipeline.pdf_chunker import _usable_page_labels
+    assert _usable_page_labels(["159", "160", "161"]) == ["159", "160", "161"]
+    assert _usable_page_labels([" 159 ", "160"]) == [" 159 ", "160"]   # numerisch m. Whitespace ok
+    assert _usable_page_labels(["xi", "xii", "1"]) is None             # gemischt römisch/arabisch
+    assert _usable_page_labels(["1", "2", "2"]) is None                # doppelt → mehrdeutig
+    assert _usable_page_labels(["100", "1", "2"]) is None              # nicht monoton → falsche Ranges
+    # Zero-Padding-Duplikat: als Strings verschieden ("01"≠"1"), als Zahl gleich (1==1).
+    # Muss abgelehnt werden, sonst zwei Seiten mit [S. 1] → False-Bind (Qwen-Review, 2026-06-27).
+    assert _usable_page_labels(["01", "1", "2"]) is None
+    # Unicode-Ziffern: str.isdigit() ist True für Superscripts (²), aber int("²") crasht.
+    # isdecimal()-Gate lehnt sie ab statt sich auf das except im Aufrufer zu verlassen
+    # (Codex-Review, 2026-06-27).
+    assert _usable_page_labels(["1", "²"]) is None
+    assert _usable_page_labels(None) is None
+    assert _usable_page_labels([]) is None
+
+
 # ---- assess_text_quality (G6/#27 — Textqualitäts-Gate) -------------------
 
 def test_empty_text_is_empty_not_thin():

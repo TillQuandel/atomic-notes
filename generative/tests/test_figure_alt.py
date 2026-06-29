@@ -70,6 +70,24 @@ def test_anchor_page_on_textless_page_is_unbindable():
     assert pdf_index_to_anchor_page(flags, 1) is None
 
 
+def test_anchor_page_uses_numeric_print_labels_when_present():
+    # Mit /PageLabels (Buch) ist die Anker-Seite das Druckseiten-Label, nicht die
+    # positionale Zählung — sonst matcht sie die source_anchors (jetzt Druckseiten)
+    # nicht mehr (Regression durch den page-label-Fix).
+    flags = [True, True, True]
+    labels = ["159", "160", "161"]
+    assert pdf_index_to_anchor_page(flags, 0, labels) == 159
+    assert pdf_index_to_anchor_page(flags, 2, labels) == 161
+
+
+def test_anchor_page_nonnumeric_label_falls_back_to_positional():
+    # Römisches Frontmatter-Label (nicht-numerisch) → positionaler Fallback,
+    # konsistent mit _resolve_page_numbers.
+    flags = [True, True]
+    labels = ["xi", "xii"]
+    assert pdf_index_to_anchor_page(flags, 1, labels) == 2
+
+
 def test_bind_unique_create_match_mutates_body():
     fig = TaggedFigure(anchor_page=3, alt_text="Ein Balkendiagramm zur Suche.", label="Abbildung 2")
     draft = _draft("Suche", ["S. 3"])

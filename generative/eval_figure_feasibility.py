@@ -151,13 +151,24 @@ def _count_raster_image_placements(page: Any) -> int:
 def _page_visual_signals(pdf_path: Path, pages: list[tuple[int, str]]) -> list[PageVisualSignals]:
     """Duenne PyMuPDF-Abstraktion fuer echte PDF-Signale."""
     import fitz  # PyMuPDF
+    from generative.pipeline.pdf_chunker import _pdf_page_labels
+
+    # `page_number` aus pdf_to_pages ist das Druckseiten-Label (z.B. 159), NICHT
+    # der physische PyMuPDF-Index. Mapping Label→physischer Index aus /PageLabels;
+    # ohne Labels ist `page_number` die 1-basierte Position → Index = page_number-1.
+    labels = _pdf_page_labels(pdf_path)
+    label_to_index: dict[str, int] = {}
+    if labels:
+        for idx, lbl in enumerate(labels):
+            label_to_index.setdefault(str(lbl).strip(), idx)
 
     signals: list[PageVisualSignals] = []
     with fitz.open(str(pdf_path)) as doc:
         for page_number, page_text in pages:
-            if page_number < 1 or page_number > len(doc):
+            pymupdf_index = label_to_index.get(str(page_number), page_number - 1)
+            if pymupdf_index < 0 or pymupdf_index >= len(doc):
                 continue
-            page = doc[page_number - 1]
+            page = doc[pymupdf_index]
             raster_images = _count_raster_image_placements(page)
             vector_drawings = len(page.get_drawings())
             signals.append(PageVisualSignals(

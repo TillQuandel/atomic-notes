@@ -19,8 +19,15 @@ def _clean_wikilink(s: str) -> str:
     eckige Klammern: '[[[[A]]]]' -> 'A', '[[A]]' -> 'A', 'A' -> 'A', '[[A|x]]' -> 'A|x'.
 
     Härtet gegen vom LLM gelieferte oder doppelt gewrappte Strings, die sonst zu
-    '[[[[..]]]]' führen (Muster wie vault_writer.rewrite_merged_related_links)."""
-    return (s or "").strip().strip("[]").strip()
+    '[[[[..]]]]' führen (Muster wie vault_writer.rewrite_merged_related_links).
+
+    Strippt Klammern NUR paarweise von außen, wenn der String an beiden Enden eine
+    trägt — sonst zerstörte `strip('[]')` Titel wie '[2024] Projekt' → '2024] Projekt'
+    oder 'Array [1]' → 'Array [1' (Qwen-Review HIGH, 2. Durchgang)."""
+    s = (s or "").strip()
+    while s.startswith("[") and s.endswith("]"):
+        s = s[1:-1].strip()
+    return s
 
 
 def _clean_dup_targets(raw: str | None) -> list[str]:
