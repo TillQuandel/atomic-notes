@@ -46,3 +46,4 @@ docs/superpowers/
 
 # Claude-Code-Worktrees (Subagenten-Isolation)
 .claude/
+.ruff_cache/
