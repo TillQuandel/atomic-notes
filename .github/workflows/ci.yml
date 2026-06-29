@@ -20,7 +20,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-          cache: pip
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
 
       - name: Poppler installieren (Linux)
         if: runner.os == 'Linux'
@@ -30,21 +34,20 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install poppler -y --no-progress
 
-      - name: Paket installieren (editable + dev)
-        run: python -m pip install -e ".[dev]"
+      - name: Abhängigkeiten installieren (uv, aus Lockfile)
+        run: uv sync --extra dev --locked --python 3.12
 
       # Nicht `pdftotext -v` direkt: Xpdf-basierte Windows-Builds exiten dabei non-zero
       - name: pdftotext-Smoke-Test
-        run: python -c "import shutil, sys; p = shutil.which('pdftotext'); print(p); sys.exit(0 if p else 1)"
+        run: uv run python -c "import shutil, sys; p = shutil.which('pdftotext'); print(p); sys.exit(0 if p else 1)"
 
       - name: Packaging-Smoke-Test (Importe, Entry-Point, Package-Data)
         run: |
-          python -c "import generative, extractive, shared, decision_engine"
-          python -c "import importlib.resources as r; assert r.files('generative').joinpath('tag_registry.yml').is_file()"
-          atomic-notes --help
+          uv run python -c "import generative, extractive, shared, decision_engine"
+          uv run python -c "import importlib.resources as r; assert r.files('generative').joinpath('tag_registry.yml').is_file()"
+          uv run atomic-notes --help
 
-      # Kanonische Suite (LLM-frei) + decision_engine (seit #32-Fix gruen).
-      # extractive-Tests laufen hier bewusst nicht: brauchen den schweren
-      # GLiNER-Stack ([extractive]-Extra).
+      # Kanonische Suite (LLM-frei) + decision_engine. extractive-Tests laufen hier
+      # bewusst nicht: brauchen den schweren GLiNER-Stack ([extractive]-Extra).
       - name: Tests
-        run: python -m pytest generative lib/decision_engine/tests -q
+        run: uv run python -m pytest generative lib/decision_engine/tests -q
