@@ -10,6 +10,7 @@ import yaml
 
 from generative.config import VAULT, WISSEN, INBOX, LITERATURE_DIR, CRITIC_AUTO_THRESHOLD
 from generative.schemas.atomic_note import AtomicNoteDraft
+from shared.author_norm import drop_institutional_coauthors
 
 
 # Schema-MoC Naming: `MoC-<Thema>.md` — Spaces erlaubt, nur FS-unsichere Zeichen ersetzen.
@@ -58,14 +59,14 @@ def _parse_filename_fallback(source_file: str) -> dict[str, str]:
     m = _FILENAME_PATTERN_FULL.match(stem)
     if m:
         return {
-            "Author": m.group("author").strip(),
+            "Author": drop_institutional_coauthors(m.group("author").strip()),
             "Year": m.group("year"),
             "Title": m.group("title").strip(),
         }
     m = _FILENAME_PATTERN_NOYEAR.match(stem)
     if m:
         return {
-            "Author": m.group("author").strip(),
+            "Author": drop_institutional_coauthors(m.group("author").strip()),
             "Title": m.group("title").strip(),
         }
     return {}
