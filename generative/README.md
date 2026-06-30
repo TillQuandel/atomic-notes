@@ -40,6 +40,21 @@ atomic-notes run --source "path/to/paper.pdf" --dry-run
 Model IDs are configured once in litellm format (e.g. `anthropic/claude-sonnet-4-6`);
 the subscription backend maps them to CLI shorthands internally.
 
+### litellm model strings
+
+litellm uses `provider/model` strings. Set them in `.env`, or leave them commented
+to inherit the defaults from `config.py` (sonnet for the heavy slot, haiku for the
+light stages):
+
+| Provider | `ATOMIC_AGENT_MODEL_OPUS` (heavy slot) example | Extra setup |
+|----------|-----------------------------------------------|-------------|
+| Anthropic | `anthropic/claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
+| OpenAI | `openai/gpt-4o` | `OPENAI_API_KEY` |
+| Ollama (local) | `ollama/mistral` | `OLLAMA_API_BASE=http://localhost:11434` |
+
+See the [litellm provider list](https://docs.litellm.ai/docs/providers) for the
+full set of supported providers and exact model strings.
+
 Failure behavior: if the `claude` CLI is missing, not logged in, or the rate window
 is exhausted (429), the pipeline fails fast with an actionable message (install/login
 hint, window reset, litellm alternative) instead of retrying or dumping a traceback.
