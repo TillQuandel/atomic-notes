@@ -192,7 +192,6 @@ generative/   LLM-based synthesis pipeline (CLI + GUI)
 extractive/   Local extractive pipeline; source sentences only, no free generation
 shared/       Shared schemas, DB schema, cross-pipeline utilities
 lib/          decision_engine (aggregation + decision rules)
-internal/     Evaluation dashboard + development notes (not user-facing)
 examples/     Bundled example PDF
 ```
 

@@ -27,7 +27,6 @@ product.
 | `extractive/` | Local sentence-extraction pipeline (GLiNER + LexRank). No free generation — notes are built from source sentences. |
 | `shared/` | Schemas, the SQLite DB schema, and cross-pipeline utilities used by both pipelines. |
 | `lib/decision_engine/` | Aggregation + decision rules (packaged as `decision_engine`). |
-| `internal/` | Evaluation dashboard, calibration assets, and development notes. **Not** part of the user-facing product. |
 | `tests/`, `generative/tests/`, `extractive/tests/` | Test suites. The canonical CI suite is `generative` + `lib/decision_engine/tests` (LLM-free). |
 | `examples/` | Bundled `zettelkasten-primer.pdf` for the quickstart and the demo script. |
 
