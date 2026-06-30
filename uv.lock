@@ -163,7 +163,7 @@ wheels = [
 
 [[package]]
 name = "atomic-notes"
-version = "0.1.0"
+version = "0.4.0"
 source = { editable = "." }
 dependencies = [
     { name = "litellm", marker = "sys_platform == 'darwin' or sys_platform == 'linux' or sys_platform == 'win32'" },
