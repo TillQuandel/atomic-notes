@@ -22,13 +22,17 @@ def main() -> None:
     if not PDF.is_file():
         sys.exit(f"FEHLER: Beispiel-PDF fehlt: {PDF}")
 
-    print(
-        f"Demo: generative Pipeline (--dry-run) auf {PDF.name}\n"
-        "Es wird NICHTS geschrieben. Backend-Setup noetig (siehe README).\n"
-    )
+    print(f"Demo: generative Pipeline (--dry-run) auf {PDF.name}\nEs wird NICHTS geschrieben.\n")
 
     cmd = ["uv", "run", "atomic-notes", "run", "--source", str(PDF), "--dry-run"]
     try:
+        # Backend-Precheck: doctor faengt fehlendes CLI/Backend ab, bevor die halbe
+        # Pipeline laeuft und tief im Stacktrace stirbt (frischer Clone ohne Login).
+        if subprocess.run(["uv", "run", "atomic-notes", "doctor"], cwd=ROOT).returncode != 0:
+            sys.exit(
+                "\nBackend nicht bereit (siehe doctor-Ausgabe oben). "
+                "Setup: README -> 'Configure backend'. Demo abgebrochen."
+            )
         raise SystemExit(subprocess.run(cmd, cwd=ROOT).returncode)
     except FileNotFoundError:
         sys.exit("FEHLER: 'uv' nicht gefunden — Setup siehe README/CONTRIBUTING.")

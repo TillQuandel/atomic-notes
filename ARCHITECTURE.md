@@ -33,8 +33,8 @@ product.
 
 ## Generative pipeline stages
 
-A run (`atomic-notes run --source <pdf>`) moves through these stages; each logs a
-`[n/7]` banner:
+A run (`atomic-notes run --source <pdf>`) moves through the pipeline; each stage
+logs a `[n/7]` banner:
 
 1. **PDF extract + chunk** — `pdftotext` → text → chapter chunks. (`[0/7]` source
    enrichment fills author/year metadata when derivable.)
@@ -45,7 +45,9 @@ A run (`atomic-notes run --source <pdf>`) moves through these stages; each logs 
 6. **Verifier + cross-reference + critic** — checks claims against the source,
    resolves siblings/duplicates (4-stage entity resolution), scores each note.
 7. **Vault writer** — writes notes (or, with `--dry-run`, previews a diff).
-8. **Quality eval** — optional faithfulness eval (can be deferred to `reeval_baseline.py`).
+
+Post-pipeline (optional, logged as `[8/8]`): **quality eval** — faithfulness eval
+that can be deferred to `reeval_baseline.py`.
 
 ```mermaid
 flowchart LR
@@ -76,7 +78,8 @@ at the pipeline level by design.
 
 ## Setup & dependencies
 
-Dependencies are managed with **uv** and pinned in `uv.lock` (resolved for Windows
-+ Linux). `torch` is declared directly and mapped to the CPU wheel index so neither
-local installs nor CI pull large CUDA wheels. See [CONTRIBUTING.md](CONTRIBUTING.md)
+Dependencies are managed with **uv** and pinned in `uv.lock` (resolved for Windows,
+Linux, and macOS). `torch` is declared directly; on Windows/Linux it is mapped to
+the CPU wheel index (no large CUDA wheels), on macOS it resolves from PyPI (CPU-only
+there). CI runs the suite on all three OSes. See [CONTRIBUTING.md](CONTRIBUTING.md)
 for the dev setup and a GPU override.

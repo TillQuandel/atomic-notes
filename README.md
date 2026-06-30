@@ -30,7 +30,7 @@ module map and stage list — is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 **generative v0.3.x** · **extractive v0.2.0**
 
-LLM-free unit suite green on ubuntu + windows (see CI badge), running in a
+LLM-free unit suite green on ubuntu + windows + macOS (see CI badge), running in a
 `uv`-locked environment (Python 3.12). An independent multi-rater assessment
 (2026-06-10) and the resulting roadmap live in `internal/docs/` — see
 `2026-06-10-projekt-bewertung.md` and `m1-installierbarkeit-plan.md`.

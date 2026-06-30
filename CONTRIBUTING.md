@@ -3,7 +3,8 @@
 ## Development Setup
 
 This project uses [uv](https://docs.astral.sh/uv/). Dependencies are pinned in
-`uv.lock` (resolved for Windows + Linux); `torch` is mapped to the CPU wheel index.
+`uv.lock` (resolved for Windows, Linux, and macOS). On Windows/Linux `torch` is
+mapped to the CPU wheel index; on macOS it comes from PyPI (CPU-only there anyway).
 
 ```bash
 git clone https://github.com/TillQuandel/atomic-notes.git
@@ -24,12 +25,15 @@ installed by default; the canonical test suite guards against its absence.
 uv run python -m pytest generative lib/decision_engine/tests -q
 ```
 
-This is the canonical, LLM-free suite (mirrors CI on ubuntu + windows). It runs in
-a couple of minutes locally. Lint/format check:
+This is the canonical, LLM-free suite (mirrors CI on ubuntu + windows + macOS). It
+runs in a couple of minutes locally. Format check:
 
 ```bash
 uv run ruff format --check .       # CI gate; `uv run ruff format .` to apply
 ```
+
+Only formatting is enforced for now; the `ruff` linter (`ruff check`) is
+intentionally deferred and not part of CI yet.
 
 ## ML notes (model cache & slow tests)
 
@@ -51,9 +55,11 @@ uv run python -m pytest -m "not slow" generative -q   # fast (default in dev)
 uv run python -m pytest generative -q                 # everything
 ```
 
-GPU override (optional, local only): the lockfile pins CPU `torch`. To use a CUDA
-build instead, install it outside the locked sync, e.g.
+GPU override (optional, local only): the lockfile pins CPU `torch` (Win/Linux). To
+use a CUDA build, install it outside the locked sync:
 `uv pip install torch --index https://download.pytorch.org/whl/cu121 --reinstall`.
+This **dirties the venv** relative to `uv.lock` — run `uv sync` to revert to the
+locked CPU build. (Not applicable on macOS, which has no CUDA.)
 
 ## TDD is the Project Norm
 
@@ -73,7 +79,7 @@ will be asked to add it.
 - Target the `master` branch.
 - Keep each PR focused on a single change.
 - Include a brief description of *why*, not just *what*.
-- CI (tests + `ruff format --check`) must be green on ubuntu **and** windows.
+- CI (tests + `ruff format --check`) must be green on ubuntu, windows **and** macOS.
 
 ## Issues
 

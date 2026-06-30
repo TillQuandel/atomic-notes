@@ -86,8 +86,12 @@ generative = ["tag_registry.yml"]
 extractive = ["templates/*.jinja2"]
 
 [tool.uv]
-# Lockfile fuer Windows + Linux aufloesen (Dev = Win, CI = Win + Ubuntu).
-environments = ["sys_platform == 'win32'", "sys_platform == 'linux'"]
+# Lockfile fuer Windows + Linux + macOS aufloesen (Dev = Win, CI = alle drei, Kollege = Mac).
+environments = [
+    "sys_platform == 'win32'",
+    "sys_platform == 'linux'",
+    "sys_platform == 'darwin'",
+]
 
 # torch als CPU-Wheel (kleiner, CI-tauglich); GPU-Override siehe CONTRIBUTING.
 [[tool.uv.index]]
@@ -96,7 +100,12 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [tool.uv.sources]
-torch = { index = "pytorch-cpu" }
+# CPU-Index NUR fuer Linux/Windows (dort existieren CUDA-Varianten, die wir vermeiden).
+# macOS: torch vom Default-Index (PyPI) — der pytorch-cpu-Index fuehrt keine macOS-Wheels,
+# und auf macOS gibt es ohnehin nur CPU-Builds.
+torch = [
+    { index = "pytorch-cpu", marker = "sys_platform == 'win32' or sys_platform == 'linux'" },
+]
 
 [tool.ruff]
 target-version = "py312"
