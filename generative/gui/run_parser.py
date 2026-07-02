@@ -90,6 +90,17 @@ _ERROR_SIGNATURES = (
     "-> doctor",
 )
 
+# Harmlose Zeilen, die eine _ERROR_SIGNATURE zufaellig matchen, aber KEIN
+# echter Fehler sind — nehmen die Zeile vom error_hint aus, sie bleibt aber
+# ein normales log-Event. Beispiel: die HuggingFace-Hub-Warnung ohne HF_TOKEN
+# ("...higher rate limits...") matcht "rate limit", ist aber bei jedem Lauf
+# ohne HF_TOKEN harmlos (auch bei Erfolg, rc=0).
+_BENIGN_SIGNATURES = (
+    "hf_token",
+    "hf hub",
+    "unauthenticated requests",
+)
+
 
 def _parse_marker(marker: str) -> dict:
     """`[Vault-Empf.]` / `[Inbox-Review: reason]` / `[Merge-Stub -> path]` → dict."""
@@ -232,6 +243,8 @@ class RunParser:
         # hochziehen (sonst gehen sie in hunderten Log-Zeilen unter) — zusätzlich
         # zum normalen Log.
         low = line.lower()
+        if any(sig in low for sig in _BENIGN_SIGNATURES):
+            return prefix + [{"type": "log", "text": line}]
         if any(sig in low for sig in _ERROR_SIGNATURES):
             return prefix + [{"type": "error_hint", "text": line.strip()}, {"type": "log", "text": line}]
 
