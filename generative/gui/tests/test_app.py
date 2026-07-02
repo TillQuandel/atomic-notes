@@ -859,3 +859,272 @@ def test_status_reports_active_run(tmp_path):
     assert body["pdf"].endswith("x.pdf")
     assert body["dry_run"] is True
     gate.set()
+
+
+# --- P4: Run-Historie (GET /api/runs, GET /api/runs/{run_id}) --------------
+
+
+def _clock_seq(*values):
+    """Deterministischer Fake-Clock: liefert die Werte der Reihe nach, dann
+    haengt er beim letzten Wert (fuer beliebig viele weitere Aufrufe)."""
+    values = list(values)
+
+    def _clock():
+        return values.pop(0) if len(values) > 1 else values[0]
+
+    return _clock
+
+
+def test_runs_endpoint_empty_when_no_runs_yet(tmp_path):
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        runs_dir=tmp_path / "runs",
+    )
+    r = TestClient(app).get("/api/runs")
+    assert r.status_code == 200
+    assert r.json() == {"runs": []}
+
+
+def test_run_completion_writes_history_record(tmp_path):
+    pdf = tmp_path / "beispiel.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+        runs_dir=tmp_path / "runs",
+        clock=_clock_seq(1000.0, 1010.0),
+    )
+    c = TestClient(app)
+    c.post(
+        "/api/run",
+        json={"pdf": str(pdf), "dry_run": True, "options": {"backend": "litellm", "profile": "fast"}},
+    )
+    _drain(c)
+    body = c.get("/api/runs").json()
+    assert len(body["runs"]) == 1
+    record = body["runs"][0]
+    from generative.gui import run_history
+
+    assert run_history.is_valid_run_id(record["run_id"])
+    assert record["started_at"] == 1000.0
+    assert record["finished_at"] == 1010.0
+    assert record["source_pdf"] == str(pdf)
+    assert record["dry_run"] is True
+    assert record["options"] == {"backend": "litellm", "profile": "fast"}
+    assert record["rc"] == 0
+    assert record["notes"] == [{"title": "a.md", "routing": "vault", "score": 5, "confidence": "high"}]
+
+
+def test_run_without_options_writes_empty_options_in_record(tmp_path):
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        runs_dir=tmp_path / "runs",
+    )
+    c = TestClient(app)
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    _drain(c)
+    record = c.get("/api/runs").json()["runs"][0]
+    assert record["options"] == {}
+
+
+def test_run_crash_still_writes_history_record_with_null_rc(tmp_path):
+    def boom(pdf, dry_run, register=None, options=None):
+        yield {"type": "started", "argv": ["boom"]}
+        raise RuntimeError("kaputt")
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=boom,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        runs_dir=tmp_path / "runs",
+    )
+    c = TestClient(app)
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    _drain(c)
+    record = c.get("/api/runs").json()["runs"][0]
+    assert record["rc"] is None
+
+
+def test_runs_endpoint_lists_newest_first(tmp_path):
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        runs_dir=tmp_path / "runs",
+        clock=_clock_seq(100.0, 200.0, 300.0, 400.0),
+    )
+    c = TestClient(app)
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    _drain(c)
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    _drain(c)
+    runs = c.get("/api/runs").json()["runs"]
+    assert [r["finished_at"] for r in runs] == [400.0, 200.0]
+
+
+def test_run_detail_endpoint_returns_full_record(tmp_path):
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        runs_dir=tmp_path / "runs",
+    )
+    c = TestClient(app)
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    _drain(c)
+    listed = c.get("/api/runs").json()["runs"][0]
+    detail = c.get(f"/api/runs/{listed['run_id']}").json()
+    assert detail == listed
+
+
+def test_run_detail_endpoint_missing_run_id_returns_404(tmp_path):
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        runs_dir=tmp_path / "runs",
+    )
+    r = TestClient(app).get("/api/runs/20240101000000-doesnotexist")
+    assert r.status_code == 404
+
+
+def test_run_detail_endpoint_rejects_invalid_run_id_shapes(tmp_path):
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        runs_dir=tmp_path / "runs",
+    )
+    c = TestClient(app)
+    for bad in ("UPPERCASE", "with%20space", "semi;colon", "dot.dot", "a%2e%2e"):
+        r = c.get(f"/api/runs/{bad}")
+        assert r.status_code in (404, 422), (bad, r.status_code)
+
+
+def test_run_detail_endpoint_rejects_path_traversal_run_id(tmp_path):
+    # Ein Record ausserhalb von runs_dir existiert real — ".." darf trotzdem
+    # nicht dorthin auflösen (Regex blockt Punkte von vornherein).
+    outside = tmp_path / "secret.json"
+    outside.write_text(json.dumps({"run_id": "secret"}), encoding="utf-8")
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        runs_dir=tmp_path / "runs",
+    )
+    c = TestClient(app)
+    r = c.get("/api/runs/..%2Fsecret")
+    assert r.status_code in (404, 422)
+
+
+def test_runs_endpoint_prunes_records_beyond_50(tmp_path):
+    from generative.gui import run_history
+
+    runs_dir = tmp_path / "runs"
+    for i in range(55):
+        record = run_history.build_run_record(
+            run_id=run_history.make_run_id(float(i), suffix=f"{i:03d}"),
+            started_at=float(i),
+            finished_at=float(i),
+            source_pdf="x.pdf",
+            dry_run=True,
+            options={},
+            rc=0,
+            notes=[],
+        )
+        run_history.write_run_record(record, runs_dir)
+    assert len(list(runs_dir.glob("*.json"))) == 55
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        runs_dir=runs_dir,
+        clock=_clock_seq(1000.0, 2000.0),
+    )
+    c = TestClient(app)
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    _drain(c)
+    assert len(list(runs_dir.glob("*.json"))) == 50
+
+
+def test_run_history_survives_simulated_gui_restart(tmp_path):
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    runs_dir = tmp_path / "runs"
+    app_a = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        runs_dir=runs_dir,
+        clock=_clock_seq(1.0, 2.0, 3.0, 4.0),
+    )
+    ca = TestClient(app_a)
+    ca.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    _drain(ca)
+    ca.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    _drain(ca)
+
+    # "Neustart": frische App-Instanz, derselbe runs_dir.
+    app_b = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        runs_dir=runs_dir,
+    )
+    runs = TestClient(app_b).get("/api/runs").json()["runs"]
+    assert len(runs) == 2
+
+
+def test_runs_endpoints_have_no_origin_check(tmp_path):
+    # L4: nur GET, nicht mutierend.
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        runs_dir=tmp_path / "runs",
+    )
+    r = TestClient(app).get("/api/runs", headers={"Origin": "http://evil.example"})
+    assert r.status_code == 200
