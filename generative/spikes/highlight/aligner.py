@@ -5,6 +5,7 @@ bbox-tragenden get_text("words")-Token-Strom (Ansatz A der Feature-Recherche).
 Reine Logik, kein PDF-I/O: Tokens werden als (text, (x0,y0,x1,y1))-Tupel
 uebergeben, damit die Kernfunktionen ohne PyMuPDF testbar bleiben.
 """
+
 import re
 import unicodedata
 

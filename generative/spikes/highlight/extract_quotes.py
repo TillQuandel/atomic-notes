@@ -9,13 +9,13 @@ for md in sorted(inbox.glob("*.md")):
         continue
     source = m.group(1)
     # quote blocks: "> [!quote]- ... \n> „...""
-    for qm in re.finditer(r'> \[!quote\]-[^\n]*\n((?:> [^\n]*\n?)+)', text):
+    for qm in re.finditer(r"> \[!quote\]-[^\n]*\n((?:> [^\n]*\n?)+)", text):
         block = qm.group(1)
         lines = [l[2:].strip() for l in block.strip().split("\n")]
         quote_text = " ".join(lines)
         quote_text = quote_text.strip('„""').strip()
         # find page from the heading line just before
-        page_m = re.search(r'S\.\s*(\d+)', qm.group(0).split("\n")[0])
+        page_m = re.search(r"S\.\s*(\d+)", qm.group(0).split("\n")[0])
         page = page_m.group(1) if page_m else None
         results.append({"note": md.name, "source": source, "page": page, "quote": quote_text})
 
