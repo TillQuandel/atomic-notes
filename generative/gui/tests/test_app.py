@@ -1216,3 +1216,110 @@ def test_runs_endpoints_have_no_origin_check(tmp_path):
     )
     r = TestClient(app).get("/api/runs", headers={"Origin": "http://evil.example"})
     assert r.status_code == 200
+
+
+# --- P2: GET/PUT /api/settings (persistierte Lauf-Einstellungen) -----------
+
+
+def _settings_app(tmp_path, **kwargs):
+    kwargs.setdefault("run_factory", fake_run)
+    kwargs.setdefault("pdf_dirs", [tmp_path])
+    kwargs.setdefault("vault_path", tmp_path)
+    kwargs.setdefault("backend", "subscription")
+    kwargs.setdefault("uploads_dir", tmp_path / "u")
+    kwargs.setdefault("settings_path", tmp_path / "gui" / "settings.json")
+    return create_app(**kwargs)
+
+
+def test_settings_empty_when_no_file_yet(tmp_path):
+    c = TestClient(_settings_app(tmp_path))
+    r = c.get("/api/settings")
+    assert r.status_code == 200
+    assert r.json() == {}
+
+
+def test_settings_put_then_get_roundtrip(tmp_path):
+    c = TestClient(_settings_app(tmp_path))
+    put = c.put(
+        "/api/settings",
+        json={"backend": "litellm", "profile": "fast", "no_llm": True, "dry_run": False},
+    )
+    assert put.status_code == 200
+    r = c.get("/api/settings")
+    assert r.json() == {"backend": "litellm", "profile": "fast", "no_llm": True, "dry_run": False}
+
+
+def test_settings_persists_across_two_create_app_instances(tmp_path):
+    # Simulierter GUI-Neustart: gleicher settings_path, frische App-Instanz.
+    settings_path = tmp_path / "gui" / "settings.json"
+    app_a = _settings_app(tmp_path, settings_path=settings_path)
+    TestClient(app_a).put("/api/settings", json={"backend": "litellm", "dry_run": False})
+
+    app_b = _settings_app(tmp_path, settings_path=settings_path)
+    r = TestClient(app_b).get("/api/settings")
+    assert r.json() == {"backend": "litellm", "dry_run": False}
+
+
+def test_settings_put_unknown_key_returns_422(tmp_path):
+    c = TestClient(_settings_app(tmp_path))
+    r = c.put("/api/settings", json={"foo": "bar"})
+    assert r.status_code == 422
+    assert "foo" in r.json()["error"]
+
+
+def test_settings_put_unknown_backend_value_returns_422(tmp_path):
+    c = TestClient(_settings_app(tmp_path))
+    r = c.put("/api/settings", json={"backend": "openai-direct"})
+    assert r.status_code == 422
+
+
+def test_settings_put_no_llm_wrong_type_returns_422(tmp_path):
+    c = TestClient(_settings_app(tmp_path))
+    r = c.put("/api/settings", json={"no_llm": "yes"})
+    assert r.status_code == 422
+
+
+def test_settings_put_rejects_cross_origin(tmp_path):
+    c = TestClient(_settings_app(tmp_path))
+    r = c.put(
+        "/api/settings",
+        json={"backend": "litellm"},
+        headers={"Origin": "http://evil.example"},
+    )
+    assert r.status_code == 403
+
+
+def test_settings_get_has_no_origin_check(tmp_path):
+    c = TestClient(_settings_app(tmp_path))
+    r = c.get("/api/settings", headers={"Origin": "http://evil.example"})
+    assert r.status_code == 200
+
+
+def test_settings_get_corrupt_file_returns_empty_with_warning(tmp_path):
+    settings_path = tmp_path / "gui" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    settings_path.write_text("{not valid json", encoding="utf-8")
+    c = TestClient(_settings_app(tmp_path, settings_path=settings_path))
+    r = c.get("/api/settings")
+    assert r.status_code == 200
+    body = r.json()
+    assert "warning" in body
+    # Nur der Warn-Key kommt dazu -- keine erfundenen Settings-Werte (L5).
+    assert {k: v for k, v in body.items() if k != "warning"} == {}
+
+
+def test_settings_put_replaces_full_object_no_merge(tmp_path):
+    c = TestClient(_settings_app(tmp_path))
+    c.put("/api/settings", json={"backend": "litellm", "profile": "fast"})
+    # Zweiter PUT ohne "profile" -> darf NICHT mit dem alten Wert gemergt werden.
+    c.put("/api/settings", json={"backend": "litellm"})
+    r = c.get("/api/settings")
+    assert r.json() == {"backend": "litellm"}
+
+
+def test_settings_no_secrets_written_to_disk(tmp_path):
+    settings_path = tmp_path / "gui" / "settings.json"
+    c = TestClient(_settings_app(tmp_path, settings_path=settings_path))
+    c.put("/api/settings", json={"backend": "litellm", "profile": "fast", "no_llm": True, "dry_run": True})
+    raw = settings_path.read_text(encoding="utf-8")
+    assert set(json.loads(raw)) <= {"backend", "profile", "no_llm", "dry_run"}
