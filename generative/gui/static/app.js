@@ -224,7 +224,8 @@ function historyOptionsShort(options) {
 function renderHistoryResults(record) {
   // Read-only: laedt die bestehende Ergebnis-Sektion aus einem historischen
   // Record statt aus der aktuellen RunSession — reine Anzeige, kein Re-Run.
-  $("results-h").textContent = `Verlauf: ${escapeHtml(baseName(record.source_pdf))} · ${formatHistoryDate(record.finished_at)}`;
+  // textContent escaped selbst — kein escapeHtml noetig (sonst erscheinen Entities literal).
+  $("results-h").textContent = `Verlauf: ${baseName(record.source_pdf)} · ${formatHistoryDate(record.finished_at)}`;
   $("results-section").hidden = false;
   $("results-list").innerHTML = "";
   // ZIP-Endpunkt bezieht sich auf die aktuelle RunSession, nicht auf diesen
