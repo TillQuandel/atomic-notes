@@ -25,7 +25,7 @@ def fake_doctor():
     ]
 
 
-def fake_run(pdf, dry_run, register=None):
+def fake_run(pdf, dry_run, register=None, options=None):
     yield {"type": "started", "argv": ["fake"]}
     yield {"type": "stage", "num": 1, "total": 7, "label": "PDF & Chunking"}
     yield {
@@ -184,7 +184,7 @@ def test_run_rejected_while_active(client, monkeypatch):
 
     gate = threading.Event()
 
-    def slow_run(pdf, dry_run, register=None):
+    def slow_run(pdf, dry_run, register=None, options=None):
         yield {"type": "started", "argv": ["slow"]}
         gate.wait(timeout=5)
         yield {"type": "done", "written": 0, "dry_run": dry_run}
@@ -212,7 +212,7 @@ def test_cancel_terminates_active_run(tmp_path):
             terminated["v"] = True
             gate.set()  # entsperrt den Lauf, simuliert Subprocess-Tod
 
-    def slow_run(pdf, dry_run, register=None):
+    def slow_run(pdf, dry_run, register=None, options=None):
         if register:
             register(FakeProc())
         yield {"type": "started", "argv": ["slow"]}
@@ -261,7 +261,7 @@ def test_run_revalidates_vault_server_side(tmp_path):
 def test_run_factory_exception_surfaces_as_error_event(tmp_path):
     # E: Wirft der Lauf, muss das als error-Event im Stream ankommen (schliesst
     # den bisher ungetesteten _consume-Exception-Pfad).
-    def boom(pdf, dry_run, register=None):
+    def boom(pdf, dry_run, register=None, options=None):
         yield {"type": "started", "argv": ["boom"]}
         raise RuntimeError("kaputt")
 
@@ -369,12 +369,152 @@ def test_status_reports_no_active_run_initially(client):
     assert body["active"] is False
 
 
+def test_run_without_options_key_behaves_like_before(client):
+    # Rueckwaertskompatibilitaet: Payload ohne `options` verhaelt sich wie heute.
+    c, pdf = client
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    assert r.status_code == 200
+    assert r.json().get("options") == {}
+
+
+def test_run_with_empty_options_dict_behaves_like_missing(client):
+    c, pdf = client
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True, "options": {}})
+    assert r.status_code == 200
+    assert r.json().get("options") == {}
+
+
+def test_run_options_unknown_key_returns_422(client):
+    c, pdf = client
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True, "options": {"foo": "bar"}})
+    assert r.status_code == 422
+    assert "foo" in r.json()["error"]
+
+
+def test_run_options_unknown_backend_value_returns_422(client):
+    c, pdf = client
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True, "options": {"backend": "openai-direct"}})
+    assert r.status_code == 422
+    assert "backend" in r.json()["error"].lower()
+
+
+def test_run_options_unknown_profile_value_returns_422(client):
+    c, pdf = client
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True, "options": {"profile": "turbo"}})
+    assert r.status_code == 422
+    assert "profil" in r.json()["error"].lower()
+
+
+def test_run_options_no_llm_wrong_type_returns_422(client):
+    c, pdf = client
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True, "options": {"no_llm": "yes"}})
+    assert r.status_code == 422
+
+
+def test_run_options_valid_values_return_200(client):
+    c, pdf = client
+    r = c.post(
+        "/api/run",
+        json={
+            "pdf": str(pdf),
+            "dry_run": True,
+            "options": {"backend": "litellm", "profile": "fast", "no_llm": True},
+        },
+    )
+    assert r.status_code == 200
+    assert r.json()["options"] == {"backend": "litellm", "profile": "fast", "no_llm": True}
+
+
+def test_run_options_rejects_cross_origin(client):
+    # L4: Der bestehende Origin-Check greift auch, wenn `options` mitgeschickt wird.
+    c, pdf = client
+    r = c.post(
+        "/api/run",
+        json={"pdf": str(pdf), "dry_run": True, "options": {"backend": "litellm"}},
+        headers={"Origin": "http://evil.example"},
+    )
+    assert r.status_code == 403
+
+
+def test_run_forwards_normalized_options_to_run_factory(tmp_path):
+    captured = {}
+
+    def capturing_run(pdf, dry_run, register=None, options=None):
+        captured["options"] = options
+        yield {"type": "started", "argv": ["x"]}
+        yield {"type": "exited", "returncode": 0}
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=capturing_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+    )
+    c = TestClient(app)
+    r = c.post(
+        "/api/run",
+        json={"pdf": str(pdf), "dry_run": True, "options": {"backend": "litellm", "profile": "fast"}},
+    )
+    assert r.status_code == 200
+    # /api/stream blockiert (Polling-Loop), bis der Lauf-Thread fertig ist —
+    # danach ist `captured` garantiert befuellt (keine Race-Condition).
+    c.get("/api/stream")
+    assert captured["options"] == {"backend": "litellm", "profile": "fast"}
+
+
+def test_doctor_reports_litellm_available_true_when_check_ok(tmp_path):
+    from generative.doctor import CheckResult
+
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+        litellm_check_fn=lambda: CheckResult(name="backend (litellm)", ok=True, detail="gesetzt: ANTHROPIC_API_KEY"),
+    )
+    body = TestClient(app).get("/api/doctor").json()
+    assert body["litellm_available"] is True
+
+
+def test_doctor_reports_litellm_unavailable_with_hint(tmp_path):
+    from generative.doctor import CheckResult
+
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+        litellm_check_fn=lambda: CheckResult(
+            name="backend (litellm)", ok=False, detail="kein Key", hint="API-Key setzen"
+        ),
+    )
+    body = TestClient(app).get("/api/doctor").json()
+    assert body["litellm_available"] is False
+    assert "API-Key setzen" in body.get("litellm_hint", "")
+
+
+def test_doctor_litellm_available_present_with_default_check(client):
+    # Ohne injizierten litellm_check_fn greift die echte doctor.check_backend-Logik.
+    c, _ = client
+    body = c.get("/api/doctor").json()
+    assert "litellm_available" in body
+    assert isinstance(body["litellm_available"], bool)
+
+
 def test_status_reports_active_run(tmp_path):
     import threading
 
     gate = threading.Event()
 
-    def slow_run(pdf, dry_run, register=None):
+    def slow_run(pdf, dry_run, register=None, options=None):
         yield {"type": "started", "argv": ["slow"]}
         gate.wait(timeout=5)
         yield {"type": "exited", "returncode": 0}

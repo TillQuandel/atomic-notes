@@ -26,6 +26,25 @@ def build_argv(pdf_path: str, *, dry_run: bool, extra: list[str] | None = None) 
     return argv
 
 
+def build_run_spec(pdf_path: str, *, dry_run: bool, options: dict | None = None) -> tuple[list[str], dict[str, str]]:
+    """Uebersetzt bereits validierte Lauf-Einstellungen (P1) in argv + Env-Overrides.
+
+    Erwartet normalisierte `options` (Server-seitig gegen die Whitelist geprueft,
+    z.B. in `app.py:_validate_run_options`) — diese Funktion validiert selbst
+    nicht, sie ist reine Uebersetzung. `options=None`/`{}` verhaelt sich exakt
+    wie ein `build_argv`-Aufruf ohne Extras (Rueckwaertskompatibilitaet).
+    """
+    options = options or {}
+    extra = ["--no-llm"] if options.get("no_llm") else None
+    argv = build_argv(pdf_path, dry_run=dry_run, extra=extra)
+    env_overrides: dict[str, str] = {}
+    if options.get("backend"):
+        env_overrides["ATOMIC_AGENT_BACKEND"] = options["backend"]
+    if options.get("profile"):
+        env_overrides["ATOMIC_AGENT_PROFILE"] = options["profile"]
+    return argv, env_overrides
+
+
 def iter_run_events(
     argv: list[str],
     *,
