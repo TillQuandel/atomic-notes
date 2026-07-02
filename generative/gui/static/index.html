@@ -82,6 +82,15 @@
       <ul id="preview-list" class="preview-list" role="log" aria-live="polite"></ul>
     </section>
 
+    <section class="panel" aria-labelledby="results-h" id="results-section" hidden>
+      <div class="actions">
+        <h2 id="results-h">Ergebnisse</h2>
+        <a id="download-all" class="button" href="/api/outputs/archive" download hidden>Alle herunterladen (ZIP)</a>
+      </div>
+      <p id="results-empty" class="hint">Keine Notes in diesem Lauf.</p>
+      <ul id="results-list" class="preview-list"></ul>
+    </section>
+
     <section class="panel" aria-labelledby="log-h">
       <h2 id="log-h">Log</h2>
       <pre id="log" class="log" aria-live="polite"></pre>

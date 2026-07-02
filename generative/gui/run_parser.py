@@ -8,11 +8,15 @@ Events (dict mit "type"):
 - note_progress  : Stage-6 Pro-Note-Marker.             {index, total, title}
 - preview        : eine im --dry-run gerenderte Note.    {name, routing, score,
                    hard_gates, confidence, flags, [reason|merge_target]}
+- note_written    : eine im Schreib-Lauf geschriebene Note (kein Score/Confidence,
+                   die druckt vault_writer nur im Dry-Run). {path, routing,
+                   [merge_target]}
 - done           : Lauf abgeschlossen.                   {written, dry_run}
 - log            : alles uebrige (roher Text).           {text}
 
 Die Marker stammen aus generative/orchestrator.py (Stage-Prints, Pro-Note-Print
-orchestrator.py:539) und generative/pipeline/vault_writer.py:874-905 (Dry-Run).
+orchestrator.py:539) und generative/pipeline/vault_writer.py:874-905 (Dry-Run)
+bzw. vault_writer.py:983-986 (Schreib-Lauf: `[Inbox]`/`[Merge-Stub]`-Zeilen).
 """
 
 from __future__ import annotations
@@ -39,6 +43,10 @@ _NOTE_RE = re.compile(r"^\s+\[(\d+)/(\d+)\]\s+(.+)$")
 _DRYRUN_RE = re.compile(r"^\s+\[DRY-RUN\] -> Inbox:\s+(.+?)\s\s+(\[.+\])\s*$")
 _SCORE_RE = re.compile(r"^\s+Score:\s*(\d+)/5\s*\|\s*Hard-Gates:\s*(pass|fail)\s*\|\s*Confidence:\s*(\w+)")
 _FLAGS_RE = re.compile(r"^\s+Flags:\s*(.+)$")
+# Schreib-Lauf (kein Dry-Run): vault_writer.py:983-986 druckt den tatsaechlich
+# geschriebenen Pfad direkt, ohne Score/Confidence-Block.
+_WRITTEN_INBOX_RE = re.compile(r"^  \[Inbox\] (.+)  \((vault-empfohlen|review)\)$")
+_WRITTEN_MERGE_RE = re.compile(r"^  \[Merge-Stub\] (.+)  -> (.+)$")
 # Abschluss (orchestrator.py:1536).
 _DONE_RE = re.compile(r"^=== Fertig:\s*(\d+)\s*Notes\s*(\(dry-run\)|geschrieben)\s*===")
 
@@ -125,6 +133,25 @@ class RunParser:
 
         # Ab hier endet ein etwaiger Preview-Block — zuerst abschliessen.
         prefix = self._flush_pending()
+
+        # 3b) Schreib-Lauf: vault_writer druckt den geschriebenen Pfad direkt
+        # (kein DRY-RUN-Block, also kein Score/Confidence). Routing-Vokabular
+        # bewusst an die Dry-Run-preview-Events angeglichen (vault/inbox/merge),
+        # damit das Frontend dieselbe Badge-Komponente wiederverwenden kann.
+        m = _WRITTEN_MERGE_RE.match(line)
+        if m:
+            return prefix + [
+                {
+                    "type": "note_written",
+                    "path": m.group(1).strip(),
+                    "routing": "merge",
+                    "merge_target": m.group(2).strip(),
+                }
+            ]
+        m = _WRITTEN_INBOX_RE.match(line)
+        if m:
+            routing = "vault" if m.group(2) == "vault-empfohlen" else "inbox"
+            return prefix + [{"type": "note_written", "path": m.group(1).strip(), "routing": routing}]
 
         # 4) Pro-Note-Marker (eingerueckt).
         m = _NOTE_RE.match(line)

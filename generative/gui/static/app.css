@@ -63,6 +63,18 @@ button.danger { background: var(--bad); border-color: var(--bad); }
 .hint { margin: 0.25rem 0 0; color: var(--muted); font-size: 0.85rem; }
 .muted { color: var(--muted); }
 
+/* Buttons, die als <a> gerendert werden (Download-Links) */
+a.button {
+  background: var(--accent); color: #fff; border: 1px solid var(--accent);
+  border-radius: 6px; padding: 0.4rem 0.9rem; font-weight: 600;
+  text-decoration: none; display: inline-block;
+}
+
+/* Ergebnis-Sektion (P3) */
+#results-section .actions { justify-content: space-between; margin-bottom: 0.75rem; }
+#results-section .actions h2 { margin: 0; }
+.preview-card .actions { margin-top: 0.2rem; }
+
 /* Upload-Dropzone */
 .dropzone {
   border: 2px dashed var(--border); border-radius: var(--radius);

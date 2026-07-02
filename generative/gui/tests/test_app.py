@@ -5,7 +5,9 @@ Dependency-Injection durch eine `fake_run`-Generator-Funktion ersetzt, die
 echte Event-Dicts yieldet — keine Mock-Bibliothek.
 """
 
+import io
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -507,6 +509,328 @@ def test_doctor_litellm_available_present_with_default_check(client):
     body = c.get("/api/doctor").json()
     assert "litellm_available" in body
     assert isinstance(body["litellm_available"], bool)
+
+
+def _drain(client):
+    """Blockiert (Stream lesen), bis der Lauf-Thread fertig ist — s. bestehendes
+    Muster in test_run_forwards_normalized_options_to_run_factory."""
+    client.get("/api/stream")
+
+
+# --- P3: GET /api/outputs, /api/outputs/file, /api/outputs/archive --------
+
+
+def test_outputs_empty_without_any_run(tmp_path):
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+    )
+    r = TestClient(app).get("/api/outputs")
+    assert r.status_code == 200
+    assert r.json() == {"items": [], "dry_run": None}
+
+
+def test_outputs_lists_preview_items_after_dry_run(client):
+    c, pdf = client
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    _drain(c)
+    body = c.get("/api/outputs").json()
+    assert body["dry_run"] is True
+    assert len(body["items"]) == 1
+    item = body["items"][0]
+    assert item["title"] == "a.md"
+    assert item["routing"] == "vault"
+    assert item["score"] == 5
+    assert item["confidence"] == "high"
+    # leere Flags / kein merge_target / keine eval-Kopie auf Platte -> keine Keys erfinden (L5).
+    assert "flags" not in item
+    assert "merge_target" not in item
+    assert "path" not in item
+
+
+def test_outputs_includes_path_when_eval_copy_exists(tmp_path):
+    pdf = tmp_path / "beispiel.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    preview_root = tmp_path / "baseline"
+    (preview_root / "beispiel").mkdir(parents=True)
+    eval_file = preview_root / "beispiel" / "vault__a.md"
+    eval_file.write_text("# a\nKoerper", encoding="utf-8")
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        preview_root=preview_root,
+    )
+    c = TestClient(app)
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    _drain(c)
+    item = c.get("/api/outputs").json()["items"][0]
+    assert Path(item["path"]) == eval_file.resolve()
+
+
+def test_outputs_write_mode_items_have_no_score_or_confidence(tmp_path):
+    vault = tmp_path / "vault"
+    (vault / "00-inbox").mkdir(parents=True)
+    (vault / "00-inbox" / "Foo.md").write_text("# Foo", encoding="utf-8")
+    (vault / "00-inbox" / "Bar.md").write_text("# Bar", encoding="utf-8")
+    (vault / "00-inbox" / "MERGE - Baz.md").write_text("# Baz", encoding="utf-8")
+
+    def write_run(pdf, dry_run, register=None, options=None):
+        yield {"type": "started", "argv": ["x"]}
+        yield {"type": "note_written", "path": "00-inbox/Foo.md", "routing": "vault"}
+        yield {"type": "note_written", "path": "00-inbox/Bar.md", "routing": "inbox"}
+        yield {
+            "type": "note_written",
+            "path": "00-inbox/MERGE - Baz.md",
+            "routing": "merge",
+            "merge_target": "04-wissen/Baz.md",
+        }
+        yield {"type": "done", "written": 3, "dry_run": dry_run}
+        yield {"type": "exited", "returncode": 0}
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=write_run, pdf_dirs=[tmp_path], vault_path=vault, backend="subscription", uploads_dir=tmp_path / "u"
+    )
+    c = TestClient(app)
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": False})
+    _drain(c)
+    body = c.get("/api/outputs").json()
+    assert body["dry_run"] is False
+    items = body["items"]
+    assert [i["routing"] for i in items] == ["vault", "inbox", "merge"]
+    assert items[2]["merge_target"] == "04-wissen/Baz.md"
+    for item in items:
+        assert "score" not in item
+        assert "confidence" not in item
+    assert items[0]["path"] == str((vault / "00-inbox" / "Foo.md").resolve())
+    assert items[1]["path"] == str((vault / "00-inbox" / "Bar.md").resolve())
+    assert items[2]["path"] == str((vault / "00-inbox" / "MERGE - Baz.md").resolve())
+
+
+def test_outputs_empty_run_zero_notes_no_crash(tmp_path):
+    def empty_run(pdf, dry_run, register=None, options=None):
+        yield {"type": "started", "argv": ["x"]}
+        yield {"type": "done", "written": 0, "dry_run": dry_run}
+        yield {"type": "exited", "returncode": 0}
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=empty_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+    )
+    c = TestClient(app)
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    _drain(c)
+    r = c.get("/api/outputs")
+    assert r.status_code == 200
+    assert r.json()["items"] == []
+
+
+def _write_mode_app(tmp_path):
+    vault = tmp_path / "vault"
+    (vault / "00-inbox").mkdir(parents=True)
+    (vault / "00-inbox" / "Foo.md").write_text("# Foo\nInhalt", encoding="utf-8")
+    (vault / "00-inbox" / "image.png").write_bytes(b"\x89PNG")
+
+    def write_run(pdf, dry_run, register=None, options=None):
+        yield {"type": "started", "argv": ["x"]}
+        yield {"type": "note_written", "path": "00-inbox/Foo.md", "routing": "vault"}
+        yield {"type": "done", "written": 1, "dry_run": dry_run}
+        yield {"type": "exited", "returncode": 0}
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=write_run, pdf_dirs=[tmp_path], vault_path=vault, backend="subscription", uploads_dir=tmp_path / "u"
+    )
+    c = TestClient(app)
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": False})
+    _drain(c)
+    return c, vault, pdf
+
+
+def test_outputs_file_downloads_vault_md(tmp_path):
+    c, vault, _ = _write_mode_app(tmp_path)
+    target = vault / "00-inbox" / "Foo.md"
+    r = c.get("/api/outputs/file", params={"path": str(target)})
+    assert r.status_code == 200
+    # Byte-Vergleich gegen das tatsaechlich Geschriebene (Windows uebersetzt
+    # write_text-Newlines zu CRLF — der Download muss exakt widerspiegeln,
+    # was auf der Platte liegt, kein eigener Newline-Vergleich).
+    assert r.content == target.read_bytes()
+    assert "attachment" in r.headers["content-disposition"]
+    assert "Foo.md" in r.headers["content-disposition"]
+
+
+def test_outputs_file_downloads_preview_eval_copy(tmp_path):
+    pdf = tmp_path / "beispiel.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    preview_root = tmp_path / "baseline"
+    (preview_root / "beispiel").mkdir(parents=True)
+    eval_file = preview_root / "beispiel" / "vault__a.md"
+    eval_file.write_text("# a\nKoerper", encoding="utf-8")
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        preview_root=preview_root,
+    )
+    c = TestClient(app)
+    r = c.get("/api/outputs/file", params={"path": str(eval_file)})
+    assert r.status_code == 200
+    assert r.content == eval_file.read_bytes()
+
+
+def test_outputs_file_rejects_path_traversal(tmp_path):
+    c, vault, _ = _write_mode_app(tmp_path)
+    outside = tmp_path / "secret.md"
+    outside.write_text("geheim", encoding="utf-8")
+    traversal = str(vault / "00-inbox" / ".." / ".." / "secret.md")
+    r = c.get("/api/outputs/file", params={"path": traversal})
+    assert r.status_code == 403
+
+
+def test_outputs_file_rejects_absolute_foreign_path(tmp_path):
+    c, _vault, _ = _write_mode_app(tmp_path)
+    outside = tmp_path / "anderswo.md"
+    outside.write_text("fremd", encoding="utf-8")
+    r = c.get("/api/outputs/file", params={"path": str(outside)})
+    assert r.status_code == 403
+
+
+def test_outputs_file_rejects_non_md_in_vault(tmp_path):
+    c, vault, _ = _write_mode_app(tmp_path)
+    r = c.get("/api/outputs/file", params={"path": str(vault / "00-inbox" / "image.png")})
+    assert r.status_code == 403
+
+
+def test_outputs_file_rejects_symlink_escape(tmp_path):
+    c, vault, _ = _write_mode_app(tmp_path)
+    outside_target = tmp_path / "geheim.md"
+    outside_target.write_text("geheim", encoding="utf-8")
+    link = vault / "00-inbox" / "link.md"
+    try:
+        link.symlink_to(outside_target)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlinks ohne Sonderrechte auf dieser Plattform nicht erstellbar")
+    r = c.get("/api/outputs/file", params={"path": str(link)})
+    assert r.status_code == 403
+
+
+def test_outputs_file_missing_returns_404(tmp_path):
+    c, vault, _ = _write_mode_app(tmp_path)
+    r = c.get("/api/outputs/file", params={"path": str(vault / "00-inbox" / "nicht-da.md")})
+    assert r.status_code == 404
+
+
+def test_outputs_archive_returns_zip_with_expected_entries(tmp_path):
+    vault = tmp_path / "vault"
+    (vault / "00-inbox").mkdir(parents=True)
+    (vault / "00-inbox" / "Foo.md").write_text("# Foo", encoding="utf-8")
+    (vault / "00-inbox" / "Bar.md").write_text("# Bar", encoding="utf-8")
+
+    def write_run(pdf, dry_run, register=None, options=None):
+        yield {"type": "started", "argv": ["x"]}
+        yield {"type": "note_written", "path": "00-inbox/Foo.md", "routing": "vault"}
+        yield {"type": "note_written", "path": "00-inbox/Bar.md", "routing": "inbox"}
+        yield {"type": "done", "written": 2, "dry_run": dry_run}
+        yield {"type": "exited", "returncode": 0}
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=write_run, pdf_dirs=[tmp_path], vault_path=vault, backend="subscription", uploads_dir=tmp_path / "u"
+    )
+    c = TestClient(app)
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": False})
+    _drain(c)
+    r = c.get("/api/outputs/archive")
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/zip"
+    zf = zipfile.ZipFile(io.BytesIO(r.content))
+    assert sorted(zf.namelist()) == ["Bar.md", "Foo.md"]
+    assert zf.read("Foo.md") == b"# Foo"
+    assert zf.read("Bar.md") == b"# Bar"
+
+
+def test_outputs_archive_empty_run_returns_empty_zip_no_crash(tmp_path):
+    def empty_run(pdf, dry_run, register=None, options=None):
+        yield {"type": "started", "argv": ["x"]}
+        yield {"type": "done", "written": 0, "dry_run": dry_run}
+        yield {"type": "exited", "returncode": 0}
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=empty_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+    )
+    c = TestClient(app)
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    _drain(c)
+    r = c.get("/api/outputs/archive")
+    assert r.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(r.content))
+    assert zf.namelist() == []
+
+
+def test_outputs_archive_dedupes_colliding_basenames(tmp_path):
+    vault = tmp_path / "vault"
+    (vault / "00-inbox").mkdir(parents=True)
+    (vault / "00-inbox" / "sub").mkdir(parents=True)
+    (vault / "00-inbox" / "Foo.md").write_text("eins", encoding="utf-8")
+    (vault / "00-inbox" / "sub" / "Foo.md").write_text("zwei", encoding="utf-8")
+
+    def write_run(pdf, dry_run, register=None, options=None):
+        yield {"type": "started", "argv": ["x"]}
+        yield {"type": "note_written", "path": "00-inbox/Foo.md", "routing": "vault"}
+        yield {"type": "note_written", "path": "00-inbox/sub/Foo.md", "routing": "inbox"}
+        yield {"type": "done", "written": 2, "dry_run": dry_run}
+        yield {"type": "exited", "returncode": 0}
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=write_run, pdf_dirs=[tmp_path], vault_path=vault, backend="subscription", uploads_dir=tmp_path / "u"
+    )
+    c = TestClient(app)
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": False})
+    _drain(c)
+    r = c.get("/api/outputs/archive")
+    zf = zipfile.ZipFile(io.BytesIO(r.content))
+    names = sorted(zf.namelist())
+    assert names == ["Foo-2.md", "Foo.md"]
+    contents = {n: zf.read(n) for n in names}
+    assert set(contents.values()) == {b"eins", b"zwei"}
+
+
+def test_outputs_endpoints_have_no_origin_check(tmp_path):
+    # L4: nur GET, nicht mutierend -> kein CSRF-Vektor, kein Origin-Gate noetig.
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+    )
+    r = TestClient(app).get("/api/outputs", headers={"Origin": "http://evil.example"})
+    assert r.status_code == 200
 
 
 def test_status_reports_active_run(tmp_path):

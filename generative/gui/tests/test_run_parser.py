@@ -5,6 +5,9 @@ strukturierte Events (Stage-Stepper, Pro-Note-Fortschritt, Dry-Run-Preview,
 Abschluss). Pure Logik, keine I/O.
 """
 
+import re
+from pathlib import Path
+
 from generative.gui.run_parser import RunParser, STAGES
 
 
@@ -199,3 +202,75 @@ def test_done_written_real_run():
     p = RunParser()
     evs = p.feed("=== Fertig: 3 Notes geschrieben ===")
     assert evs == [{"type": "done", "written": 3, "dry_run": False}]
+
+
+# --- note_written (P3: Schreib-Lauf-Pfade aus vault_writer.py) -------------
+
+
+def test_write_mode_inbox_vault_recommended_emits_note_written():
+    p = RunParser()
+    evs = p.feed("  [Inbox] 00-inbox/Zettelkasten.md  (vault-empfohlen)")
+    assert evs == [{"type": "note_written", "path": "00-inbox/Zettelkasten.md", "routing": "vault"}]
+
+
+def test_write_mode_inbox_review_emits_note_written():
+    p = RunParser()
+    evs = p.feed("  [Inbox] 00-inbox/schwache-note.md  (review)")
+    assert evs == [{"type": "note_written", "path": "00-inbox/schwache-note.md", "routing": "inbox"}]
+
+
+def test_write_mode_merge_stub_emits_note_written_with_merge_target():
+    p = RunParser()
+    evs = p.feed("  [Merge-Stub] 00-inbox/MERGE - Atomic Note.md  -> 04-wissen/Atomic Notes.md")
+    assert evs == [
+        {
+            "type": "note_written",
+            "path": "00-inbox/MERGE - Atomic Note.md",
+            "routing": "merge",
+            "merge_target": "04-wissen/Atomic Notes.md",
+        }
+    ]
+
+
+def test_write_mode_lines_do_not_leave_pending_preview_state():
+    # Kein DRY-RUN-Block in echten Schreib-Laeufen — trotzdem defensiv: eine
+    # note_written-Zeile darf keinen offenen Preview-Block "auffressen".
+    p = RunParser()
+    evs = p.feed("  [Inbox] 00-inbox/a.md  (vault-empfohlen)")
+    assert evs[0]["type"] == "note_written"
+    assert p.flush() == []
+
+
+def test_golden_write_mode_stdout_sample_parses_full_run():
+    # Konstruiertes Fixture (kein echter Pipeline-Lauf erlaubt) aus den exakten
+    # Print-Formaten in generative/pipeline/vault_writer.py — abgesichert durch
+    # den Kopplungstest unten, der die Formate gegen den Quelltext prueft.
+    sample = (Path(__file__).parent / "fixtures" / "run_stdout_write_sample.txt").read_text(encoding="utf-8")
+    evs = _events(sample.splitlines())
+    stages = sorted({e["num"] for e in evs if e["type"] == "stage"})
+    assert stages == [1, 2, 3, 4, 5, 6, 7, 8]
+    written = [e for e in evs if e["type"] == "note_written"]
+    assert [w["routing"] for w in written] == ["vault", "inbox", "merge"]
+    assert written[0]["path"] == "00-inbox/Zettelkasten.md"
+    assert written[1]["path"] == "00-inbox/schwache-note.md"
+    assert written[2]["merge_target"] == "04-wissen/Atomic Notes.md"
+    # Schreib-Modus druckt kein Score/Confidence — keine preview-Events.
+    assert not [e for e in evs if e["type"] == "preview"]
+    done = [e for e in evs if e["type"] == "done"]
+    assert done and done[0]["written"] == 4 and done[0]["dry_run"] is False
+
+
+def test_write_mode_print_formats_match_vault_writer_source():
+    """Kopplungstest (Plan P3 Schritt 4): schlaegt an, wenn vault_writer.py die
+    [Inbox]/[Merge-Stub]-Print-Formate aendert, ohne dass Parser + Fixture hier
+    nachgezogen werden (Format-Drift-Detektor, siehe run_parser.py-Docstring —
+    stdout-Parser-Kopplung ist Bruchstelle Nr. 1, Plan §8)."""
+    src = (Path(__file__).parents[2] / "pipeline" / "vault_writer.py").read_text(encoding="utf-8")
+    assert re.search(
+        r"""print\(f"  \[Inbox\] \{_display\(target\)\}  \(\{'vault-empfohlen' if auto else 'review'\}\)"\)""",
+        src,
+    ), "vault_writer.py [Inbox]-Print-Format geaendert — Parser/Fixture in test_run_parser.py nachziehen"
+    assert re.search(
+        r"""print\(f"  \[Merge-Stub\] \{_display\(target\)\}  -> \{_display\(existing_vault\)\}"\)""",
+        src,
+    ), "vault_writer.py [Merge-Stub]-Print-Format geaendert — Parser/Fixture in test_run_parser.py nachziehen"
