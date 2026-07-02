@@ -111,6 +111,7 @@ a.button {
 .stepper li .step-label { flex: 1 1 auto; }
 .stepper li .elapsed { font-variant-numeric: tabular-nums; font-size: 0.8rem; color: var(--muted); }
 .note-progress { margin: 0.6rem 0 0; color: var(--muted); font-size: 0.9rem; }
+.run-summary { font-variant-numeric: tabular-nums; }
 
 /* Preview-Notes */
 .preview-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }

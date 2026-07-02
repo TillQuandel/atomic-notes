@@ -12,6 +12,9 @@ Aggregation nicht, es nimmt sie fertig entgegen.
 Records liegen unter `generative/.cache/gui/runs/<run_id>.json` (Cache-
 Artefakt, kein Vault-Inhalt — L4-Whitelist gilt trotzdem: `run_id` wird strikt
 gegen `RUN_ID_RE` geprueft, Pfade nur per `joinpath` unterhalb `runs_dir`).
+
+`duration_s`/`tokens` (P5) sind optional — nur vorhanden, wenn der Lauf ein
+`run_summary`-Event erzeugt hat (Final-Report Zeit/Tokens, s. run_parser.py).
 """
 
 from __future__ import annotations
@@ -59,9 +62,17 @@ def build_run_record(
     options: dict | None,
     rc: int | None,
     notes: list[dict],
+    duration_s: float | None = None,
+    tokens: dict | None = None,
 ) -> dict:
-    """Reiner Dict-Aufbau — kein I/O, keine Validierung (die macht der Aufrufer)."""
-    return {
+    """Reiner Dict-Aufbau — kein I/O, keine Validierung (die macht der Aufrufer).
+
+    `duration_s`/`tokens` (P5: aus dem `run_summary`-Event, s. run_parser.py)
+    sind optional — fehlen sie (kein run_summary-Event im Lauf, z.B. Crash vor
+    dem Final-Report), tauchen die Keys gar nicht im Record auf statt mit `None`
+    aufzufuellen (kein Erfinden, L5).
+    """
+    record = {
         "run_id": run_id,
         "started_at": started_at,
         "finished_at": finished_at,
@@ -71,6 +82,11 @@ def build_run_record(
         "rc": rc,
         "notes": notes,
     }
+    if duration_s is not None:
+        record["duration_s"] = duration_s
+    if tokens:
+        record["tokens"] = tokens
+    return record
 
 
 def write_run_record(record: dict, runs_dir: Path | str) -> Path:

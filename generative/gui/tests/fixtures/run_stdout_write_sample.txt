@@ -26,6 +26,13 @@
   [Merge-Stub] 00-inbox/MERGE - Atomic Note.md  -> 04-wissen/Atomic Notes.md
 
 === Fertig: 4 Notes geschrieben ===
+   -> Vault:  2
+   -> Inbox:  2 (manuell pruefen)
+   -> Quelle offen: 0 (source-status: unresolved)
+   -> 0 PDFs verändert
+   -> Zeit:   9.7s
+   -> Tokens: 6,530 (In:5,000 Out:1,530 Cache-R:200 Cache-C:0)
+   -> Quelle: zettelkasten-primer.pdf
 
 [8/8] Qualitäts-Eval…
    -> Stage-8-Eval: +0 Out-Tok (0% des Out-Totals)

@@ -170,6 +170,14 @@ def test_golden_real_stdout_sample_parses_full_run():
     assert previews[2]["merge_target"] == "04-wissen/Atomic Notes.md"
     done = [e for e in evs if e["type"] == "done"]
     assert done and done[0]["written"] == 4 and done[0]["dry_run"] is True
+    summaries = [e for e in evs if e["type"] == "run_summary"]
+    assert summaries == [
+        {
+            "type": "run_summary",
+            "duration_s": 12.4,
+            "tokens": {"total": 18432, "input": 14200, "output": 4232, "cache_read": 0, "cache_create": 0},
+        }
+    ]
 
 
 def test_error_hint_for_known_backend_failures():
@@ -258,6 +266,82 @@ def test_golden_write_mode_stdout_sample_parses_full_run():
     assert not [e for e in evs if e["type"] == "preview"]
     done = [e for e in evs if e["type"] == "done"]
     assert done and done[0]["written"] == 4 and done[0]["dry_run"] is False
+    summaries = [e for e in evs if e["type"] == "run_summary"]
+    assert summaries == [
+        {
+            "type": "run_summary",
+            "duration_s": 9.7,
+            "tokens": {"total": 6530, "input": 5000, "output": 1530, "cache_read": 200, "cache_create": 0},
+        }
+    ]
+
+
+# --- run_summary (P5: Zeit/Tokens/Quelle-Block nach '=== Fertig… ===') -----
+
+
+def test_run_summary_full_block_emits_single_event_after_quelle_line():
+    lines = [
+        "   -> Zeit:   12.4s",
+        "   -> Tokens: 18,432 (In:14,200 Out:4,232 Cache-R:0 Cache-C:0)",
+        "   -> Quelle: zettelkasten-primer.pdf",
+    ]
+    evs = _events(lines)
+    assert evs == [
+        {
+            "type": "run_summary",
+            "duration_s": 12.4,
+            "tokens": {"total": 18432, "input": 14200, "output": 4232, "cache_read": 0, "cache_create": 0},
+        }
+    ]
+
+
+def test_run_summary_zeit_line_alone_emits_nothing_yet():
+    p = RunParser()
+    evs = p.feed("   -> Zeit:   12.4s")
+    assert evs == []
+
+
+def test_run_summary_fallback_line_when_tokens_unavailable():
+    p = RunParser()
+    evs = p.feed("   -> Zeit:   3.2s  |  Tokens: n/a  |  Quelle: broken.pdf")
+    assert evs == [{"type": "run_summary", "duration_s": 3.2}]
+
+
+def test_incomplete_run_summary_block_emits_nothing_if_stream_ends():
+    # Stream bricht nach der Zeit-Zeile ab (z.B. Prozess-Crash) — kein
+    # erfundenes run_summary-Event ohne Tokens/Quelle-Bestaetigung (L5).
+    p = RunParser()
+    p.feed("   -> Zeit:   12.4s")
+    assert p.flush() == []
+
+
+def test_routing_report_quelle_offen_line_is_not_mistaken_for_summary_quelle():
+    # routing_report.final_report_lines() druckt "-> Quelle offen: N (...)" —
+    # muss vom "-> Quelle: <name>"-Abschluss der Summary unterschieden werden.
+    p = RunParser()
+    evs = p.feed("   -> Quelle offen: 0 (source-status: unresolved)")
+    assert evs == [{"type": "log", "text": "   -> Quelle offen: 0 (source-status: unresolved)"}]
+
+
+def test_run_summary_print_formats_match_orchestrator_source():
+    """Kopplungstest (analog test_write_mode_print_formats_match_vault_writer_source):
+    schlaegt an, wenn orchestrator.py die Zeit/Tokens/Quelle-Print-Formate
+    aendert, ohne dass Parser/Fixtures hier nachgezogen werden."""
+    src = (Path(__file__).parents[2] / "orchestrator.py").read_text(encoding="utf-8")
+    assert re.search(r"""print\(f"   -> Zeit:   \{_wall_s_early\}s"\)""", src), (
+        "orchestrator.py Zeit-Print-Format geaendert — Parser/Fixture nachziehen"
+    )
+    assert re.search(
+        r"""f"   -> Tokens: \{_pipe\['total'\]:,\} \(In:\{_pipe\['input'\]:,\} """
+        r"""Out:\{_pipe\['output'\]:,\} Cache-R:\{_pipe\['cache_read'\]:,\} Cache-C:\{_pipe\['cache_create'\]:,\}\)\"""",
+        src,
+    ), "orchestrator.py Tokens-Print-Format geaendert — Parser/Fixture nachziehen"
+    assert re.search(r"""print\(f"   -> Quelle: \{source_path.name\}"\)""", src), (
+        "orchestrator.py Quelle-Print-Format geaendert — Parser/Fixture nachziehen"
+    )
+    assert re.search(
+        r"""print\(f"   -> Zeit:   \{_wall_s_early\}s  \|  Tokens: n/a  \|  Quelle: \{source_path.name\}"\)""", src
+    ), "orchestrator.py Fallback-Zeile geaendert — Parser/Fixture nachziehen"
 
 
 def test_write_mode_print_formats_match_vault_writer_source():
