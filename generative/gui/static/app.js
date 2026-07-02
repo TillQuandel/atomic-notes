@@ -14,6 +14,33 @@ let userCancelled = false;
 let activeStage = 0;
 let stageStartedAt = 0;
 let elapsedTimer = null;
+let stageDurations = {}; // Stage-Nummer -> abgeschlossene Dauer in s (P5)
+let runSummary = null; // vom `run_summary`-Event (P5: Zeit/Tokens Final-Report)
+
+// --- reine Formatierungs-Helfer (P5, ohne DOM-Zugriff — per `node --check`
+// syntaktisch pruefbar; Logik manuell gegen die Plan-Beispiele verifiziert). ---
+
+function formatSeconds(totalSeconds) {
+  const s = Math.max(0, Math.round(totalSeconds));
+  if (s < 60) return `${s} s`;
+  const m = Math.floor(s / 60);
+  const rem = s % 60;
+  return `${m}:${String(rem).padStart(2, "0")} min`;
+}
+
+function formatTokenCount(n) {
+  return Number(n).toLocaleString("de-DE");
+}
+
+function buildRunSummaryText(stageCount, summary) {
+  const parts = [];
+  if (stageCount) parts.push(`${stageCount} Stages`);
+  if (summary && summary.duration_s !== undefined) parts.push(formatSeconds(summary.duration_s));
+  if (summary && summary.tokens && summary.tokens.total !== undefined) {
+    parts.push(`${formatTokenCount(summary.tokens.total)} Tokens`);
+  }
+  return parts.join(" · ");
+}
 
 function renderStepper() {
   const ol = $("stepper");
@@ -27,14 +54,24 @@ function renderStepper() {
 }
 
 function setStage(num) {
-  if (num !== activeStage) { activeStage = num; stageStartedAt = Date.now(); }
+  if (num !== activeStage) {
+    // Abgeschlossene Stufe: Dauer festhalten, damit sie als "✓ 34 s" stehen bleibt.
+    if (activeStage > 0 && stageStartedAt) {
+      stageDurations[activeStage] = (Date.now() - stageStartedAt) / 1000;
+    }
+    activeStage = num;
+    stageStartedAt = Date.now();
+  }
   for (const [n] of STAGES) {
     const li = $(`step-${n}`);
     if (!li) continue;
     li.classList.toggle("done", n < num);
     li.classList.toggle("active", n === num);
     li.classList.remove("error");
-    if (n !== num) { const e = li.querySelector(".elapsed"); if (e) e.textContent = ""; }
+    const e = li.querySelector(".elapsed");
+    if (!e) continue;
+    if (n === num) { e.textContent = ""; continue; } // laufende Stufe: tickElapsed() uebernimmt
+    e.textContent = stageDurations[n] !== undefined ? `✓ ${formatSeconds(stageDurations[n])}` : "";
   }
 }
 
@@ -43,13 +80,20 @@ function markStageError(num) {
   if (li) { li.classList.remove("active"); li.classList.add("error"); }
 }
 
+function renderRunSummaryLine() {
+  const el = $("run-summary");
+  if (!el) return;
+  el.textContent = buildRunSummaryText(Object.keys(stageDurations).length, runSummary);
+}
+
 function tickElapsed() {
-  // NN/g: bei der laufenden Stufe ab ~1s die verstrichene Zeit zeigen (Systemstatus).
+  // NN/g: Indeterminate-Wartezeiten ab >10s brauchen einen sichtbaren Zaehler
+  // (darunter reicht der Spinner/Status — kein Text-Rauschen fuer kurze Stufen).
   const li = $(`step-${activeStage}`);
   if (!li || !running) return;
   const s = Math.floor((Date.now() - stageStartedAt) / 1000);
   const e = li.querySelector(".elapsed");
-  if (e) e.textContent = s >= 1 ? `${s}s` : "";
+  if (e) e.textContent = s > 10 ? formatSeconds(s) : "";
 }
 
 function startElapsed() {
@@ -66,6 +110,9 @@ function stopElapsed() {
 function resetRun() {
   renderStepper();
   activeStage = 0;
+  stageDurations = {};
+  runSummary = null;
+  $("run-summary").textContent = "";
   $("preview-list").innerHTML = "";
   $("preview-empty").style.display = "block";
   $("note-progress").textContent = "";
@@ -249,6 +296,13 @@ function addHistoryEntry(record) {
   const rcClass = rcKnown ? (rcOk ? "ok" : "warn") : "warn";
   const rcLabel = !rcKnown ? "abgebrochen/Fehler" : rcOk ? "erfolgreich" : `Fehlercode ${record.rc}`;
   const notesCount = (record.notes || []).length;
+  // P5: Zeit/Tokens nur zeigen, wenn der Lauf ein run_summary-Event hatte
+  // (kein Erfinden bei aelteren/gecrashten Records ohne diese Felder, L5).
+  const summaryBadges = [];
+  if (record.duration_s !== undefined) summaryBadges.push(`<span class="badge">${formatSeconds(record.duration_s)}</span>`);
+  if (record.tokens && record.tokens.total !== undefined) {
+    summaryBadges.push(`<span class="badge">${formatTokenCount(record.tokens.total)} Tokens</span>`);
+  }
   li.innerHTML = `
     <div class="title">${escapeHtml(baseName(record.source_pdf))}</div>
     <div class="meta">
@@ -256,6 +310,7 @@ function addHistoryEntry(record) {
       <span class="badge">${record.dry_run ? "Vorschau" : "Geschrieben"}</span>
       <span class="badge ${rcClass}">${rcLabel}</span>
       <span class="badge">${notesCount} Notes</span>
+      ${summaryBadges.join("")}
     </div>
     <div class="hint">${escapeHtml(historyOptionsShort(record.options))}</div>`;
   const open = () => renderHistoryResults(record);
@@ -301,6 +356,10 @@ function startStream() {
   es.addEventListener("preview", (e) => addPreview(JSON.parse(e.data)));
   es.addEventListener("log", (e) => { try { logLine(JSON.parse(e.data).text); } catch { } });
   es.addEventListener("error_hint", (e) => { try { showBanner(JSON.parse(e.data).text); } catch { } });
+  // P5: Final-Report Zeit/Tokens (run_parser.py) — Summenzeile unter dem Stepper.
+  es.addEventListener("run_summary", (e) => {
+    try { runSummary = JSON.parse(e.data); renderRunSummaryLine(); } catch { }
+  });
   // `done` = Pipeline hat geschrieben; der Lauf macht ggf. noch Stage-8-Eval.
   // NICHT schließen — erst `exited` beendet den Stream.
   es.addEventListener("done", (e) => {
@@ -314,7 +373,7 @@ function startStream() {
     let rc = 0;
     try { rc = JSON.parse(e.data).returncode; } catch { }
     if (userCancelled) { markStageError(activeStage); logLine("■ Lauf abgebrochen."); }
-    else if (rc === 0) { setStage(99); logLine("● Lauf beendet."); loadOutputs(); }
+    else if (rc === 0) { setStage(99); renderRunSummaryLine(); logLine("● Lauf beendet."); loadOutputs(); }
     else { markStageError(activeStage); logLine(`✗ Lauf mit Fehlercode ${rc} beendet.`); }
     loadHistory();
     close();

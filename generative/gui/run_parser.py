@@ -12,11 +12,16 @@ Events (dict mit "type"):
                    die druckt vault_writer nur im Dry-Run). {path, routing,
                    [merge_target]}
 - done           : Lauf abgeschlossen.                   {written, dry_run}
+- run_summary    : Final-Report Zeit/Tokens (P5).         {duration_s, tokens?:
+                   {total, input, output, cache_read, cache_create}} — `tokens`
+                   fehlt, wenn der Orchestrator sie nicht ermitteln konnte
+                   (Fallback-Zeile "Tokens: n/a", kein Erfinden, L5).
 - log            : alles uebrige (roher Text).           {text}
 
 Die Marker stammen aus generative/orchestrator.py (Stage-Prints, Pro-Note-Print
-orchestrator.py:539) und generative/pipeline/vault_writer.py:874-905 (Dry-Run)
-bzw. vault_writer.py:983-986 (Schreib-Lauf: `[Inbox]`/`[Merge-Stub]`-Zeilen).
+orchestrator.py:539; Final-Report Zeit/Tokens/Quelle orchestrator.py:2165-2171)
+und generative/pipeline/vault_writer.py:874-905 (Dry-Run) bzw.
+vault_writer.py:983-986 (Schreib-Lauf: `[Inbox]`/`[Merge-Stub]`-Zeilen).
 """
 
 from __future__ import annotations
@@ -49,6 +54,22 @@ _WRITTEN_INBOX_RE = re.compile(r"^  \[Inbox\] (.+)  \((vault-empfohlen|review)\)
 _WRITTEN_MERGE_RE = re.compile(r"^  \[Merge-Stub\] (.+)  -> (.+)$")
 # Abschluss (orchestrator.py:1536).
 _DONE_RE = re.compile(r"^=== Fertig:\s*(\d+)\s*Notes\s*(\(dry-run\)|geschrieben)\s*===")
+
+# Final-Report Zeit/Tokens/Quelle-Block (orchestrator.py:2165-2171), gedruckt
+# direkt nach den Routing-Report-Zeilen (routing_report.final_report_lines).
+# Zwei sich ausschliessende Formen: (a) drei Zeilen Zeit/Tokens/Quelle
+# (Normalfall), (b) EINE Fallback-Zeile mit "Tokens: n/a" (Exception beim
+# Token-Zaehlen, z.B. fehlende Tracing-Datei) — Reihenfolge beim Matchen
+# wichtig: Fallback zuerst pruefen (sonst matcht die Zeit-Teil-Regex bereits).
+_SUMMARY_FALLBACK_RE = re.compile(r"^\s+-> Zeit:\s+(\d+\.\d+)s\s+\|\s+Tokens: n/a\s+\|\s+Quelle: .+$")
+_SUMMARY_TIME_RE = re.compile(r"^\s+-> Zeit:\s+(\d+\.\d+)s\s*$")
+_SUMMARY_TOKENS_RE = re.compile(
+    r"^\s+-> Tokens:\s+([\d,]+)\s+\(In:([\d,]+)\s+Out:([\d,]+)\s+Cache-R:([\d,]+)\s+Cache-C:([\d,]+)\)\s*$"
+)
+# "-> Quelle offen: N (...)" (routing_report) darf NICHT matchen — der
+# Doppelpunkt sitzt bei diesem Marker direkt hinter "Quelle" (kein "offen"
+# dazwischen), das unterscheidet die beiden Marker zuverlässig.
+_SUMMARY_SOURCE_RE = re.compile(r"^\s+-> Quelle:\s+.+$")
 
 # Bekannte Backend-/Setup-Fehlersignaturen (Kleinschreibung-Substrings) — Quelle:
 # _subscription_backend.py (_fail_fast_hint), error_hints.py, doctor.py.
@@ -88,6 +109,7 @@ class RunParser:
 
     def __init__(self) -> None:
         self._pending: dict | None = None  # halb-gefuellte preview-Note
+        self._pending_summary: dict | None = None  # halb-gefuellter run_summary-Block
 
     def _flush_pending(self) -> list[dict]:
         if self._pending is None:
@@ -152,6 +174,36 @@ class RunParser:
         if m:
             routing = "vault" if m.group(2) == "vault-empfohlen" else "inbox"
             return prefix + [{"type": "note_written", "path": m.group(1).strip(), "routing": routing}]
+
+        # 3c) Run-Summary (P5): Zeit/Tokens/Quelle-Block direkt nach
+        # '=== Fertig… ==='. Fallback-Einzeiler (Tokens nicht ermittelbar) zuerst
+        # pruefen — sonst wuerde die Zeit-Teil-Regex bereits (falsch) matchen.
+        m = _SUMMARY_FALLBACK_RE.match(line)
+        if m:
+            self._pending_summary = None  # ein etwaig offener Block wird verworfen (L5: nichts erfinden)
+            return prefix + [{"type": "run_summary", "duration_s": float(m.group(1))}]
+
+        m = _SUMMARY_TIME_RE.match(line)
+        if m:
+            self._pending_summary = {"duration_s": float(m.group(1))}
+            return prefix
+
+        m = _SUMMARY_TOKENS_RE.match(line)
+        if m and self._pending_summary is not None:
+            self._pending_summary["tokens"] = {
+                "total": int(m.group(1).replace(",", "")),
+                "input": int(m.group(2).replace(",", "")),
+                "output": int(m.group(3).replace(",", "")),
+                "cache_read": int(m.group(4).replace(",", "")),
+                "cache_create": int(m.group(5).replace(",", "")),
+            }
+            return prefix
+
+        m = _SUMMARY_SOURCE_RE.match(line)
+        if m and self._pending_summary is not None:
+            summary = self._pending_summary
+            self._pending_summary = None
+            return prefix + [{"type": "run_summary", **summary}]
 
         # 4) Pro-Note-Marker (eingerueckt).
         m = _NOTE_RE.match(line)

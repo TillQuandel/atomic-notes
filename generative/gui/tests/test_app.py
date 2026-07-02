@@ -140,6 +140,30 @@ def test_run_then_stream_yields_events(client):
     assert any(json.loads(ln[len("data:") :].strip()).get("written") == 1 for ln in done_payloads)
 
 
+def test_run_summary_event_forwarded_over_sse(tmp_path):
+    # P5: run_summary ist ein Event wie jedes andere -> _event_stream reicht es
+    # unveraendert durch, keine eigene Sonderbehandlung noetig.
+    pdf = tmp_path / "beispiel.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=fake_run_with_summary,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+    )
+    c = TestClient(app)
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    body = c.get("/api/stream").text
+    assert "event: run_summary" in body
+    summary_payloads = [ln for ln in body.splitlines() if ln.startswith("data:") and '"run_summary"' in ln]
+    assert len(summary_payloads) == 1
+    payload = json.loads(summary_payloads[0][len("data:") :].strip())
+    assert payload["duration_s"] == 12.4
+    assert payload["tokens"]["total"] == 18432
+
+
 def test_preview_rejects_path_traversal(client):
     c, _ = client
     r = c.get("/api/preview", params={"pdf_stem": "../../../etc", "name": "../secret.md"})
@@ -939,6 +963,70 @@ def test_run_without_options_writes_empty_options_in_record(tmp_path):
     _drain(c)
     record = c.get("/api/runs").json()["runs"][0]
     assert record["options"] == {}
+
+
+# --- P5: run_summary-Event -> Historie-Record duration_s/tokens ------------
+
+
+def fake_run_with_summary(pdf, dry_run, register=None, options=None):
+    yield {"type": "started", "argv": ["fake"]}
+    yield {"type": "stage", "num": 1, "total": 7, "label": "PDF & Chunking"}
+    yield {
+        "type": "preview",
+        "name": "a.md",
+        "routing": "vault",
+        "score": 5,
+        "hard_gates": True,
+        "confidence": "high",
+        "flags": "",
+    }
+    yield {"type": "done", "written": 1, "dry_run": dry_run}
+    yield {
+        "type": "run_summary",
+        "duration_s": 12.4,
+        "tokens": {"total": 18432, "input": 14200, "output": 4232, "cache_read": 0, "cache_create": 0},
+    }
+    yield {"type": "exited", "returncode": 0}
+
+
+def test_run_summary_event_lands_in_history_record(tmp_path):
+    pdf = tmp_path / "beispiel.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=fake_run_with_summary,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        runs_dir=tmp_path / "runs",
+    )
+    c = TestClient(app)
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    _drain(c)
+    record = c.get("/api/runs").json()["runs"][0]
+    assert record["duration_s"] == 12.4
+    assert record["tokens"] == {"total": 18432, "input": 14200, "output": 4232, "cache_read": 0, "cache_create": 0}
+
+
+def test_run_without_summary_event_omits_duration_and_tokens_in_record(tmp_path):
+    # fake_run (Standard-Fixture) endet ohne run_summary-Event — Record darf
+    # keine erfundenen duration_s/tokens-Felder bekommen (L5).
+    pdf = tmp_path / "beispiel.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        runs_dir=tmp_path / "runs",
+    )
+    c = TestClient(app)
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    _drain(c)
+    record = c.get("/api/runs").json()["runs"][0]
+    assert "duration_s" not in record
+    assert "tokens" not in record
 
 
 def test_run_crash_still_writes_history_record_with_null_rc(tmp_path):

@@ -30,6 +30,13 @@
     Score: 4/5 | Hard-Gates: pass | Confidence: medium
 
 === Fertig: 4 Notes (dry-run) ===
+   -> Vault:  1
+   -> Inbox:  2 (manuell pruefen)
+   -> Quelle offen: 0 (source-status: unresolved)
+   -> 0 PDFs verändert
+   -> Zeit:   12.4s
+   -> Tokens: 18,432 (In:14,200 Out:4,232 Cache-R:0 Cache-C:0)
+   -> Quelle: zettelkasten-primer.pdf
 
 [8/8] Qualitäts-Eval…
    -> Stage-8-Eval: +0 Out-Tok (0% des Out-Totals)

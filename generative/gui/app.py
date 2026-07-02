@@ -154,6 +154,23 @@ def _output_items_from_events(
     return items
 
 
+def _run_summary_from_events(events: list[dict]) -> dict:
+    """Extrahiert das `run_summary`-Event (P5: Final-Report Zeit/Tokens) fuer den
+    Historie-Record. Hoechstens ein solches Event pro Lauf (s. run_parser.py).
+    Fehlt es (z.B. Crash vor dem Final-Report), ist das Ergebnis `{}` — der
+    Aufrufer laesst die Record-Felder dann schlicht weg (kein Erfinden, L5).
+    """
+    for ev in events:
+        if ev.get("type") == "run_summary":
+            result: dict = {}
+            if "duration_s" in ev:
+                result["duration_s"] = ev["duration_s"]
+            if ev.get("tokens"):
+                result["tokens"] = ev["tokens"]
+            return result
+    return {}
+
+
 def _validate_output_path(path: str, *, vault_path: Path, preview_root: Path) -> Path | None:
     """Pfad-Whitelist (L4) fuer `/api/outputs/file` + `/api/outputs/archive`:
     nur `.md`-Dateien unterhalb `vault_path`, oder beliebige Dateien unterhalb
@@ -248,6 +265,7 @@ class RunSession:
         notes = _output_items_from_events(
             self.events, pdf=self.pdf, vault_path=self.vault_path, preview_root=self.preview_root
         )
+        summary = _run_summary_from_events(self.events)
         record = run_history.build_run_record(
             run_id=run_history.make_run_id(finished_at),
             started_at=self.started_at,
@@ -257,6 +275,8 @@ class RunSession:
             options=self.options,
             rc=rc,
             notes=notes,
+            duration_s=summary.get("duration_s"),
+            tokens=summary.get("tokens"),
         )
         try:
             run_history.write_run_record(record, self.runs_dir)

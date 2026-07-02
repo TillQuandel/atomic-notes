@@ -67,6 +67,42 @@ def test_build_run_record_shape():
     }
 
 
+def test_build_run_record_includes_duration_and_tokens_when_given():
+    # P5: run_summary-Daten (Zeit/Tokens aus dem Final-Report) landen optional
+    # im Record — Kurzzeile im Historie-Panel braucht sie.
+    record = run_history.build_run_record(
+        run_id="20240101000000-abc123",
+        started_at=100.0,
+        finished_at=142.5,
+        source_pdf="C:/pdfs/foo.pdf",
+        dry_run=True,
+        options={},
+        rc=0,
+        notes=[],
+        duration_s=12.4,
+        tokens={"total": 18432, "input": 14200, "output": 4232, "cache_read": 0, "cache_create": 0},
+    )
+    assert record["duration_s"] == 12.4
+    assert record["tokens"] == {"total": 18432, "input": 14200, "output": 4232, "cache_read": 0, "cache_create": 0}
+
+
+def test_build_run_record_omits_duration_and_tokens_when_absent():
+    # Rueckwaertskompatibilitaet: kein run_summary-Event -> keine erfundenen
+    # Felder im Record (L5) statt None-Platzhalter.
+    record = run_history.build_run_record(
+        run_id="x",
+        started_at=1.0,
+        finished_at=2.0,
+        source_pdf=None,
+        dry_run=None,
+        options=None,
+        rc=None,
+        notes=[],
+    )
+    assert "duration_s" not in record
+    assert "tokens" not in record
+
+
 def test_build_run_record_defaults_options_to_empty_dict():
     record = run_history.build_run_record(
         run_id="x",
