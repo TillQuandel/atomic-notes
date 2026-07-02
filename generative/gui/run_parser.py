@@ -92,13 +92,17 @@ _ERROR_SIGNATURES = (
 
 # Harmlose Zeilen, die eine _ERROR_SIGNATURE zufaellig matchen, aber KEIN
 # echter Fehler sind — nehmen die Zeile vom error_hint aus, sie bleibt aber
-# ein normales log-Event. Beispiel: die HuggingFace-Hub-Warnung ohne HF_TOKEN
-# ("...higher rate limits...") matcht "rate limit", ist aber bei jedem Lauf
-# ohne HF_TOKEN harmlos (auch bei Erfolg, rc=0).
+# ein normales log-Event. Beispiele:
+# - die HuggingFace-Hub-Warnung ohne HF_TOKEN ("...higher rate limits...")
+#   matcht "rate limit", ist aber bei jedem Lauf ohne HF_TOKEN harmlos (rc=0);
+# - eval-Skip-Zeilen ("  [skip] key: not found", eval_paired/eval_repeat)
+#   matchen "not found", sind aber bewusste Auslassungen, kein harter Fehler.
+#   ("not found" bleibt fuer echte Fehler wie litellm "model not found" aktiv.)
 _BENIGN_SIGNATURES = (
     "hf_token",
     "hf hub",
     "unauthenticated requests",
+    "[skip]",
 )
 
 
