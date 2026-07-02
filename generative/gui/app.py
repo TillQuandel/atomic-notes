@@ -23,8 +23,7 @@ from pathlib import Path
 from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
-from generative.gui import run_history, runner
-from generative.runtime_config import PRESETS
+from generative.gui import gui_settings, run_history, runner
 
 logger = logging.getLogger(__name__)
 
@@ -39,6 +38,11 @@ _DEFAULT_RUNS_DIR = Path(__file__).resolve().parents[1] / ".cache" / "gui" / "ru
 # P4: mehr als so viele Records im runs_dir -> aelteste werden geloescht.
 _MAX_RUN_RECORDS = 50
 
+# P2 (Einstellungs-Defaults): GUI-eigene Settings-Datei, analog _DEFAULT_RUNS_DIR
+# -- Modul-Konstante, damit Tests sie per monkeypatch isolieren koennen (s.
+# tests/conftest.py) und create_app(settings_path=...) sie injizieren kann.
+_DEFAULT_SETTINGS_PATH = Path(__file__).resolve().parents[1] / ".cache" / "gui" / "settings.json"
+
 # Endungen, die als „PDF-Kandidat" gelistet werden.
 _PDF_GLOB = "*.pdf"
 
@@ -47,11 +51,10 @@ _PDF_GLOB = "*.pdf"
 # same-origin), ist es kein CSRF-Vektor.
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
-# P1 (Lauf-Einstellungen): Whitelist der `POST /api/run`-`options`. Backend-Werte
-# sind, wie in doctor.check_backend/config.BACKEND verifiziert, genau diese zwei;
-# Profil-Whitelist wird bewusst aus runtime_config.PRESETS importiert statt
-# hart dupliziert (Plan P1 Schritt 1).
-_BACKENDS = frozenset({"subscription", "litellm"})
+# P1 (Lauf-Einstellungen): Whitelist der `POST /api/run`-`options`. Backend-/
+# Profil-Wertepruefung teilt sich `gui_settings.validate_backend/validate_profile`
+# (P2 hat dieselbe Pruefung fuer `PUT /api/settings` -- ausfaktoriert statt
+# dupliziert, s. gui_settings.py).
 _OPTION_KEYS = frozenset({"backend", "profile", "no_llm"})
 
 
@@ -71,16 +74,16 @@ def _validate_run_options(options) -> tuple[dict, str | None]:
         return {}, f"Unbekannte Option(en): {', '.join(sorted(unknown))}"
 
     normalized: dict = {}
-    backend = options.get("backend")
-    if backend not in (None, ""):
-        if backend not in _BACKENDS:
-            return {}, f"Unbekannter Backend-Wert: {backend!r} (erlaubt: {', '.join(sorted(_BACKENDS))})"
+    backend, error = gui_settings.validate_backend(options.get("backend"))
+    if error:
+        return {}, error
+    if backend is not None:
         normalized["backend"] = backend
 
-    profile = options.get("profile")
-    if profile not in (None, ""):
-        if profile not in PRESETS:
-            return {}, f"Unbekanntes Profil: {profile!r} (erlaubt: {', '.join(sorted(PRESETS))})"
+    profile, error = gui_settings.validate_profile(options.get("profile"))
+    if error:
+        return {}, error
+    if profile is not None:
         normalized["profile"] = profile
 
     no_llm = options.get("no_llm")
@@ -305,6 +308,7 @@ def create_app(
     litellm_check_fn: Callable[[], object] | None = None,
     preview_root: Path | None = None,
     runs_dir: Path | None = None,
+    settings_path: Path | None = None,
     clock: Callable[[], float] | None = None,
 ) -> FastAPI:
     run_factory = run_factory or _default_run_factory
@@ -320,6 +324,9 @@ def create_app(
     if runs_dir is None:
         runs_dir = _DEFAULT_RUNS_DIR
     runs_dir = Path(runs_dir)
+    if settings_path is None:
+        settings_path = _DEFAULT_SETTINGS_PATH
+    settings_path = Path(settings_path)
     clock = clock or time.time
 
     if pdf_dirs is None or vault_path is None or backend is None:
@@ -566,6 +573,30 @@ def create_app(
         if record is None:
             return JSONResponse({"error": "Lauf nicht gefunden"}, status_code=404)
         return JSONResponse(record)
+
+    @app.get("/api/settings")
+    def get_settings() -> JSONResponse:
+        """Zuletzt gespeicherte Lauf-Einstellungen (P2). Nur GET, nicht
+        mutierend -> kein Origin-Check (L4-Ausnahme, wie /api/outputs)."""
+        data, warning = gui_settings.read_settings(settings_path)
+        body = dict(data)
+        if warning:
+            body["warning"] = warning
+        return JSONResponse(body)
+
+    @app.put("/api/settings")
+    async def put_settings(request: Request) -> JSONResponse:
+        """Speichert die Lauf-Einstellungen (P2) -- immer das vollstaendige
+        Objekt, kein Merge mit der vorherigen Datei (Aufrufer schickt den
+        kompletten aktuellen Formular-Zustand)."""
+        if not _is_same_origin(request):
+            return JSONResponse({"error": "Cross-Origin-Request abgelehnt."}, status_code=403)
+        body = await request.json()
+        normalized, error = gui_settings.validate_settings(body)
+        if error:
+            return JSONResponse({"error": error}, status_code=422)
+        gui_settings.write_settings(normalized, settings_path)
+        return JSONResponse(normalized)
 
     return app
 

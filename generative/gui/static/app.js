@@ -449,6 +449,7 @@ function wireUpload() {
 }
 
 let doctorOk = true;
+let litellmAvailable = true; // P1-Doctor-Gating, von loadDoctor() gesetzt
 
 function applyBackendGate(d) {
   // Doctor-Gating (P1): litellm-Auswahl serverseitig entschieden (litellm_available
@@ -474,6 +475,7 @@ async function loadDoctor() {
   try {
     const d = await (await fetch("/api/doctor")).json();
     doctorOk = d.ok;
+    litellmAvailable = !!d.litellm_available;
     const fails = (d.checks || []).filter((c) => !c.ok);
     const summary = `Backend: ${d.backend} · Vault: ${d.vault}`;
     if (d.ok) {
@@ -490,6 +492,57 @@ async function loadDoctor() {
     el.textContent = "Preflight konnte nicht geladen werden.";
   }
   applyStartGate();
+}
+
+// --- Persistierte Einstellungen (P2: GET/PUT /api/settings) ---------------
+// Stiller Auto-Save bei Aenderung eines der vier Felder, kein "Speichern"-
+// Button (passend zum Bestand). Laden erst NACH loadDoctor(), damit das
+// Doctor-Gating (litellm-Verfuegbarkeit) beim Vorbelegen bereits feststeht.
+
+function currentSettingsPayload() {
+  return {
+    backend: $("opt-backend").value,
+    profile: $("opt-profile").value,
+    no_llm: $("opt-no-llm").checked,
+    dry_run: $("dry-run").checked,
+  };
+}
+
+async function loadSettings() {
+  try {
+    const r = await fetch("/api/settings");
+    if (!r.ok) return {};
+    const s = await r.json();
+    if (s.warning) showBanner(s.warning);
+    return s;
+  } catch {
+    return {};
+  }
+}
+
+function applyStoredSettings(settings) {
+  if (!settings) return;
+  if (settings.backend) {
+    if (settings.backend === "litellm" && !litellmAvailable) {
+      showBanner('Gespeichertes Backend „litellm" ist nicht verfügbar (kein Provider-Key) — Server-Default wird verwendet.');
+    } else {
+      $("opt-backend").value = settings.backend;
+    }
+  }
+  if (settings.profile) $("opt-profile").value = settings.profile;
+  if (settings.no_llm !== undefined) $("opt-no-llm").checked = !!settings.no_llm;
+  if (settings.dry_run !== undefined) $("dry-run").checked = !!settings.dry_run;
+  updateModeHint();
+}
+
+async function saveSettings() {
+  try {
+    await fetch("/api/settings", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(currentSettingsPayload()),
+    });
+  } catch { }
 }
 
 function applyStartGate() {
@@ -533,15 +586,22 @@ async function attachIfRunActive() {
   } catch { }
 }
 
-document.addEventListener("DOMContentLoaded", () => {
+document.addEventListener("DOMContentLoaded", async () => {
   renderStepper();
   loadPdfs();
-  loadDoctor();
   updateModeHint();
   wireUpload();
   attachIfRunActive();
   loadHistory();
-  $("dry-run").addEventListener("change", updateModeHint);
+  // Reihenfolge bewusst: erst Doctor (litellm-Verfuegbarkeit steht fest), dann
+  // gespeicherte Einstellungen anwenden — sonst koennte ein nicht verfuegbares
+  // "litellm" aus einer frueheren Sitzung stillschweigend uebernommen werden.
+  await loadDoctor();
+  applyStoredSettings(await loadSettings());
+  $("dry-run").addEventListener("change", () => { updateModeHint(); saveSettings(); });
+  $("opt-backend").addEventListener("change", saveSettings);
+  $("opt-profile").addEventListener("change", saveSettings);
+  $("opt-no-llm").addEventListener("change", saveSettings);
 
   $("run-form").addEventListener("submit", async (e) => {
     e.preventDefault();
