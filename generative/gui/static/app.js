@@ -580,6 +580,7 @@ async function attachIfRunActive() {
       running = true; userCancelled = false;
       $("stop-btn").hidden = false; $("start-btn").disabled = true;
       currentPdfStem = (s.pdf || "").split(/[\\/]/).pop().replace(/\.pdf$/i, "");
+      renderRunHeader(s.options || {});
       logLine("» Laufender Pipeline-Lauf erkannt — angehängt.");
       startStream();
     }

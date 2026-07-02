@@ -198,6 +198,35 @@ def test_normal_line_no_error_hint():
     assert not any(e["type"] == "error_hint" for e in evs)
 
 
+def test_hf_hub_warning_is_benign_not_error_hint():
+    # B1: die harmlose HuggingFace-Warnung (kein HF_TOKEN gesetzt) matcht die
+    # "rate limit"-Fehlersignatur und loeste bisher faelschlich einen
+    # error_hint bei JEDEM Lauf ohne HF_TOKEN aus, auch bei Erfolg (rc=0).
+    p = RunParser()
+    evs = p.feed(
+        "Warning: You are sending unauthenticated requests to the HF Hub. "
+        "Please set a HF_TOKEN to enable higher rate limits and faster downloads."
+    )
+    assert evs == [
+        {
+            "type": "log",
+            "text": (
+                "Warning: You are sending unauthenticated requests to the HF Hub. "
+                "Please set a HF_TOKEN to enable higher rate limits and faster downloads."
+            ),
+        }
+    ]
+
+
+def test_real_rate_limit_line_still_emits_error_hint():
+    # Echte Rate-Limit-Erkennung (_subscription_backend.py:_RATE_PATTERNS) darf
+    # der Benign-Filter nicht unterdruecken.
+    p = RunParser()
+    evs = p.feed("  [subscription] Rate-Limit (429) erreicht — 5-Stunden-Fenster")
+    assert any(e["type"] == "error_hint" for e in evs)
+    assert any(e["type"] == "log" for e in evs)
+
+
 def test_enrichment_stage_zero_marker():
     # [0/7] = optionales PDF-Enrichment (Vor-Stufe) → stage num=0.
     p = RunParser()

@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import re
 import threading
 import time
 import zipfile
@@ -22,6 +23,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from generative.gui import gui_settings, run_history, runner
 
@@ -45,6 +47,12 @@ _DEFAULT_SETTINGS_PATH = Path(__file__).resolve().parents[1] / ".cache" / "gui" 
 
 # Endungen, die als „PDF-Kandidat" gelistet werden.
 _PDF_GLOB = "*.pdf"
+
+# S1: Host-Header-Allowlist gegen DNS-Rebinding — kombiniert mit
+# `/api/outputs/file` (liefert jede `.md` im Vault) waere ein fehlender Check
+# ein Exfiltrationspfad. Nur lokale Hosts erlaubt (Server bindet ohnehin nur an
+# 127.0.0.1).
+_DEFAULT_ALLOWED_HOSTS = ["127.0.0.1", "localhost", "::1"]
 
 # Same-Origin-Hosts: Die GUI bindet nur an 127.0.0.1. Ein Browser sendet bei
 # Cross-Origin-POSTs einen `Origin`-Header — fehlt er (curl/TestClient/Beacon
@@ -155,6 +163,16 @@ def _output_items_from_events(
                 item["path"] = str(candidate)
             items.append(item)
     return items
+
+
+def _archive_filename(pdf: str | None) -> str:
+    """ZIP-Dateiname fuer `GET /api/outputs/archive` aus dem PDF-Stem der
+    aktuellen Session (C1). Ohne Session/PDF: Fallback `"outputs.zip"`."""
+    if not pdf:
+        return "outputs.zip"
+    stem = Path(pdf).stem
+    safe = re.sub(r"[^A-Za-z0-9._-]", "-", stem)
+    return f"{safe}-outputs.zip"
 
 
 def _run_summary_from_events(events: list[dict]) -> dict:
@@ -310,6 +328,7 @@ def create_app(
     runs_dir: Path | None = None,
     settings_path: Path | None = None,
     clock: Callable[[], float] | None = None,
+    allowed_hosts: list[str] | None = None,
 ) -> FastAPI:
     run_factory = run_factory or _default_run_factory
     if doctor_fn is None:
@@ -350,6 +369,7 @@ def create_app(
     _allowed_roots = [d.resolve() for d in pdf_dirs] + [uploads_dir.resolve()]
 
     app = FastAPI(title="atomic-notes GUI")
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts or _DEFAULT_ALLOWED_HOSTS)
     app.state.session = None
     app.state.session_lock = threading.Lock()
 
@@ -433,7 +453,10 @@ def create_app(
     async def start_run(request: Request) -> JSONResponse:
         if not _is_same_origin(request):
             return JSONResponse({"error": "Cross-Origin-Request abgelehnt."}, status_code=403)
-        body = await request.json()
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JSONResponse({"error": "Ungültiger JSON-Body."}, status_code=400)
         pdf = body.get("pdf", "")
         dry_run = bool(body.get("dry_run", True))
         options, options_error = _validate_run_options(body.get("options"))
@@ -474,7 +497,14 @@ def create_app(
         s = app.state.session
         if s is None or not s.active:
             return JSONResponse({"active": False})
-        return JSONResponse({"active": True, "pdf": getattr(s, "pdf", None), "dry_run": getattr(s, "dry_run", None)})
+        return JSONResponse(
+            {
+                "active": True,
+                "pdf": getattr(s, "pdf", None),
+                "dry_run": getattr(s, "dry_run", None),
+                "options": getattr(s, "options", {}),
+            }
+        )
 
     @app.post("/api/cancel")
     def cancel_run(request: Request) -> JSONResponse:
@@ -557,7 +587,7 @@ def create_app(
                 used[base] = count + 1
                 arcname = base if count == 0 else f"{Path(base).stem}-{count + 1}{Path(base).suffix}"
                 zf.write(resolved, arcname=arcname)
-        headers = {"Content-Disposition": 'attachment; filename="outputs.zip"'}
+        headers = {"Content-Disposition": f'attachment; filename="{_archive_filename(pdf)}"'}
         return StreamingResponse(iter([buf.getvalue()]), media_type="application/zip", headers=headers)
 
     @app.get("/api/runs")
@@ -591,7 +621,10 @@ def create_app(
         kompletten aktuellen Formular-Zustand)."""
         if not _is_same_origin(request):
             return JSONResponse({"error": "Cross-Origin-Request abgelehnt."}, status_code=403)
-        body = await request.json()
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JSONResponse({"error": "Ungültiger JSON-Body."}, status_code=400)
         normalized, error = gui_settings.validate_settings(body)
         if error:
             return JSONResponse({"error": error}, status_code=422)

@@ -58,7 +58,7 @@ def client(tmp_path):
         uploads_dir=uploads,
         doctor_fn=fake_doctor,
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     c._uploads = uploads  # für Upload-Tests
     return c, pdf
 
@@ -109,8 +109,24 @@ def test_doctor_ok_false_when_required_check_fails(tmp_path):
         uploads_dir=tmp_path / "u",
         doctor_fn=failing_doctor,
     )
-    body = TestClient(app).get("/api/doctor").json()
+    body = TestClient(app, base_url="http://localhost").get("/api/doctor").json()
     assert body["ok"] is False  # required-Fehler → Start sperren
+
+
+def test_run_rejects_invalid_json_body_with_400(client):
+    # B2: kaputter JSON-Body loeste bisher ein ungefangenes JSONDecodeError ->
+    # 500 aus, statt eines sauberen 400.
+    c, _ = client
+    r = c.post("/api/run", content="{invalid", headers={"Content-Type": "application/json"})
+    assert r.status_code == 400
+    assert "error" in r.json()
+
+
+def test_settings_put_rejects_invalid_json_body_with_400(tmp_path):
+    c = TestClient(_settings_app(tmp_path), base_url="http://localhost")
+    r = c.put("/api/settings", content="{invalid", headers={"Content-Type": "application/json"})
+    assert r.status_code == 400
+    assert "error" in r.json()
 
 
 def test_run_rejects_unknown_pdf(client):
@@ -153,7 +169,7 @@ def test_run_summary_event_forwarded_over_sse(tmp_path):
         uploads_dir=tmp_path / "u",
         doctor_fn=fake_doctor,
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     body = c.get("/api/stream").text
     assert "event: run_summary" in body
@@ -216,7 +232,7 @@ def test_run_rejected_while_active(client, monkeypatch):
         yield {"type": "done", "written": 0, "dry_run": dry_run}
 
     app = create_app(run_factory=slow_run, pdf_dirs=[pdf.parent], vault_path=pdf.parent, backend="subscription")
-    cc = TestClient(app)
+    cc = TestClient(app, base_url="http://localhost")
     r1 = cc.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     assert r1.status_code == 200
     r2 = cc.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
@@ -254,7 +270,7 @@ def test_cancel_terminates_active_run(tmp_path):
         backend="subscription",
         uploads_dir=tmp_path / "u",
     )
-    cc = TestClient(app)
+    cc = TestClient(app, base_url="http://localhost")
     assert cc.post("/api/run", json={"pdf": str(pdf), "dry_run": True}).status_code == 200
     r = cc.post("/api/cancel")
     assert r.status_code == 200
@@ -279,7 +295,7 @@ def test_run_revalidates_vault_server_side(tmp_path):
         uploads_dir=tmp_path / "u",
         doctor_fn=fake_doctor,
     )
-    r = TestClient(app).post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    r = TestClient(app, base_url="http://localhost").post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     assert r.status_code == 400
     assert "vault" in r.json()["error"].lower()
 
@@ -296,7 +312,7 @@ def test_run_factory_exception_surfaces_as_error_event(tmp_path):
     app = create_app(
         run_factory=boom, pdf_dirs=[tmp_path], vault_path=tmp_path, backend="subscription", uploads_dir=tmp_path / "u"
     )
-    cc = TestClient(app)
+    cc = TestClient(app, base_url="http://localhost")
     assert cc.post("/api/run", json={"pdf": str(pdf), "dry_run": True}).status_code == 200
     body = cc.get("/api/stream").text
     assert "event: error" in body
@@ -316,7 +332,9 @@ def test_preview_returns_body_for_existing_eval_copy(tmp_path):
         uploads_dir=tmp_path / "u",
         preview_root=base,
     )
-    r = TestClient(app).get("/api/preview", params={"pdf_stem": "meinpdf", "name": "Konzept.md"})
+    r = TestClient(app, base_url="http://localhost").get(
+        "/api/preview", params={"pdf_stem": "meinpdf", "name": "Konzept.md"}
+    )
     assert r.status_code == 200
     assert r.json()["body"] == "# Konzept\nKörper"
 
@@ -367,7 +385,7 @@ def test_run_rejects_pdf_outside_allowed_dirs(tmp_path):
         uploads_dir=tmp_path / "uploads",
         doctor_fn=fake_doctor,
     )
-    r = TestClient(app).post("/api/run", json={"pdf": str(outside), "dry_run": True})
+    r = TestClient(app, base_url="http://localhost").post("/api/run", json={"pdf": str(outside), "dry_run": True})
     assert r.status_code == 400
 
 
@@ -385,7 +403,7 @@ def test_run_accepts_pdf_from_uploads_dir(tmp_path):
         uploads_dir=uploads,
         doctor_fn=fake_doctor,
     )
-    r = TestClient(app).post("/api/run", json={"pdf": str(up), "dry_run": True})
+    r = TestClient(app, base_url="http://localhost").post("/api/run", json={"pdf": str(up), "dry_run": True})
     assert r.status_code == 200
 
 
@@ -480,7 +498,7 @@ def test_run_forwards_normalized_options_to_run_factory(tmp_path):
         uploads_dir=tmp_path / "u",
         doctor_fn=fake_doctor,
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     r = c.post(
         "/api/run",
         json={"pdf": str(pdf), "dry_run": True, "options": {"backend": "litellm", "profile": "fast"}},
@@ -504,7 +522,7 @@ def test_doctor_reports_litellm_available_true_when_check_ok(tmp_path):
         doctor_fn=fake_doctor,
         litellm_check_fn=lambda: CheckResult(name="backend (litellm)", ok=True, detail="gesetzt: ANTHROPIC_API_KEY"),
     )
-    body = TestClient(app).get("/api/doctor").json()
+    body = TestClient(app, base_url="http://localhost").get("/api/doctor").json()
     assert body["litellm_available"] is True
 
 
@@ -522,7 +540,7 @@ def test_doctor_reports_litellm_unavailable_with_hint(tmp_path):
             name="backend (litellm)", ok=False, detail="kein Key", hint="API-Key setzen"
         ),
     )
-    body = TestClient(app).get("/api/doctor").json()
+    body = TestClient(app, base_url="http://localhost").get("/api/doctor").json()
     assert body["litellm_available"] is False
     assert "API-Key setzen" in body.get("litellm_hint", "")
 
@@ -552,7 +570,7 @@ def test_outputs_empty_without_any_run(tmp_path):
         backend="subscription",
         uploads_dir=tmp_path / "u",
     )
-    r = TestClient(app).get("/api/outputs")
+    r = TestClient(app, base_url="http://localhost").get("/api/outputs")
     assert r.status_code == 200
     assert r.json() == {"items": [], "dry_run": None}
 
@@ -590,7 +608,7 @@ def test_outputs_includes_path_when_eval_copy_exists(tmp_path):
         uploads_dir=tmp_path / "u",
         preview_root=preview_root,
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     _drain(c)
     item = c.get("/api/outputs").json()["items"][0]
@@ -622,7 +640,7 @@ def test_outputs_write_mode_items_have_no_score_or_confidence(tmp_path):
     app = create_app(
         run_factory=write_run, pdf_dirs=[tmp_path], vault_path=vault, backend="subscription", uploads_dir=tmp_path / "u"
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     c.post("/api/run", json={"pdf": str(pdf), "dry_run": False})
     _drain(c)
     body = c.get("/api/outputs").json()
@@ -653,7 +671,7 @@ def test_outputs_empty_run_zero_notes_no_crash(tmp_path):
         backend="subscription",
         uploads_dir=tmp_path / "u",
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     _drain(c)
     r = c.get("/api/outputs")
@@ -678,7 +696,7 @@ def _write_mode_app(tmp_path):
     app = create_app(
         run_factory=write_run, pdf_dirs=[tmp_path], vault_path=vault, backend="subscription", uploads_dir=tmp_path / "u"
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     c.post("/api/run", json={"pdf": str(pdf), "dry_run": False})
     _drain(c)
     return c, vault, pdf
@@ -712,7 +730,7 @@ def test_outputs_file_downloads_preview_eval_copy(tmp_path):
         uploads_dir=tmp_path / "u",
         preview_root=preview_root,
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     r = c.get("/api/outputs/file", params={"path": str(eval_file)})
     assert r.status_code == 200
     assert r.content == eval_file.read_bytes()
@@ -760,6 +778,47 @@ def test_outputs_file_missing_returns_404(tmp_path):
     assert r.status_code == 404
 
 
+def test_archive_filename_helper_uses_pdf_stem():
+    from generative.gui.app import _archive_filename
+
+    assert _archive_filename("beispiel.pdf") == "beispiel-outputs.zip"
+
+
+def test_archive_filename_helper_fallback_without_pdf():
+    from generative.gui.app import _archive_filename
+
+    assert _archive_filename(None) == "outputs.zip"
+
+
+def test_archive_filename_helper_sanitizes_special_chars():
+    from generative.gui.app import _archive_filename
+
+    assert _archive_filename("mein Dökument (v2)!.pdf") == "mein-D-kument--v2---outputs.zip"
+
+
+def test_outputs_archive_content_disposition_uses_pdf_stem(tmp_path):
+    vault = tmp_path / "vault"
+    (vault / "00-inbox").mkdir(parents=True)
+    (vault / "00-inbox" / "Foo.md").write_text("# Foo", encoding="utf-8")
+
+    def write_run(pdf, dry_run, register=None, options=None):
+        yield {"type": "started", "argv": ["x"]}
+        yield {"type": "note_written", "path": "00-inbox/Foo.md", "routing": "vault"}
+        yield {"type": "done", "written": 1, "dry_run": dry_run}
+        yield {"type": "exited", "returncode": 0}
+
+    pdf = tmp_path / "beispiel.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=write_run, pdf_dirs=[tmp_path], vault_path=vault, backend="subscription", uploads_dir=tmp_path / "u"
+    )
+    c = TestClient(app, base_url="http://localhost")
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": False})
+    _drain(c)
+    r = c.get("/api/outputs/archive")
+    assert 'filename="beispiel-outputs.zip"' in r.headers["content-disposition"]
+
+
 def test_outputs_archive_returns_zip_with_expected_entries(tmp_path):
     vault = tmp_path / "vault"
     (vault / "00-inbox").mkdir(parents=True)
@@ -778,7 +837,7 @@ def test_outputs_archive_returns_zip_with_expected_entries(tmp_path):
     app = create_app(
         run_factory=write_run, pdf_dirs=[tmp_path], vault_path=vault, backend="subscription", uploads_dir=tmp_path / "u"
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     c.post("/api/run", json={"pdf": str(pdf), "dry_run": False})
     _drain(c)
     r = c.get("/api/outputs/archive")
@@ -805,7 +864,7 @@ def test_outputs_archive_empty_run_returns_empty_zip_no_crash(tmp_path):
         backend="subscription",
         uploads_dir=tmp_path / "u",
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     _drain(c)
     r = c.get("/api/outputs/archive")
@@ -833,7 +892,7 @@ def test_outputs_archive_dedupes_colliding_basenames(tmp_path):
     app = create_app(
         run_factory=write_run, pdf_dirs=[tmp_path], vault_path=vault, backend="subscription", uploads_dir=tmp_path / "u"
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     c.post("/api/run", json={"pdf": str(pdf), "dry_run": False})
     _drain(c)
     r = c.get("/api/outputs/archive")
@@ -853,7 +912,7 @@ def test_outputs_endpoints_have_no_origin_check(tmp_path):
         backend="subscription",
         uploads_dir=tmp_path / "u",
     )
-    r = TestClient(app).get("/api/outputs", headers={"Origin": "http://evil.example"})
+    r = TestClient(app, base_url="http://localhost").get("/api/outputs", headers={"Origin": "http://evil.example"})
     assert r.status_code == 200
 
 
@@ -876,12 +935,41 @@ def test_status_reports_active_run(tmp_path):
         backend="subscription",
         uploads_dir=tmp_path / "u",
     )
-    cc = TestClient(app)
+    cc = TestClient(app, base_url="http://localhost")
     cc.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     body = cc.get("/api/status").json()
     assert body["active"] is True
     assert body["pdf"].endswith("x.pdf")
     assert body["dry_run"] is True
+    gate.set()
+
+
+def test_status_reports_options_of_active_run(tmp_path):
+    # C2: nach Reattach (frisch geladene Seite waehrend ein Lauf aktiv ist)
+    # muss der Options-Header sich befuellen koennen -- /api/status braucht
+    # dafuer die Optionen des laufenden Lauf mit.
+    import threading
+
+    gate = threading.Event()
+
+    def slow_run(pdf, dry_run, register=None, options=None):
+        yield {"type": "started", "argv": ["slow"]}
+        gate.wait(timeout=5)
+        yield {"type": "exited", "returncode": 0}
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=slow_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+    )
+    cc = TestClient(app, base_url="http://localhost")
+    cc.post("/api/run", json={"pdf": str(pdf), "dry_run": True, "options": {"profile": "fast"}})
+    body = cc.get("/api/status").json()
+    assert body["options"] == {"profile": "fast"}
     gate.set()
 
 
@@ -908,7 +996,7 @@ def test_runs_endpoint_empty_when_no_runs_yet(tmp_path):
         uploads_dir=tmp_path / "u",
         runs_dir=tmp_path / "runs",
     )
-    r = TestClient(app).get("/api/runs")
+    r = TestClient(app, base_url="http://localhost").get("/api/runs")
     assert r.status_code == 200
     assert r.json() == {"runs": []}
 
@@ -926,7 +1014,7 @@ def test_run_completion_writes_history_record(tmp_path):
         runs_dir=tmp_path / "runs",
         clock=_clock_seq(1000.0, 1010.0),
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     c.post(
         "/api/run",
         json={"pdf": str(pdf), "dry_run": True, "options": {"backend": "litellm", "profile": "fast"}},
@@ -958,7 +1046,7 @@ def test_run_without_options_writes_empty_options_in_record(tmp_path):
         uploads_dir=tmp_path / "u",
         runs_dir=tmp_path / "runs",
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     _drain(c)
     record = c.get("/api/runs").json()["runs"][0]
@@ -1000,7 +1088,7 @@ def test_run_summary_event_lands_in_history_record(tmp_path):
         uploads_dir=tmp_path / "u",
         runs_dir=tmp_path / "runs",
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     _drain(c)
     record = c.get("/api/runs").json()["runs"][0]
@@ -1021,7 +1109,7 @@ def test_run_without_summary_event_omits_duration_and_tokens_in_record(tmp_path)
         uploads_dir=tmp_path / "u",
         runs_dir=tmp_path / "runs",
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     _drain(c)
     record = c.get("/api/runs").json()["runs"][0]
@@ -1044,7 +1132,7 @@ def test_run_crash_still_writes_history_record_with_null_rc(tmp_path):
         uploads_dir=tmp_path / "u",
         runs_dir=tmp_path / "runs",
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     _drain(c)
     record = c.get("/api/runs").json()["runs"][0]
@@ -1063,7 +1151,7 @@ def test_runs_endpoint_lists_newest_first(tmp_path):
         runs_dir=tmp_path / "runs",
         clock=_clock_seq(100.0, 200.0, 300.0, 400.0),
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     _drain(c)
     c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
@@ -1083,7 +1171,7 @@ def test_run_detail_endpoint_returns_full_record(tmp_path):
         uploads_dir=tmp_path / "u",
         runs_dir=tmp_path / "runs",
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     _drain(c)
     listed = c.get("/api/runs").json()["runs"][0]
@@ -1100,7 +1188,7 @@ def test_run_detail_endpoint_missing_run_id_returns_404(tmp_path):
         uploads_dir=tmp_path / "u",
         runs_dir=tmp_path / "runs",
     )
-    r = TestClient(app).get("/api/runs/20240101000000-doesnotexist")
+    r = TestClient(app, base_url="http://localhost").get("/api/runs/20240101000000-doesnotexist")
     assert r.status_code == 404
 
 
@@ -1113,7 +1201,7 @@ def test_run_detail_endpoint_rejects_invalid_run_id_shapes(tmp_path):
         uploads_dir=tmp_path / "u",
         runs_dir=tmp_path / "runs",
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     for bad in ("UPPERCASE", "with%20space", "semi;colon", "dot.dot", "a%2e%2e"):
         r = c.get(f"/api/runs/{bad}")
         assert r.status_code in (404, 422), (bad, r.status_code)
@@ -1132,7 +1220,7 @@ def test_run_detail_endpoint_rejects_path_traversal_run_id(tmp_path):
         uploads_dir=tmp_path / "u",
         runs_dir=tmp_path / "runs",
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     r = c.get("/api/runs/..%2Fsecret")
     assert r.status_code in (404, 422)
 
@@ -1166,7 +1254,7 @@ def test_runs_endpoint_prunes_records_beyond_50(tmp_path):
         runs_dir=runs_dir,
         clock=_clock_seq(1000.0, 2000.0),
     )
-    c = TestClient(app)
+    c = TestClient(app, base_url="http://localhost")
     c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     _drain(c)
     assert len(list(runs_dir.glob("*.json"))) == 50
@@ -1185,7 +1273,7 @@ def test_run_history_survives_simulated_gui_restart(tmp_path):
         runs_dir=runs_dir,
         clock=_clock_seq(1.0, 2.0, 3.0, 4.0),
     )
-    ca = TestClient(app_a)
+    ca = TestClient(app_a, base_url="http://localhost")
     ca.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
     _drain(ca)
     ca.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
@@ -1200,7 +1288,7 @@ def test_run_history_survives_simulated_gui_restart(tmp_path):
         uploads_dir=tmp_path / "u",
         runs_dir=runs_dir,
     )
-    runs = TestClient(app_b).get("/api/runs").json()["runs"]
+    runs = TestClient(app_b, base_url="http://localhost").get("/api/runs").json()["runs"]
     assert len(runs) == 2
 
 
@@ -1214,7 +1302,7 @@ def test_runs_endpoints_have_no_origin_check(tmp_path):
         uploads_dir=tmp_path / "u",
         runs_dir=tmp_path / "runs",
     )
-    r = TestClient(app).get("/api/runs", headers={"Origin": "http://evil.example"})
+    r = TestClient(app, base_url="http://localhost").get("/api/runs", headers={"Origin": "http://evil.example"})
     assert r.status_code == 200
 
 
@@ -1232,14 +1320,14 @@ def _settings_app(tmp_path, **kwargs):
 
 
 def test_settings_empty_when_no_file_yet(tmp_path):
-    c = TestClient(_settings_app(tmp_path))
+    c = TestClient(_settings_app(tmp_path), base_url="http://localhost")
     r = c.get("/api/settings")
     assert r.status_code == 200
     assert r.json() == {}
 
 
 def test_settings_put_then_get_roundtrip(tmp_path):
-    c = TestClient(_settings_app(tmp_path))
+    c = TestClient(_settings_app(tmp_path), base_url="http://localhost")
     put = c.put(
         "/api/settings",
         json={"backend": "litellm", "profile": "fast", "no_llm": True, "dry_run": False},
@@ -1253,34 +1341,34 @@ def test_settings_persists_across_two_create_app_instances(tmp_path):
     # Simulierter GUI-Neustart: gleicher settings_path, frische App-Instanz.
     settings_path = tmp_path / "gui" / "settings.json"
     app_a = _settings_app(tmp_path, settings_path=settings_path)
-    TestClient(app_a).put("/api/settings", json={"backend": "litellm", "dry_run": False})
+    TestClient(app_a, base_url="http://localhost").put("/api/settings", json={"backend": "litellm", "dry_run": False})
 
     app_b = _settings_app(tmp_path, settings_path=settings_path)
-    r = TestClient(app_b).get("/api/settings")
+    r = TestClient(app_b, base_url="http://localhost").get("/api/settings")
     assert r.json() == {"backend": "litellm", "dry_run": False}
 
 
 def test_settings_put_unknown_key_returns_422(tmp_path):
-    c = TestClient(_settings_app(tmp_path))
+    c = TestClient(_settings_app(tmp_path), base_url="http://localhost")
     r = c.put("/api/settings", json={"foo": "bar"})
     assert r.status_code == 422
     assert "foo" in r.json()["error"]
 
 
 def test_settings_put_unknown_backend_value_returns_422(tmp_path):
-    c = TestClient(_settings_app(tmp_path))
+    c = TestClient(_settings_app(tmp_path), base_url="http://localhost")
     r = c.put("/api/settings", json={"backend": "openai-direct"})
     assert r.status_code == 422
 
 
 def test_settings_put_no_llm_wrong_type_returns_422(tmp_path):
-    c = TestClient(_settings_app(tmp_path))
+    c = TestClient(_settings_app(tmp_path), base_url="http://localhost")
     r = c.put("/api/settings", json={"no_llm": "yes"})
     assert r.status_code == 422
 
 
 def test_settings_put_rejects_cross_origin(tmp_path):
-    c = TestClient(_settings_app(tmp_path))
+    c = TestClient(_settings_app(tmp_path), base_url="http://localhost")
     r = c.put(
         "/api/settings",
         json={"backend": "litellm"},
@@ -1290,7 +1378,7 @@ def test_settings_put_rejects_cross_origin(tmp_path):
 
 
 def test_settings_get_has_no_origin_check(tmp_path):
-    c = TestClient(_settings_app(tmp_path))
+    c = TestClient(_settings_app(tmp_path), base_url="http://localhost")
     r = c.get("/api/settings", headers={"Origin": "http://evil.example"})
     assert r.status_code == 200
 
@@ -1299,7 +1387,7 @@ def test_settings_get_corrupt_file_returns_empty_with_warning(tmp_path):
     settings_path = tmp_path / "gui" / "settings.json"
     settings_path.parent.mkdir(parents=True)
     settings_path.write_text("{not valid json", encoding="utf-8")
-    c = TestClient(_settings_app(tmp_path, settings_path=settings_path))
+    c = TestClient(_settings_app(tmp_path, settings_path=settings_path), base_url="http://localhost")
     r = c.get("/api/settings")
     assert r.status_code == 200
     body = r.json()
@@ -1309,7 +1397,7 @@ def test_settings_get_corrupt_file_returns_empty_with_warning(tmp_path):
 
 
 def test_settings_put_replaces_full_object_no_merge(tmp_path):
-    c = TestClient(_settings_app(tmp_path))
+    c = TestClient(_settings_app(tmp_path), base_url="http://localhost")
     c.put("/api/settings", json={"backend": "litellm", "profile": "fast"})
     # Zweiter PUT ohne "profile" -> darf NICHT mit dem alten Wert gemergt werden.
     c.put("/api/settings", json={"backend": "litellm"})
@@ -1317,9 +1405,49 @@ def test_settings_put_replaces_full_object_no_merge(tmp_path):
     assert r.json() == {"backend": "litellm"}
 
 
+# --- S1: Host-Header-Allowlist (DNS-Rebinding-Schutz) ----------------------
+
+
+def test_foreign_host_header_rejected_with_400(tmp_path):
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+    )
+    c = TestClient(app, base_url="http://evil.example")
+    r = c.get("/api/doctor")
+    assert r.status_code == 400
+
+
+def test_localhost_host_header_still_allowed(tmp_path):
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+    )
+    c = TestClient(app, base_url="http://localhost")
+    assert c.get("/api/doctor").status_code == 200
+
+
+def test_127_0_0_1_host_header_still_allowed(tmp_path):
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+    )
+    c = TestClient(app, base_url="http://127.0.0.1")
+    assert c.get("/api/doctor").status_code == 200
+
+
 def test_settings_no_secrets_written_to_disk(tmp_path):
     settings_path = tmp_path / "gui" / "settings.json"
-    c = TestClient(_settings_app(tmp_path, settings_path=settings_path))
+    c = TestClient(_settings_app(tmp_path, settings_path=settings_path), base_url="http://localhost")
     c.put("/api/settings", json={"backend": "litellm", "profile": "fast", "no_llm": True, "dry_run": True})
     raw = settings_path.read_text(encoding="utf-8")
     assert set(json.loads(raw)) <= {"backend", "profile", "no_llm", "dry_run"}
