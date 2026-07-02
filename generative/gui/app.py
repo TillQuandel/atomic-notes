@@ -217,7 +217,7 @@ def _default_run_factory(pdf: str, dry_run: bool, register=None, options: dict |
 
 def create_app(
     *,
-    run_factory: Callable[[str, bool], Iterator[dict]] | None = None,
+    run_factory: Callable[..., Iterator[dict]] | None = None,  # (pdf, dry_run, register, options)
     pdf_dirs: list[Path] | None = None,
     vault_path: Path | None = None,
     backend: str | None = None,
