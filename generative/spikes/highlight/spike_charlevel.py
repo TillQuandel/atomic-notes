@@ -13,6 +13,7 @@ SOURCE_MAP = {
     "Schlebbe und Greifeneder - 2022 - Information Need, Informationsbedarf und -bedürfnis.pdf": "Schlebbe und Greifeneder - 2022 - Information Need, Informationsbedarf und -bedürfnis.pdf",
 }
 
+
 def page_chars(page):
     """Liste von (char, fitz.Rect) in Lesereihenfolge aus rawdict, OHNE synthetische Spaces."""
     raw = page.get_text("rawdict")
@@ -24,8 +25,10 @@ def page_chars(page):
                     out.append((ch["c"], fitz.Rect(ch["bbox"])))
     return out
 
+
 def normalize_char(c):
     return c.lower()
+
 
 def char_level_match(page, quote, min_ratio=85):
     chars = page_chars(page)
@@ -40,7 +43,7 @@ def char_level_match(page, quote, min_ratio=85):
     # 1) exakter Substring-Versuch (whitespace-frei)
     idx = page_str.find(q_str)
     if idx != -1:
-        matched = chars[idx: idx + len(q_str)]
+        matched = chars[idx : idx + len(q_str)]
         return matched, 100.0
 
     # 2) Fuzzy-Alignment per Sliding Window (Schrittweite 1, Fensterbreite = len(q_str) +-10%)
@@ -48,14 +51,15 @@ def char_level_match(page, quote, min_ratio=85):
     best_ratio, best_start = 0, None
     step = max(1, win // 20)
     for start in range(0, max(1, len(page_str) - win + 1), step):
-        window = page_str[start:start + win]
+        window = page_str[start : start + win]
         r = fuzz.ratio(q_str, window)
         if r > best_ratio:
             best_ratio, best_start = r, start
     if best_start is not None and best_ratio >= min_ratio:
-        matched = chars[best_start: best_start + win]
+        matched = chars[best_start : best_start + win]
         return matched, best_ratio
     return None
+
 
 def span_fill_rects(matched_chars):
     """Gruppiert matched chars nach Zeile (y-Bucket) und liefert pro Zeile eine
@@ -74,6 +78,7 @@ def span_fill_rects(matched_chars):
         y1 = max(r.y1 for r in rs)
         rects.append(fitz.Rect(x0, y0, x1, y1))
     return rects
+
 
 def main():
     with open(r"C:/Users/tillq/.claude/jobs/d40fcd3a/tmp/quotes.json", encoding="utf-8") as f:
@@ -102,18 +107,30 @@ def main():
                 rects = span_fill_rects(m[0])
                 found = {"page": p + 1, "ratio": m[1], "n_line_rects": len(rects)}
                 break
-        results.append({"note": q["note"], "source": src, "claimed_page": page_claim,
-                         "quote_preview": q["quote"][:50], "char_level": found})
+        results.append(
+            {
+                "note": q["note"],
+                "source": src,
+                "claimed_page": page_claim,
+                "quote_preview": q["quote"][:50],
+                "char_level": found,
+            }
+        )
 
     n = len(results)
     hits = [r for r in results if r["char_level"]]
     print(f"Gemessen: {n}")
-    print(f"Char-Level-Treffer: {len(hits)} ({len(hits)/n*100:.1f}%)")
-    print(f"Weiterhin NICHT gefunden: {n - len(hits)} ({(n-len(hits))/n*100:.1f}%)")
+    print(f"Char-Level-Treffer: {len(hits)} ({len(hits) / n * 100:.1f}%)")
+    print(f"Weiterhin NICHT gefunden: {n - len(hits)} ({(n - len(hits)) / n * 100:.1f}%)")
     print()
     for r in results:
-        status = f"OK ratio={r['char_level']['ratio']:.0f} lines={r['char_level']['n_line_rects']}" if r["char_level"] else "MISS"
+        status = (
+            f"OK ratio={r['char_level']['ratio']:.0f} lines={r['char_level']['n_line_rects']}"
+            if r["char_level"]
+            else "MISS"
+        )
         print(f"[{status:30s}] {r['source'][:35]:35s} S.{r['claimed_page']:>3} {r['quote_preview']}")
+
 
 if __name__ == "__main__":
     main()

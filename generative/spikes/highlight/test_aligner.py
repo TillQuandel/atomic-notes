@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """TDD-Tests fuer die reine Zitat->Geometrie-Alignment-Logik (kein PDF-I/O)."""
+
 import aligner
 
 
@@ -8,10 +9,7 @@ def test_strip_editorial_brackets_removes_capitalization_bracket():
 
 
 def test_strip_editorial_brackets_removes_inserted_referent():
-    assert (
-        aligner.strip_editorial_brackets("in [asynchronous discussions] we")
-        == "in asynchronous discussions we"
-    )
+    assert aligner.strip_editorial_brackets("in [asynchronous discussions] we") == "in asynchronous discussions we"
 
 
 def test_normalize_resolves_fi_ligature():
@@ -55,8 +53,7 @@ def test_locate_returns_bboxes_of_verbatim_quote():
 
 def test_build_page_string_dehyphenates_word_split_across_three_lines():
     # Gegen Mistral-Cross-Review-Behauptung: 3-fach-Split muss zusammenkleben.
-    tokens = [("ar-", (0, 0, 5, 8)), ("chitec-", (0, 10, 20, 18)),
-              ("ture", (0, 20, 30, 28))]
+    tokens = [("ar-", (0, 0, 5, 8)), ("chitec-", (0, 10, 20, 18)), ("ture", (0, 20, 30, 28))]
     page_str, _ = aligner.build_page_string(tokens)
     assert page_str == "architecture"
 

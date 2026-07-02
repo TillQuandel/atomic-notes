@@ -22,6 +22,7 @@ die Figur-Fragmentierung trat nur auf der (falschen) Zitier-Seite auf.
 Aufruf:  python spike_align.py [--min-score S] [--min-ratio R]
                                [--present T] [--verbose]
 """
+
 import argparse
 import json
 import os
@@ -55,6 +56,7 @@ def load_quotes(path):
 
 # --- Page-Orakel (Verifier-Simulation) -------------------------------------
 
+
 def _page_charstream(page):
     raw = page.get_text("rawdict")
     chars = []
@@ -83,6 +85,7 @@ def find_page(doc, quote):
 
 # --- Word-Alignment (der Spike selbst) -------------------------------------
 
+
 def page_tokens(page):
     """Stufe 0 column_boxes + native words-Reihenfolge je Spalte."""
     words = page.get_text("words")  # (x0,y0,x1,y1,text,block,line,wno)
@@ -107,8 +110,7 @@ def page_tokens(page):
 
 
 def _norm_nospace(s):
-    return re.sub(r"\s+", "", aligner.normalize_text(
-        aligner.strip_editorial_brackets(s))).replace("-", "")
+    return re.sub(r"\s+", "", aligner.normalize_text(aligner.strip_editorial_brackets(s))).replace("-", "")
 
 
 def geometry_matches(page, rects, quote, min_sim=95):
@@ -125,8 +127,7 @@ def localize(doc, page_1based, quote, min_score, min_ratio):
     """Gibt einen Hit NUR zurueck, wenn (1) das Alignment eine Stelle findet UND
     (2) der Text unter den Bboxes das Zitat reproduziert (Geometrie-Beweis)."""
     page = doc[page_1based - 1]
-    hit = aligner.locate(quote, page_tokens(page),
-                         min_score=min_score, min_len_ratio=min_ratio)
+    hit = aligner.locate(quote, page_tokens(page), min_score=min_score, min_len_ratio=min_ratio)
     if hit and not geometry_matches(page, hit["rects"], quote):
         hit = {**hit, "geometry_ok": False}
         return None  # Alignment-Score hoch, aber Bbox deckt falschen Text -> verwerfen
@@ -134,6 +135,7 @@ def localize(doc, page_1based, quote, min_score, min_ratio):
 
 
 # --- Harness ----------------------------------------------------------------
+
 
 def evaluate(quotes, docs, args):
     rows = []
@@ -149,11 +151,17 @@ def evaluate(quotes, docs, args):
         hit = None
         if page is not None:
             hit = localize(doc, page, q["quote"], args.min_score, args.min_ratio)
-        rows.append({
-            "source": src[:26], "cite": q["page"], "page": page,
-            "char_score": char_score, "present": present, "hit": hit,
-            "quote": q["quote"][:52],
-        })
+        rows.append(
+            {
+                "source": src[:26],
+                "cite": q["page"],
+                "page": page,
+                "char_score": char_score,
+                "present": present,
+                "hit": hit,
+                "quote": q["quote"][:52],
+            }
+        )
     return rows
 
 
@@ -161,8 +169,9 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--min-score", type=float, default=96.0)
     ap.add_argument("--min-ratio", type=float, default=0.9)
-    ap.add_argument("--present", type=float, default=97.0,
-                    help="Char-Score-Schwelle, ab der ein Zitat als verbatim-praesent gilt")
+    ap.add_argument(
+        "--present", type=float, default=97.0, help="Char-Score-Schwelle, ab der ein Zitat als verbatim-praesent gilt"
+    )
     ap.add_argument("--verbose", action="store_true")
     args = ap.parse_args()
 
@@ -176,25 +185,27 @@ def main():
     absent = [r for r in real if not r["present"]]
     gaps = [r for r in present if not r["hit"]]
 
-    print(f"=== Alignment-Spike (min_score={args.min_score} min_ratio={args.min_ratio} "
-          f"present>={args.present}) ===")
-    print(f"Zitate gesamt: {len(real)}  |  verbatim-praesent: {len(present)}  "
-          f"|  nicht-verbatim (upstream-Sidecar): {len(absent)}")
+    print(f"=== Alignment-Spike (min_score={args.min_score} min_ratio={args.min_ratio} present>={args.present}) ===")
+    print(
+        f"Zitate gesamt: {len(real)}  |  verbatim-praesent: {len(present)}  "
+        f"|  nicht-verbatim (upstream-Sidecar): {len(absent)}"
+    )
     print(f"\nHIGHLIGHT-GEOMETRIE auf praesenten Zitaten:")
-    print(f"  lokalisiert: {len(present)-len(gaps)}/{len(present)}")
+    print(f"  lokalisiert: {len(present) - len(gaps)}/{len(present)}")
     if present:
-        print(f"  ECHTE LUECKE: {len(gaps)}/{len(present)} = {len(gaps)/len(present)*100:.1f}%")
+        print(f"  ECHTE LUECKE: {len(gaps)}/{len(present)} = {len(gaps) / len(present) * 100:.1f}%")
 
     if near:
         false_hits = [r for r in near if r["hit"]]
         print(f"\nNEAR-MISS (Falsch-Treffer-Test): {len(near)} Zitate")
-        print(f"  vom Orakel als nicht-praesent verworfen: "
-              f"{sum(1 for r in near if not r['present'])}")
+        print(f"  vom Orakel als nicht-praesent verworfen: {sum(1 for r in near if not r['present'])}")
         print(f"  FALSCH-TREFFER (Alignment highlightet Falsches): {len(false_hits)}")
         for r in false_hits:
             h = r["hit"]
-            print(f"    !! {r['source']} orakel-S.{r['page']} char={r['char_score']:.0f} "
-                  f"score={h['score']:.0f} ratio={h['len_ratio']:.2f} -- {r['quote']}")
+            print(
+                f"    !! {r['source']} orakel-S.{r['page']} char={r['char_score']:.0f} "
+                f"score={h['score']:.0f} ratio={h['len_ratio']:.2f} -- {r['quote']}"
+            )
 
     print(f"\n--- Echte Luecken (praesent, aber nicht lokalisiert) ---")
     for r in gaps:
@@ -209,8 +220,10 @@ def main():
         for r in present:
             if r["hit"]:
                 h = r["hit"]
-                print(f"  OK S.{r['page']:>3} score={h['score']:.0f} ratio={h['len_ratio']:.2f} "
-                      f"words={len(h['word_indices'])} char={r['char_score']:.0f} -- {r['quote']}")
+                print(
+                    f"  OK S.{r['page']:>3} score={h['score']:.0f} ratio={h['len_ratio']:.2f} "
+                    f"words={len(h['word_indices'])} char={r['char_score']:.0f} -- {r['quote']}"
+                )
 
 
 if __name__ == "__main__":

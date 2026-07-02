@@ -49,6 +49,7 @@ Usage
       print(page.get_text(clip=rect, sort=True))
   ----------------------------------------------------------------------------------
 """
+
 import os
 import sys
 import fitz
@@ -84,9 +85,7 @@ def column_boxes(page, footer_margin=50, header_margin=50, no_image_text=True):
             True if 'temp' has no intersections with items of 'bboxlist'.
         """
         for b in bboxlist:
-            if not intersects_bboxes(temp, vert_bboxes) and (
-                b == None or b == bb or (temp & b).is_empty
-            ):
+            if not intersects_bboxes(temp, vert_bboxes) and (b == None or b == bb or (temp & b).is_empty):
                 continue
             return False
 
@@ -172,9 +171,7 @@ def column_boxes(page, footer_margin=50, header_margin=50, no_image_text=True):
             b1 = nblocks[i]
             if abs(b1.y1 - y1) > 10:  # different bottom
                 if i1 > i0:  # segment length > 1? Sort it!
-                    nblocks[i0 : i1 + 1] = sorted(
-                        nblocks[i0 : i1 + 1], key=lambda b: b.x0
-                    )
+                    nblocks[i0 : i1 + 1] = sorted(nblocks[i0 : i1 + 1], key=lambda b: b.x0)
                 y1 = b1.y1  # store new bottom value
                 i0 = i  # store its start index
             i1 = i  # store current index
@@ -230,9 +227,7 @@ def column_boxes(page, footer_margin=50, header_margin=50, no_image_text=True):
     bboxes.sort(key=lambda k: (in_bbox(k, path_bboxes), k.y0, k.x0))
 
     # Extend bboxes to the right where possible
-    bboxes = extend_right(
-        bboxes, int(page.rect.width), path_bboxes, vert_bboxes, img_bboxes
-    )
+    bboxes = extend_right(bboxes, int(page.rect.width), path_bboxes, vert_bboxes, img_bboxes)
 
     # immediately return of no text found
     if bboxes == []:

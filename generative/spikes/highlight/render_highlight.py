@@ -4,12 +4,13 @@ und rendert die betroffenen Seiten als PNG zur visuellen Kontrolle.
 
 Nur Spike-Beleg -- KEIN Pipeline-Code. Aufruf: python render_highlight.py <source-key>
 """
+
 import os
 import sys
 
 import fitz
 
-from spike_align import (LIT, SOURCE_MAP, find_page, load_quotes, localize)
+from spike_align import LIT, SOURCE_MAP, find_page, load_quotes, localize
 
 OUT = os.path.dirname(os.path.abspath(__file__))
 
@@ -19,8 +20,7 @@ def main():
     src = next(s for s in SOURCE_MAP if key in s)
     doc = fitz.open(f"{LIT}/{SOURCE_MAP[src]}")
 
-    quotes = [q for q in load_quotes(os.path.join(OUT, "quotes.json"))
-              if q["source"] == src]
+    quotes = [q for q in load_quotes(os.path.join(OUT, "quotes.json")) if q["source"] == src]
     touched = set()
     n_hl = 0
     for q in quotes:
@@ -45,7 +45,7 @@ def main():
     # betroffene Seiten als PNG rendern
     for pno in sorted(touched)[:3]:
         pix = doc[pno].get_pixmap(dpi=130)
-        png = os.path.join(OUT, f"_hl_{key}_p{pno+1}.png")
+        png = os.path.join(OUT, f"_hl_{key}_p{pno + 1}.png")
         pix.save(png)
         print(f"  render: {png}")
     doc.close()

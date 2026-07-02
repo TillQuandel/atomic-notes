@@ -14,19 +14,23 @@ SOURCE_MAP = {
     "Schlebbe und Greifeneder - 2022 - Information Need, Informationsbedarf und -bedürfnis.pdf": "Schlebbe und Greifeneder - 2022 - Information Need, Informationsbedarf und -bedürfnis.pdf",
 }
 
+
 def normalize(s):
     s = s.replace("--", " ").replace("–", " ").replace("—", " ")
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
+
 def sig_words(s):
     words = re.findall(r"[A-Za-zÄÖÜäöüß']{3,}", s)
     return [w.lower() for w in words]
+
 
 def try_search_for(page, quote):
     flags = fitz.TEXT_DEHYPHENATE | fitz.TEXT_INHIBIT_SPACES
     hits = page.search_for(normalize(quote), flags=flags)
     return hits
+
 
 def try_wordlist_sequence(page, quote, min_ratio=80, min_coverage=0.7):
     words = page.get_text("words")  # x0,y0,x1,y1,word,block,line,wno
@@ -58,6 +62,7 @@ def try_wordlist_sequence(page, quote, min_ratio=80, min_coverage=0.7):
     if coverage >= min_coverage and matched_rects:
         return matched_rects, coverage
     return None
+
 
 def main():
     with open(r"C:/Users/tillq/.claude/jobs/d40fcd3a/tmp/quotes.json", encoding="utf-8") as f:
@@ -104,11 +109,16 @@ def main():
                     found_stage = f"wordlist(cov={wl[1]:.2f})"
                     found_page = p + 1
                     break
-        results.append({
-            "note": q["note"], "source": src, "claimed_page": page_claim,
-            "status": found_stage or "NOT_FOUND", "found_page": found_page,
-            "quote_preview": q["quote"][:60],
-        })
+        results.append(
+            {
+                "note": q["note"],
+                "source": src,
+                "claimed_page": page_claim,
+                "status": found_stage or "NOT_FOUND",
+                "found_page": found_page,
+                "quote_preview": q["quote"][:60],
+            }
+        )
 
     total = len(results)
     by_status_bucket = {"search_for": 0, "wordlist": 0, "not_found": 0, "skipped": 0}
@@ -131,8 +141,9 @@ def main():
     locatable = by_status_bucket["search_for"] + by_status_bucket["wordlist"]
     measured = total - by_status_bucket["skipped"]
     if measured:
-        print(f"Locatable rate (of measured, n={measured}): {locatable/measured*100:.1f}%")
-        print(f"Gap rate (of measured): {by_status_bucket['not_found']/measured*100:.1f}%")
+        print(f"Locatable rate (of measured, n={measured}): {locatable / measured * 100:.1f}%")
+        print(f"Gap rate (of measured): {by_status_bucket['not_found'] / measured * 100:.1f}%")
+
 
 if __name__ == "__main__":
     main()

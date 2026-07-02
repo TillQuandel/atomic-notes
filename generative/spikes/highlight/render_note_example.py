@@ -6,13 +6,14 @@ Provenance-Info pro Annotation, Original nie mutiert -> neue Datei + Seiten-Rend
 
 Aufruf: python render_note_example.py "<Note-Dateiname.md>" [out-basename]
 """
+
 import os
 import sys
 from collections import defaultdict
 
 import fitz
 
-from spike_align import (LIT, SOURCE_MAP, find_page, load_quotes, localize)
+from spike_align import LIT, SOURCE_MAP, find_page, load_quotes, localize
 
 OUT = os.path.dirname(os.path.abspath(__file__))
 RENDER_DIR = "C:/tmp/render"
@@ -25,16 +26,16 @@ def merge_line_rects(rects):
         lines[round(fitz.Rect(r).y0, 0)].append(fitz.Rect(r))
     merged = []
     for _, rs in sorted(lines.items()):
-        merged.append(fitz.Rect(min(r.x0 for r in rs), min(r.y0 for r in rs),
-                                max(r.x1 for r in rs), max(r.y1 for r in rs)))
+        merged.append(
+            fitz.Rect(min(r.x0 for r in rs), min(r.y0 for r in rs), max(r.x1 for r in rs), max(r.y1 for r in rs))
+        )
     return merged
 
 
 def main():
     note = sys.argv[1]
     base = sys.argv[2] if len(sys.argv) > 2 else "note_example"
-    quotes = [q for q in load_quotes(os.path.join(OUT, "quotes.json"))
-              if q["note"] == note]
+    quotes = [q for q in load_quotes(os.path.join(OUT, "quotes.json")) if q["note"] == note]
     if not quotes:
         sys.exit(f"Keine Zitate fuer Note {note!r} im Testset.")
     src = quotes[0]["source"]
@@ -53,8 +54,10 @@ def main():
         annot.set_info(title="atomic-notes", content=f"{note} :: {q['quote'][:60]}")
         annot.update()
         touched[page_no] = touched.get(page_no, 0) + 1
-        print(f"  [Highlight] cite=S.{q['page']} -> gefunden PDF-S.{page_no} "
-              f"score={hit['score']:.0f} -- {q['quote'][:55]}")
+        print(
+            f"  [Highlight] cite=S.{q['page']} -> gefunden PDF-S.{page_no} "
+            f"score={hit['score']:.0f} -- {q['quote'][:55]}"
+        )
 
     out_pdf = os.path.join(RENDER_DIR, f"{base}.pdf")
     doc.save(out_pdf, garbage=3, deflate=True)

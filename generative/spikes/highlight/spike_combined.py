@@ -13,17 +13,21 @@ SOURCE_MAP = {
     "Schlebbe und Greifeneder - 2022 - Information Need, Informationsbedarf und -bedürfnis.pdf": "Schlebbe und Greifeneder - 2022 - Information Need, Informationsbedarf und -bedürfnis.pdf",
 }
 
+
 def strip_editorial_brackets(q):
     # "[T]his" -> "This"; "[asynchronous discussions]" -> "asynchronous discussions"
     return re.sub(r"\[([^\]]*)\]", r"\1", q)
+
 
 def try_search_for(page, quote):
     flags = fitz.TEXT_DEHYPHENATE | fitz.TEXT_INHIBIT_SPACES
     q = re.sub(r"\s+", " ", strip_editorial_brackets(quote)).strip()
     return page.search_for(q, flags=flags)
 
+
 def sig_words(s):
     return [w.lower() for w in re.findall(r"[A-Za-zÄÖÜäöüß']{3,}", s)]
+
 
 def try_wordlist_sequence(page, quote, min_ratio=80, min_coverage=0.7):
     words = page.get_text("words")
@@ -43,6 +47,7 @@ def try_wordlist_sequence(page, quote, min_ratio=80, min_coverage=0.7):
     cov = matched / len(q_sig)
     return cov if cov >= min_coverage else None
 
+
 def page_chars(page):
     raw = page.get_text("rawdict")
     out = []
@@ -52,6 +57,7 @@ def page_chars(page):
                 for ch in span.get("chars", []):
                     out.append(ch["c"].lower())
     return out
+
 
 def try_char_level(page, quote, min_score=82):
     chars = page_chars(page)
@@ -66,6 +72,7 @@ def try_char_level(page, quote, min_score=82):
     if res.score >= min_score:
         return res.score
     return None
+
 
 def main():
     with open(r"C:/Users/tillq/.claude/jobs/d40fcd3a/tmp/quotes.json", encoding="utf-8") as f:
@@ -101,21 +108,30 @@ def main():
                 if try_char_level(doc[p], q["quote"]):
                     methods_hit.append("char_level")
                     break
-        results.append({"note": q["note"], "source": src[:30], "page": q["page"],
-                         "quote": q["quote"][:45], "hit": methods_hit[0] if methods_hit else "MISS"})
+        results.append(
+            {
+                "note": q["note"],
+                "source": src[:30],
+                "page": q["page"],
+                "quote": q["quote"][:45],
+                "hit": methods_hit[0] if methods_hit else "MISS",
+            }
+        )
 
     n = len(results)
     from collections import Counter
+
     c = Counter(r["hit"] for r in results)
     print(f"Gemessen: {n}")
     for k, v in c.items():
-        print(f"  {k}: {v} ({v/n*100:.1f}%)")
+        print(f"  {k}: {v} ({v / n * 100:.1f}%)")
     miss = c.get("MISS", 0)
-    print(f"\nGesamt lokalisierbar: {n-miss}/{n} = {(n-miss)/n*100:.1f}%")
-    print(f"Gap-Rate: {miss/n*100:.1f}%\n")
+    print(f"\nGesamt lokalisierbar: {n - miss}/{n} = {(n - miss) / n * 100:.1f}%")
+    print(f"Gap-Rate: {miss / n * 100:.1f}%\n")
     for r in results:
         if r["hit"] == "MISS":
             print(f"MISS: {r['source']} S.{r['page']} -- {r['quote']}")
+
 
 if __name__ == "__main__":
     main()
