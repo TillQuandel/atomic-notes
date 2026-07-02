@@ -201,6 +201,82 @@ async function loadOutputs() {
   } catch { }
 }
 
+// --- Verlauf (P4: GET /api/runs, read-only Ergebnis-Sektion) --------------
+
+function formatHistoryDate(ts) {
+  if (!ts) return "?";
+  return new Date(ts * 1000).toLocaleString("de-DE");
+}
+
+function baseName(p) {
+  return (p || "").split(/[\\/]/).pop() || "?";
+}
+
+function historyOptionsShort(options) {
+  if (!options || Object.keys(options).length === 0) return "Server-Default";
+  const parts = [];
+  if (options.backend) parts.push(`Backend: ${options.backend}`);
+  if (options.profile) parts.push(`Profil: ${options.profile}`);
+  if (options.no_llm) parts.push("ohne LLM");
+  return parts.length ? parts.join(" · ") : "Server-Default";
+}
+
+function renderHistoryResults(record) {
+  // Read-only: laedt die bestehende Ergebnis-Sektion aus einem historischen
+  // Record statt aus der aktuellen RunSession — reine Anzeige, kein Re-Run.
+  // textContent escaped selbst — kein escapeHtml noetig (sonst erscheinen Entities literal).
+  $("results-h").textContent = `Verlauf: ${baseName(record.source_pdf)} · ${formatHistoryDate(record.finished_at)}`;
+  $("results-section").hidden = false;
+  $("results-list").innerHTML = "";
+  // ZIP-Endpunkt bezieht sich auf die aktuelle RunSession, nicht auf diesen
+  // historischen Lauf — hier verstecken statt falscher Inhalte anzubieten.
+  $("download-all").hidden = true;
+  const notes = record.notes || [];
+  const hasItems = notes.length > 0;
+  $("results-empty").style.display = hasItems ? "none" : "block";
+  $("results-empty").textContent = hasItems ? "" : "Keine Notes in diesem Lauf.";
+  for (const item of notes) addResultCard(item);
+  $("results-section").scrollIntoView({ behavior: "smooth", block: "start" });
+}
+
+function addHistoryEntry(record) {
+  const li = document.createElement("li");
+  li.className = "preview-card history-card";
+  li.tabIndex = 0;
+  li.setAttribute("role", "button");
+  const rcKnown = record.rc !== null && record.rc !== undefined;
+  const rcOk = record.rc === 0;
+  const rcClass = rcKnown ? (rcOk ? "ok" : "warn") : "warn";
+  const rcLabel = !rcKnown ? "abgebrochen/Fehler" : rcOk ? "erfolgreich" : `Fehlercode ${record.rc}`;
+  const notesCount = (record.notes || []).length;
+  li.innerHTML = `
+    <div class="title">${escapeHtml(baseName(record.source_pdf))}</div>
+    <div class="meta">
+      <span class="hint">${formatHistoryDate(record.finished_at)}</span>
+      <span class="badge">${record.dry_run ? "Vorschau" : "Geschrieben"}</span>
+      <span class="badge ${rcClass}">${rcLabel}</span>
+      <span class="badge">${notesCount} Notes</span>
+    </div>
+    <div class="hint">${escapeHtml(historyOptionsShort(record.options))}</div>`;
+  const open = () => renderHistoryResults(record);
+  li.addEventListener("click", open);
+  li.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
+  });
+  $("history-list").appendChild(li);
+}
+
+async function loadHistory() {
+  try {
+    const r = await fetch("/api/runs");
+    if (!r.ok) return;
+    const { runs } = await r.json();
+    $("history-list").innerHTML = "";
+    $("history-empty").style.display = runs.length ? "none" : "block";
+    for (const record of runs) addHistoryEntry(record);
+  } catch { }
+}
+
 function logLine(text) {
   const el = $("log");
   el.textContent += text + "\n";
@@ -240,6 +316,7 @@ function startStream() {
     if (userCancelled) { markStageError(activeStage); logLine("■ Lauf abgebrochen."); }
     else if (rc === 0) { setStage(99); logLine("● Lauf beendet."); loadOutputs(); }
     else { markStageError(activeStage); logLine(`✗ Lauf mit Fehlercode ${rc} beendet.`); }
+    loadHistory();
     close();
   });
   es.addEventListener("error", (e) => {
@@ -404,6 +481,7 @@ document.addEventListener("DOMContentLoaded", () => {
   updateModeHint();
   wireUpload();
   attachIfRunActive();
+  loadHistory();
   $("dry-run").addEventListener("change", updateModeHint);
 
   $("run-form").addEventListener("submit", async (e) => {

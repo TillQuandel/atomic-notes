@@ -13,7 +13,9 @@ from __future__ import annotations
 
 import io
 import json
+import logging
 import threading
+import time
 import zipfile
 from collections.abc import Iterator, Callable
 from pathlib import Path
@@ -21,10 +23,21 @@ from pathlib import Path
 from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
-from generative.gui import runner
+from generative.gui import run_history, runner
 from generative.runtime_config import PRESETS
 
+logger = logging.getLogger(__name__)
+
 _STATIC = Path(__file__).parent / "static"
+
+# P4 (Run-Historie): Default-Ablageort fuer Lauf-Records — Modul-Konstante
+# (statt Inline-Default in create_app), damit Tests sie isoliert per
+# monkeypatch auf ein tmp_path umbiegen koennen (s. tests/conftest.py), ohne
+# jeden bestehenden create_app(...)-Aufruf einzeln anzufassen.
+_DEFAULT_RUNS_DIR = Path(__file__).resolve().parents[1] / ".cache" / "gui" / "runs"
+
+# P4: mehr als so viele Records im runs_dir -> aelteste werden geloescht.
+_MAX_RUN_RECORDS = 50
 
 # Endungen, die als „PDF-Kandidat" gelistet werden.
 _PDF_GLOB = "*.pdf"
@@ -170,9 +183,18 @@ class RunSession:
         self.cancelled = False
         self.pdf: str | None = None
         self.dry_run: bool | None = None
+        self.options: dict = {}
         self._proc = None  # vom Runner registriertes Popen-Handle (für Cancel)
         self._lock = threading.Lock()
         self._thread: threading.Thread | None = None
+        self.started_at: float | None = None
+        # P4 (Run-Historie): vom Aufrufer (start_run-Handler) gesetzter Kontext
+        # fuer den Record-Write am Lauf-Ende. `runs_dir=None` deaktiviert das
+        # Schreiben (z.B. wenn RunSession direkt ohne GUI-Kontext genutzt wird).
+        self.vault_path: Path | None = None
+        self.preview_root: Path | None = None
+        self.runs_dir: Path | None = None
+        self.clock: Callable[[], float] = time.time
 
     def register_proc(self, proc) -> None:
         """Vom Runner aufgerufen, sobald der Subprocess läuft — ermöglicht Cancel."""
@@ -194,16 +216,53 @@ class RunSession:
                 pass
 
     def _consume(self, run_iter: Iterator[dict]) -> None:
+        self.started_at = self.clock()
         try:
             for ev in run_iter:
+                if ev.get("type") in ("exited", "error"):
+                    # Terminal-Event: Historie-Record SYNCHRON schreiben,
+                    # BEVOR das Event in `self.events` sichtbar wird. Sonst
+                    # kann ein Beobachter (SSE-Client via `_event_stream`,
+                    # der auf genau dieses Event wartet und dann sofort
+                    # zurueckkehrt) `/api/runs` abfragen, bevor der Record auf
+                    # Platte liegt — Race zwischen zwei Threads, `finished`
+                    # allein reicht nicht (der SSE-Stream endet bereits beim
+                    # Lesen des Terminal-Events, nicht erst bei `finished`).
+                    self._write_history_record(ev)
                 with self._lock:
                     self.events.append(ev)
         except Exception as exc:  # Lauf-Crash als error-Event sichtbar machen
+            err_ev = {"type": "error", "message": str(exc)}
+            self._write_history_record(err_ev)
             with self._lock:
-                self.events.append({"type": "error", "message": str(exc)})
+                self.events.append(err_ev)
         finally:
             with self._lock:
                 self.finished = True
+
+    def _write_history_record(self, terminal_ev: dict) -> None:
+        if self.runs_dir is None:
+            return
+        finished_at = self.clock()
+        rc = terminal_ev.get("returncode") if terminal_ev.get("type") == "exited" else None
+        notes = _output_items_from_events(
+            self.events, pdf=self.pdf, vault_path=self.vault_path, preview_root=self.preview_root
+        )
+        record = run_history.build_run_record(
+            run_id=run_history.make_run_id(finished_at),
+            started_at=self.started_at,
+            finished_at=finished_at,
+            source_pdf=self.pdf,
+            dry_run=self.dry_run,
+            options=self.options,
+            rc=rc,
+            notes=notes,
+        )
+        try:
+            run_history.write_run_record(record, self.runs_dir)
+            run_history.prune_old_records(self.runs_dir, keep=_MAX_RUN_RECORDS)
+        except OSError as exc:  # Historie darf einen Lauf nie zum Absturz bringen (L5: sichtbar, nicht still)
+            logger.warning("Konnte Run-Historie nicht schreiben: %s", exc)
 
     @property
     def active(self) -> bool:
@@ -225,6 +284,8 @@ def create_app(
     doctor_fn: Callable[[], list] | None = None,
     litellm_check_fn: Callable[[], object] | None = None,
     preview_root: Path | None = None,
+    runs_dir: Path | None = None,
+    clock: Callable[[], float] | None = None,
 ) -> FastAPI:
     run_factory = run_factory or _default_run_factory
     if doctor_fn is None:
@@ -236,6 +297,10 @@ def create_app(
     if preview_root is None:
         preview_root = Path(__file__).resolve().parents[1] / ".cache" / "eval" / "baseline"
     preview_root = Path(preview_root)
+    if runs_dir is None:
+        runs_dir = _DEFAULT_RUNS_DIR
+    runs_dir = Path(runs_dir)
+    clock = clock or time.time
 
     if pdf_dirs is None or vault_path is None or backend is None:
         from generative import config as _cfg
@@ -362,6 +427,12 @@ def create_app(
             session = RunSession()
             session.pdf = pdf
             session.dry_run = dry_run
+            session.options = options
+            # P4: Kontext fuer den Historie-Record am Lauf-Ende (s. RunSession._write_history_record).
+            session.vault_path = vault_path
+            session.preview_root = preview_root
+            session.runs_dir = runs_dir
+            session.clock = clock
             # Iterator MIT der Proc-Registrierung der Session erzeugen → Cancel
             # kann den Subprocess später terminieren.
             run_iter = run_factory(pdf, dry_run, session.register_proc, options)
@@ -461,6 +532,20 @@ def create_app(
                 zf.write(resolved, arcname=arcname)
         headers = {"Content-Disposition": 'attachment; filename="outputs.zip"'}
         return StreamingResponse(iter([buf.getvalue()]), media_type="application/zip", headers=headers)
+
+    @app.get("/api/runs")
+    def list_runs() -> JSONResponse:
+        """Run-Historie (P4), neueste zuerst, max. `_MAX_RUN_RECORDS`. Nur GET,
+        nicht mutierend -> kein Origin-Check (L4-Ausnahme, wie /api/outputs)."""
+        records = run_history.list_run_records(runs_dir, limit=_MAX_RUN_RECORDS)
+        return JSONResponse({"runs": records})
+
+    @app.get("/api/runs/{run_id}")
+    def get_run(run_id: str):
+        record = run_history.read_run_record(run_id, runs_dir)
+        if record is None:
+            return JSONResponse({"error": "Lauf nicht gefunden"}, status_code=404)
+        return JSONResponse(record)
 
     return app
 
