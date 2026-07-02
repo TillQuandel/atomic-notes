@@ -26,9 +26,7 @@ def build_argv(pdf_path: str, *, dry_run: bool, extra: list[str] | None = None) 
     return argv
 
 
-def build_run_spec(
-    pdf_path: str, *, dry_run: bool, options: dict | None = None
-) -> tuple[list[str], dict[str, str]]:
+def build_run_spec(pdf_path: str, *, dry_run: bool, options: dict | None = None) -> tuple[list[str], dict[str, str]]:
     """Uebersetzt bereits validierte Lauf-Einstellungen (P1) in argv + Env-Overrides.
 
     Erwartet normalisierte `options` (Server-seitig gegen die Whitelist geprueft,
