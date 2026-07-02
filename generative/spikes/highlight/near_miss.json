@@ -1,0 +1,88 @@
+[
+  {
+    "note": "NEAR-MISS fabricated",
+    "source": "Knowles - From Pedagogy to Andragogy.pdf",
+    "page": "5",
+    "quote": "Adult learners consistently outperform younger students in every measured cognitive domain across all disciplines.",
+    "kind": "fabricated-plausible"
+  },
+  {
+    "note": "NEAR-MISS fabricated",
+    "source": "Hrastinski - 2008 - Asynchronous and Synchronous E-Learning.pdf",
+    "page": "4",
+    "quote": "Asynchronous e-learning fully replaces the need for any real-time interaction between students and teachers.",
+    "kind": "fabricated-plausible"
+  },
+  {
+    "note": "NEAR-MISS fabricated",
+    "source": "Mahmood und University of the Punjab - 2016 - Do People Overestimate Their Information Literacy Skills A Systematic Review of Empirical Evidence.pdf",
+    "page": "8",
+    "quote": "Digital natives possess an innate and complete mastery of every modern information retrieval system.",
+    "kind": "fabricated-plausible"
+  },
+  {
+    "note": "NEAR-MISS cross-pdf",
+    "source": "Merrill - First principles of instruction.pdf",
+    "page": "3",
+    "quote": "Even if I cannot see the person, I write something more personal because I am in dialogue with them.",
+    "kind": "real-phrase-wrong-pdf"
+  },
+  {
+    "note": "NEAR-MISS cross-pdf",
+    "source": "Knowles - From Pedagogy to Andragogy.pdf",
+    "page": "6",
+    "quote": "Instruction is far more effective when it also engages the learner in a task-centered instructional strategy.",
+    "kind": "real-phrase-wrong-pdf"
+  },
+  {
+    "note": "NEAR-MISS stitched",
+    "source": "Knowles - From Pedagogy to Andragogy.pdf",
+    "page": "3",
+    "quote": "There is a distinct shift in emphasis in andragogy toward the transmittal techniques so prevalent in youth education.",
+    "kind": "reversed-meaning"
+  },
+  {
+    "note": "NEAR-MISS stitched",
+    "source": "Merrill - First principles of instruction.pdf",
+    "page": "3",
+    "quote": "Learning is promoted when existing knowledge is activated and the goal-oriented learners use education deliberately.",
+    "kind": "stitched-fragments"
+  },
+  {
+    "note": "NEAR-MISS generic",
+    "source": "Sühl-Strohmenger - 2008 - Informationsvermittlung. Neugier, Zweifel, Lehren, Lernen ….pdf",
+    "page": "2",
+    "quote": "Zusammenfassend hat dieses Kapitel die zentrale These zweifelsfrei und abschließend nachgewiesen.",
+    "kind": "fabricated-generic"
+  },
+  {
+    "note": "NEAR-MISS paraphrase",
+    "source": "Hrastinski - 2008 - Asynchronous and Synchronous E-Learning.pdf",
+    "page": "2",
+    "quote": "Loneliness during online study can be reduced through frequent and sustained personal contact with peers.",
+    "kind": "paraphrase-not-verbatim"
+  },
+  {
+    "note": "NEAR-MISS paraphrase",
+    "source": "Knowles - From Pedagogy to Andragogy.pdf",
+    "page": "5",
+    "quote": "It is a typical feature of growing up that a child gradually turns into a self-directed independent adult.",
+    "kind": "paraphrase-not-verbatim"
+  },
+  {
+    "note": "NEAR-MISS cross-pdf",
+    "source": "Schlebbe und Greifeneder - 2022 - Information Need, Informationsbedarf und -bedürfnis.pdf",
+    "page": "4",
+    "quote": "Als besonders selten adressierte Zielgruppen erweisen sich in der Auswertung die Lehrenden selbst.",
+    "kind": "reversed-meaning"
+  },
+  {
+    "note": "NEAR-MISS fabricated",
+    "source": "Merrill - First principles of instruction.pdf",
+    "page": "1",
+    "quote": "A principle is an unbreakable law of nature that determines every possible outcome of any instruction.",
+    "kind": "fabricated-plausible"
+  }
+]
+
+TOTAL: 12 quote blocks

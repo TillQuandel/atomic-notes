@@ -1,0 +1,371 @@
+[
+  {
+    "note": "Activation Phase (Merrill FPI).md",
+    "source": "Merrill - First principles of instruction.pdf",
+    "claimed_page": "3",
+    "status": "wordlist(cov=0.80)",
+    "found_page": 4,
+    "quote_preview": "Learning is promoted when existing knowledge is activated as"
+  },
+  {
+    "note": "Activation Phase (Merrill FPI).md",
+    "source": "Merrill - First principles of instruction.pdf",
+    "claimed_page": "3",
+    "status": "NOT_FOUND",
+    "found_page": null,
+    "quote_preview": "Much instructional practice concentrates primarily on the de"
+  },
+  {
+    "note": "Aktivierende Lehrverfahren.md",
+    "source": "Sühl-Strohmenger - 2008 - Informationsvermittlung. Neugier, Zweifel, Lehren, Lernen ….pdf",
+    "claimed_page": "5",
+    "status": "wordlist(cov=1.00)",
+    "found_page": 5,
+    "quote_preview": "Nach Paul Watzlawick beinhaltet der Konstruktivismus die ‚Un"
+  },
+  {
+    "note": "Andragogical Design Process.md",
+    "source": "Knowles - From Pedagogy to Andragogy.pdf",
+    "claimed_page": "24",
+    "status": "wordlist(cov=1.00)",
+    "found_page": 24,
+    "quote_preview": "[T]his andragogical process involves the following phases co"
+  },
+  {
+    "note": "Andragogical Design Process.md",
+    "source": "Knowles - From Pedagogy to Andragogy.pdf",
+    "claimed_page": "13",
+    "status": "NOT_FOUND",
+    "found_page": null,
+    "quote_preview": "There is a distinct shift in emphasis in andragogy away from"
+  },
+  {
+    "note": "Andragogy.md",
+    "source": "Knowles - From Pedagogy to Andragogy.pdf",
+    "claimed_page": "5",
+    "status": "wordlist(cov=1.00)",
+    "found_page": 5,
+    "quote_preview": "It is a normal aspect of the process of maturation for a per"
+  },
+  {
+    "note": "Andragogy.md",
+    "source": "Knowles - From Pedagogy to Andragogy.pdf",
+    "claimed_page": "6",
+    "status": "wordlist(cov=0.90)",
+    "found_page": 6,
+    "quote_preview": "As people grow and develop they accumulate an increasing res"
+  },
+  {
+    "note": "Application Phase (Merrill FPI).md",
+    "source": "Merrill - First principles of instruction.pdf",
+    "claimed_page": "3",
+    "status": "NOT_FOUND",
+    "found_page": null,
+    "quote_preview": "Learning is promoted when learners are required to use their"
+  },
+  {
+    "note": "Application Phase (Merrill FPI).md",
+    "source": "Merrill - First principles of instruction.pdf",
+    "claimed_page": "3",
+    "status": "NOT_FOUND",
+    "found_page": null,
+    "quote_preview": "Learning is promoted when learners are guided in their probl"
+  },
+  {
+    "note": "Application Phase (Merrill FPI).md",
+    "source": "Merrill - First principles of instruction.pdf",
+    "claimed_page": "3",
+    "status": "NOT_FOUND",
+    "found_page": null,
+    "quote_preview": "It is astounding that with this almost universal agreement o"
+  },
+  {
+    "note": "Asynchronous E-Learning.md",
+    "source": "Hrastinski - 2008 - Asynchronous and Synchronous E-Learning.pdf",
+    "claimed_page": "3",
+    "status": "search_for",
+    "found_page": 3,
+    "quote_preview": "In the [asynchronous discussions] it is easier to find some "
+  },
+  {
+    "note": "Asynchronous E-Learning.md",
+    "source": "Hrastinski - 2008 - Asynchronous and Synchronous E-Learning.pdf",
+    "claimed_page": "5",
+    "status": "wordlist(cov=0.83)",
+    "found_page": 4,
+    "quote_preview": "[A]synchronous e-learning better supports cognitive particip"
+  },
+  {
+    "note": "Cognitive und Personal Participation in E-Learning.md",
+    "source": "Hrastinski - 2008 - Asynchronous and Synchronous E-Learning.pdf",
+    "claimed_page": "4",
+    "status": "search_for",
+    "found_page": 4,
+    "quote_preview": "Even if I cannot see the person, I write so to speak to the "
+  },
+  {
+    "note": "Cognitive und Personal Participation in E-Learning.md",
+    "source": "Hrastinski - 2008 - Asynchronous and Synchronous E-Learning.pdf",
+    "claimed_page": "4",
+    "status": "NOT_FOUND",
+    "found_page": null,
+    "quote_preview": "A downside revealed in the interviews is that the focus is o"
+  },
+  {
+    "note": "Demonstration Phase (Merrill FPI).md",
+    "source": "Merrill - First principles of instruction.pdf",
+    "claimed_page": "6",
+    "status": "search_for",
+    "found_page": 6,
+    "quote_preview": "Instruction is far more effective when it also includes the "
+  },
+  {
+    "note": "Dunning-Kruger-Effekt in der Informationskompetenz.md",
+    "source": "Mahmood und University of the Punjab - 2016 - Do People Overestimate Their Information Literacy Skills A Systematic Review of Empirical Evidence.pdf",
+    "claimed_page": "8",
+    "status": "wordlist(cov=0.90)",
+    "found_page": 8,
+    "quote_preview": "individuals with belowproficient skills are unlikely to seek"
+  },
+  {
+    "note": "Dunning-Kruger-Effekt in der Informationskompetenz.md",
+    "source": "Mahmood und University of the Punjab - 2016 - Do People Overestimate Their Information Literacy Skills A Systematic Review of Empirical Evidence.pdf",
+    "claimed_page": "8",
+    "status": "wordlist(cov=1.00)",
+    "found_page": 8,
+    "quote_preview": "this assertion was a 'dangerous myth.' Digital familiarity a"
+  },
+  {
+    "note": "Experience as Learning Resource.md",
+    "source": "Knowles - From Pedagogy to Andragogy.pdf",
+    "claimed_page": "6",
+    "status": "wordlist(cov=0.90)",
+    "found_page": 6,
+    "quote_preview": "As people grow and develop they accumulate an increasing res"
+  },
+  {
+    "note": "Experience as Learning Resource.md",
+    "source": "Knowles - From Pedagogy to Andragogy.pdf",
+    "claimed_page": "6",
+    "status": "search_for",
+    "found_page": 6,
+    "quote_preview": "people attach more meaning to learning they gain from experi"
+  },
+  {
+    "note": "Integration Phase (Merrill FPI).md",
+    "source": "Merrill - First principles of instruction.pdf",
+    "claimed_page": "3",
+    "status": "NOT_FOUND",
+    "found_page": null,
+    "quote_preview": "Learning is promoted when learners are encouraged to integra"
+  },
+  {
+    "note": "Integration Phase (Merrill FPI).md",
+    "source": "Merrill - First principles of instruction.pdf",
+    "claimed_page": "3",
+    "status": "wordlist(cov=1.00)",
+    "found_page": 4,
+    "quote_preview": "The real motivation for learners is learning."
+  },
+  {
+    "note": "Kategoriale Bildung (Klafki).md",
+    "source": "Sühl-Strohmenger - 2008 - Informationsvermittlung. Neugier, Zweifel, Lehren, Lernen ….pdf",
+    "claimed_page": "2",
+    "status": "wordlist(cov=1.00)",
+    "found_page": 2,
+    "quote_preview": "Bildung ist kategorial in dem Sinne, dass dem Menschen sich "
+  },
+  {
+    "note": "MERGE - First Principles of Instruction.md",
+    "source": "Merrill - First principles of instruction.pdf",
+    "claimed_page": "1",
+    "status": "wordlist(cov=1.00)",
+    "found_page": 1,
+    "quote_preview": "A principle (basic method) is a relationship that is always "
+  },
+  {
+    "note": "MERGE - First Principles of Instruction.md",
+    "source": "Merrill - First principles of instruction.pdf",
+    "claimed_page": "2",
+    "status": "search_for",
+    "found_page": 2,
+    "quote_preview": "First principles of instruction are design oriented or presc"
+  },
+  {
+    "note": "MERGE - Forschungsströme der Information-Behavior-Forschung.md",
+    "source": "bates-2017.pdf",
+    "page": "1",
+    "quote": "Interest in this area developed out of several streams. Librarians wanted to understand library users better, government agencies wanted to understand how scientists and engineers used technical information in order to promote more rapid uptake of new research results, and social scientists generally were interested in the social uses of information in a variety of senses.",
+    "status": "SKIPPED_NO_PDF"
+  },
+  {
+    "note": "MERGE - Forschungsströme der Information-Behavior-Forschung.md",
+    "source": "bates-2017.pdf",
+    "page": "1",
+    "quote": "In comparison to other social and behavioral science fields, we are always looking for the red thread of information in the social texture of people's lives.",
+    "status": "SKIPPED_NO_PDF"
+  },
+  {
+    "note": "Metaebenen-Modell der Metadaten.md",
+    "source": "Assfalg - 2013 - Metadaten.pdf",
+    "page": "159",
+    "quote": "Für die Benutzer, die als Rechercheure nach Literatur suchen, sind diese Bibliotheksbestände in diesem Zusammenhang das Datenmaterial und die Datensätze des Online-Public-Access-Systems (OPAC) sind für die Bibliotheksbenutzer die Metadaten zum Datenmaterial.",
+    "status": "SKIPPED_NO_PDF"
+  },
+  {
+    "note": "Metaebenen-Modell der Metadaten.md",
+    "source": "Assfalg - 2013 - Metadaten.pdf",
+    "page": "159",
+    "quote": "In jedem konkreten Fall ist die Verwendung der Bezeichnung Daten oder Metadaten abhängig von dem Anwendungszweck bzw. der Perspektive.",
+    "status": "SKIPPED_NO_PDF"
+  },
+  {
+    "note": "MoC-Paradigmenwechsel in der Information-Behavior-Forschung.md",
+    "source": "Schlebbe und Greifeneder - 2022 - Information Need, Informationsbedarf und -bedürfnis.pdf",
+    "claimed_page": "4",
+    "status": "wordlist(cov=1.00)",
+    "found_page": 4,
+    "quote_preview": "[…] dass ein Großteil der frühen Studien einen systemorienti"
+  },
+  {
+    "note": "MoC-Paradigmenwechsel in der Information-Behavior-Forschung.md",
+    "source": "Schlebbe und Greifeneder - 2022 - Information Need, Informationsbedarf und -bedürfnis.pdf",
+    "claimed_page": "5",
+    "status": "search_for",
+    "found_page": 5,
+    "quote_preview": "Als besonders häufig adressierte Zielgruppen der Information"
+  },
+  {
+    "note": "Problem-centered Learning Orientation.md",
+    "source": "Knowles - From Pedagogy to Andragogy.pdf",
+    "claimed_page": "6",
+    "status": "wordlist(cov=0.84)",
+    "found_page": 6,
+    "quote_preview": "People are ready to learn something when they experience a n"
+  },
+  {
+    "note": "Problem-centered Learning Orientation.md",
+    "source": "Knowles - From Pedagogy to Andragogy.pdf",
+    "claimed_page": "18",
+    "status": "search_for",
+    "found_page": 18,
+    "quote_preview": "Because adult learners tend to be problem-centered in their "
+  },
+  {
+    "note": "Pädagogisches Modell.md",
+    "source": "Knowles - From Pedagogy to Andragogy.pdf",
+    "claimed_page": "3",
+    "status": "search_for",
+    "found_page": 3,
+    "quote_preview": "Obviously, they were feeling guilty because they had no theo"
+  },
+  {
+    "note": "Pädagogisches Modell.md",
+    "source": "Knowles - From Pedagogy to Andragogy.pdf",
+    "claimed_page": "3",
+    "status": "NOT_FOUND",
+    "found_page": null,
+    "quote_preview": "The first,... the goal-oriented, are those who use education"
+  },
+  {
+    "note": "Readiness to Learn (Andragogy).md",
+    "source": "Knowles - From Pedagogy to Andragogy.pdf",
+    "claimed_page": "6",
+    "status": "search_for",
+    "found_page": 6,
+    "quote_preview": "People become ready to learn something when they experience "
+  },
+  {
+    "note": "Readiness to Learn (Andragogy).md",
+    "source": "Knowles - From Pedagogy to Andragogy.pdf",
+    "claimed_page": "6",
+    "status": "wordlist(cov=1.00)",
+    "found_page": 6,
+    "quote_preview": "The educator has a responsibility to create conditions and p"
+  },
+  {
+    "note": "Self-directed Learning.md",
+    "source": "Knowles - From Pedagogy to Andragogy.pdf",
+    "claimed_page": "8",
+    "status": "wordlist(cov=0.98)",
+    "found_page": 8,
+    "quote_preview": "The problem arises when teachers take this stance at face va"
+  },
+  {
+    "note": "Self-directed Learning.md",
+    "source": "Knowles - From Pedagogy to Andragogy.pdf",
+    "claimed_page": "8",
+    "status": "search_for",
+    "found_page": 8,
+    "quote_preview": "Fortunately, once adults make the discovery that they can ta"
+  },
+  {
+    "note": "Semantisches Retrieval mit Assoziationsnetz.md",
+    "source": "Reimer - 2013 - Wissensorganisation.pdf",
+    "page": "181",
+    "quote": "Stattdessen reicht auch ein einfaches Assoziationsnetz aus, das Begriffe semantisch assoziiert und durch ein numerisches Gewicht zwischen 0 und 1 beschreibt, ohne die Art der Beziehung näher zu charakterisieren.",
+    "status": "SKIPPED_NO_PDF"
+  },
+  {
+    "note": "Semantisches Retrieval mit Assoziationsnetz.md",
+    "source": "Reimer - 2013 - Wissensorganisation.pdf",
+    "page": "181",
+    "quote": "Solche Assoziationsnetze lassen sich viel einfacher automatisch aus Textdokumenten lernen als Begriffshierarchien oder ganze Ontologien.",
+    "status": "SKIPPED_NO_PDF"
+  },
+  {
+    "note": "Synchronous E-Learning.md",
+    "source": "Hrastinski - 2008 - Asynchronous and Synchronous E-Learning.pdf",
+    "claimed_page": "4",
+    "status": "search_for",
+    "found_page": 4,
+    "quote_preview": "Students become more committed and motivated because a quick"
+  },
+  {
+    "note": "Synchronous E-Learning.md",
+    "source": "Hrastinski - 2008 - Asynchronous and Synchronous E-Learning.pdf",
+    "claimed_page": "5",
+    "status": "wordlist(cov=0.95)",
+    "found_page": 5,
+    "quote_preview": "I suggest that, other things being equal, synchronous e-lear"
+  },
+  {
+    "note": "Three Types of Communication in E-Learning.md",
+    "source": "Hrastinski - 2008 - Asynchronous and Synchronous E-Learning.pdf",
+    "claimed_page": "2",
+    "status": "wordlist(cov=1.00)",
+    "found_page": 2,
+    "quote_preview": "Haythornthwaite argues that three types of communication in "
+  },
+  {
+    "note": "Three Types of Communication in E-Learning.md",
+    "source": "Hrastinski - 2008 - Asynchronous and Synchronous E-Learning.pdf",
+    "claimed_page": "2",
+    "status": "search_for",
+    "found_page": 2,
+    "quote_preview": "Isolation can be overcome by more continued contact, particu"
+  },
+  {
+    "note": "Wissensorganisation.md",
+    "source": "Reimer - 2013 - Wissensorganisation.pdf",
+    "page": "172",
+    "quote": "Unter Wissensorganisation versteht man die Organisation der Ablage und die inhaltliche Charakterisierung von Informationsobjekten, so dass sie leicht(er) auffindbar sind.",
+    "status": "SKIPPED_NO_PDF"
+  },
+  {
+    "note": "Wissensorganisation.md",
+    "source": "Reimer - 2013 - Wissensorganisation.pdf",
+    "page": "178",
+    "quote": "Begriffshierarchien (manchmal auch als Taxonomien bezeichnet) sind das elementare Grundkonstrukt überhaupt für die Definition von Begriffen und finden sich in Thesauri, in Ontologien und in Topic Maps.",
+    "status": "SKIPPED_NO_PDF"
+  }
+]
+
+=== SUMMARY ===
+Total quotes: 46
+search_for: 12
+wordlist: 18
+not_found: 8
+skipped: 8
+Locatable rate (of measured, n=38): 78.9%
+Gap rate (of measured): 21.1%
