@@ -72,6 +72,10 @@ function resetRun() {
   $("run-header").textContent = "";
   $("log").textContent = "";
   const b = $("error-banner"); b.hidden = true; b.textContent = "";
+  $("results-section").hidden = true;
+  $("results-list").innerHTML = "";
+  $("results-empty").style.display = "block";
+  $("download-all").hidden = true;
 }
 
 function buildRunOptions() {
@@ -138,6 +142,65 @@ function addPreview(ev) {
   $("preview-list").appendChild(li);
 }
 
+// --- Ergebnis-Sektion (P3: /api/outputs, nach `exited(rc=0)`) -------------
+
+function routingLabel(routing) {
+  return { vault: "Vault-Empfehlung", inbox: "Inbox-Review", merge: "Merge-Stub" }[routing] || routing;
+}
+
+function addResultCard(item) {
+  const li = document.createElement("li");
+  li.className = "preview-card";
+  const confClass = { high: "ok", low: "warn" }[item.confidence] || "";
+  const badges = [`<span class="badge ${item.routing}">${routingLabel(item.routing)}</span>`];
+  // Score/Confidence gibt es nur im Dry-Run (vault_writer druckt sie im
+  // Schreib-Lauf nicht) — nur anzeigen, wenn tatsächlich vorhanden (L5).
+  if (item.score !== undefined) badges.push(`<span class="badge">Score ${item.score}/5</span>`);
+  if (item.confidence !== undefined) badges.push(`<span class="badge ${confClass}">Confidence ${escapeHtml(item.confidence)}</span>`);
+  if (item.merge_target) badges.push(`<span class="badge">→ ${escapeHtml(item.merge_target)}</span>`);
+  const flags = (item.flags || "").trim();
+  const downloadHtml = item.path
+    ? `<a class="button" href="/api/outputs/file?path=${encodeURIComponent(item.path)}" download>Herunterladen</a>`
+    : `<span class="hint">Kein Download verfügbar.</span>`;
+  li.innerHTML = `
+    <div class="title">${escapeHtml(item.title)}</div>
+    <div class="meta">${badges.join("")}</div>
+    ${flags ? `<div class="flags">⚠ ${escapeHtml(flags)}</div>` : ""}
+    <details class="note-body"><summary>Note-Text anzeigen</summary><pre class="body-content muted">…</pre></details>
+    <div class="actions">${downloadHtml}</div>`;
+  const det = li.querySelector("details");
+  if (item.path) {
+    const body = li.querySelector(".body-content");
+    det.addEventListener("toggle", async () => {
+      if (!det.open || det.dataset.loaded) return;
+      det.dataset.loaded = "1";
+      try {
+        const r = await fetch(`/api/outputs/file?path=${encodeURIComponent(item.path)}`);
+        if (r.ok) { body.textContent = await r.text(); body.classList.remove("muted"); }
+        else { body.textContent = "(Note-Text konnte nicht geladen werden.)"; }
+      } catch { body.textContent = "(Note-Text konnte nicht geladen werden.)"; }
+    });
+  } else {
+    det.remove();
+  }
+  $("results-list").appendChild(li);
+}
+
+async function loadOutputs() {
+  try {
+    const r = await fetch("/api/outputs");
+    if (!r.ok) return;
+    const { items, dry_run } = await r.json();
+    $("results-h").textContent = dry_run ? "Vorschau-Ergebnisse (nichts im Vault geschrieben)" : "Ergebnisse";
+    $("results-section").hidden = false;
+    $("results-list").innerHTML = "";
+    const hasItems = items.length > 0;
+    $("results-empty").style.display = hasItems ? "none" : "block";
+    $("download-all").hidden = !hasItems;
+    for (const item of items) addResultCard(item);
+  } catch { }
+}
+
 function logLine(text) {
   const el = $("log");
   el.textContent += text + "\n";
@@ -175,7 +238,7 @@ function startStream() {
     let rc = 0;
     try { rc = JSON.parse(e.data).returncode; } catch { }
     if (userCancelled) { markStageError(activeStage); logLine("■ Lauf abgebrochen."); }
-    else if (rc === 0) { setStage(99); logLine("● Lauf beendet."); }
+    else if (rc === 0) { setStage(99); logLine("● Lauf beendet."); loadOutputs(); }
     else { markStageError(activeStage); logLine(`✗ Lauf mit Fehlercode ${rc} beendet.`); }
     close();
   });

@@ -11,13 +11,15 @@ Stack (lt. Plan „atomic-notes Frontend-Stack-Entscheidung"): FastAPI + HTMX/SS
 
 from __future__ import annotations
 
+import io
 import json
 import threading
+import zipfile
 from collections.abc import Iterator, Callable
 from pathlib import Path
 
 from fastapi import FastAPI, Request, UploadFile, File
-from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 
 from generative.gui import runner
 from generative.runtime_config import PRESETS
@@ -94,6 +96,69 @@ def _is_within(path: str, root: Path) -> bool:
         return Path(path).resolve().is_relative_to(root)
     except (OSError, ValueError):
         return False
+
+
+def _output_items_from_events(
+    events: list[dict], *, pdf: str | None, vault_path: Path, preview_root: Path
+) -> list[dict]:
+    """Aggregiert die Ergebnisliste (`GET /api/outputs`) aus den Events der
+    aktuellen/letzten RunSession.
+
+    Dry-Run: aus `preview`-Events (Name/Routing/Score/Confidence/Flags); der
+    Download-Pfad ist die eval-Kopie unter `preview_root/<pdf-stem>/…`, sofern
+    sie existiert (kein Erfinden — fehlt sie, bleibt `path` weg, L5).
+    Schreib-Lauf: aus `note_written`-Events (vault_writer-stdout) — dort gibt es
+    kein Score/Confidence, die druckt vault_writer nur im Dry-Run.
+    """
+    items: list[dict] = []
+    stem = Path(pdf).stem if pdf else ""
+    vault_root = Path(vault_path).resolve()
+    preview_base = Path(preview_root).resolve()
+    for ev in events:
+        if ev.get("type") == "preview":
+            item: dict = {"title": ev["name"], "routing": ev["routing"]}
+            if ev.get("score") is not None:
+                item["score"] = ev["score"]
+            if ev.get("confidence") is not None:
+                item["confidence"] = ev["confidence"]
+            if ev.get("merge_target"):
+                item["merge_target"] = ev["merge_target"]
+            if ev.get("flags"):
+                item["flags"] = ev["flags"]
+            if stem:
+                candidate = (preview_base / stem / f"{ev['routing']}__{ev['name']}").resolve()
+                if candidate.is_relative_to(preview_base) and candidate.exists():
+                    item["path"] = str(candidate)
+            items.append(item)
+        elif ev.get("type") == "note_written":
+            item = {"title": Path(ev["path"]).name, "routing": ev["routing"]}
+            if ev.get("merge_target"):
+                item["merge_target"] = ev["merge_target"]
+            candidate = (vault_root / ev["path"]).resolve()
+            if candidate.is_relative_to(vault_root):
+                item["path"] = str(candidate)
+            items.append(item)
+    return items
+
+
+def _validate_output_path(path: str, *, vault_path: Path, preview_root: Path) -> Path | None:
+    """Pfad-Whitelist (L4) fuer `/api/outputs/file` + `/api/outputs/archive`:
+    nur `.md`-Dateien unterhalb `vault_path`, oder beliebige Dateien unterhalb
+    `preview_root` (die eval-Kopien der Dry-Run-Vorschau, bereits auf `.md`
+    beschraenkt). `resolve()` neutralisiert Symlink-Escapes. Alles andere:
+    `None` -> Aufrufer antwortet 403.
+    """
+    try:
+        resolved = Path(path).resolve()
+    except (OSError, ValueError):
+        return None
+    vault_root = Path(vault_path).resolve()
+    preview_base = Path(preview_root).resolve()
+    if resolved.is_relative_to(vault_root) and resolved.suffix == ".md":
+        return resolved
+    if resolved.is_relative_to(preview_base):
+        return resolved
+    return None
 
 
 class RunSession:
@@ -352,6 +417,50 @@ def create_app(
             if f.is_relative_to(base) and f.exists():
                 return JSONResponse({"name": safe_name, "body": f.read_text(encoding="utf-8")})
         return JSONResponse({"error": "nicht gefunden"}, status_code=404)
+
+    @app.get("/api/outputs")
+    def outputs() -> JSONResponse:
+        """Ergebnisliste des aktuellen/letzten Laufs (P3). Nur GET, nicht
+        mutierend -> kein Origin-Check (L4-Ausnahme, wie /api/preview)."""
+        session = app.state.session
+        events = session.events if session is not None else []
+        pdf = getattr(session, "pdf", None) if session is not None else None
+        dry_run = getattr(session, "dry_run", None) if session is not None else None
+        items = _output_items_from_events(events, pdf=pdf, vault_path=vault_path, preview_root=preview_root)
+        return JSONResponse({"items": items, "dry_run": dry_run})
+
+    @app.get("/api/outputs/file")
+    def outputs_file(path: str):
+        resolved = _validate_output_path(path, vault_path=vault_path, preview_root=preview_root)
+        if resolved is None:
+            return JSONResponse({"error": "Pfad nicht erlaubt"}, status_code=403)
+        if not resolved.is_file():
+            return JSONResponse({"error": "nicht gefunden"}, status_code=404)
+        return FileResponse(resolved, filename=resolved.name, media_type="text/markdown")
+
+    @app.get("/api/outputs/archive")
+    def outputs_archive() -> StreamingResponse:
+        session = app.state.session
+        events = session.events if session is not None else []
+        pdf = getattr(session, "pdf", None) if session is not None else None
+        items = _output_items_from_events(events, pdf=pdf, vault_path=vault_path, preview_root=preview_root)
+        buf = io.BytesIO()
+        used: dict[str, int] = {}
+        with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+            for item in items:
+                raw = item.get("path")
+                if not raw:
+                    continue
+                resolved = _validate_output_path(raw, vault_path=vault_path, preview_root=preview_root)
+                if resolved is None or not resolved.is_file():
+                    continue
+                base = resolved.name
+                count = used.get(base, 0)
+                used[base] = count + 1
+                arcname = base if count == 0 else f"{Path(base).stem}-{count + 1}{Path(base).suffix}"
+                zf.write(resolved, arcname=arcname)
+        headers = {"Content-Disposition": 'attachment; filename="outputs.zip"'}
+        return StreamingResponse(iter([buf.getvalue()]), media_type="application/zip", headers=headers)
 
     return app
 
