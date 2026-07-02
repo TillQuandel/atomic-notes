@@ -13,6 +13,7 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from generative.gui import gui_settings
 from generative.gui.app import create_app
 
 
@@ -1462,3 +1463,410 @@ def test_settings_no_secrets_written_to_disk(tmp_path):
     c.put("/api/settings", json={"backend": "litellm", "profile": "fast", "no_llm": True, "dry_run": True})
     raw = settings_path.read_text(encoding="utf-8")
     assert set(json.loads(raw)) <= {"backend", "profile", "no_llm", "dry_run"}
+
+
+# --- B2: Vault-/Ordner-Wahl -------------------------------------------------
+
+
+def _vault_app(tmp_path, vault=None, **kwargs):
+    if vault is None:
+        vault = tmp_path / "vault"
+        vault.mkdir()
+    kwargs.setdefault("run_factory", fake_run)
+    kwargs.setdefault("pdf_dirs", [tmp_path])
+    kwargs.setdefault("vault_path", vault)
+    kwargs.setdefault("backend", "subscription")
+    kwargs.setdefault("uploads_dir", tmp_path / "u")
+    kwargs.setdefault("doctor_fn", fake_doctor)
+    kwargs.setdefault("settings_path", tmp_path / "gui" / "settings.json")
+    app = create_app(**kwargs)
+    return app, vault
+
+
+def test_vault_get_returns_current_vault(tmp_path):
+    app, vault = _vault_app(tmp_path)
+    c = TestClient(app, base_url="http://localhost")
+    r = c.get("/api/vault")
+    assert r.status_code == 200
+    assert r.json()["vault"] == str(vault.resolve())
+
+
+def test_vault_put_valid_directory_changes_state(tmp_path):
+    app, _vault = _vault_app(tmp_path)
+    c = TestClient(app, base_url="http://localhost")
+    new_vault = tmp_path / "new-vault"
+    new_vault.mkdir()
+    r = c.put("/api/vault", json={"path": str(new_vault)})
+    assert r.status_code == 200
+    assert r.json()["vault"] == str(new_vault.resolve())
+    assert c.get("/api/vault").json()["vault"] == str(new_vault.resolve())
+
+
+def test_vault_put_rejects_nonexistent_path(tmp_path):
+    app, _vault = _vault_app(tmp_path)
+    c = TestClient(app, base_url="http://localhost")
+    r = c.put("/api/vault", json={"path": str(tmp_path / "nicht-da")})
+    assert r.status_code == 400
+
+
+def test_vault_put_rejects_file_not_directory(tmp_path):
+    app, _vault = _vault_app(tmp_path)
+    f = tmp_path / "datei.txt"
+    f.write_text("x", encoding="utf-8")
+    c = TestClient(app, base_url="http://localhost")
+    r = c.put("/api/vault", json={"path": str(f)})
+    assert r.status_code == 400
+
+
+def test_vault_put_rejects_traversal_to_nonexistent_dir(tmp_path):
+    app, _vault = _vault_app(tmp_path)
+    c = TestClient(app, base_url="http://localhost")
+    bogus = str(tmp_path / "a" / ".." / ".." / "definitiv-nicht-da-xyz")
+    r = c.put("/api/vault", json={"path": bogus})
+    assert r.status_code == 400
+
+
+def test_vault_put_rejects_symlink_to_file(tmp_path):
+    app, _vault = _vault_app(tmp_path)
+    target = tmp_path / "real.txt"
+    target.write_text("x", encoding="utf-8")
+    link = tmp_path / "link-zur-datei"
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlinks ohne Sonderrechte auf dieser Plattform nicht erstellbar")
+    c = TestClient(app, base_url="http://localhost")
+    r = c.put("/api/vault", json={"path": str(link)})
+    assert r.status_code == 400
+
+
+def test_vault_put_rejects_invalid_json_body(tmp_path):
+    app, _vault = _vault_app(tmp_path)
+    c = TestClient(app, base_url="http://localhost")
+    r = c.put("/api/vault", content="{invalid", headers={"Content-Type": "application/json"})
+    assert r.status_code == 400
+
+
+def test_vault_put_rejects_non_object_json_body(tmp_path):
+    app, _vault = _vault_app(tmp_path)
+    c = TestClient(app, base_url="http://localhost")
+    for payload in ("null", "[]", "42", '"text"'):
+        r = c.put("/api/vault", content=payload, headers={"Content-Type": "application/json"})
+        assert r.status_code == 400, f"payload {payload!r} -> {r.status_code}"
+
+
+def test_vault_put_rejects_missing_path_key(tmp_path):
+    app, _vault = _vault_app(tmp_path)
+    c = TestClient(app, base_url="http://localhost")
+    r = c.put("/api/vault", json={})
+    assert r.status_code == 400
+
+
+def test_vault_put_rejects_cross_origin(tmp_path):
+    app, _vault = _vault_app(tmp_path)
+    new_vault = tmp_path / "new-vault"
+    new_vault.mkdir()
+    c = TestClient(app, base_url="http://localhost")
+    r = c.put(
+        "/api/vault",
+        json={"path": str(new_vault)},
+        headers={"Origin": "http://evil.example"},
+    )
+    assert r.status_code == 403
+
+
+def test_vault_put_persists_to_settings(tmp_path):
+    settings_path = tmp_path / "gui" / "settings.json"
+    app, _vault = _vault_app(tmp_path, settings_path=settings_path)
+    c = TestClient(app, base_url="http://localhost")
+    new_vault = tmp_path / "new-vault"
+    new_vault.mkdir()
+    c.put("/api/vault", json={"path": str(new_vault)})
+    data, _warning = gui_settings.read_settings(settings_path)
+    assert data["vault_path"] == str(new_vault.resolve())
+
+
+def test_vault_put_merges_with_existing_settings_not_replace(tmp_path):
+    settings_path = tmp_path / "gui" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    gui_settings.write_settings({"backend": "litellm", "profile": "fast"}, settings_path)
+    app, _vault = _vault_app(tmp_path, settings_path=settings_path)
+    c = TestClient(app, base_url="http://localhost")
+    new_vault = tmp_path / "new-vault"
+    new_vault.mkdir()
+    c.put("/api/vault", json={"path": str(new_vault)})
+    data, _warning = gui_settings.read_settings(settings_path)
+    assert data["backend"] == "litellm"
+    assert data["profile"] == "fast"
+    assert data["vault_path"] == str(new_vault.resolve())
+
+
+def test_vault_put_rejected_while_run_active(tmp_path):
+    import threading
+
+    gate = threading.Event()
+
+    def slow_run(pdf, dry_run, register=None, options=None):
+        yield {"type": "started", "argv": ["slow"]}
+        gate.wait(timeout=5)
+        yield {"type": "exited", "returncode": 0}
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    new_vault = tmp_path / "new-vault"
+    new_vault.mkdir()
+    app, _vault = _vault_app(tmp_path, run_factory=slow_run)
+    c = TestClient(app, base_url="http://localhost")
+    assert c.post("/api/run", json={"pdf": str(pdf), "dry_run": True}).status_code == 200
+    r = c.put("/api/vault", json={"path": str(new_vault)})
+    assert r.status_code == 409
+    gate.set()
+
+
+def test_build_run_spec_wired_into_default_run_factory(tmp_path):
+    # Subprocess-Override (Punkt 3): der ECHTE Default-Run-Factory-Pfad (kein
+    # injizierter Fake) muss ATOMIC_AGENT_VAULT_PATH aus dem AKTUELLEN
+    # app.state.vault_path in die Subprocess-Env setzen. Wir stubben nur
+    # runner.iter_run_events, um keinen echten Orchestrator-Subprocess zu starten.
+    captured = {}
+
+    def fake_iter_run_events(argv, *, env=None, cwd=None, on_proc=None):
+        captured["env"] = env
+        yield {"type": "started", "argv": argv}
+        yield {"type": "exited", "returncode": 0}
+
+    import generative.gui.runner as runner_module
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        pdf_dirs=[tmp_path],
+        vault_path=vault,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+    )
+    c = TestClient(app, base_url="http://localhost")
+    orig = runner_module.iter_run_events
+    runner_module.iter_run_events = fake_iter_run_events
+    try:
+        c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+        _drain(c)
+    finally:
+        runner_module.iter_run_events = orig
+    assert captured["env"]["ATOMIC_AGENT_VAULT_PATH"] == str(vault.resolve())
+
+
+# --- R1 (Race, KRITISCH): Output-Endpunkte gegen Session-Snapshot ----------
+
+
+def test_outputs_file_uses_session_snapshot_after_vault_switch(tmp_path):
+    vault_a = tmp_path / "vault-a"
+    (vault_a / "00-inbox").mkdir(parents=True)
+    (vault_a / "00-inbox" / "Foo.md").write_text("# Foo", encoding="utf-8")
+    vault_b = tmp_path / "vault-b"
+    vault_b.mkdir()
+    (vault_b / "Bar.md").write_text("# Bar", encoding="utf-8")
+
+    def write_run(pdf, dry_run, register=None, options=None):
+        yield {"type": "started", "argv": ["x"]}
+        yield {"type": "note_written", "path": "00-inbox/Foo.md", "routing": "vault"}
+        yield {"type": "done", "written": 1, "dry_run": dry_run}
+        yield {"type": "exited", "returncode": 0}
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=write_run,
+        pdf_dirs=[tmp_path],
+        vault_path=vault_a,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+    )
+    c = TestClient(app, base_url="http://localhost")
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": False})
+    _drain(c)
+
+    # Vault-Wechsel NACH Lauf-Ende.
+    r = c.put("/api/vault", json={"path": str(vault_b)})
+    assert r.status_code == 200
+
+    # Session-Snapshot (Vault A, wo tatsaechlich geschrieben wurde) bleibt erlaubt.
+    ok = c.get("/api/outputs/file", params={"path": str(vault_a / "00-inbox" / "Foo.md")})
+    assert ok.status_code == 200
+
+    # Neuer State-Vault (B), aber ausserhalb des Session-Snapshots -> 403.
+    blocked = c.get("/api/outputs/file", params={"path": str(vault_b / "Bar.md")})
+    assert blocked.status_code == 403
+
+
+def test_outputs_list_uses_session_snapshot_after_vault_switch(tmp_path):
+    vault_a = tmp_path / "vault-a"
+    (vault_a / "00-inbox").mkdir(parents=True)
+    (vault_a / "00-inbox" / "Foo.md").write_text("# Foo", encoding="utf-8")
+    vault_b = tmp_path / "vault-b"
+    vault_b.mkdir()
+
+    def write_run(pdf, dry_run, register=None, options=None):
+        yield {"type": "started", "argv": ["x"]}
+        yield {"type": "note_written", "path": "00-inbox/Foo.md", "routing": "vault"}
+        yield {"type": "done", "written": 1, "dry_run": dry_run}
+        yield {"type": "exited", "returncode": 0}
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=write_run,
+        pdf_dirs=[tmp_path],
+        vault_path=vault_a,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+    )
+    c = TestClient(app, base_url="http://localhost")
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": False})
+    _drain(c)
+    c.put("/api/vault", json={"path": str(vault_b)})
+
+    body = c.get("/api/outputs").json()
+    assert body["items"][0]["path"] == str((vault_a / "00-inbox" / "Foo.md").resolve())
+
+
+def test_outputs_uses_state_vault_when_no_session_yet(tmp_path):
+    # Ohne je gelaufene Session: Fallback auf app.state.vault_path.
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=vault,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+    )
+    c = TestClient(app, base_url="http://localhost")
+    new_vault = tmp_path / "new-vault"
+    new_vault.mkdir()
+    (new_vault / "Note.md").write_text("# Note", encoding="utf-8")
+    c.put("/api/vault", json={"path": str(new_vault)})
+    r = c.get("/api/outputs/file", params={"path": str(new_vault / "Note.md")})
+    assert r.status_code == 200
+
+
+# --- R2 (doctor, KRITISCH): gewaehlter Vault statt config.VAULT -----------
+
+
+def test_doctor_ok_true_despite_stale_embedded_vault_check(tmp_path):
+    # R2 -- der Kernfall: `doctor_fn()` (z.B. das echte `doctor.run_all()`)
+    # enthaelt bereits einen "vault"-Check, der aber gegen den ALTEN
+    # `config.VAULT`-Import-Default prueft -- der kann nach einem GUI-Vault-
+    # Wechsel stale/False sein, obwohl der TATSAECHLICH gewaehlte Vault
+    # (`app.state.vault_path`) valide ist. `ok` darf sich davon nicht blockieren
+    # lassen -- das ist der eigentliche Kern von R2, nicht nur ein zusaetzliches
+    # Feld daneben.
+    from generative.doctor import CheckResult
+
+    def stale_vault_doctor():
+        return [
+            CheckResult(name="pdftotext", ok=True, detail="ok"),
+            CheckResult(name="backend (subscription)", ok=True, detail="ok"),
+            CheckResult(name="vault", ok=False, detail="alter config.VAULT-Pfad existiert nicht"),
+        ]
+
+    real_vault = tmp_path / "echter-vault"
+    real_vault.mkdir()
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=real_vault,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=stale_vault_doctor,
+    )
+    body = TestClient(app, base_url="http://localhost").get("/api/doctor").json()
+    assert body["vault_exists"] is True
+    assert body["ok"] is True  # trotz stale "vault"-Eintrag in `checks`
+    # Der stale Eintrag bleibt sichtbar (Transparenz), gated `ok` aber nicht mehr.
+    assert any(c["name"] == "vault" and c["ok"] is False for c in body["checks"])
+
+
+def test_doctor_shows_configured_vault(tmp_path):
+    app, vault = _vault_app(tmp_path)
+    c = TestClient(app, base_url="http://localhost")
+    body = c.get("/api/doctor").json()
+    assert body["vault"] == str(vault.resolve())
+    assert body["vault_exists"] is True
+
+
+def test_doctor_reflects_vault_after_switch(tmp_path):
+    app, _vault = _vault_app(tmp_path)
+    c = TestClient(app, base_url="http://localhost")
+    new_vault = tmp_path / "new-vault"
+    new_vault.mkdir()
+    c.put("/api/vault", json={"path": str(new_vault)})
+    body = c.get("/api/doctor").json()
+    assert body["vault"] == str(new_vault.resolve())
+    assert body["vault_exists"] is True
+
+
+def test_doctor_vault_exists_false_when_state_vault_missing(tmp_path):
+    # Kann nur ueber einen kaputten Settings-Restart entstehen (PUT /api/vault
+    # selbst lehnt nicht-existente Pfade ab) -- ueber settings_path simuliert.
+    settings_path = tmp_path / "gui" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    gui_settings.write_settings({"vault_path": str(tmp_path / "weg-seitdem")}, settings_path)
+    (tmp_path / "weg-seitdem").mkdir()
+    # Verzeichnis existiert beim create_app-Aufruf noch (Preload akzeptiert es) ...
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+        settings_path=settings_path,
+    )
+    import shutil
+
+    # ... wird aber danach geloescht -> doctor muss das ehrlich zeigen (ok=False).
+    shutil.rmtree(tmp_path / "weg-seitdem")
+    body = TestClient(app, base_url="http://localhost").get("/api/doctor").json()
+    assert body["vault_exists"] is False
+    assert body["ok"] is False
+
+
+# --- P6: GUI-Settings-Preload beim Server-Start ----------------------------
+
+
+def test_create_app_preloads_vault_path_from_settings(tmp_path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    settings_path = tmp_path / "gui" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    gui_settings.write_settings({"vault_path": str(vault)}, settings_path)
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+        settings_path=settings_path,
+        # vault_path bewusst NICHT gesetzt -> muss aus Settings vorbelegt werden.
+    )
+    body = TestClient(app, base_url="http://localhost").get("/api/vault").json()
+    assert body["vault"] == str(vault.resolve())
+
+
+def test_create_app_ignores_broken_stored_vault_path_no_crash(tmp_path):
+    settings_path = tmp_path / "gui" / "settings.json"
+    settings_path.parent.mkdir(parents=True)
+    gui_settings.write_settings({"vault_path": str(tmp_path / "nicht-da")}, settings_path)
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+        settings_path=settings_path,
+    )
+    body = TestClient(app, base_url="http://localhost").get("/api/vault").json()
+    assert body["vault"] != str((tmp_path / "nicht-da").resolve())

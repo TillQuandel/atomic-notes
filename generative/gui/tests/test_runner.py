@@ -104,3 +104,26 @@ def test_build_run_spec_combined_options():
     assert env == {"ATOMIC_AGENT_BACKEND": "litellm", "ATOMIC_AGENT_PROFILE": "quality"}
     assert "--no-llm" in argv
     assert "--dry-run" in argv
+
+
+# --- build_run_spec vault_path (B2: Subprocess-Override) -------------------
+
+
+def test_build_run_spec_vault_path_sets_env_var():
+    argv, env = build_run_spec("foo.pdf", dry_run=True, options=None, vault_path="C:/Users/x/Vault")
+    assert env == {"ATOMIC_AGENT_VAULT_PATH": "C:/Users/x/Vault"}
+
+
+def test_build_run_spec_no_vault_path_omits_env_var():
+    argv, env = build_run_spec("foo.pdf", dry_run=True, options=None, vault_path=None)
+    assert "ATOMIC_AGENT_VAULT_PATH" not in env
+
+
+def test_build_run_spec_vault_path_combines_with_other_options():
+    argv, env = build_run_spec(
+        "foo.pdf",
+        dry_run=False,
+        options={"backend": "litellm"},
+        vault_path="/some/vault",
+    )
+    assert env == {"ATOMIC_AGENT_BACKEND": "litellm", "ATOMIC_AGENT_VAULT_PATH": "/some/vault"}

@@ -9,9 +9,12 @@ Reine Datei-/Validierungslogik, kein FastAPI (analog run_history.py). Die
 Backend-/Profil-Wertepruefung wird von `app._validate_run_options`
 wiederverwendet (`validate_backend`/`validate_profile`) statt dupliziert.
 
-Schema: `{backend?, profile?, no_llm?, dry_run?}` -- alle vier Keys optional,
-nur tatsaechlich gesetzte Werte werden gespeichert/gelesen. Keine Secrets
-(API-Keys bleiben in `.env`).
+Schema: `{backend?, profile?, no_llm?, dry_run?, vault_path?}` -- alle Keys
+optional, nur tatsaechlich gesetzte Werte werden gespeichert/gelesen. Keine
+Secrets (API-Keys bleiben in `.env`). `vault_path` (B2): der zuletzt per
+`PUT /api/vault` gewaehlte Ziel-Vault -- geschrieben vom Vault-Endpunkt in
+`app.py`, nicht von `PUT /api/settings` (das schreibt nur die vier
+Lauf-Einstellungen, s. dortiges Full-Replace-Verhalten).
 """
 
 from __future__ import annotations
@@ -27,7 +30,7 @@ from generative.runtime_config import PRESETS
 logger = logging.getLogger(__name__)
 
 BACKENDS = frozenset({"subscription", "litellm"})
-SETTINGS_KEYS = frozenset({"backend", "profile", "no_llm", "dry_run"})
+SETTINGS_KEYS = frozenset({"backend", "profile", "no_llm", "dry_run", "vault_path"})
 
 
 def validate_backend(value) -> tuple[str | None, str | None]:
@@ -53,6 +56,18 @@ def _validate_bool(value, field_name: str) -> tuple[bool | None, str | None]:
         return None, None
     if not isinstance(value, bool):
         return None, f"{field_name} muss ein Boolean sein."
+    return value, None
+
+
+def validate_vault_path(value) -> tuple[str | None, str | None]:
+    """B2: `vault_path`-Wert pruefen. Anders als backend/profile bedeutet ein
+    leerer String hier KEIN "Server-Default", sondern ist ein Fehler -- ein
+    gespeicherter vault_path ist entweder gesetzt oder gar nicht im Payload.
+    Keine Existenz-/Verzeichnis-Pruefung hier (macht `PUT /api/vault`)."""
+    if value is None:
+        return None, None
+    if not isinstance(value, str) or not value.strip():
+        return None, "vault_path muss ein nicht-leerer String sein."
     return value, None
 
 
@@ -96,6 +111,12 @@ def validate_settings(payload) -> tuple[dict, str | None]:
         return {}, error
     if dry_run is not None:
         normalized["dry_run"] = dry_run
+
+    vault_path, error = validate_vault_path(payload.get("vault_path"))
+    if error:
+        return {}, error
+    if vault_path is not None:
+        normalized["vault_path"] = vault_path
 
     return normalized, None
 

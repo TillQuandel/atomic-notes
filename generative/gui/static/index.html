@@ -15,6 +15,20 @@
   <main>
     <div id="error-banner" class="error-banner" role="alert" hidden></div>
 
+    <section class="panel" aria-labelledby="vault-h">
+      <h2 id="vault-h">Ziel-Vault</h2>
+      <form id="vault-form">
+        <label for="vault-path">Vault-Pfad</label>
+        <div class="actions">
+          <input type="text" id="vault-path" name="vault-path"
+                 placeholder="Pfad zum Ziel-Vault (Ordner)" autocomplete="off">
+          <button type="submit" id="vault-apply-btn">Übernehmen</button>
+        </div>
+        <p id="vault-current" class="hint" aria-live="polite"></p>
+        <p id="vault-status" class="hint" aria-live="polite"></p>
+      </form>
+    </section>
+
     <section class="panel" aria-labelledby="run-h">
       <h2 id="run-h">Lauf starten</h2>
       <form id="run-form">

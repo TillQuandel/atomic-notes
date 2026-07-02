@@ -368,6 +368,7 @@ function startStream() {
   const close = () => {
     es.close(); stopElapsed(); running = false; userCancelled = false;
     $("start-btn").disabled = false; $("stop-btn").hidden = true; applyStartGate();
+    applyVaultGate();
   };
   es.addEventListener("exited", (e) => {
     let rc = 0;
@@ -500,12 +501,18 @@ async function loadDoctor() {
 // Doctor-Gating (litellm-Verfuegbarkeit) beim Vorbelegen bereits feststeht.
 
 function currentSettingsPayload() {
-  return {
+  const payload = {
     backend: $("opt-backend").value,
     profile: $("opt-profile").value,
     no_llm: $("opt-no-llm").checked,
     dry_run: $("dry-run").checked,
   };
+  // B2: PUT /api/settings ersetzt die Datei vollstaendig (kein Merge) -- ohne
+  // den zuletzt geladenen/uebernommenen Vault hier mitzuschicken wuerde ein
+  // spaeterer Autosave (Backend/Profil/…) den per PUT /api/vault gesetzten
+  // vault_path wieder loeschen.
+  if (currentVaultPath) payload.vault_path = currentVaultPath;
+  return payload;
 }
 
 async function loadSettings() {
@@ -570,6 +577,73 @@ function updateModeHint() {
     : "Schreibt Notes nach 00-inbox im Vault. Frischer Lauf — Scores können von einer vorherigen Vorschau leicht abweichen.";
 }
 
+// --- Ziel-Vault (B2: PUT/GET /api/vault) ----------------------------------
+
+let currentVaultPath = null; // zuletzt geladener/uebernommener Vault, s. currentSettingsPayload()
+
+async function loadVault() {
+  try {
+    const r = await fetch("/api/vault");
+    if (!r.ok) return;
+    const { vault } = await r.json();
+    currentVaultPath = vault;
+    $("vault-path").value = vault;
+    $("vault-current").textContent = `Aktueller Vault: ${vault}`;
+  } catch { }
+}
+
+function applyVaultGate() {
+  // Wechsel waehrend eines aktiven Laufs ist serverseitig gesperrt (409, R1) --
+  // das Feld hier zusaetzlich deaktivieren, statt den Nutzer erst den
+  // Fehlschlag erleben zu lassen.
+  const btn = $("vault-apply-btn");
+  const input = $("vault-path");
+  if (btn) btn.disabled = running;
+  if (input) input.disabled = running;
+}
+
+function setVaultStatus(text, isError) {
+  const el = $("vault-status");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("bad", !!isError);
+  $("vault-path").classList.toggle("bad", !!isError);
+}
+
+async function applyVault(path) {
+  setVaultStatus("");
+  try {
+    const r = await fetch("/api/vault", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ path }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const msg = d.error || `Vault-Wechsel fehlgeschlagen (${r.status})`;
+      showBanner(msg);
+      setVaultStatus("✗ " + msg, true);
+      return;
+    }
+    currentVaultPath = d.vault;
+    $("vault-path").value = d.vault;
+    $("vault-current").textContent = `Aktueller Vault: ${d.vault}`;
+    setVaultStatus("✓ übernommen.", false);
+    await loadDoctor(); // Preflight (vault_exists) haengt vom neuen Vault ab.
+  } catch {
+    setVaultStatus("✗ Vault-Wechsel fehlgeschlagen (Netzwerkfehler).", true);
+  }
+}
+
+function wireVaultForm() {
+  $("vault-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const path = $("vault-path").value.trim();
+    if (!path) return;
+    applyVault(path);
+  });
+}
+
 async function attachIfRunActive() {
   // Lädt die Seite, während (woanders) bereits ein Lauf aktiv ist: anhängen
   // statt in die 409-Sackgasse zu laufen — Stop-Button + Stream-Reattach.
@@ -582,6 +656,7 @@ async function attachIfRunActive() {
       currentPdfStem = (s.pdf || "").split(/[\\/]/).pop().replace(/\.pdf$/i, "");
       renderRunHeader(s.options || {});
       logLine("» Laufender Pipeline-Lauf erkannt — angehängt.");
+      applyVaultGate();
       startStream();
     }
   } catch { }
@@ -592,6 +667,8 @@ document.addEventListener("DOMContentLoaded", async () => {
   loadPdfs();
   updateModeHint();
   wireUpload();
+  wireVaultForm();
+  loadVault();
   attachIfRunActive();
   loadHistory();
   // Reihenfolge bewusst: erst Doctor (litellm-Verfuegbarkeit steht fest), dann
@@ -627,6 +704,7 @@ document.addEventListener("DOMContentLoaded", async () => {
     currentPdfStem = pdf.split(/[\\/]/).pop().replace(/\.pdf$/i, "");
     renderRunHeader(started.options || options);
     running = true; userCancelled = false; $("stop-btn").hidden = false;
+    applyVaultGate();
     startStream();
   });
 
