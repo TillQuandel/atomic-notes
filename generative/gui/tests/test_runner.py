@@ -7,7 +7,7 @@ Events streamen.
 
 import sys
 
-from generative.gui.runner import build_argv, iter_run_events
+from generative.gui.runner import build_argv, build_run_spec, iter_run_events
 
 
 def test_build_argv_dry_run_default():
@@ -56,3 +56,51 @@ def test_iter_run_events_sets_gui_env_flag():
     evs = list(iter_run_events([sys.executable, "-c", script]))
     logs = [e.get("label", "") + e.get("text", "") for e in evs]
     assert any("flag=1" in s for s in logs)
+
+
+# --- build_run_spec (P1: Lauf-Einstellungen) ------------------------------
+
+
+def test_build_run_spec_no_options_matches_plain_build_argv():
+    argv, env = build_run_spec("foo.pdf", dry_run=True, options=None)
+    assert argv == build_argv("foo.pdf", dry_run=True)
+    assert env == {}
+
+
+def test_build_run_spec_empty_options_dict_matches_plain_build_argv():
+    argv, env = build_run_spec("foo.pdf", dry_run=True, options={})
+    assert argv == build_argv("foo.pdf", dry_run=True)
+    assert env == {}
+
+
+def test_build_run_spec_backend_option_sets_env_var():
+    argv, env = build_run_spec("foo.pdf", dry_run=False, options={"backend": "litellm"})
+    assert env == {"ATOMIC_AGENT_BACKEND": "litellm"}
+    assert "--no-llm" not in argv
+
+
+def test_build_run_spec_profile_option_sets_env_var():
+    argv, env = build_run_spec("foo.pdf", dry_run=False, options={"profile": "fast"})
+    assert env == {"ATOMIC_AGENT_PROFILE": "fast"}
+
+
+def test_build_run_spec_no_llm_option_appends_flag():
+    argv, env = build_run_spec("foo.pdf", dry_run=False, options={"no_llm": True})
+    assert "--no-llm" in argv
+    assert env == {}
+
+
+def test_build_run_spec_no_llm_false_omits_flag():
+    argv, env = build_run_spec("foo.pdf", dry_run=False, options={"no_llm": False})
+    assert "--no-llm" not in argv
+
+
+def test_build_run_spec_combined_options():
+    argv, env = build_run_spec(
+        "foo.pdf",
+        dry_run=True,
+        options={"backend": "litellm", "profile": "quality", "no_llm": True},
+    )
+    assert env == {"ATOMIC_AGENT_BACKEND": "litellm", "ATOMIC_AGENT_PROFILE": "quality"}
+    assert "--no-llm" in argv
+    assert "--dry-run" in argv

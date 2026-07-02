@@ -20,6 +20,7 @@ from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 
 from generative.gui import runner
+from generative.runtime_config import PRESETS
 
 _STATIC = Path(__file__).parent / "static"
 
@@ -30,6 +31,51 @@ _PDF_GLOB = "*.pdf"
 # Cross-Origin-POSTs einen `Origin`-Header — fehlt er (curl/TestClient/Beacon
 # same-origin), ist es kein CSRF-Vektor.
 _LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+# P1 (Lauf-Einstellungen): Whitelist der `POST /api/run`-`options`. Backend-Werte
+# sind, wie in doctor.check_backend/config.BACKEND verifiziert, genau diese zwei;
+# Profil-Whitelist wird bewusst aus runtime_config.PRESETS importiert statt
+# hart dupliziert (Plan P1 Schritt 1).
+_BACKENDS = frozenset({"subscription", "litellm"})
+_OPTION_KEYS = frozenset({"backend", "profile", "no_llm"})
+
+
+def _validate_run_options(options) -> tuple[dict, str | None]:
+    """Normalisiert+prueft `options` aus `POST /api/run`.
+
+    Rueckgabe: (normalisierte_optionen, fehlermeldung). Fehlt `options` oder ist
+    es leer, ist das Ergebnis `({}, None)` — identisch zum heutigen Verhalten
+    (kein Env-Override, kein `--no-llm`).
+    """
+    if not options:
+        return {}, None
+    if not isinstance(options, dict):
+        return {}, "options muss ein Objekt sein."
+    unknown = set(options) - _OPTION_KEYS
+    if unknown:
+        return {}, f"Unbekannte Option(en): {', '.join(sorted(unknown))}"
+
+    normalized: dict = {}
+    backend = options.get("backend")
+    if backend not in (None, ""):
+        if backend not in _BACKENDS:
+            return {}, f"Unbekannter Backend-Wert: {backend!r} (erlaubt: {', '.join(sorted(_BACKENDS))})"
+        normalized["backend"] = backend
+
+    profile = options.get("profile")
+    if profile not in (None, ""):
+        if profile not in PRESETS:
+            return {}, f"Unbekanntes Profil: {profile!r} (erlaubt: {', '.join(sorted(PRESETS))})"
+        normalized["profile"] = profile
+
+    no_llm = options.get("no_llm")
+    if no_llm is not None:
+        if not isinstance(no_llm, bool):
+            return {}, "no_llm muss ein Boolean sein."
+        if no_llm:
+            normalized["no_llm"] = True
+
+    return normalized, None
 
 
 def _is_same_origin(request: Request) -> bool:
@@ -99,8 +145,9 @@ class RunSession:
         return not self.finished
 
 
-def _default_run_factory(pdf: str, dry_run: bool, register=None) -> Iterator[dict]:
-    yield from runner.iter_run_events(runner.build_argv(pdf, dry_run=dry_run), on_proc=register)
+def _default_run_factory(pdf: str, dry_run: bool, register=None, options: dict | None = None) -> Iterator[dict]:
+    argv, env_overrides = runner.build_run_spec(pdf, dry_run=dry_run, options=options)
+    yield from runner.iter_run_events(argv, env=env_overrides, on_proc=register)
 
 
 def create_app(
@@ -111,11 +158,16 @@ def create_app(
     backend: str | None = None,
     uploads_dir: Path | None = None,
     doctor_fn: Callable[[], list] | None = None,
+    litellm_check_fn: Callable[[], object] | None = None,
     preview_root: Path | None = None,
 ) -> FastAPI:
     run_factory = run_factory or _default_run_factory
     if doctor_fn is None:
         from generative.doctor import run_all as doctor_fn
+    if litellm_check_fn is None:
+        from generative.doctor import check_backend as _check_backend
+
+        litellm_check_fn = lambda: _check_backend("litellm")  # noqa: E731
     if preview_root is None:
         preview_root = Path(__file__).resolve().parents[1] / ".cache" / "eval" / "baseline"
     preview_root = Path(preview_root)
@@ -203,14 +255,22 @@ def create_app(
                 }
             )
         ok = all(c["ok"] for c in checks if c["required"])
-        return JSONResponse(
-            {
-                "backend": backend,
-                "vault": str(Path(vault_path)),
-                "ok": ok,
-                "checks": checks,
-            }
-        )
+        # P1 Doctor-Gating: litellm-Verfuegbarkeit unabhaengig vom aktuell
+        # konfigurierten Server-Backend pruefen (sonst faellt der Key-Check weg,
+        # sobald der Server per Default auf "subscription" laeuft) — reine
+        # Wiederverwendung von doctor.check_backend, keine neue Logik.
+        litellm_check = litellm_check_fn()
+        litellm_available = bool(getattr(litellm_check, "ok", False))
+        response = {
+            "backend": backend,
+            "vault": str(Path(vault_path)),
+            "ok": ok,
+            "checks": checks,
+            "litellm_available": litellm_available,
+        }
+        if not litellm_available:
+            response["litellm_hint"] = getattr(litellm_check, "hint", "") or getattr(litellm_check, "detail", "")
+        return JSONResponse(response)
 
     @app.post("/api/run")
     async def start_run(request: Request) -> JSONResponse:
@@ -219,6 +279,9 @@ def create_app(
         body = await request.json()
         pdf = body.get("pdf", "")
         dry_run = bool(body.get("dry_run", True))
+        options, options_error = _validate_run_options(body.get("options"))
+        if options_error:
+            return JSONResponse({"error": options_error}, status_code=422)
         if not pdf or not Path(pdf).exists():
             return JSONResponse({"error": f"PDF nicht gefunden: {pdf}"}, status_code=400)
         # #2: Quelle muss unter einem erlaubten Root liegen (gelistet/hochgeladen).
@@ -236,10 +299,10 @@ def create_app(
             session.dry_run = dry_run
             # Iterator MIT der Proc-Registrierung der Session erzeugen → Cancel
             # kann den Subprocess später terminieren.
-            run_iter = run_factory(pdf, dry_run, session.register_proc)
+            run_iter = run_factory(pdf, dry_run, session.register_proc, options)
             app.state.session = session
             session.start(run_iter)
-        return JSONResponse({"status": "started", "pdf": pdf, "dry_run": dry_run})
+        return JSONResponse({"status": "started", "pdf": pdf, "dry_run": dry_run, "options": options})
 
     @app.get("/api/status")
     def status() -> JSONResponse:

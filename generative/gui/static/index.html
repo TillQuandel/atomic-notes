@@ -34,6 +34,33 @@
           Vorschau (Dry-Run — schreibt nichts in den Vault)
         </label>
 
+        <fieldset id="run-options">
+          <legend>Einstellungen</legend>
+
+          <label for="opt-backend">Backend</label>
+          <select id="opt-backend" name="backend">
+            <option value="">Server-Default</option>
+            <option value="subscription">subscription (Claude-Code-CLI)</option>
+            <option value="litellm">litellm (API-Key)</option>
+          </select>
+          <p id="opt-backend-hint" class="hint"></p>
+
+          <label for="opt-profile">Profil</label>
+          <select id="opt-profile" name="profile">
+            <option value="">Server-Default</option>
+            <option value="legacy">legacy — Basis, mit Refine-Loop</option>
+            <option value="fast">fast — schnell, kein Refine (max. 3 Konzepte)</option>
+            <option value="balanced">balanced — moderates Refine (max. 2/Lauf)</option>
+            <option value="quality">quality — volle Tiefe (Refine unbegrenzt, mit Retry)</option>
+          </select>
+
+          <label class="check">
+            <input type="checkbox" id="opt-no-llm">
+            Ohne LLM (Verifier/CrossRef/Critic ohne LLM — FOSS-Alternativen)
+          </label>
+          <p class="hint">Schneller/günstiger, aber kein Refine-Loop → systematisch schwächere Notes.</p>
+        </fieldset>
+
         <div class="actions">
           <button type="submit" id="start-btn">Lauf starten</button>
           <button type="button" id="stop-btn" class="danger" hidden>Abbrechen</button>
@@ -44,6 +71,7 @@
 
     <section class="panel" aria-labelledby="steps-h">
       <h2 id="steps-h">Pipeline</h2>
+      <p id="run-header" class="hint" aria-live="polite"></p>
       <ol id="stepper" class="stepper"></ol>
       <p id="note-progress" class="note-progress" aria-live="polite"></p>
     </section>

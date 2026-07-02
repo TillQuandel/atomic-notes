@@ -69,8 +69,28 @@ function resetRun() {
   $("preview-list").innerHTML = "";
   $("preview-empty").style.display = "block";
   $("note-progress").textContent = "";
+  $("run-header").textContent = "";
   $("log").textContent = "";
   const b = $("error-banner"); b.hidden = true; b.textContent = "";
+}
+
+function buildRunOptions() {
+  // Nur tatsächlich vom Server-Default abweichende Werte mitschicken —
+  // leere Felder bedeuten "Server-Default" (Rückwärtskompatibilität, siehe P1).
+  const options = {};
+  const backend = $("opt-backend").value;
+  const profile = $("opt-profile").value;
+  if (backend) options.backend = backend;
+  if (profile) options.profile = profile;
+  if ($("opt-no-llm").checked) options.no_llm = true;
+  return options;
+}
+
+function renderRunHeader(options) {
+  const backend = options.backend || "Server-Default";
+  const profile = options.profile || "Server-Default";
+  const noLlm = options.no_llm ? "ja" : "nein";
+  $("run-header").textContent = `Backend: ${backend} · Profil: ${profile} · ohne LLM: ${noLlm}`;
 }
 
 function showBanner(text) {
@@ -231,6 +251,25 @@ function wireUpload() {
 
 let doctorOk = true;
 
+function applyBackendGate(d) {
+  // Doctor-Gating (P1): litellm-Auswahl serverseitig entschieden (litellm_available
+  // aus /api/doctor) — JS sperrt nur die Option und zeigt die Begründung an.
+  const sel = $("opt-backend");
+  if (!sel) return;
+  const defaultOpt = sel.querySelector('option[value=""]');
+  if (defaultOpt) defaultOpt.textContent = `Server-Default (${d.backend})`;
+  const litellmOpt = sel.querySelector('option[value="litellm"]');
+  const hintEl = $("opt-backend-hint");
+  const available = !!d.litellm_available;
+  if (litellmOpt) {
+    litellmOpt.disabled = !available;
+    if (sel.value === "litellm" && !available) sel.value = "";
+  }
+  if (hintEl) {
+    hintEl.textContent = available ? "" : (d.litellm_hint || "litellm nicht verfügbar — kein Provider-Key gefunden.");
+  }
+}
+
 async function loadDoctor() {
   const el = $("doctor");
   try {
@@ -247,6 +286,7 @@ async function loadDoctor() {
         fails.filter((c) => c.hint).map((c) => `<br><span class="muted">→ ${escapeHtml(c.hint)}</span>`).join("");
       el.classList.toggle("bad", fails.some((c) => c.required));
     }
+    applyBackendGate(d);
   } catch {
     el.textContent = "Preflight konnte nicht geladen werden.";
   }
@@ -310,9 +350,10 @@ document.addEventListener("DOMContentLoaded", () => {
     if (!pdf) return;
     resetRun();
     $("start-btn").disabled = true;
+    const options = buildRunOptions();
     const r = await fetch("/api/run", {
       method: "POST", headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ pdf, dry_run: $("dry-run").checked }),
+      body: JSON.stringify({ pdf, dry_run: $("dry-run").checked, options }),
     });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
@@ -321,7 +362,9 @@ document.addEventListener("DOMContentLoaded", () => {
       applyStartGate();
       return;
     }
+    const started = await r.json().catch(() => ({}));
     currentPdfStem = pdf.split(/[\\/]/).pop().replace(/\.pdf$/i, "");
+    renderRunHeader(started.options || options);
     running = true; userCancelled = false; $("stop-btn").hidden = false;
     startStream();
   });
