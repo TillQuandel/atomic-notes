@@ -457,6 +457,10 @@ def create_app(
             body = await request.json()
         except (json.JSONDecodeError, UnicodeDecodeError):
             return JSONResponse({"error": "Ungültiger JSON-Body."}, status_code=400)
+        # G1: gueltiges JSON, das kein Objekt ist (null/[]), liefe sonst in
+        # body.get(...) -> AttributeError -> 500. Explizit als 400 abweisen.
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "Ungültiger JSON-Body."}, status_code=400)
         pdf = body.get("pdf", "")
         dry_run = bool(body.get("dry_run", True))
         options, options_error = _validate_run_options(body.get("options"))

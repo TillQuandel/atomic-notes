@@ -129,6 +129,17 @@ def test_settings_put_rejects_invalid_json_body_with_400(tmp_path):
     assert "error" in r.json()
 
 
+def test_run_rejects_non_object_json_body_with_400(client):
+    # G1 (Codex-Nachreview): syntaktisch gueltiges JSON, das kein Objekt ist
+    # (null, []), lief bisher in body.get(...) -> AttributeError -> 500. Der
+    # B2-Fix fing nur JSONDecodeError. Beide Faelle muessen 400 liefern.
+    c, _ = client
+    for payload in ("null", "[]", "42", '"text"'):
+        r = c.post("/api/run", content=payload, headers={"Content-Type": "application/json"})
+        assert r.status_code == 400, f"payload {payload!r} -> {r.status_code}"
+        assert "error" in r.json()
+
+
 def test_run_rejects_unknown_pdf(client):
     c, _ = client
     r = c.post("/api/run", json={"pdf": "C:/does/not/exist.pdf", "dry_run": True})

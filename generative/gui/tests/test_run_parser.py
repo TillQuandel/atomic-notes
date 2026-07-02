@@ -227,6 +227,25 @@ def test_real_rate_limit_line_still_emits_error_hint():
     assert any(e["type"] == "log" for e in evs)
 
 
+def test_skip_line_with_not_found_is_benign():
+    # G2 (Codex-Nachreview): benigne eval-Skip-Zeilen enthalten "not found"
+    # (eval_paired/eval_repeat: "  [skip] key: not found") und loesten bisher
+    # faelschlich einen error_hint aus. Ein "[skip]"-Marker ist per Definition
+    # kein harter Fehler.
+    p = RunParser()
+    evs = p.feed("  [skip] chunk-recall: not found")
+    assert evs == [{"type": "log", "text": "  [skip] chunk-recall: not found"}]
+
+
+def test_real_not_found_error_still_emits_error_hint():
+    # G2: der Benign-Filter darf echte "not found"-Fehler (z.B. litellm
+    # "model not found") NICHT unterdruecken — nur Skip-Zeilen sind benign.
+    p = RunParser()
+    evs = p.feed("litellm.NotFoundError: model not found")
+    assert any(e["type"] == "error_hint" for e in evs)
+    assert any(e["type"] == "log" for e in evs)
+
+
 def test_enrichment_stage_zero_marker():
     # [0/7] = optionales PDF-Enrichment (Vor-Stufe) → stage num=0.
     p = RunParser()
