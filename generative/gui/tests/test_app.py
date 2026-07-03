@@ -1007,6 +1007,30 @@ def test_outputs_file_downloads_preview_eval_copy(tmp_path):
     assert r.content == eval_file.read_bytes()
 
 
+def test_outputs_file_rejects_non_md_under_preview_root(tmp_path):
+    # Der preview-Zweig der Whitelist muss wie Vault/Export auf .md
+    # beschraenkt sein -- eine Nicht-.md-Datei unterhalb `preview_root` darf
+    # NICHT ausgeliefert werden, auch wenn sie (z.B. via Traversal aus einem
+    # Lauf-Verzeichnis) dort landet.
+    pdf = tmp_path / "beispiel.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    preview_root = tmp_path / "baseline"
+    (preview_root / "beispiel").mkdir(parents=True)
+    evil_file = preview_root / "beispiel" / "inbox__evil.txt"
+    evil_file.write_text("nicht erlaubt", encoding="utf-8")
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        preview_root=preview_root,
+    )
+    c = TestClient(app, base_url="http://localhost")
+    r = c.get("/api/outputs/file", params={"path": str(evil_file)})
+    assert r.status_code == 403
+
+
 def test_outputs_file_rejects_path_traversal(tmp_path):
     c, vault, _ = _write_mode_app(tmp_path)
     outside = tmp_path / "secret.md"
@@ -1108,6 +1132,68 @@ def test_validate_output_path_helper_without_export_dir_unaffected(tmp_path):
     outside = tmp_path / "fremd.md"
     outside.write_text("x", encoding="utf-8")
     resolved = _validate_output_path(str(outside), vault_path=vault, preview_root=preview)
+    assert resolved is None
+
+
+def test_validate_output_path_helper_rejects_non_md_under_preview_root(tmp_path):
+    # Direkter Helper-Test (ergaenzend zum Endpoint-Test oben): der
+    # preview-Zweig darf keine beliebigen Dateien mehr durchlassen.
+    from generative.gui.app import _validate_output_path
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    preview = tmp_path / "preview"
+    preview.mkdir()
+    img = preview / "beispiel" / "vault__bild.png"
+    img.parent.mkdir(parents=True)
+    img.write_bytes(b"\x89PNG")
+    resolved = _validate_output_path(str(img), vault_path=vault, preview_root=preview)
+    assert resolved is None
+
+
+def test_validate_output_path_helper_allows_md_under_preview_root(tmp_path):
+    # Bestands-Semantik bleibt erhalten: .md unterhalb preview_root weiterhin erlaubt.
+    from generative.gui.app import _validate_output_path
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    preview = tmp_path / "preview"
+    preview.mkdir()
+    note = preview / "beispiel" / "vault__a.md"
+    note.parent.mkdir(parents=True)
+    note.write_text("# a", encoding="utf-8")
+    resolved = _validate_output_path(str(note), vault_path=vault, preview_root=preview)
+    assert resolved == note.resolve()
+
+
+def test_validate_output_path_helper_rejects_ads_under_preview_root(tmp_path):
+    # NTFS Alternate Data Stream (ADS): `wirt.txt:geheim.md` hat als
+    # Path-Suffix ".md" (Python liest den Stream-Namen als Endung), Windows
+    # liefert beim Oeffnen aber den Stream der Basisdatei `wirt.txt` aus --
+    # die .md-Whitelist waere umgangen. Reine Pfad-Logik, kein echtes ADS
+    # noetig (NTFS-only, nicht CI-portabel).
+    from generative.gui.app import _validate_output_path
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    preview = tmp_path / "preview"
+    preview.mkdir()
+    bad = str(preview / "wirt.txt:geheim.md")
+    resolved = _validate_output_path(bad, vault_path=vault, preview_root=preview)
+    assert resolved is None
+
+
+def test_validate_output_path_helper_rejects_ads_under_vault(tmp_path):
+    # Wie oben, aber unter `vault_path` -- der ADS-Guard muss fuer ALLE
+    # Whitelist-Zweige greifen, nicht nur fuer preview_root.
+    from generative.gui.app import _validate_output_path
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    preview = tmp_path / "preview"
+    preview.mkdir()
+    bad = str(vault / "note.txt:hidden.md")
+    resolved = _validate_output_path(bad, vault_path=vault, preview_root=preview)
     assert resolved is None
 
 

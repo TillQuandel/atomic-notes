@@ -256,23 +256,29 @@ def _validate_output_path(
     path: str, *, vault_path: Path, preview_root: Path, export_dir: Path | None = None
 ) -> Path | None:
     """Pfad-Whitelist (L4) fuer `/api/outputs/file` + `/api/outputs/archive`:
-    nur `.md`-Dateien unterhalb `vault_path`, oder beliebige Dateien unterhalb
-    `preview_root` (die eval-Kopien der Dry-Run-Vorschau, bereits auf `.md`
-    beschraenkt), oder `.md`-Dateien unterhalb `export_dir` (B3: der zur
-    Laufzeit gewaehlte freie Export-Ordner -- gleiche `.md`-Beschraenkung wie
-    beim Vault, da der Export-Ordner ebenso ein beliebiger lokaler Ordner ist).
-    `resolve()` neutralisiert Symlink-Escapes. Alles andere: `None` -> Aufrufer
-    antwortet 403.
+    nur `.md`-Dateien unterhalb `vault_path`, oder `.md`-Dateien unterhalb
+    `preview_root` (die eval-Kopien der Dry-Run-Vorschau), oder `.md`-Dateien
+    unterhalb `export_dir` (B3: der zur Laufzeit gewaehlte freie Export-Ordner
+    -- gleiche `.md`-Beschraenkung wie beim Vault, da der Export-Ordner
+    ebenso ein beliebiger lokaler Ordner ist). `resolve()` neutralisiert
+    Symlink-Escapes. Alles andere: `None` -> Aufrufer antwortet 403.
     """
     try:
         resolved = Path(path).resolve()
     except (OSError, ValueError):
         return None
+    # ADS-Schutz (alle Zweige): Doppelpunkt im Dateinamen = NTFS-Stream-Syntax
+    # (`wirt.txt:geheim.md`). Path liest den Stream-Namen als `.suffix` (".md"),
+    # Windows liefert aber die Basisdatei aus -- die .md-Whitelist waere
+    # umgangen. Der Drive-Doppelpunkt (`C:`) steckt in `.drive`, nicht in
+    # `.name`; legitime Notes haben nie `:` im Namen (Windows verbietet es).
+    if ":" in resolved.name:
+        return None
     vault_root = Path(vault_path).resolve()
     preview_base = Path(preview_root).resolve()
     if resolved.is_relative_to(vault_root) and resolved.suffix == ".md":
         return resolved
-    if resolved.is_relative_to(preview_base):
+    if resolved.is_relative_to(preview_base) and resolved.suffix == ".md":
         return resolved
     if export_dir is not None:
         export_base = Path(export_dir).resolve()
