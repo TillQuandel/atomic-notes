@@ -48,14 +48,14 @@ function renderStepper() {
   for (const [num, label] of STAGES) {
     const li = document.createElement("li");
     li.id = `step-${num}`;
-    li.innerHTML = `<span class="dot" aria-hidden="true"></span><span class="step-label">${num}. ${label}</span><span class="elapsed" aria-hidden="true"></span>`;
+    li.innerHTML = `<span class="dot" aria-hidden="true"></span><span class="step-label">${num}. ${label}</span><span class="state"></span><span class="elapsed" aria-hidden="true"></span>`;
     ol.appendChild(li);
   }
 }
 
 function setStage(num) {
   if (num !== activeStage) {
-    // Abgeschlossene Stufe: Dauer festhalten, damit sie als "✓ 34 s" stehen bleibt.
+    // Abgeschlossene Stufe: Dauer festhalten, damit sie als Zeit stehen bleibt.
     if (activeStage > 0 && stageStartedAt) {
       stageDurations[activeStage] = (Date.now() - stageStartedAt) / 1000;
     }
@@ -68,16 +68,22 @@ function setStage(num) {
     li.classList.toggle("done", n < num);
     li.classList.toggle("active", n === num);
     li.classList.remove("error");
+    const s = li.querySelector(".state");
+    if (s) s.textContent = n < num ? "fertig" : n === num ? "läuft…" : "";
     const e = li.querySelector(".elapsed");
     if (!e) continue;
     if (n === num) { e.textContent = ""; continue; } // laufende Stufe: tickElapsed() uebernimmt
-    e.textContent = stageDurations[n] !== undefined ? `✓ ${formatSeconds(stageDurations[n])}` : "";
+    e.textContent = stageDurations[n] !== undefined ? formatSeconds(stageDurations[n]) : "";
   }
 }
 
 function markStageError(num) {
   const li = $(`step-${num}`);
-  if (li) { li.classList.remove("active"); li.classList.add("error"); }
+  if (li) {
+    li.classList.remove("active"); li.classList.add("error");
+    const s = li.querySelector(".state");
+    if (s) s.textContent = "Fehler";
+  }
 }
 
 function renderRunSummaryLine() {
@@ -167,7 +173,7 @@ function showBanner(text) {
   // mehrere Hinweise sammeln, Duplikate vermeiden
   if (![...b.children].some((c) => c.textContent === text)) {
     const p = document.createElement("div");
-    p.textContent = "⚠ " + text;
+    p.textContent = text;
     b.appendChild(p);
   }
 }
@@ -189,7 +195,7 @@ function addPreview(ev) {
       ${ev.reason ? `<span class="badge">${escapeHtml(ev.reason)}</span>` : ""}
       ${ev.merge_target ? `<span class="badge">→ ${escapeHtml(ev.merge_target)}</span>` : ""}
     </div>
-    ${flags ? `<div class="flags">⚠ ${escapeHtml(flags)}</div>` : ""}
+    ${flags ? `<div class="flags">Hinweis: ${escapeHtml(flags)}</div>` : ""}
     <details class="note-body"><summary>Note-Text anzeigen</summary><pre class="body-content muted">…</pre></details>`;
   // Body lazy laden beim ersten Aufklappen (nur im Dry-Run vorhanden).
   const det = li.querySelector("details");
@@ -229,7 +235,7 @@ function addResultCard(item) {
   li.innerHTML = `
     <div class="title">${escapeHtml(item.title)}</div>
     <div class="meta">${badges.join("")}</div>
-    ${flags ? `<div class="flags">⚠ ${escapeHtml(flags)}</div>` : ""}
+    ${flags ? `<div class="flags">Hinweis: ${escapeHtml(flags)}</div>` : ""}
     <details class="note-body"><summary>Note-Text anzeigen</summary><pre class="body-content muted">…</pre></details>
     <div class="actions">${downloadHtml}</div>`;
   const det = li.querySelector("details");
@@ -439,11 +445,11 @@ async function uploadFile(file) {
   try {
     const r = await fetch("/api/upload", { method: "POST", body: fd });
     const d = await r.json();
-    if (!r.ok) { status.textContent = "✗ " + (d.error || "Upload fehlgeschlagen"); return; }
+    if (!r.ok) { status.textContent = d.error || "Upload fehlgeschlagen"; return; }
     selectUploadedPdf(d.path, d.name);
-    status.textContent = `✓ „${d.name}“ bereit — Lauf starten.`;
+    status.textContent = `„${d.name}“ bereit — Lauf starten.`;
   } catch {
-    status.textContent = "✗ Upload fehlgeschlagen.";
+    status.textContent = "Upload fehlgeschlagen.";
   }
 }
 
@@ -526,11 +532,11 @@ async function loadDoctor() {
     const fails = (d.checks || []).filter((c) => !c.ok);
     const summary = `Backend: ${d.backend} · Vault: ${d.vault}`;
     if (d.ok) {
-      el.textContent = `${summary} ✓`;
+      el.textContent = `${summary} — ok`;
       el.classList.remove("bad");
     } else {
       const probleme = fails.map((c) => `${c.name}${c.required ? "" : " (optional)"}`).join(", ");
-      el.innerHTML = `${escapeHtml(summary)} <strong>✗ Preflight: ${escapeHtml(probleme)}</strong>` +
+      el.innerHTML = `${escapeHtml(summary)} <strong>Preflight: ${escapeHtml(probleme)}</strong>` +
         fails.filter((c) => c.hint).map((c) => `<br><span class="muted">→ ${escapeHtml(c.hint)}</span>`).join("");
       el.classList.toggle("bad", fails.some((c) => c.required));
     }
@@ -659,6 +665,7 @@ function setVaultStatus(text, isError) {
   if (!el) return;
   el.textContent = text;
   el.classList.toggle("bad", !!isError);
+  el.classList.toggle("ok", text !== "" && !isError);
   $("vault-path").classList.toggle("bad", !!isError);
 }
 
@@ -674,16 +681,16 @@ async function applyVault(path) {
     if (!r.ok) {
       const msg = d.error || `Vault-Wechsel fehlgeschlagen (${r.status})`;
       showBanner(msg);
-      setVaultStatus("✗ " + msg, true);
+      setVaultStatus(msg, true);
       return;
     }
     currentVaultPath = d.vault;
     $("vault-path").value = d.vault;
     $("vault-current").textContent = `Aktueller Vault: ${d.vault}`;
-    setVaultStatus("✓ übernommen.", false);
+    setVaultStatus("Übernommen.", false);
     await loadDoctor(); // Preflight (vault_exists) haengt vom neuen Vault ab.
   } catch {
-    setVaultStatus("✗ Vault-Wechsel fehlgeschlagen (Netzwerkfehler).", true);
+    setVaultStatus("Vault-Wechsel fehlgeschlagen (Netzwerkfehler).", true);
   }
 }
 
@@ -703,6 +710,7 @@ function setLitellmKeyStatus(text, isError) {
   if (!el) return;
   el.textContent = text;
   el.classList.toggle("bad", !!isError);
+  el.classList.toggle("ok", text !== "" && !isError);
 }
 
 async function saveLitellmKey(provider, key) {
@@ -717,7 +725,7 @@ async function saveLitellmKey(provider, key) {
     if (!r.ok) {
       const msg = d.error || `Speichern fehlgeschlagen (${r.status})`;
       showBanner(msg);
-      setLitellmKeyStatus("✗ " + msg, true);
+      setLitellmKeyStatus(msg, true);
       return;
     }
     // Key nie zurueckanzeigen -- nur Erfolgsmeldung, Feld leeren.
@@ -727,9 +735,9 @@ async function saveLitellmKey(provider, key) {
     // gesetzter Key wird erst nach GUI-Neustart aktiv. KEIN loadDoctor()-Aufruf
     // hier: er wuerde weiter "litellm nicht verfuegbar" zeigen und so faelsch-
     // lich Unwirksamkeit suggerieren. Die Meldung benennt die Neustart-Grenze.
-    setLitellmKeyStatus("✓ Key gespeichert. GUI neu starten, damit er aktiv wird.", false);
+    setLitellmKeyStatus("Key gespeichert. GUI neu starten, damit er aktiv wird.", false);
   } catch {
-    setLitellmKeyStatus("✗ Speichern fehlgeschlagen (Netzwerkfehler).", true);
+    setLitellmKeyStatus("Speichern fehlgeschlagen (Netzwerkfehler).", true);
   }
 }
 
