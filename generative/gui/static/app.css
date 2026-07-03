@@ -83,7 +83,10 @@ a.button {
 }
 .dropzone:hover, .dropzone:focus-visible { border-color: var(--accent); outline: none; }
 .dropzone.dragover { border-color: var(--accent); background: #eef1fd; color: var(--ink); }
-.error-banner {
+/* :not([hidden]) — sonst ueberschreibt `display: grid` das hidden-Attribut
+   (Klassen-Selektor schlaegt UA-`[hidden]{display:none}`), und das leere
+   Banner bleibt als leerer Kasten sichtbar. */
+.error-banner:not([hidden]) {
   border: 1px solid var(--bad); background: #fdecea; color: var(--bad);
   border-radius: var(--radius); padding: 0.75rem 1rem; font-size: 0.9rem;
   display: grid; gap: 0.25rem;
