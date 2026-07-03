@@ -360,9 +360,12 @@ def test_run_rejects_cross_origin(client):
 
 
 def test_run_allows_same_origin(client):
-    # Same-Origin (127.0.0.1) bleibt erlaubt.
+    # Same-Origin bleibt erlaubt. Die `client`-Fixture setzt base_url auf
+    # "http://localhost" (ohne Port) -> der TestClient sendet den Host-Header
+    # "localhost". M1 vergleicht Origin exakt gegen diesen Host-Header, daher
+    # hier "http://localhost" statt eines beliebigen anderen Ports.
     c, pdf = client
-    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True}, headers={"Origin": "http://127.0.0.1:8052"})
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True}, headers={"Origin": "http://localhost"})
     assert r.status_code == 200
 
 
@@ -380,6 +383,104 @@ def test_cancel_rejects_cross_origin(client):
     c, _ = client
     r = c.post("/api/cancel", headers={"Origin": "http://evil.example"})
     assert r.status_code == 403
+
+
+def _run_app(tmp_path):
+    # M1: eigener App-Aufbau (statt `client`-Fixture), weil diese Tests den
+    # Host-Header ueber die `base_url` des TestClients gezielt variieren
+    # muessen -- die Fixture ist fest auf "http://localhost" verdrahtet.
+    pdf = tmp_path / "beispiel.pdf"
+    pdf.write_bytes(b"%PDF-1.4 fake")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=vault,
+        backend="subscription",
+        uploads_dir=tmp_path / "uploads",
+        doctor_fn=fake_doctor,
+    )
+    return app, pdf
+
+
+def test_run_rejects_cross_origin_port(tmp_path):
+    # M1 (KRITISCH): Ein fremder localhost-Port ist KEIN Same-Origin -- vorher
+    # akzeptierte `_is_same_origin` jede Origin mit Hostname 127.0.0.1/
+    # localhost/::1, unabhaengig vom Port (CSRF-Luecke fuer jede andere lokal
+    # laufende Web-App). Jetzt: exakter netloc-Vergleich gegen den Host-Header.
+    app, pdf = _run_app(tmp_path)
+    c = TestClient(app, base_url="http://127.0.0.1:8052")
+    r = c.post(
+        "/api/run",
+        json={"pdf": str(pdf), "dry_run": True},
+        headers={"Origin": "http://127.0.0.1:3000"},
+    )
+    assert r.status_code == 403
+
+
+def test_run_rejects_cross_origin_hostname_same_port(tmp_path):
+    # M1: gleicher Port, aber anderer Hostname (127.0.0.1 vs. localhost) --
+    # der netloc-Vergleich ist exakt, keine Hostname-Aequivalenz.
+    app, pdf = _run_app(tmp_path)
+    c = TestClient(app, base_url="http://127.0.0.1:8052")
+    r = c.post(
+        "/api/run",
+        json={"pdf": str(pdf), "dry_run": True},
+        headers={"Origin": "http://localhost:8052"},
+    )
+    assert r.status_code == 403
+
+
+def test_run_allows_same_origin_case_insensitive(tmp_path):
+    # M1: Origin und Host-Header case-insensitiv vergleichen (Hostnames sind
+    # nicht case-sensitiv).
+    app, pdf = _run_app(tmp_path)
+    c = TestClient(app, base_url="http://localhost:8052")
+    r = c.post(
+        "/api/run",
+        json={"pdf": str(pdf), "dry_run": True},
+        headers={"Origin": "http://LOCALHOST:8052"},
+    )
+    assert r.status_code == 200
+
+
+def test_run_rejects_null_origin(client):
+    # M1: `Origin: null` (z.B. sandboxed iframe/data:-URL) faellt nicht unter
+    # "Origin fehlt" -- fail-closed, nicht erlaubt.
+    c, pdf = client
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True}, headers={"Origin": "null"})
+    assert r.status_code == 403
+
+
+def test_is_same_origin_direct_matrix():
+    # Codex-Review M1 (GERING): direkte Matrix fuer `_is_same_origin` --
+    # Faelle, die ueber den TestClient nicht erreichbar sind (fehlender
+    # Host-Header, Userinfo im Origin-netloc, ungueltiger Port, IPv6).
+    from starlette.requests import Request
+
+    from generative.gui.app import _is_same_origin
+
+    def _req(headers: dict[str, str]) -> Request:
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/run",
+            "query_string": b"",
+            "headers": [(k.encode(), v.encode()) for k, v in headers.items()],
+        }
+        return Request(scope)
+
+    # kein Origin -> erlaubt (Nicht-Browser-Clients)
+    assert _is_same_origin(_req({})) is True
+    # Origin gesetzt, aber Host-Header fehlt -> fail-closed
+    assert _is_same_origin(_req({"origin": "http://127.0.0.1:8052"})) is False
+    # Userinfo im Origin-netloc matcht den Host-Header nicht
+    assert _is_same_origin(_req({"origin": "http://user@127.0.0.1:8052", "host": "127.0.0.1:8052"})) is False
+    # ungueltiger/fremder Port -> abgelehnt
+    assert _is_same_origin(_req({"origin": "http://127.0.0.1:99999", "host": "127.0.0.1:8052"})) is False
+    # IPv6: netloc-Gleichheit inkl. Klammer-Notation
+    assert _is_same_origin(_req({"origin": "http://[::1]:8052", "host": "[::1]:8052"})) is True
 
 
 def test_run_rejects_pdf_outside_allowed_dirs(tmp_path):
@@ -1904,6 +2005,21 @@ def test_vault_put_rejects_cross_origin(tmp_path):
         "/api/vault",
         json={"path": str(new_vault)},
         headers={"Origin": "http://evil.example"},
+    )
+    assert r.status_code == 403
+
+
+def test_vault_put_rejects_cross_origin_port(tmp_path):
+    # M1: Haertung deckt auch andere Mutatoren als /api/run ab -- fremder
+    # localhost-Port wird auch bei PUT /api/vault abgelehnt.
+    app, _vault = _vault_app(tmp_path)
+    new_vault = tmp_path / "new-vault"
+    new_vault.mkdir()
+    c = TestClient(app, base_url="http://127.0.0.1:8052")
+    r = c.put(
+        "/api/vault",
+        json={"path": str(new_vault)},
+        headers={"Origin": "http://127.0.0.1:3000"},
     )
     assert r.status_code == 403
 
