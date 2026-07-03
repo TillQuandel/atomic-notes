@@ -25,7 +25,7 @@ from fastapi import FastAPI, Request, UploadFile, File
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, StreamingResponse
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
-from generative.gui import gui_settings, run_history, runner
+from generative.gui import env_file, gui_settings, run_history, runner
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +44,14 @@ _MAX_RUN_RECORDS = 50
 # -- Modul-Konstante, damit Tests sie per monkeypatch isolieren koennen (s.
 # tests/conftest.py) und create_app(settings_path=...) sie injizieren kann.
 _DEFAULT_SETTINGS_PATH = Path(__file__).resolve().parents[1] / ".cache" / "gui" / "settings.json"
+
+# B1b: Ziel-Datei fuer den litellm-API-Key-Endpunkt -- FEST auf generative/.env
+# (identisch zu config.py: `Path(__file__).resolve().parent / ".env"`, dort
+# von generative/config.py aus gerechnet). Modul-Konstante analog
+# _DEFAULT_RUNS_DIR/_DEFAULT_SETTINGS_PATH, damit Tests sie per monkeypatch
+# isolieren koennen (Sicherheitsnetz zusaetzlich zu create_app(env_path=...)
+# -- die echte .env darf NIE von einem Test angefasst werden).
+_DEFAULT_ENV_PATH = Path(__file__).resolve().parents[1] / ".env"
 
 # Endungen, die als „PDF-Kandidat" gelistet werden.
 _PDF_GLOB = "*.pdf"
@@ -422,6 +430,7 @@ def create_app(
     preview_root: Path | None = None,
     runs_dir: Path | None = None,
     settings_path: Path | None = None,
+    env_path: Path | None = None,
     clock: Callable[[], float] | None = None,
     allowed_hosts: list[str] | None = None,
 ) -> FastAPI:
@@ -434,6 +443,12 @@ def create_app(
         litellm_check_fn = lambda: _check_backend("litellm")  # noqa: E731
     if access_summary_fn is None:
         from generative.doctor import access_summary as access_summary_fn
+    # B1b: Provider-Enum SSoT bleibt doctor.py -- hier nur importiert, nie dupliziert.
+    from generative.doctor import _LITELLM_KEY_VARS
+
+    if env_path is None:
+        env_path = _DEFAULT_ENV_PATH
+    env_path = Path(env_path)
     if preview_root is None:
         preview_root = Path(__file__).resolve().parents[1] / ".cache" / "eval" / "baseline"
     preview_root = Path(preview_root)
@@ -889,6 +904,40 @@ def create_app(
             stored["vault_path"] = str(resolved)
             gui_settings.write_settings(stored, settings_path)
         return JSONResponse({"vault": str(app.state.vault_path)})
+
+    @app.post("/api/access/litellm-key")
+    async def set_litellm_key(request: Request) -> JSONResponse:
+        """litellm-API-Key aus der GUI setzen (B1b). Schreibt genau eine Zeile
+        nach `generative/.env` (Pfad FEST verdrahtet, s. `env_path`/
+        `_DEFAULT_ENV_PATH` -- niemals vom Client ableitbar). Gibt den Key NIE
+        zurueck und loggt ihn NIE (nur `provider`+`set`-Flag in der Response).
+
+        Lockert bewusst „keine Secrets durch die GUI" (L4) -- deshalb strengste
+        Validierung: Origin-Check zuerst, Provider gegen die feste
+        `_LITELLM_KEY_VARS`-Enum (kein beliebiger Variablenname), Control-Chars
+        im Wert geblockt (sonst koennte ein `\\n` eine zweite `.env`-Zeile
+        injizieren, z.B. `ATOMIC_AGENT_BACKEND=evil`).
+        """
+        if not _is_same_origin(request):
+            return JSONResponse({"error": "Cross-Origin-Request abgelehnt."}, status_code=403)
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JSONResponse({"error": "Ungültiger JSON-Body."}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "Ungültiger JSON-Body."}, status_code=400)
+        provider = body.get("provider")
+        if provider not in _LITELLM_KEY_VARS:
+            return JSONResponse({"error": "Unbekannter Provider."}, status_code=422)
+        clean_key, error = env_file.validate_key_value(body.get("key"))
+        if error:
+            return JSONResponse({"error": error}, status_code=400)
+        try:
+            env_file.write_env_var(provider, clean_key, env_path)
+        except OSError as exc:  # Fehlermeldung generisch -- nie den key-Wert einbetten (L4).
+            logger.warning("Konnte litellm-Key nicht schreiben (%s): %s", provider, exc)
+            return JSONResponse({"error": "Key konnte nicht gespeichert werden."}, status_code=500)
+        return JSONResponse({"provider": provider, "set": True})
 
     return app
 

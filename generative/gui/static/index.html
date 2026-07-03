@@ -34,6 +34,24 @@
         Nicht eingeloggt: im Terminal <code>claude</code> starten und einloggen.
         <button type="button" id="access-copy-btn">Befehl kopieren</button>
       </p>
+
+      <!-- B1b: litellm-API-Key setzen -- write-only, wird nie zurueckgegeben
+           oder angezeigt (weder hier noch im Log). Provider auf die feste
+           3er-Enum (_LITELLM_KEY_VARS) begrenzt. -->
+      <form id="litellm-key-form" class="litellm-key-form">
+        <label for="litellm-key-provider">litellm-Key setzen</label>
+        <div class="actions">
+          <select id="litellm-key-provider" name="litellm-key-provider">
+            <option value="ANTHROPIC_API_KEY">ANTHROPIC_API_KEY</option>
+            <option value="OPENAI_API_KEY">OPENAI_API_KEY</option>
+            <option value="OLLAMA_API_BASE">OLLAMA_API_BASE</option>
+          </select>
+          <input type="password" id="litellm-key-value" name="litellm-key-value"
+                 placeholder="Key eingeben" autocomplete="off">
+          <button type="submit" id="litellm-key-btn">Speichern</button>
+        </div>
+        <p id="litellm-key-status" class="hint" aria-live="polite"></p>
+      </form>
     </section>
 
     <section class="panel" aria-labelledby="vault-h">
