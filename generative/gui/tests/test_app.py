@@ -522,6 +522,42 @@ def test_run_forwards_normalized_options_to_run_factory(tmp_path):
     assert captured["options"] == {"backend": "litellm", "profile": "fast"}
 
 
+def test_run_forwards_resolved_export_dir_to_run_factory(tmp_path):
+    # B3 (TOCTOU-Konsistenz): der an --inbox-dir durchgereichte Pfad muss der
+    # AUFGELOESTE sein (== gesnapshotteter session.export_dir), nicht der rohe
+    # Eingabe-String -- sonst koennte ein Symlink nach der Validierung woanders
+    # hinzeigen und der Subprocess ausserhalb des Snapshots schreiben.
+    captured = {}
+
+    def capturing_run(pdf, dry_run, register=None, options=None):
+        captured["options"] = options
+        yield {"type": "started", "argv": ["x"]}
+        yield {"type": "exited", "returncode": 0}
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    export = tmp_path / "export"
+    export.mkdir()
+    app = create_app(
+        run_factory=capturing_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+    )
+    c = TestClient(app, base_url="http://localhost")
+    # relativ-verschachtelter Eingabe-Pfad, der zu `export` aufloest
+    messy = str(export / "sub" / "..")
+    r = c.post(
+        "/api/run",
+        json={"pdf": str(pdf), "dry_run": False, "options": {"inbox_dir": messy}},
+    )
+    assert r.status_code == 200
+    c.get("/api/stream")
+    assert captured["options"]["inbox_dir"] == str(export.resolve())
+
+
 # --- B3: Output-Ziel waehlbar (options.inbox_dir) --------------------------
 
 

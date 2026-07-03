@@ -608,6 +608,11 @@ def create_app(
                 return JSONResponse({"error": f"Ungültiger Export-Ordner: {options['inbox_dir']}"}, status_code=400)
             if not export_dir.is_dir():
                 return JSONResponse({"error": f"Export-Ordner nicht gefunden: {options['inbox_dir']}"}, status_code=400)
+            # TOCTOU-Konsistenz: dem Subprocess (--inbox-dir) UND dem Snapshot
+            # denselben AUFGELOESTEN Pfad geben, nicht den rohen Eingabe-String
+            # -- ein Symlink koennte sonst nach der Validierung woanders
+            # hinzeigen und der Subprocess ausserhalb des Snapshots schreiben.
+            options = {**options, "inbox_dir": str(export_dir)}
         if not pdf or not Path(pdf).exists():
             return JSONResponse({"error": f"PDF nicht gefunden: {pdf}"}, status_code=400)
         # #2: Quelle muss unter einem erlaubten Root liegen (gelistet/hochgeladen).
