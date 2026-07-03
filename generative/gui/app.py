@@ -54,11 +54,6 @@ _PDF_GLOB = "*.pdf"
 # 127.0.0.1).
 _DEFAULT_ALLOWED_HOSTS = ["127.0.0.1", "localhost", "::1"]
 
-# Same-Origin-Hosts: Die GUI bindet nur an 127.0.0.1. Ein Browser sendet bei
-# Cross-Origin-POSTs einen `Origin`-Header — fehlt er (curl/TestClient/Beacon
-# same-origin), ist es kein CSRF-Vektor.
-_LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
-
 # P1 (Lauf-Einstellungen): Whitelist der `POST /api/run`-`options`. Backend-/
 # Profil-Wertepruefung teilt sich `gui_settings.validate_backend/validate_profile`
 # (P2 hat dieselbe Pruefung fuer `PUT /api/settings` -- ausfaktoriert statt
@@ -116,13 +111,27 @@ def _validate_run_options(options) -> tuple[dict, str | None]:
 
 
 def _is_same_origin(request: Request) -> bool:
-    """CSRF-Schutz: Cross-Origin-Browser-Requests an mutierende Endpunkte abweisen."""
+    """CSRF-Schutz: Cross-Origin-Browser-Requests an mutierende Endpunkte abweisen.
+
+    M1-Haertung: exakter Vergleich `Origin`-netloc gegen den `Host`-Header
+    (statt nur Hostname gegen eine localhost-Whitelist) -- sonst akzeptierte
+    die GUI Cross-Origin-POSTs von JEDER anderen localhost-Origin (z.B.
+    http://localhost:3000), weil `request.json()` content-type-unabhaengig
+    parst (ein text/plain-POST ist ein "simple request" ohne CORS-Preflight).
+    Fehlender `Origin`-Header bleibt erlaubt (Nicht-Browser-Clients wie curl
+    haben keinen Origin); fehlender `Host`-Header oder leere/`null`-Origin
+    werden abgelehnt (fail-closed). Vergleich case-insensitiv, da Hostnames
+    nicht case-sensitiv sind.
+    """
     origin = request.headers.get("origin")
     if origin is None:
         return True
+    host = request.headers.get("host")
+    if not host:
+        return False
     from urllib.parse import urlparse
 
-    return urlparse(origin).hostname in _LOCAL_HOSTS
+    return urlparse(origin).netloc.lower() == host.lower()
 
 
 def _active_vault(session: "RunSession | None", state_vault_path: Path) -> Path:
