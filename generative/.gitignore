@@ -2,6 +2,10 @@
 *.pyc
 __pycache__/
 .env
+# B1b: Crash-Reste des atomaren .env-Merge-Writes (env_file.write_env_var legt
+# `.tmp-XXXX.env` an; bei hartem Kill zwischen Write und os.replace bleibt eine
+# Datei mit KLARTEXT-KEY liegen -- nie versehentlich committen).
+.tmp-*.env
 .vscode/
 .idea/
 .pytest_cache/

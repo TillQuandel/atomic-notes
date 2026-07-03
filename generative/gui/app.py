@@ -934,7 +934,10 @@ def create_app(
             return JSONResponse({"error": error}, status_code=400)
         try:
             env_file.write_env_var(provider, clean_key, env_path)
-        except OSError as exc:  # Fehlermeldung generisch -- nie den key-Wert einbetten (L4).
+        except (OSError, UnicodeDecodeError) as exc:  # Fehlermeldung generisch -- nie den key-Wert einbetten (L4).
+            # UnicodeDecodeError: eine bestehende, nicht-UTF-8-`.env` (Windows
+            # cp1252/BOM) wuerde beim Read sonst als ungefangener Traceback-500
+            # durchschlagen -- fail-closed mit generischer Meldung.
             logger.warning("Konnte litellm-Key nicht schreiben (%s): %s", provider, exc)
             return JSONResponse({"error": "Key konnte nicht gespeichert werden."}, status_code=500)
         return JSONResponse({"provider": provider, "set": True})

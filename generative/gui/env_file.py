@@ -22,7 +22,13 @@ from pathlib import Path
 # < 0x20 (Tab, CR, LF, NUL, ...) oder DEL (0x7f) -- deckt alle gaengigen
 # Zeilenumbruch-/Injection-Zeichen ab, ohne normale Key-Zeichen (auch
 # Sonderzeichen wie -, _, /, :, .) einzuschraenken.
-_CONTROL_CHARS = frozenset(chr(c) for c in range(0x20)) | {"\x7f"}
+# Zusaetzlich die Unicode-Zeilentrenner, die Python `str.splitlines()` als
+# Zeilengrenze wertet: U+0085 (NEL), U+2028 (LINE SEPARATOR), U+2029
+# (PARAGRAPH SEPARATOR). Gegen den aktuellen dotenv-Ladeweg empirisch harmlos,
+# aber defense-in-depth (kuenftig evtl. gehostet/dockerisiert -- Docker
+# `env_file`/Shell-`source` parsen Zeilen anders). Invariante: jeder
+# akzeptierte Key ist einzeilig (`len(clean_key.splitlines()) == 1`).
+_CONTROL_CHARS = frozenset(chr(c) for c in range(0x20)) | {"\x7f", "\x85", "\u2028", "\u2029"}
 
 # Read-Modify-Write der .env-Datei ist NICHT parallelsicher ohne Lock --
 # zwei gleichzeitige POSTs koennten sich sonst gegenseitig ueberschreiben
@@ -39,6 +45,11 @@ def validate_key_value(value: object) -> tuple[str | None, str | None]:
     `.strip()` unsichtbar geworden, obwohl er als Eingabe abgelehnt werden
     soll). Fuehrende/nachfolgende Leerzeichen werden getrimmt; ein danach
     leerer String gilt als "kein Key".
+
+    Ein (nach strip) mit `"`/`'` beginnender Wert wird abgelehnt: python-dotenv
+    interpretiert fuehrende Anfuehrungszeichen als Multiline-Quote-Beginn und
+    kann so die GESAMTE `.env`-Ladung (auch andere Variablen) lahmlegen. Ein
+    legitimer API-Key/URL beginnt nie mit einem Quote.
     """
     if not isinstance(value, str):
         return None, "key fehlt oder ist kein String."
@@ -47,6 +58,8 @@ def validate_key_value(value: object) -> tuple[str | None, str | None]:
     stripped = value.strip()
     if not stripped:
         return None, "key darf nicht leer sein."
+    if stripped[0] in ('"', "'"):
+        return None, "Key darf nicht mit Anfuehrungszeichen beginnen."
     return stripped, None
 
 

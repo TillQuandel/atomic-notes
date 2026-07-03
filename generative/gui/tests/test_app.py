@@ -2650,3 +2650,30 @@ def test_litellm_key_appended_when_not_previously_set(tmp_path):
     assert r.status_code == 200
     content = env_path.read_text(encoding="utf-8")
     assert content == "ATOMIC_AGENT_BACKEND=subscription\nOLLAMA_API_BASE=http://localhost:11434\n"
+
+
+def test_litellm_key_non_utf8_env_returns_500_no_traceback(tmp_path):
+    # Punkt 4 (fail-closed): eine bestehende nicht-UTF-8-`.env` (cp1252/BOM)
+    # wirft beim Read einen UnicodeDecodeError -- der Endpunkt muss ihn als
+    # generische 500 fangen (kein Traceback-Durchschlag, kein Key in der
+    # Response).
+    env_path = tmp_path / ".env"
+    env_path.write_bytes(b"ATOMIC_AGENT_BACKEND=subscription\n\xff\xfe not utf8\n")
+    c = TestClient(
+        _litellm_key_app(tmp_path, env_path=env_path), base_url="http://localhost", raise_server_exceptions=False
+    )
+    r = c.post("/api/access/litellm-key", json={"provider": "ANTHROPIC_API_KEY", "key": "sk-test-xxx"})
+    assert r.status_code == 500
+    body = r.json()
+    assert body == {"error": "Key konnte nicht gespeichert werden."}
+    assert "sk-test-xxx" not in r.text
+
+
+def test_litellm_key_rejects_leading_quote_400(tmp_path):
+    # Punkt 5 (Endpunkt-Ebene): ein mit Quote beginnender Key wird als 400
+    # abgewiesen, nichts geschrieben.
+    env_path = tmp_path / ".env"
+    c = TestClient(_litellm_key_app(tmp_path, env_path=env_path), base_url="http://localhost")
+    r = c.post("/api/access/litellm-key", json={"provider": "ANTHROPIC_API_KEY", "key": '"sk-x'})
+    assert r.status_code == 400
+    assert not env_path.exists()

@@ -722,8 +722,12 @@ async function saveLitellmKey(provider, key) {
     }
     // Key nie zurueckanzeigen -- nur Erfolgsmeldung, Feld leeren.
     $("litellm-key-value").value = "";
-    setLitellmKeyStatus("✓ Key gesetzt.", false);
-    await loadDoctor(); // litellm-Verfuegbarkeit haengt vom neuen Key ab.
+    // L6-Ehrlichkeit: der laufende GUI-Prozess liest `.env`/os.environ NICHT
+    // neu (config.py laedt sie nur beim Start, override=False) -- ein frisch
+    // gesetzter Key wird erst nach GUI-Neustart aktiv. KEIN loadDoctor()-Aufruf
+    // hier: er wuerde weiter "litellm nicht verfuegbar" zeigen und so faelsch-
+    // lich Unwirksamkeit suggerieren. Die Meldung benennt die Neustart-Grenze.
+    setLitellmKeyStatus("✓ Key gespeichert. GUI neu starten, damit er aktiv wird.", false);
   } catch {
     setLitellmKeyStatus("✗ Speichern fehlgeschlagen (Netzwerkfehler).", true);
   }

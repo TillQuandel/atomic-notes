@@ -7,6 +7,8 @@ echte `generative/.env`.
 
 from __future__ import annotations
 
+import pytest
+
 from generative.gui import env_file
 
 
@@ -86,6 +88,62 @@ def test_validate_key_value_rejects_trailing_newline_even_though_strip_would_rem
     value, error = env_file.validate_key_value("sk-test-xxx\n")
     assert value is None
     assert error is not None
+
+
+# --- Punkt 2: Unicode-Zeilentrenner (Qwen-Fund, defense-in-depth) ----------
+
+
+@pytest.mark.parametrize("sep", ["\x85", "\u2028", "\u2029"])
+def test_validate_key_value_rejects_unicode_line_separators(sep):
+    # str.splitlines() wertet U+0085/U+2028/U+2029 als Zeilengrenze -- ein
+    # solcher Trenner im Wert koennte in einem anderen Ladeweg (Docker
+    # env_file/Shell-source) eine zweite Zeile injizieren.
+    value, error = env_file.validate_key_value(f"sk-x{sep}INJECTED=1")
+    assert value is None
+    assert error is not None
+
+
+@pytest.mark.parametrize(
+    "key",
+    ["sk-test-xxx", "http://localhost:11434", "sk-ant-api03-AbC_123-xyz", "a" * 200],
+)
+def test_validate_key_value_accepted_key_is_always_single_line(key):
+    # Invariante: jeder akzeptierte Key ist einzeilig -- kein Trenner (ASCII
+    # oder Unicode) hat ihn passiert.
+    clean, error = env_file.validate_key_value(key)
+    assert error is None
+    assert len(clean.splitlines()) == 1
+
+
+# --- Punkt 5: fuehrendes Anfuehrungszeichen ablehnen (.env-Robustheit) -----
+
+
+def test_validate_key_value_rejects_leading_double_quote():
+    value, error = env_file.validate_key_value('"sk-x')
+    assert value is None
+    assert error is not None
+
+
+def test_validate_key_value_rejects_leading_single_quote():
+    value, error = env_file.validate_key_value("'sk-x")
+    assert value is None
+    assert error is not None
+
+
+def test_validate_key_value_rejects_leading_quote_after_strip():
+    # Der fuehrende Whitespace wird getrimmt -- danach beginnt der Wert mit
+    # einem Quote und muss abgelehnt werden.
+    value, error = env_file.validate_key_value('   "sk-x')
+    assert value is None
+    assert error is not None
+
+
+def test_validate_key_value_allows_internal_quote():
+    # Nur ein FUEHRENDES Quote ist das Problem; ein Quote mitten im Wert bleibt
+    # erlaubt (kein legitimer Key beginnt mit einem Quote, aber intern moeglich).
+    value, error = env_file.validate_key_value('sk-x"y')
+    assert error is None
+    assert value == 'sk-x"y'
 
 
 # --- write_env_var ---------------------------------------------------------
