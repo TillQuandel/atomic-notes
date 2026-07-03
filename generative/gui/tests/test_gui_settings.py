@@ -79,6 +79,37 @@ def test_validate_settings_rejects_non_dict_payload():
     assert error is not None
 
 
+# --- vault_path (B2: Vault-/Ordner-Wahl) --------------------------------
+
+
+def test_validate_settings_accepts_vault_path_string():
+    normalized, error = gui_settings.validate_settings({"vault_path": "C:/Users/x/Vault"})
+    assert error is None
+    assert normalized == {"vault_path": "C:/Users/x/Vault"}
+
+
+def test_validate_settings_rejects_empty_vault_path():
+    # Anders als backend/profile (dort bedeutet "" "Server-Default"): ein leerer
+    # vault_path hat keine sinnvolle Bedeutung -- Fehler statt stillem Weglassen.
+    normalized, error = gui_settings.validate_settings({"vault_path": ""})
+    assert normalized == {}
+    assert error is not None
+
+
+def test_validate_settings_rejects_non_string_vault_path():
+    normalized, error = gui_settings.validate_settings({"vault_path": 123})
+    assert normalized == {}
+    assert error is not None
+
+
+def test_validate_settings_vault_path_no_existence_check():
+    # validate_settings prueft NICHT ob der Pfad existiert -- das macht der
+    # Endpunkt (PUT /api/vault). Ein beliebiger nicht-leerer String ist hier gueltig.
+    normalized, error = gui_settings.validate_settings({"vault_path": "/nicht/vorhanden"})
+    assert error is None
+    assert normalized == {"vault_path": "/nicht/vorhanden"}
+
+
 # --- write_settings / read_settings ------------------------------------
 
 
@@ -125,3 +156,11 @@ def test_write_creates_parent_directories(tmp_path):
     path = tmp_path / "a" / "b" / "settings.json"
     gui_settings.write_settings({"profile": "fast"}, path)
     assert path.exists()
+
+
+def test_write_then_read_roundtrip_with_vault_path(tmp_path):
+    path = tmp_path / "gui" / "settings.json"
+    gui_settings.write_settings({"backend": "litellm", "vault_path": "C:/Vault"}, path)
+    data, warning = gui_settings.read_settings(path)
+    assert warning is None
+    assert data == {"backend": "litellm", "vault_path": "C:/Vault"}

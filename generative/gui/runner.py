@@ -26,13 +26,25 @@ def build_argv(pdf_path: str, *, dry_run: bool, extra: list[str] | None = None) 
     return argv
 
 
-def build_run_spec(pdf_path: str, *, dry_run: bool, options: dict | None = None) -> tuple[list[str], dict[str, str]]:
+def build_run_spec(
+    pdf_path: str,
+    *,
+    dry_run: bool,
+    options: dict | None = None,
+    vault_path: str | None = None,
+) -> tuple[list[str], dict[str, str]]:
     """Uebersetzt bereits validierte Lauf-Einstellungen (P1) in argv + Env-Overrides.
 
     Erwartet normalisierte `options` (Server-seitig gegen die Whitelist geprueft,
     z.B. in `app.py:_validate_run_options`) — diese Funktion validiert selbst
     nicht, sie ist reine Uebersetzung. `options=None`/`{}` verhaelt sich exakt
     wie ein `build_argv`-Aufruf ohne Extras (Rueckwaertskompatibilitaet).
+
+    `vault_path` (B2, Punkt 3): der zur Laufzeit in der GUI gewaehlte Vault --
+    reine Uebersetzung in `ATOMIC_AGENT_VAULT_PATH`, keine Validierung hier
+    (die passiert serverseitig in `app.py` vor dem Lauf-Start bzw. in
+    `PUT /api/vault`). `None`/leer laesst den Subprocess das Standard-ENV
+    (bzw. `.env`) erben -- unveraendertes Verhalten vor B2.
     """
     options = options or {}
     extra = ["--no-llm"] if options.get("no_llm") else None
@@ -42,6 +54,8 @@ def build_run_spec(pdf_path: str, *, dry_run: bool, options: dict | None = None)
         env_overrides["ATOMIC_AGENT_BACKEND"] = options["backend"]
     if options.get("profile"):
         env_overrides["ATOMIC_AGENT_PROFILE"] = options["profile"]
+    if vault_path:
+        env_overrides["ATOMIC_AGENT_VAULT_PATH"] = str(vault_path)
     return argv, env_overrides
 
 

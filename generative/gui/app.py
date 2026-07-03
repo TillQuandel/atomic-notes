@@ -114,6 +114,20 @@ def _is_same_origin(request: Request) -> bool:
     return urlparse(origin).hostname in _LOCAL_HOSTS
 
 
+def _active_vault(session: "RunSession | None", state_vault_path: Path) -> Path:
+    """R1 (Race, KRITISCH, B2): die session-gebundenen Output-Endpunkte
+    (`/api/outputs`, `/api/outputs/file`, `/api/outputs/archive`) validieren
+    gegen den Vault-SNAPSHOT des (letzten) Laufs (`session.vault_path`,
+    gesetzt bei Lauf-Start in `start_run`), NICHT gegen den moeglicherweise
+    zwischenzeitlich per `PUT /api/vault` gewechselten globalen
+    `app.state.vault_path`. Sonst wuerde ein Download gegen Vault B validieren,
+    waehrend der Lauf tatsaechlich in Vault A geschrieben hat. Ohne Session
+    (noch nie gelaufen): Fallback auf den aktuellen State-Vault."""
+    if session is not None and getattr(session, "vault_path", None) is not None:
+        return session.vault_path
+    return state_vault_path
+
+
 def _is_within(path: str, root: Path) -> bool:
     """True, wenn `path` (aufgelöst) innerhalb von `root` liegt."""
     try:
@@ -310,8 +324,18 @@ class RunSession:
         return not self.finished
 
 
-def _default_run_factory(pdf: str, dry_run: bool, register=None, options: dict | None = None) -> Iterator[dict]:
-    argv, env_overrides = runner.build_run_spec(pdf, dry_run=dry_run, options=options)
+def _default_run_factory(
+    pdf: str,
+    dry_run: bool,
+    register=None,
+    options: dict | None = None,
+    vault_path: Path | None = None,
+) -> Iterator[dict]:
+    """`vault_path` (B2, Punkt 3): der Subprocess bekommt `ATOMIC_AGENT_VAULT_PATH`
+    fuer den zur Laufzeit gewaehlten Vault. `create_app` reicht hier bei jedem
+    Lauf-Start den AKTUELLEN `app.state.vault_path` durch (s. Wrapper-Closure
+    unten) -- nicht den urspruenglichen `create_app(vault_path=...)`-Parameter."""
+    argv, env_overrides = runner.build_run_spec(pdf, dry_run=dry_run, options=options, vault_path=vault_path)
     yield from runner.iter_run_events(argv, env=env_overrides, on_proc=register)
 
 
@@ -330,7 +354,7 @@ def create_app(
     clock: Callable[[], float] | None = None,
     allowed_hosts: list[str] | None = None,
 ) -> FastAPI:
-    run_factory = run_factory or _default_run_factory
+    _injected_run_factory = run_factory
     if doctor_fn is None:
         from generative.doctor import run_all as doctor_fn
     if litellm_check_fn is None:
@@ -356,6 +380,23 @@ def create_app(
             pdf_dirs = [_repo / "examples", getattr(_cfg, "LITERATURE_DIR", None)]
         if vault_path is None:
             vault_path = _cfg.VAULT
+            # P6/B2: eine zuvor per `PUT /api/vault` gewaehlte + persistierte
+            # Vault-Wahl ueberschreibt beim Server-Start den config.VAULT-Default
+            # -- aber nur, wenn der gespeicherte Pfad noch existiert und ein
+            # Verzeichnis ist (fail-open lesend, L5: ein kaputter/veralteter
+            # Eintrag darf den Server-Start nicht verhindern).
+            _stored_settings, _ = gui_settings.read_settings(settings_path)
+            _stored_vault = _stored_settings.get("vault_path")
+            if _stored_vault:
+                _candidate = Path(_stored_vault)
+                if _candidate.is_dir():
+                    vault_path = _candidate
+                else:
+                    logger.warning(
+                        "Gespeicherter vault_path existiert nicht (mehr) oder ist kein "
+                        "Verzeichnis, verwende Default: %s",
+                        _stored_vault,
+                    )
         if backend is None:
             backend = _cfg.BACKEND
     pdf_dirs = [Path(d) for d in pdf_dirs if d]
@@ -372,6 +413,25 @@ def create_app(
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=allowed_hosts or _DEFAULT_ALLOWED_HOSTS)
     app.state.session = None
     app.state.session_lock = threading.Lock()
+    # B2: mutabler Vault-State -- die nicht-session-gebundenen Pruefungen
+    # (/api/run-Vault-Check, /api/doctor) lesen ab hier `app.state.vault_path`
+    # statt der eingefrorenen Closure-Variable `vault_path`, damit ein Wechsel
+    # per `PUT /api/vault` sofort greift. `.resolve()`: kanonischer absoluter
+    # Pfad, konsistent mit der Validierung in `PUT /api/vault` weiter unten.
+    app.state.vault_path = Path(vault_path).resolve()
+
+    if _injected_run_factory is not None:
+        run_factory = _injected_run_factory
+    else:
+
+        def run_factory(pdf: str, dry_run: bool, register=None, options: dict | None = None) -> Iterator[dict]:
+            # B2 (Punkt 3, Subprocess-Override): `app.state.vault_path` wird
+            # erst HIER beim tatsaechlichen Lauf-Start gelesen (nicht beim
+            # create_app-Aufruf) -- kann also einen zwischenzeitlichen Wechsel
+            # per `PUT /api/vault` mitnehmen.
+            return _default_run_factory(
+                pdf, dry_run, register=register, options=options, vault_path=app.state.vault_path
+            )
 
     @app.get("/", response_class=HTMLResponse)
     def index() -> HTMLResponse:
@@ -431,16 +491,32 @@ def create_app(
                     "required": bool(getattr(chk, "required", True)),
                 }
             )
-        ok = all(c["ok"] for c in checks if c["required"])
+        # R2 (doctor, KRITISCH, B2): `doctor_fn()` (Default: `doctor.run_all()`)
+        # enthaelt bereits einen "vault"-Check, der prueft aber INTERN
+        # `config.VAULT` -- die Modul-Import-Konstante aus config.py, NICHT den
+        # zur Laufzeit per `PUT /api/vault` gewechselten `app.state.vault_path`.
+        # Nach einem Vault-Wechsel waere dieser eingebettete Check dauerhaft
+        # stale (zeigt nie den neuen State-Vault) und wuerde `ok` fälschlich
+        # blockieren/freigeben. Deshalb: aus der `ok`-Gating-Menge ausklammern
+        # und durch eine eigene, frische Re-Validierung des TATSAECHLICH
+        # gewaehlten Vaults ersetzen. Der alte Eintrag bleibt in `checks`
+        # sichtbar (Transparenz/Debugging), zaehlt aber nicht mehr mit --
+        # bewusst dokumentierte Grenze (L6): sein `detail`-Text kann irreführend
+        # veraltet sein, solange `doctor_fn` selbst nicht B2-aware ist.
+        checks_ok = all(c["ok"] for c in checks if c["required"] and c["name"] != "vault")
         # P1 Doctor-Gating: litellm-Verfuegbarkeit unabhaengig vom aktuell
         # konfigurierten Server-Backend pruefen (sonst faellt der Key-Check weg,
         # sobald der Server per Default auf "subscription" laeuft) — reine
         # Wiederverwendung von doctor.check_backend, keine neue Logik.
         litellm_check = litellm_check_fn()
         litellm_available = bool(getattr(litellm_check, "ok", False))
+        current_vault = app.state.vault_path
+        vault_exists = current_vault.is_dir()
+        ok = checks_ok and vault_exists
         response = {
             "backend": backend,
-            "vault": str(Path(vault_path)),
+            "vault": str(current_vault),
+            "vault_exists": vault_exists,
             "ok": ok,
             "checks": checks,
             "litellm_available": litellm_available,
@@ -473,8 +549,10 @@ def create_app(
             return JSONResponse({"error": "PDF liegt ausserhalb der erlaubten Verzeichnisse."}, status_code=400)
         # Server-seitige Revalidierung (Client-Gate könnte umgangen/veraltet sein):
         # der Vault wird auch im Dry-Run gebraucht (Context-Builder scannt ihn).
-        if not Path(vault_path).exists():
-            return JSONResponse({"error": f"Vault nicht gefunden: {vault_path}"}, status_code=400)
+        # B2: liest den GEWAEHLTEN Vault (`app.state.vault_path`), nicht die
+        # eingefrorene Closure-Variable -- folgt also einem Wechsel per PUT /api/vault.
+        if not app.state.vault_path.exists():
+            return JSONResponse({"error": f"Vault nicht gefunden: {app.state.vault_path}"}, status_code=400)
         with app.state.session_lock:
             if app.state.session is not None and app.state.session.active:
                 return JSONResponse({"error": "Es läuft bereits ein Pipeline-Lauf."}, status_code=409)
@@ -482,8 +560,11 @@ def create_app(
             session.pdf = pdf
             session.dry_run = dry_run
             session.options = options
-            # P4: Kontext fuer den Historie-Record am Lauf-Ende (s. RunSession._write_history_record).
-            session.vault_path = vault_path
+            # P4/B2 (R1): Vault-SNAPSHOT dieses Laufs -- Downloads/Ergebnislisten
+            # validieren spaeter gegen GENAU diesen Wert (s. `_active_vault`),
+            # auch wenn `app.state.vault_path` inzwischen per PUT /api/vault
+            # weitergewechselt wurde.
+            session.vault_path = app.state.vault_path
             session.preview_root = preview_root
             session.runs_dir = runs_dir
             session.clock = clock
@@ -535,6 +616,13 @@ def create_app(
 
         pdf_stem/name werden auf reine Dateinamen reduziert (kein Traversal); der
         aufgelöste Pfad muss innerhalb des baseline-Roots liegen.
+
+        R3 (Preview-Staleness, MITTEL, B2 -- bewusst NICHT geloest, out of
+        scope): `preview_root` ist vault-UNABHAENGIG, nur nach `pdf_stem`
+        gekeyed (s. `_output_items_from_events`). Nach einem Vault-Wechsel kann
+        derselbe PDF-Stem also alte Preview-Kopien aus einem FRUEHEREN Vault
+        liefern, bevor ein frischer Lauf sie ueberschreibt. Bekannte, dokumentierte
+        Grenze -- kein Namespacing pro Vault/Run gebaut (L5).
         """
         base = preview_root.resolve()
         safe_stem = Path(pdf_stem).name
@@ -558,12 +646,14 @@ def create_app(
         events = session.events if session is not None else []
         pdf = getattr(session, "pdf", None) if session is not None else None
         dry_run = getattr(session, "dry_run", None) if session is not None else None
-        items = _output_items_from_events(events, pdf=pdf, vault_path=vault_path, preview_root=preview_root)
+        active_vault = _active_vault(session, app.state.vault_path)
+        items = _output_items_from_events(events, pdf=pdf, vault_path=active_vault, preview_root=preview_root)
         return JSONResponse({"items": items, "dry_run": dry_run})
 
     @app.get("/api/outputs/file")
     def outputs_file(path: str):
-        resolved = _validate_output_path(path, vault_path=vault_path, preview_root=preview_root)
+        active_vault = _active_vault(app.state.session, app.state.vault_path)
+        resolved = _validate_output_path(path, vault_path=active_vault, preview_root=preview_root)
         if resolved is None:
             return JSONResponse({"error": "Pfad nicht erlaubt"}, status_code=403)
         if not resolved.is_file():
@@ -575,7 +665,8 @@ def create_app(
         session = app.state.session
         events = session.events if session is not None else []
         pdf = getattr(session, "pdf", None) if session is not None else None
-        items = _output_items_from_events(events, pdf=pdf, vault_path=vault_path, preview_root=preview_root)
+        active_vault = _active_vault(session, app.state.vault_path)
+        items = _output_items_from_events(events, pdf=pdf, vault_path=active_vault, preview_root=preview_root)
         buf = io.BytesIO()
         used: dict[str, int] = {}
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -583,7 +674,7 @@ def create_app(
                 raw = item.get("path")
                 if not raw:
                     continue
-                resolved = _validate_output_path(raw, vault_path=vault_path, preview_root=preview_root)
+                resolved = _validate_output_path(raw, vault_path=active_vault, preview_root=preview_root)
                 if resolved is None or not resolved.is_file():
                     continue
                 base = resolved.name
@@ -634,6 +725,64 @@ def create_app(
             return JSONResponse({"error": error}, status_code=422)
         gui_settings.write_settings(normalized, settings_path)
         return JSONResponse(normalized)
+
+    @app.get("/api/vault")
+    def get_vault() -> JSONResponse:
+        """Aktuell gewaehlter Vault (B2). Nur GET, nicht mutierend -> kein
+        Origin-Check (L4-Ausnahme, wie /api/outputs bzw. /api/settings)."""
+        return JSONResponse({"vault": str(app.state.vault_path)})
+
+    @app.put("/api/vault")
+    async def put_vault(request: Request) -> JSONResponse:
+        """Ziel-Vault zur Laufzeit wechseln (B2). Kein OS-Dialog -- reines
+        Pfad-Textfeld, serverseitig validiert (existiert + ist Verzeichnis).
+
+        Bewusst OHNE Whitelist/erlaubte-Wurzeln-Pruefung (anders als
+        `/api/outputs/file`): das ist genau der Zweck dieses Endpunkts -- der
+        Nutzer waehlt hier explizit einen beliebigen lokalen Ordner als neuen
+        Arbeits-Vault, analog einem nativen "Ordner waehlen"-Dialog. Traversal-
+        /Symlink-Eingaben werden nicht durch eine Sonderregel geblockt, sondern
+        laufen durch dieselbe `resolve()`+`is_dir()`-Pruefung wie jeder andere
+        Pfad -- ein nicht existierendes Ziel oder eine Datei statt Verzeichnis
+        scheitert dort ohnehin (400).
+        """
+        if not _is_same_origin(request):
+            return JSONResponse({"error": "Cross-Origin-Request abgelehnt."}, status_code=403)
+        try:
+            body = await request.json()
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            return JSONResponse({"error": "Ungültiger JSON-Body."}, status_code=400)
+        if not isinstance(body, dict):
+            return JSONResponse({"error": "Ungültiger JSON-Body."}, status_code=400)
+        raw_path = body.get("path")
+        if not raw_path or not isinstance(raw_path, str):
+            return JSONResponse({"error": "path fehlt oder ist kein String."}, status_code=400)
+        with app.state.session_lock:
+            # R1 (Race, KRITISCH): waehrend ein Lauf aktiv ist, bleibt der
+            # gewaehlte Vault fest -- ein Wechsel greift erst fuer den
+            # NAECHSTEN Lauf (der laufende Subprocess/die Session-Downloads
+            # haengen bereits am alten Vault, s. `_active_vault`).
+            if app.state.session is not None and app.state.session.active:
+                return JSONResponse(
+                    {"error": "Vault-Wechsel während eines aktiven Laufs nicht möglich."}, status_code=409
+                )
+            try:
+                resolved = Path(raw_path).resolve()
+            except (OSError, ValueError):
+                return JSONResponse({"error": f"Ungültiger Pfad: {raw_path}"}, status_code=400)
+            if not resolved.is_dir():
+                return JSONResponse({"error": f"Verzeichnis nicht gefunden: {raw_path}"}, status_code=400)
+            app.state.vault_path = resolved
+            # Persistenz (P2-Mechanik wiederverwendet): mit den bestehenden
+            # Settings mergen statt sie zu ersetzen -- anders als `PUT
+            # /api/settings` (dort schickt der Client immer das komplette
+            # Formular-Objekt), hier soll der Vault-Wechsel bereits gespeicherte
+            # Lauf-Einstellungen (backend/profile/…) nicht loeschen.
+            stored, _warning = gui_settings.read_settings(settings_path)
+            stored = dict(stored)
+            stored["vault_path"] = str(resolved)
+            gui_settings.write_settings(stored, settings_path)
+        return JSONResponse({"vault": str(app.state.vault_path)})
 
     return app
 
