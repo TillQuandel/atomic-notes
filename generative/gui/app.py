@@ -267,6 +267,13 @@ def _validate_output_path(
         resolved = Path(path).resolve()
     except (OSError, ValueError):
         return None
+    # ADS-Schutz (alle Zweige): Doppelpunkt im Dateinamen = NTFS-Stream-Syntax
+    # (`wirt.txt:geheim.md`). Path liest den Stream-Namen als `.suffix` (".md"),
+    # Windows liefert aber die Basisdatei aus -- die .md-Whitelist waere
+    # umgangen. Der Drive-Doppelpunkt (`C:`) steckt in `.drive`, nicht in
+    # `.name`; legitime Notes haben nie `:` im Namen (Windows verbietet es).
+    if ":" in resolved.name:
+        return None
     vault_root = Path(vault_path).resolve()
     preview_base = Path(preview_root).resolve()
     if resolved.is_relative_to(vault_root) and resolved.suffix == ".md":

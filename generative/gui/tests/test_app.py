@@ -1166,6 +1166,37 @@ def test_validate_output_path_helper_allows_md_under_preview_root(tmp_path):
     assert resolved == note.resolve()
 
 
+def test_validate_output_path_helper_rejects_ads_under_preview_root(tmp_path):
+    # NTFS Alternate Data Stream (ADS): `wirt.txt:geheim.md` hat als
+    # Path-Suffix ".md" (Python liest den Stream-Namen als Endung), Windows
+    # liefert beim Oeffnen aber den Stream der Basisdatei `wirt.txt` aus --
+    # die .md-Whitelist waere umgangen. Reine Pfad-Logik, kein echtes ADS
+    # noetig (NTFS-only, nicht CI-portabel).
+    from generative.gui.app import _validate_output_path
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    preview = tmp_path / "preview"
+    preview.mkdir()
+    bad = str(preview / "wirt.txt:geheim.md")
+    resolved = _validate_output_path(bad, vault_path=vault, preview_root=preview)
+    assert resolved is None
+
+
+def test_validate_output_path_helper_rejects_ads_under_vault(tmp_path):
+    # Wie oben, aber unter `vault_path` -- der ADS-Guard muss fuer ALLE
+    # Whitelist-Zweige greifen, nicht nur fuer preview_root.
+    from generative.gui.app import _validate_output_path
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    preview = tmp_path / "preview"
+    preview.mkdir()
+    bad = str(vault / "note.txt:hidden.md")
+    resolved = _validate_output_path(bad, vault_path=vault, preview_root=preview)
+    assert resolved is None
+
+
 def test_output_items_from_events_note_written_absolute_path_under_export_dir(tmp_path):
     from generative.gui.app import _output_items_from_events
 
