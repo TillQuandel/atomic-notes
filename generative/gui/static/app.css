@@ -1,152 +1,185 @@
-/* atomic-notes GUI — funktionales Basis-Styling (Polish folgt separat).
-   Design-Tokens als CSS-Variablen, damit der spaetere visuelle Pass an genau
-   einer Stelle ansetzt. */
+/* atomic-notes GUI — Design-Tokens + Anti-Slop-Pass (P7).
+   Grayscale-Neutrals + genau 3 semantische Akzente, 4/8er-Spacing-Raster,
+   3 Typo-Stufen. Keine Drop-Shadows/Blur/Gradients/Emoji/Icons/Animationen. */
 :root {
+  /* Grayscale-Neutrals */
   --bg: #f7f7f8;
   --panel: #ffffff;
+  --surface-2: #f0f0f3;      /* Code-/Inline-Hintergruende */
   --ink: #1d1d20;
   --muted: #6b6b73;
   --border: #e2e2e6;
-  --accent: #3a5bd9;
-  --ok: #1f8a4c;
-  --warn: #b4690e;
-  --bad: #c0392b;
+  /* Akzente — genau 3, eine Farbe pro semantischer Dimension */
+  --accent: #3a5bd9;         /* Primaeraktion */
+  --accent-soft: #eef1fd;    /* aktive Flaechen (Stepper active, dragover) */
+  --ok: #187a42;             /* Status ok (abgedunkelt: 5,38:1 auf Weiss, 5,03:1 auf bg) */
+  --bad: #c0392b;            /* Status Fehler + einzige irreversible Aktion */
+  --bad-soft: #fdecea;       /* Fehler-Flaechen (Banner, Stepper error) */
+  /* Log-Konsole (dunkel, grayscale) */
+  --console-bg: #1d1d20;
+  --console-ink: #e6e6e9;
+  /* Spacing — 4/8er-Raster */
+  --space-1: 0.25rem;  /* 4px */
+  --space-2: 0.5rem;   /* 8px */
+  --space-3: 0.75rem;  /* 12px */
+  --space-4: 1rem;     /* 16px */
+  --space-5: 1.5rem;   /* 24px */
+  --space-6: 2rem;     /* 32px */
+  /* Typo — genau 3 Stufen */
+  --text-lg: 1.25rem;    /* h1 */
+  --text-base: 1rem;     /* h2, Body, Controls */
+  --text-sm: 0.875rem;   /* Hints, Badges, Meta, Log, Dauern */
   --radius: 8px;
-  --gap: 1rem;
+  --radius-sm: 6px;
   --font: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  --font-mono: ui-monospace, "Cascadia Mono", Consolas, monospace;
 }
+
+/* Wurzelfix: Author-`display`-Regeln (z. B. `a.button { display: inline-block }`
+   auf `#download-all[hidden]`) ueberschreiben sonst das UA-`[hidden]` — bekannte
+   Bug-Klasse (Issue 113). Als erste Regel nach :root, damit sie ueber allen
+   Klassen-Selektoren mit eigenem `display` steht. */
+[hidden] { display: none !important; }
 
 * { box-sizing: border-box; }
 body {
   margin: 0; font-family: var(--font); color: var(--ink);
   background: var(--bg); line-height: 1.5;
+  font-variant-numeric: tabular-nums;
 }
 
 .topbar {
-  display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap;
-  padding: 1rem 1.5rem; background: var(--panel); border-bottom: 1px solid var(--border);
+  display: flex; align-items: baseline; gap: var(--space-4); flex-wrap: wrap;
+  padding: var(--space-4) var(--space-5); background: var(--panel); border-bottom: 1px solid var(--border);
 }
-.topbar h1 { margin: 0; font-size: 1.25rem; letter-spacing: -0.01em; }
-.doctor { margin: 0; color: var(--muted); font-size: 0.9rem; }
+/* Wortmarke: CLI-Herkunft des Tools bewusst sichtbar machen. */
+.topbar h1 { margin: 0; font-family: var(--font-mono); font-weight: 600; font-size: var(--text-lg); letter-spacing: -0.01em; }
+.doctor { margin: 0; color: var(--muted); font-size: var(--text-sm); }
 .doctor.bad { color: var(--bad); }
 
 main {
-  display: grid; gap: var(--gap); max-width: 880px; margin: 1.5rem auto;
-  padding: 0 1rem;
+  display: grid; gap: var(--space-4); max-width: 880px; margin: var(--space-5) auto;
+  padding: 0 var(--space-4);
 }
 .panel {
   background: var(--panel); border: 1px solid var(--border);
-  border-radius: var(--radius); padding: 1.25rem;
+  border-radius: var(--radius); padding: var(--space-5);
 }
-.panel h2 { margin: 0 0 0.75rem; font-size: 1rem; }
+.panel h2 { margin: 0 0 var(--space-3); font-size: var(--text-base); }
 
-form { display: grid; gap: 0.6rem; }
-label { font-weight: 600; font-size: 0.9rem; }
-label.check { font-weight: 400; display: flex; align-items: center; gap: 0.5rem; }
+form { display: grid; gap: var(--space-3); }
+label { font-weight: 600; font-size: var(--text-sm); }
+label.check { font-weight: 400; display: flex; align-items: center; gap: var(--space-2); }
 select, button, input[type="text"] {
-  font: inherit; padding: 0.5rem 0.7rem; border-radius: 6px;
-  border: 1px solid var(--border); background: #fff;
+  font: inherit; padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm);
+  border: 1px solid var(--border); background: var(--panel);
 }
 input[type="text"] { flex: 1 1 auto; min-width: 0; }
 input[type="text"].bad { border-color: var(--bad); }
 .hint.bad { color: var(--bad); }
+.hint.ok { color: var(--ok); }
 button {
-  background: var(--accent); color: #fff; border-color: var(--accent);
-  font-weight: 600; cursor: pointer; justify-self: start; padding: 0.5rem 1.1rem;
+  background: var(--accent); color: var(--panel); border-color: var(--accent);
+  font-weight: 600; cursor: pointer; justify-self: start; padding: var(--space-2) var(--space-4);
 }
 button:disabled { opacity: 0.55; cursor: progress; }
-.actions { display: flex; gap: 0.5rem; align-items: center; }
+.actions { display: flex; gap: var(--space-2); align-items: center; }
 #run-options, #target-options {
   border: 1px solid var(--border); border-radius: var(--radius);
-  padding: 0.75rem 0.85rem; margin: 0; display: grid; gap: 0.5rem;
+  padding: var(--space-3); margin: 0; display: grid; gap: var(--space-2);
 }
-#run-options legend, #target-options legend { font-weight: 600; font-size: 0.9rem; padding: 0 0.3rem; }
+#run-options legend, #target-options legend { font-weight: 600; font-size: var(--text-sm); padding: 0 var(--space-1); }
 #run-options select:disabled, #run-options option:disabled { color: var(--muted); }
 button.danger { background: var(--bad); border-color: var(--bad); }
-.hint { margin: 0.25rem 0 0; color: var(--muted); font-size: 0.85rem; }
+/* Stop ist reversibel (Bestaetigung im Log, kein Datenverlust) — neutraler
+   Stil. Destruktives Rot bleibt allein dem Start-Button im Schreib-Modus
+   vorbehalten (siehe button.danger, per updateModeHint auf #start-btn). */
+#stop-btn { background: var(--panel); color: var(--ink); border-color: var(--border); }
+.hint { margin: var(--space-1) 0 0; color: var(--muted); font-size: var(--text-sm); }
 .muted { color: var(--muted); }
 
 /* Buttons, die als <a> gerendert werden (Download-Links) */
 a.button {
-  background: var(--accent); color: #fff; border: 1px solid var(--accent);
-  border-radius: 6px; padding: 0.4rem 0.9rem; font-weight: 600;
+  background: var(--accent); color: var(--panel); border: 1px solid var(--accent);
+  border-radius: var(--radius-sm); padding: var(--space-2) var(--space-4); font-weight: 600;
   text-decoration: none; display: inline-block;
 }
 
 /* Ergebnis-Sektion (P3) */
-#results-section .actions { justify-content: space-between; margin-bottom: 0.75rem; }
+#results-section .actions { justify-content: space-between; margin-bottom: var(--space-3); }
 #results-section .actions h2 { margin: 0; }
-.preview-card .actions { margin-top: 0.2rem; }
+.preview-card .actions { margin-top: var(--space-1); }
 
 /* Upload-Dropzone */
 .dropzone {
   border: 2px dashed var(--border); border-radius: var(--radius);
-  padding: 1rem; text-align: center; color: var(--muted);
+  padding: var(--space-4); text-align: center; color: var(--muted);
   transition: border-color 0.15s, background 0.15s; cursor: pointer;
 }
 .dropzone:hover, .dropzone:focus-visible { border-color: var(--accent); outline: none; }
-.dropzone.dragover { border-color: var(--accent); background: #eef1fd; color: var(--ink); }
-/* :not([hidden]) — sonst ueberschreibt `display: grid` das hidden-Attribut
-   (Klassen-Selektor schlaegt UA-`[hidden]{display:none}`), und das leere
-   Banner bleibt als leerer Kasten sichtbar. */
-.error-banner:not([hidden]) {
-  border: 1px solid var(--bad); background: #fdecea; color: var(--bad);
-  border-radius: var(--radius); padding: 0.75rem 1rem; font-size: 0.9rem;
-  display: grid; gap: 0.25rem;
+.dropzone.dragover { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+.error-banner {
+  border: 1px solid var(--bad); background: var(--bad-soft); color: var(--bad);
+  border-radius: var(--radius); padding: var(--space-3) var(--space-4); font-size: var(--text-sm);
+  display: grid; gap: var(--space-1);
 }
-.dropzone p { margin: 0 0 0.5rem; }
-.dropzone #upload-btn { background: #fff; color: var(--accent); border-color: var(--accent); }
-.dropzone #upload-status { margin-top: 0.5rem; }
+.dropzone p { margin: 0 0 var(--space-2); }
+.dropzone #upload-btn { background: var(--panel); color: var(--accent); border-color: var(--accent); }
+.dropzone #upload-status { margin-top: var(--space-2); }
 
 /* Stepper */
-.stepper { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.35rem; }
+.stepper { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-1); }
 .stepper li {
-  display: flex; align-items: center; gap: 0.6rem; padding: 0.4rem 0.5rem;
-  border-radius: 6px; color: var(--muted);
+  display: flex; align-items: center; gap: var(--space-3); padding: var(--space-2);
+  border-radius: var(--radius-sm); color: var(--muted);
 }
 .stepper li .dot {
   width: 1.1rem; height: 1.1rem; border-radius: 50%; flex: 0 0 auto;
-  border: 2px solid var(--border); background: #fff;
+  border: 2px solid var(--border); background: var(--panel);
 }
-.stepper li.active { color: var(--ink); background: #eef1fd; font-weight: 600; }
+.stepper li.active { color: var(--ink); background: var(--accent-soft); font-weight: 600; }
 .stepper li.active .dot { border-color: var(--accent); }
 .stepper li.done { color: var(--ink); }
 .stepper li.done .dot { background: var(--ok); border-color: var(--ok); }
-.stepper li.error { color: var(--bad); background: #fdecea; font-weight: 600; }
+.stepper li.error { color: var(--bad); background: var(--bad-soft); font-weight: 600; }
 .stepper li.error .dot { background: var(--bad); border-color: var(--bad); }
 .stepper li .step-label { flex: 1 1 auto; }
-.stepper li .elapsed { font-variant-numeric: tabular-nums; font-size: 0.8rem; color: var(--muted); }
-.note-progress { margin: 0.6rem 0 0; color: var(--muted); font-size: 0.9rem; }
+.stepper li .state { font-size: var(--text-sm); }
+.stepper li.active .state { color: var(--accent); }
+.stepper li.done .state { color: var(--ok); }
+.stepper li.error .state { color: var(--bad); }
+.stepper li .elapsed { font-variant-numeric: tabular-nums; font-size: var(--text-sm); color: var(--muted); }
+.note-progress { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--text-sm); }
 .run-summary { font-variant-numeric: tabular-nums; }
 
 /* Preview-Notes */
-.preview-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.5rem; }
+.preview-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
 .preview-card {
-  border: 1px solid var(--border); border-radius: 6px; padding: 0.7rem 0.85rem;
-  display: grid; gap: 0.3rem;
+  border: 1px solid var(--border); border-radius: var(--radius-sm); padding: var(--space-3);
+  display: grid; gap: var(--space-1);
 }
 .preview-card .title { font-weight: 600; }
-.preview-card .meta { display: flex; flex-wrap: wrap; gap: 0.4rem; font-size: 0.82rem; }
+.preview-card .meta { display: flex; flex-wrap: wrap; gap: var(--space-2); font-size: var(--text-sm); }
 .badge {
-  border-radius: 999px; padding: 0.1rem 0.55rem; border: 1px solid var(--border);
+  border-radius: 999px; padding: var(--space-1) var(--space-2); border: 1px solid var(--border);
   color: var(--muted);
 }
 .badge.vault { color: var(--ok); border-color: var(--ok); }
-.badge.inbox { color: var(--warn); border-color: var(--warn); }
+.badge.inbox { color: var(--ink); border-color: var(--border); background: var(--surface-2); }
 .badge.merge { color: var(--accent); border-color: var(--accent); }
 .badge.flag { color: var(--bad); border-color: var(--bad); }
 .badge.ok { color: var(--ok); border-color: var(--ok); }
-.badge.warn { color: var(--warn); border-color: var(--warn); }
-.preview-card .note-body { margin-top: 0.2rem; font-size: 0.85rem; }
+.badge.warn { color: var(--ink); border-color: var(--border); background: var(--surface-2); }
+.preview-card .note-body { margin-top: var(--space-1); font-size: var(--text-sm); }
 .preview-card .note-body summary { cursor: pointer; color: var(--accent); }
 .preview-card .body-content {
-  margin: 0.4rem 0 0; max-height: 18rem; overflow: auto; white-space: pre-wrap;
-  word-break: break-word; background: #f0f0f3; padding: 0.6rem; border-radius: 6px;
-  font-size: 0.78rem;
+  margin: var(--space-2) 0 0; max-height: 18rem; overflow: auto; white-space: pre-wrap;
+  word-break: break-word; background: var(--surface-2); padding: var(--space-3); border-radius: var(--radius-sm);
+  font-size: var(--text-sm); font-family: var(--font-mono);
 }
 .preview-card .flags {
-  font-size: 0.8rem; color: var(--warn); line-height: 1.4;
-  border-top: 1px solid var(--border); padding-top: 0.3rem;
+  font-size: var(--text-sm); color: var(--muted); line-height: 1.4;
+  border-top: 1px solid var(--border); padding-top: var(--space-1);
 }
 
 /* Verlauf (P4) */
@@ -155,26 +188,29 @@ a.button {
 .history-card:hover, .history-card:focus-visible { border-color: var(--accent); outline: none; }
 
 /* Zugang (B1a) */
-.access-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
-.access-list li { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
+.access-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
+.access-list li { display: flex; align-items: center; gap: var(--space-2); font-size: var(--text-sm); }
 .access-dot {
   width: 0.8rem; height: 0.8rem; border-radius: 50%; flex: 0 0 auto;
   background: var(--border);
 }
 .access-dot.ok { background: var(--ok); }
 .access-dot.bad { background: var(--bad); }
-.access-status { color: var(--muted); margin-left: auto; font-size: 0.85rem; text-align: right; }
+.access-status { color: var(--muted); margin-left: auto; font-size: var(--text-sm); text-align: right; }
 #access-subscription-hint code {
-  background: #f0f0f3; border-radius: 4px; padding: 0.1rem 0.4rem; font-size: 0.85rem;
+  background: var(--surface-2); border-radius: 4px; padding: var(--space-1) var(--space-2); font-size: var(--text-sm);
+  font-family: var(--font-mono);
 }
-#access-copy-btn { margin-left: 0.5rem; padding: 0.25rem 0.6rem; font-size: 0.8rem; }
-.litellm-key-form { margin-top: 0.9rem; padding-top: 0.75rem; border-top: 1px solid var(--border); }
-.litellm-key-form label { display: block; margin-bottom: 0.3rem; }
+#access-copy-btn { margin-left: var(--space-2); padding: var(--space-1) var(--space-2); font-size: var(--text-sm); }
+.litellm-key-form { margin-top: var(--space-4); padding-top: var(--space-3); border-top: 1px solid var(--border); }
+.litellm-key-form label { display: block; margin-bottom: var(--space-1); }
 .litellm-key-form select { flex: 0 0 auto; }
 .litellm-key-form input[type="password"] { flex: 1 1 auto; min-width: 0; }
 
 .log {
-  margin: 0; max-height: 16rem; overflow: auto; font-size: 0.8rem;
-  background: #1d1d20; color: #e6e6e9; padding: 0.75rem; border-radius: 6px;
-  white-space: pre-wrap; word-break: break-word;
+  margin: 0; max-height: 16rem; overflow: auto; font-size: var(--text-sm);
+  background: var(--console-bg); color: var(--console-ink); padding: var(--space-3); border-radius: var(--radius-sm);
+  white-space: pre-wrap; word-break: break-word; font-family: var(--font-mono);
 }
+/* Leerer Log-Kasten vermeiden (kein leeres schwarzes Rechteck vor dem ersten Lauf). */
+#log:empty { display: none; }
