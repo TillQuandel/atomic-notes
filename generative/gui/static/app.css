@@ -154,6 +154,21 @@ a.button {
 .history-card { cursor: pointer; }
 .history-card:hover, .history-card:focus-visible { border-color: var(--accent); outline: none; }
 
+/* Zugang (B1a) */
+.access-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 0.4rem; }
+.access-list li { display: flex; align-items: center; gap: 0.5rem; font-size: 0.9rem; }
+.access-dot {
+  width: 0.8rem; height: 0.8rem; border-radius: 50%; flex: 0 0 auto;
+  background: var(--border);
+}
+.access-dot.ok { background: var(--ok); }
+.access-dot.bad { background: var(--bad); }
+.access-status { color: var(--muted); margin-left: auto; font-size: 0.85rem; text-align: right; }
+#access-subscription-hint code {
+  background: #f0f0f3; border-radius: 4px; padding: 0.1rem 0.4rem; font-size: 0.85rem;
+}
+#access-copy-btn { margin-left: 0.5rem; padding: 0.25rem 0.6rem; font-size: 0.8rem; }
+
 .log {
   margin: 0; max-height: 16rem; overflow: auto; font-size: 0.8rem;
   background: #1d1d20; color: #e6e6e9; padding: 0.75rem; border-radius: 6px;

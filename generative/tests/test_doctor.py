@@ -127,3 +127,56 @@ def test_credentials_ok_nennt_heuristik(tmp_path):
     cred.write_text("{}", encoding="utf-8")
     r = doctor.check_backend("subscription", which=lambda n: "/usr/bin/claude", home=tmp_path, env={})
     assert "nicht live verifiziert" in r.detail
+
+
+# --- access_summary (B1a) ---------------------------------------------------
+
+
+def test_access_summary_struktur_alles_verfuegbar(tmp_path):
+    cred = tmp_path / ".claude" / ".credentials.json"
+    cred.parent.mkdir()
+    cred.write_text("{}", encoding="utf-8")
+    summary = doctor.access_summary(
+        which=lambda n: "/usr/bin/claude",
+        home=tmp_path,
+        env={"ANTHROPIC_API_KEY": "sk-test"},
+    )
+    assert summary == {
+        "subscription": {"cli_found": True, "credentials_present": True},
+        "litellm": {"available": True, "key_vars_set": ["ANTHROPIC_API_KEY"]},
+    }
+
+
+def test_access_summary_nichts_verfuegbar(tmp_path):
+    summary = doctor.access_summary(which=lambda n: None, home=tmp_path, env={})
+    assert summary == {
+        "subscription": {"cli_found": False, "credentials_present": False},
+        "litellm": {"available": False, "key_vars_set": []},
+    }
+
+
+def test_access_summary_cli_ohne_credentials(tmp_path):
+    summary = doctor.access_summary(which=lambda n: "/usr/bin/claude", home=tmp_path, env={})
+    assert summary["subscription"] == {"cli_found": True, "credentials_present": False}
+
+
+def test_access_summary_mehrere_key_vars_nur_namen(tmp_path):
+    summary = doctor.access_summary(
+        which=lambda n: None,
+        home=tmp_path,
+        env={"ANTHROPIC_API_KEY": "sk-geheim", "OPENAI_API_KEY": "oa-geheim"},
+    )
+    assert summary["litellm"]["key_vars_set"] == ["ANTHROPIC_API_KEY", "OPENAI_API_KEY"]
+
+
+def test_access_summary_kein_key_wert_in_rueckgabe(tmp_path):
+    """Kritisch: nie den Key-WERT zurueckgeben, nur den Variablen-NAMEN."""
+    import json
+
+    summary = doctor.access_summary(
+        which=lambda n: None,
+        home=tmp_path,
+        env={"ANTHROPIC_API_KEY": "sk-geheim-wert-12345"},
+    )
+    dumped = json.dumps(summary)
+    assert "sk-geheim-wert-12345" not in dumped

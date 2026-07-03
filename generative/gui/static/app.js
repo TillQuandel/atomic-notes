@@ -488,6 +488,35 @@ function applyBackendGate(d) {
   }
 }
 
+// B1a: "Zugang"-Panel -- zeigt nur Namen/Booleans aus `access`, nie Key-Werte.
+function renderAccess(access) {
+  if (!access) return;
+  $("access-backend").textContent = `Aktives Backend: ${access.backend}`;
+
+  const sub = access.subscription || {};
+  const subOk = !!sub.cli_found && !!sub.credentials_present;
+  const subDot = document.querySelector("#access-subscription .access-dot");
+  const subStatus = document.querySelector("#access-subscription .access-status");
+  subDot.classList.toggle("ok", subOk);
+  subDot.classList.toggle("bad", !subOk);
+  subStatus.textContent = subOk
+    ? "verfügbar"
+    : `nicht verfügbar (CLI: ${sub.cli_found ? "gefunden" : "fehlt"}, Login: ${sub.credentials_present ? "vorhanden" : "fehlt"})`;
+
+  const lit = access.litellm || {};
+  const litOk = !!lit.available;
+  const litDot = document.querySelector("#access-litellm .access-dot");
+  const litStatus = document.querySelector("#access-litellm .access-status");
+  litDot.classList.toggle("ok", litOk);
+  litDot.classList.toggle("bad", !litOk);
+  litStatus.textContent = litOk
+    ? `verfügbar (${(lit.key_vars_set || []).join(", ")})`
+    : "nicht verfügbar (kein Provider-Key gesetzt)";
+
+  // L6: ehrlicher Hinweis statt GUI-Login -- der existiert headless nicht.
+  $("access-subscription-hint").hidden = subOk;
+}
+
 async function loadDoctor() {
   const el = $("doctor");
   try {
@@ -506,6 +535,7 @@ async function loadDoctor() {
       el.classList.toggle("bad", fails.some((c) => c.required));
     }
     applyBackendGate(d);
+    renderAccess(d.access);
   } catch {
     el.textContent = "Preflight konnte nicht geladen werden.";
   }
@@ -690,6 +720,15 @@ document.addEventListener("DOMContentLoaded", async () => {
   updateModeHint();
   wireUpload();
   wireVaultForm();
+  $("access-copy-btn").addEventListener("click", async () => {
+    try {
+      await navigator.clipboard.writeText("claude");
+      const btn = $("access-copy-btn");
+      const original = btn.textContent;
+      btn.textContent = "Kopiert!";
+      setTimeout(() => { btn.textContent = original; }, 1500);
+    } catch { /* Clipboard-API evtl. nicht verfuegbar -- kein Fallback noetig, Text ist sichtbar. */ }
+  });
   loadVault();
   attachIfRunActive();
   loadHistory();

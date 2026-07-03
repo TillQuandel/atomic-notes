@@ -108,6 +108,32 @@ def check_backend(
     )
 
 
+def access_summary(
+    which: Callable[[str], str | None] = shutil.which,
+    home: Path | None = None,
+    env: Mapping[str, str] | None = None,
+) -> dict:
+    """Zugangs-Uebersicht fuer die GUI (B1a) — nur Namen + Booleans, NIE Key-Werte.
+
+    SSoT fuer die Access-Booleans, wiederverwendet dieselben Konstanten wie
+    `check_backend` (CLAUDE_BIN, _LITELLM_KEY_VARS), erfindet keine neue
+    Heuristik.
+    """
+    from generative.config import CLAUDE_BIN
+
+    home = Path.home() if home is None else home
+    env = os.environ if env is None else env
+
+    cli_found = which(CLAUDE_BIN) is not None
+    credentials_present = (home / ".claude" / ".credentials.json").exists()
+    key_vars_set = [v for v in _LITELLM_KEY_VARS if env.get(v)]
+
+    return {
+        "subscription": {"cli_found": cli_found, "credentials_present": credentials_present},
+        "litellm": {"available": len(key_vars_set) > 0, "key_vars_set": key_vars_set},
+    }
+
+
 def check_vault(vault: Path) -> CheckResult:
     """Vault-Pfad vorhanden und beschreibbar? (Schreibprobe statt os.access — Windows.)"""
     if not vault.is_dir():

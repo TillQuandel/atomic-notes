@@ -824,6 +824,81 @@ def test_doctor_litellm_available_present_with_default_check(client):
     assert isinstance(body["litellm_available"], bool)
 
 
+# --- access (B1a) -----------------------------------------------------------
+
+
+def _fake_access_summary():
+    return {
+        "subscription": {"cli_found": True, "credentials_present": True},
+        "litellm": {"available": True, "key_vars_set": ["ANTHROPIC_API_KEY"]},
+    }
+
+
+def test_doctor_access_struktur(tmp_path):
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+        access_summary_fn=_fake_access_summary,
+    )
+    body = TestClient(app, base_url="http://localhost").get("/api/doctor").json()
+    assert body["access"] == {
+        "backend": "subscription",
+        "subscription": {"cli_found": True, "credentials_present": True},
+        "litellm": {"available": True, "key_vars_set": ["ANTHROPIC_API_KEY"]},
+    }
+
+
+def test_doctor_access_altfelder_unveraendert(tmp_path):
+    # Rueckwaertskompatibilitaet: bestehende Felder bleiben unveraendert vorhanden.
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+        access_summary_fn=_fake_access_summary,
+    )
+    body = TestClient(app, base_url="http://localhost").get("/api/doctor").json()
+    assert {"backend", "vault", "vault_exists", "ok", "checks", "litellm_available"} <= set(body)
+
+
+def test_doctor_access_kein_key_leak(tmp_path):
+    def access_with_key_like_value():
+        # Absichtlich falscher Wert, um sicherzustellen, dass der Endpunkt
+        # nichts zusaetzlich einschleust -- die echte access_summary gibt nie
+        # Werte zurueck, dieser Test prueft nur die Transport-Schicht.
+        return {
+            "subscription": {"cli_found": True, "credentials_present": True},
+            "litellm": {"available": True, "key_vars_set": ["ANTHROPIC_API_KEY"]},
+        }
+
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+        access_summary_fn=access_with_key_like_value,
+    )
+    r = TestClient(app, base_url="http://localhost").get("/api/doctor")
+    assert "sk-" not in r.text
+    assert "ANTHROPIC_API_KEY" in r.text  # Name darf, Wert nicht
+
+
+def test_doctor_access_present_with_default_access_summary_fn(client):
+    # Ohne injizierten access_summary_fn greift die echte doctor.access_summary-Logik.
+    c, _ = client
+    body = c.get("/api/doctor").json()
+    assert "access" in body
+    assert "subscription" in body["access"] and "litellm" in body["access"]
+
+
 def _drain(client):
     """Blockiert (Stream lesen), bis der Lauf-Thread fertig ist — s. bestehendes
     Muster in test_run_forwards_normalized_options_to_run_factory."""

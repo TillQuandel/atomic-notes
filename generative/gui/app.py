@@ -418,6 +418,7 @@ def create_app(
     uploads_dir: Path | None = None,
     doctor_fn: Callable[[], list] | None = None,
     litellm_check_fn: Callable[[], object] | None = None,
+    access_summary_fn: Callable[[], dict] | None = None,
     preview_root: Path | None = None,
     runs_dir: Path | None = None,
     settings_path: Path | None = None,
@@ -431,6 +432,8 @@ def create_app(
         from generative.doctor import check_backend as _check_backend
 
         litellm_check_fn = lambda: _check_backend("litellm")  # noqa: E731
+    if access_summary_fn is None:
+        from generative.doctor import access_summary as access_summary_fn
     if preview_root is None:
         preview_root = Path(__file__).resolve().parents[1] / ".cache" / "eval" / "baseline"
     preview_root = Path(preview_root)
@@ -593,6 +596,10 @@ def create_app(
         }
         if not litellm_available:
             response["litellm_hint"] = getattr(litellm_check, "hint", "") or getattr(litellm_check, "detail", "")
+        # B1a: Zugangs-Uebersicht fuer das "Zugang"-Panel -- additiv, aendert
+        # keine bestehenden Felder. Nur Namen/Booleans (access_summary_fn),
+        # nie Key-Werte.
+        response["access"] = {"backend": backend, **access_summary_fn()}
         return JSONResponse(response)
 
     @app.post("/api/run")

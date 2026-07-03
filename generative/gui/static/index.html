@@ -15,6 +15,27 @@
   <main>
     <div id="error-banner" class="error-banner" role="alert" hidden></div>
 
+    <section class="panel" aria-labelledby="access-h">
+      <h2 id="access-h">Zugang</h2>
+      <p id="access-backend" class="hint"></p>
+      <ul id="access-list" class="access-list">
+        <li id="access-subscription">
+          <span class="access-dot" aria-hidden="true"></span>
+          <span class="access-label">Subscription (Claude-Code-CLI)</span>
+          <span class="access-status"></span>
+        </li>
+        <li id="access-litellm">
+          <span class="access-dot" aria-hidden="true"></span>
+          <span class="access-label">litellm (API-Key)</span>
+          <span class="access-status"></span>
+        </li>
+      </ul>
+      <p id="access-subscription-hint" class="hint" hidden>
+        Nicht eingeloggt: im Terminal <code>claude</code> starten und einloggen.
+        <button type="button" id="access-copy-btn">Befehl kopieren</button>
+      </p>
+    </section>
+
     <section class="panel" aria-labelledby="vault-h">
       <h2 id="vault-h">Ziel-Vault</h2>
       <form id="vault-form">
