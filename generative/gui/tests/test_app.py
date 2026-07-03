@@ -453,6 +453,36 @@ def test_run_rejects_null_origin(client):
     assert r.status_code == 403
 
 
+def test_is_same_origin_direct_matrix():
+    # Codex-Review M1 (GERING): direkte Matrix fuer `_is_same_origin` --
+    # Faelle, die ueber den TestClient nicht erreichbar sind (fehlender
+    # Host-Header, Userinfo im Origin-netloc, ungueltiger Port, IPv6).
+    from starlette.requests import Request
+
+    from generative.gui.app import _is_same_origin
+
+    def _req(headers: dict[str, str]) -> Request:
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "path": "/api/run",
+            "query_string": b"",
+            "headers": [(k.encode(), v.encode()) for k, v in headers.items()],
+        }
+        return Request(scope)
+
+    # kein Origin -> erlaubt (Nicht-Browser-Clients)
+    assert _is_same_origin(_req({})) is True
+    # Origin gesetzt, aber Host-Header fehlt -> fail-closed
+    assert _is_same_origin(_req({"origin": "http://127.0.0.1:8052"})) is False
+    # Userinfo im Origin-netloc matcht den Host-Header nicht
+    assert _is_same_origin(_req({"origin": "http://user@127.0.0.1:8052", "host": "127.0.0.1:8052"})) is False
+    # ungueltiger/fremder Port -> abgelehnt
+    assert _is_same_origin(_req({"origin": "http://127.0.0.1:99999", "host": "127.0.0.1:8052"})) is False
+    # IPv6: netloc-Gleichheit inkl. Klammer-Notation
+    assert _is_same_origin(_req({"origin": "http://[::1]:8052", "host": "[::1]:8052"})) is True
+
+
 def test_run_rejects_pdf_outside_allowed_dirs(tmp_path):
     # #2: Ein existierender Pfad ausserhalb pdf_dirs/uploads_dir (z.B. beliebige
     # lokale Datei via CSRF/abgelaufenem Client-State) wird serverseitig abgelehnt.
