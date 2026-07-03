@@ -38,7 +38,9 @@
 /* Wurzelfix: Author-`display`-Regeln (z. B. `a.button { display: inline-block }`
    auf `#download-all[hidden]`) ueberschreiben sonst das UA-`[hidden]` — bekannte
    Bug-Klasse (Issue 113). Als erste Regel nach :root, damit sie ueber allen
-   Klassen-Selektoren mit eigenem `display` steht. */
+   Klassen-Selektoren mit eigenem `display` steht.
+   Grenze: matcht auch `hidden="until-found"` (hier nirgends genutzt) — bei
+   Bedarf auf `[hidden]:not([hidden="until-found"])` verengen. */
 [hidden] { display: none !important; }
 
 * { box-sizing: border-box; }
@@ -110,7 +112,8 @@ a.button {
 #results-section .actions h2 { margin: 0; }
 .preview-card .actions { margin-top: var(--space-1); }
 
-/* Upload-Dropzone */
+/* Upload-Dropzone (Micro-Transition <=150ms vorbestehend — Zustands-Feedback,
+   nicht dekorativ; Anti-Slop verbietet dekorative Animationen/Keyframes) */
 .dropzone {
   border: 2px dashed var(--border); border-radius: var(--radius);
   padding: var(--space-4); text-align: center; color: var(--muted);
@@ -148,9 +151,8 @@ a.button {
 .stepper li.active .state { color: var(--accent); }
 .stepper li.done .state { color: var(--ok); }
 .stepper li.error .state { color: var(--bad); }
-.stepper li .elapsed { font-variant-numeric: tabular-nums; font-size: var(--text-sm); color: var(--muted); }
+.stepper li .elapsed { font-size: var(--text-sm); color: var(--muted); }
 .note-progress { margin: var(--space-2) 0 0; color: var(--muted); font-size: var(--text-sm); }
-.run-summary { font-variant-numeric: tabular-nums; }
 
 /* Preview-Notes */
 .preview-list { list-style: none; margin: 0; padding: 0; display: grid; gap: var(--space-2); }
@@ -165,11 +167,11 @@ a.button {
   color: var(--muted);
 }
 .badge.vault { color: var(--ok); border-color: var(--ok); }
-.badge.inbox { color: var(--ink); border-color: var(--border); background: var(--surface-2); }
+
 .badge.merge { color: var(--accent); border-color: var(--accent); }
 .badge.flag { color: var(--bad); border-color: var(--bad); }
 .badge.ok { color: var(--ok); border-color: var(--ok); }
-.badge.warn { color: var(--ink); border-color: var(--border); background: var(--surface-2); }
+.badge.inbox, .badge.warn { color: var(--ink); border-color: var(--border); background: var(--surface-2); }
 .preview-card .note-body { margin-top: var(--space-1); font-size: var(--text-sm); }
 .preview-card .note-body summary { cursor: pointer; color: var(--accent); }
 .preview-card .body-content {
@@ -198,7 +200,7 @@ a.button {
 .access-dot.bad { background: var(--bad); }
 .access-status { color: var(--muted); margin-left: auto; font-size: var(--text-sm); text-align: right; }
 #access-subscription-hint code {
-  background: var(--surface-2); border-radius: 4px; padding: var(--space-1) var(--space-2); font-size: var(--text-sm);
+  background: var(--surface-2); border-radius: var(--radius-sm); padding: var(--space-1) var(--space-2); font-size: var(--text-sm);
   font-family: var(--font-mono);
 }
 #access-copy-btn { margin-left: var(--space-2); padding: var(--space-1) var(--space-2); font-size: var(--text-sm); }
