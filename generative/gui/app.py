@@ -62,8 +62,9 @@ _LOCAL_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 # P1 (Lauf-Einstellungen): Whitelist der `POST /api/run`-`options`. Backend-/
 # Profil-Wertepruefung teilt sich `gui_settings.validate_backend/validate_profile`
 # (P2 hat dieselbe Pruefung fuer `PUT /api/settings` -- ausfaktoriert statt
-# dupliziert, s. gui_settings.py).
-_OPTION_KEYS = frozenset({"backend", "profile", "no_llm"})
+# dupliziert, s. gui_settings.py). `inbox_dir` (B3): freier Export-Ordner statt
+# Vault-Inbox -- nur im Schreib-Modus wirksam (s. `start_run`/`build_run_spec`).
+_OPTION_KEYS = frozenset({"backend", "profile", "no_llm", "inbox_dir"})
 
 
 def _validate_run_options(options) -> tuple[dict, str | None]:
@@ -101,6 +102,16 @@ def _validate_run_options(options) -> tuple[dict, str | None]:
         if no_llm:
             normalized["no_llm"] = True
 
+    # B3 (Output-Ziel waehlbar): leerer String = kein Export-Wunsch (wie bei
+    # backend/profile) -- Existenz-/Verzeichnis-Pruefung passiert serverseitig
+    # in `start_run` (nur dort ist bekannt, ob es ein Schreib-Lauf ist).
+    inbox_dir = options.get("inbox_dir")
+    if inbox_dir is not None:
+        if not isinstance(inbox_dir, str):
+            return {}, "inbox_dir muss ein String sein."
+        if inbox_dir.strip():
+            normalized["inbox_dir"] = inbox_dir
+
     return normalized, None
 
 
@@ -128,6 +139,17 @@ def _active_vault(session: "RunSession | None", state_vault_path: Path) -> Path:
     return state_vault_path
 
 
+def _active_export_dir(session: "RunSession | None") -> Path | None:
+    """B3 (analog `_active_vault`): der Export-Ordner-Snapshot DIESES Laufs --
+    es gibt (anders als beim Vault) keinen persistenten globalen State dafuer,
+    nur den per-Lauf-Snapshot in `session.export_dir`. Ohne Session (noch nie
+    gelaufen) oder Vault-Inbox-Modus: `None` (keine zusaetzliche erlaubte
+    Wurzel, unveraendertes Verhalten vor B3)."""
+    if session is not None:
+        return getattr(session, "export_dir", None)
+    return None
+
+
 def _is_within(path: str, root: Path) -> bool:
     """True, wenn `path` (aufgelöst) innerhalb von `root` liegt."""
     try:
@@ -137,7 +159,12 @@ def _is_within(path: str, root: Path) -> bool:
 
 
 def _output_items_from_events(
-    events: list[dict], *, pdf: str | None, vault_path: Path, preview_root: Path
+    events: list[dict],
+    *,
+    pdf: str | None,
+    vault_path: Path,
+    preview_root: Path,
+    export_dir: Path | None = None,
 ) -> list[dict]:
     """Aggregiert die Ergebnisliste (`GET /api/outputs`) aus den Events der
     aktuellen/letzten RunSession.
@@ -147,11 +174,19 @@ def _output_items_from_events(
     sie existiert (kein Erfinden — fehlt sie, bleibt `path` weg, L5).
     Schreib-Lauf: aus `note_written`-Events (vault_writer-stdout) — dort gibt es
     kein Score/Confidence, die druckt vault_writer nur im Dry-Run.
+
+    `export_dir` (B3): wurde der Lauf mit einem freien Export-Ordner statt der
+    Vault-Inbox gestartet, druckt `vault_writer._display` einen ABSOLUTEN Pfad
+    (er liegt nicht unter `VAULT`, s. `orchestrator.py`/`vault_writer.py`
+    B3-Vorbedingungen) — `candidate` (unten) ist dann bereits dieser absolute
+    Pfad (ein absoluter RHS-Operand bei `Path.__truediv__` verdraengt `vault_root`).
+    Ohne den zusaetzlichen Export-Ordner-Check faellt so ein Pfad hier weg.
     """
     items: list[dict] = []
     stem = Path(pdf).stem if pdf else ""
     vault_root = Path(vault_path).resolve()
     preview_base = Path(preview_root).resolve()
+    export_base = Path(export_dir).resolve() if export_dir is not None else None
     for ev in events:
         if ev.get("type") == "preview":
             item: dict = {"title": ev["name"], "routing": ev["routing"]}
@@ -174,6 +209,8 @@ def _output_items_from_events(
                 item["merge_target"] = ev["merge_target"]
             candidate = (vault_root / ev["path"]).resolve()
             if candidate.is_relative_to(vault_root):
+                item["path"] = str(candidate)
+            elif export_base is not None and candidate.is_relative_to(export_base):
                 item["path"] = str(candidate)
             items.append(item)
     return items
@@ -206,12 +243,17 @@ def _run_summary_from_events(events: list[dict]) -> dict:
     return {}
 
 
-def _validate_output_path(path: str, *, vault_path: Path, preview_root: Path) -> Path | None:
+def _validate_output_path(
+    path: str, *, vault_path: Path, preview_root: Path, export_dir: Path | None = None
+) -> Path | None:
     """Pfad-Whitelist (L4) fuer `/api/outputs/file` + `/api/outputs/archive`:
     nur `.md`-Dateien unterhalb `vault_path`, oder beliebige Dateien unterhalb
     `preview_root` (die eval-Kopien der Dry-Run-Vorschau, bereits auf `.md`
-    beschraenkt). `resolve()` neutralisiert Symlink-Escapes. Alles andere:
-    `None` -> Aufrufer antwortet 403.
+    beschraenkt), oder `.md`-Dateien unterhalb `export_dir` (B3: der zur
+    Laufzeit gewaehlte freie Export-Ordner -- gleiche `.md`-Beschraenkung wie
+    beim Vault, da der Export-Ordner ebenso ein beliebiger lokaler Ordner ist).
+    `resolve()` neutralisiert Symlink-Escapes. Alles andere: `None` -> Aufrufer
+    antwortet 403.
     """
     try:
         resolved = Path(path).resolve()
@@ -223,6 +265,10 @@ def _validate_output_path(path: str, *, vault_path: Path, preview_root: Path) ->
         return resolved
     if resolved.is_relative_to(preview_base):
         return resolved
+    if export_dir is not None:
+        export_base = Path(export_dir).resolve()
+        if resolved.is_relative_to(export_base) and resolved.suffix == ".md":
+            return resolved
     return None
 
 
@@ -244,6 +290,11 @@ class RunSession:
         # fuer den Record-Write am Lauf-Ende. `runs_dir=None` deaktiviert das
         # Schreiben (z.B. wenn RunSession direkt ohne GUI-Kontext genutzt wird).
         self.vault_path: Path | None = None
+        # B3 (Output-Ziel waehlbar): Snapshot des per `options.inbox_dir`
+        # gewaehlten Export-Ordners fuer DIESEN Lauf (Schreib-Modus) -- analog
+        # `vault_path` oben. `None` = Vault-Inbox (Default) oder Dry-Run
+        # (inbox_dir wird dort ignoriert, s. `start_run`).
+        self.export_dir: Path | None = None
         self.preview_root: Path | None = None
         self.runs_dir: Path | None = None
         self.clock: Callable[[], float] = time.time
@@ -298,7 +349,11 @@ class RunSession:
         finished_at = self.clock()
         rc = terminal_ev.get("returncode") if terminal_ev.get("type") == "exited" else None
         notes = _output_items_from_events(
-            self.events, pdf=self.pdf, vault_path=self.vault_path, preview_root=self.preview_root
+            self.events,
+            pdf=self.pdf,
+            vault_path=self.vault_path,
+            preview_root=self.preview_root,
+            export_dir=self.export_dir,
         )
         summary = _run_summary_from_events(self.events)
         record = run_history.build_run_record(
@@ -542,6 +597,17 @@ def create_app(
         options, options_error = _validate_run_options(body.get("options"))
         if options_error:
             return JSONResponse({"error": options_error}, status_code=422)
+        # B3 (Output-Ziel waehlbar): `inbox_dir` ist nur im SCHREIB-Modus
+        # wirksam -- im Dry-Run wird er ignoriert (kein Fehler, kein Export-
+        # Ordner-Snapshot, s. `_active_export_dir`/`RunSession.export_dir`).
+        export_dir: Path | None = None
+        if options.get("inbox_dir") and not dry_run:
+            try:
+                export_dir = Path(options["inbox_dir"]).resolve()
+            except (OSError, ValueError):
+                return JSONResponse({"error": f"Ungültiger Export-Ordner: {options['inbox_dir']}"}, status_code=400)
+            if not export_dir.is_dir():
+                return JSONResponse({"error": f"Export-Ordner nicht gefunden: {options['inbox_dir']}"}, status_code=400)
         if not pdf or not Path(pdf).exists():
             return JSONResponse({"error": f"PDF nicht gefunden: {pdf}"}, status_code=400)
         # #2: Quelle muss unter einem erlaubten Root liegen (gelistet/hochgeladen).
@@ -565,6 +631,7 @@ def create_app(
             # auch wenn `app.state.vault_path` inzwischen per PUT /api/vault
             # weitergewechselt wurde.
             session.vault_path = app.state.vault_path
+            session.export_dir = export_dir
             session.preview_root = preview_root
             session.runs_dir = runs_dir
             session.clock = clock
@@ -647,13 +714,20 @@ def create_app(
         pdf = getattr(session, "pdf", None) if session is not None else None
         dry_run = getattr(session, "dry_run", None) if session is not None else None
         active_vault = _active_vault(session, app.state.vault_path)
-        items = _output_items_from_events(events, pdf=pdf, vault_path=active_vault, preview_root=preview_root)
+        active_export_dir = _active_export_dir(session)
+        items = _output_items_from_events(
+            events, pdf=pdf, vault_path=active_vault, preview_root=preview_root, export_dir=active_export_dir
+        )
         return JSONResponse({"items": items, "dry_run": dry_run})
 
     @app.get("/api/outputs/file")
     def outputs_file(path: str):
-        active_vault = _active_vault(app.state.session, app.state.vault_path)
-        resolved = _validate_output_path(path, vault_path=active_vault, preview_root=preview_root)
+        session = app.state.session
+        active_vault = _active_vault(session, app.state.vault_path)
+        active_export_dir = _active_export_dir(session)
+        resolved = _validate_output_path(
+            path, vault_path=active_vault, preview_root=preview_root, export_dir=active_export_dir
+        )
         if resolved is None:
             return JSONResponse({"error": "Pfad nicht erlaubt"}, status_code=403)
         if not resolved.is_file():
@@ -666,7 +740,10 @@ def create_app(
         events = session.events if session is not None else []
         pdf = getattr(session, "pdf", None) if session is not None else None
         active_vault = _active_vault(session, app.state.vault_path)
-        items = _output_items_from_events(events, pdf=pdf, vault_path=active_vault, preview_root=preview_root)
+        active_export_dir = _active_export_dir(session)
+        items = _output_items_from_events(
+            events, pdf=pdf, vault_path=active_vault, preview_root=preview_root, export_dir=active_export_dir
+        )
         buf = io.BytesIO()
         used: dict[str, int] = {}
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
@@ -674,7 +751,9 @@ def create_app(
                 raw = item.get("path")
                 if not raw:
                     continue
-                resolved = _validate_output_path(raw, vault_path=active_vault, preview_root=preview_root)
+                resolved = _validate_output_path(
+                    raw, vault_path=active_vault, preview_root=preview_root, export_dir=active_export_dir
+                )
                 if resolved is None or not resolved.is_file():
                     continue
                 base = resolved.name

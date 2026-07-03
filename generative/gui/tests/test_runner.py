@@ -127,3 +127,36 @@ def test_build_run_spec_vault_path_combines_with_other_options():
         vault_path="/some/vault",
     )
     assert env == {"ATOMIC_AGENT_BACKEND": "litellm", "ATOMIC_AGENT_VAULT_PATH": "/some/vault"}
+
+
+# --- build_run_spec inbox_dir (B3: Output-Ziel waehlbar) -------------------
+
+
+def test_build_run_spec_inbox_dir_write_mode_appends_flag():
+    argv, env = build_run_spec("foo.pdf", dry_run=False, options={"inbox_dir": "C:/export"})
+    assert "--inbox-dir" in argv
+    assert argv[argv.index("--inbox-dir") + 1] == "C:/export"
+
+
+def test_build_run_spec_inbox_dir_dry_run_omits_flag():
+    # Dry-Run ignoriert inbox_dir -- vault_writer schreibt im Dry-Run ohnehin
+    # nur eval-Kopien nach .cache/eval/baseline, unabhaengig von --inbox-dir.
+    argv, env = build_run_spec("foo.pdf", dry_run=True, options={"inbox_dir": "C:/export"})
+    assert "--inbox-dir" not in argv
+
+
+def test_build_run_spec_no_inbox_dir_omits_flag():
+    argv, env = build_run_spec("foo.pdf", dry_run=False, options={})
+    assert "--inbox-dir" not in argv
+
+
+def test_build_run_spec_inbox_dir_combines_with_other_options():
+    argv, env = build_run_spec(
+        "foo.pdf",
+        dry_run=False,
+        options={"backend": "litellm", "no_llm": True, "inbox_dir": "C:/export"},
+    )
+    assert "--no-llm" in argv
+    assert "--inbox-dir" in argv
+    assert argv[argv.index("--inbox-dir") + 1] == "C:/export"
+    assert env == {"ATOMIC_AGENT_BACKEND": "litellm"}

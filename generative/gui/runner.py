@@ -45,10 +45,20 @@ def build_run_spec(
     (die passiert serverseitig in `app.py` vor dem Lauf-Start bzw. in
     `PUT /api/vault`). `None`/leer laesst den Subprocess das Standard-ENV
     (bzw. `.env`) erben -- unveraendertes Verhalten vor B2.
+
+    `options["inbox_dir"]` (B3): nur im SCHREIB-Modus (`dry_run=False`) an
+    `--inbox-dir` durchgereicht -- im Dry-Run schreibt vault_writer ohnehin nur
+    eval-Kopien nach `.cache/eval/baseline`, unabhaengig von `--inbox-dir`
+    (Orchestrator-Flag greift dort nicht). Reine Uebersetzung, keine Existenz-
+    Validierung hier (die passiert serverseitig in `app.py:start_run`).
     """
     options = options or {}
-    extra = ["--no-llm"] if options.get("no_llm") else None
-    argv = build_argv(pdf_path, dry_run=dry_run, extra=extra)
+    extra: list[str] = []
+    if options.get("no_llm"):
+        extra.append("--no-llm")
+    if options.get("inbox_dir") and not dry_run:
+        extra.extend(["--inbox-dir", str(options["inbox_dir"])])
+    argv = build_argv(pdf_path, dry_run=dry_run, extra=extra or None)
     env_overrides: dict[str, str] = {}
     if options.get("backend"):
         env_overrides["ATOMIC_AGENT_BACKEND"] = options["backend"]
