@@ -312,8 +312,6 @@ function renderHistoryResults(record) {
 function addHistoryEntry(record) {
   const li = document.createElement("li");
   li.className = "preview-card history-card";
-  li.tabIndex = 0;
-  li.setAttribute("role", "button");
   const rcKnown = record.rc !== null && record.rc !== undefined;
   const rcOk = record.rc === 0;
   const rcClass = rcKnown ? (rcOk ? "ok" : "warn") : "warn";
@@ -326,21 +324,21 @@ function addHistoryEntry(record) {
   if (record.tokens && record.tokens.total !== undefined) {
     summaryBadges.push(`<span class="badge">${formatTokenCount(record.tokens.total)} Tokens</span>`);
   }
+  // P8: Karteninhalt in einem <button> statt li[role=button] — native
+  // Fokus-/Aktivierungs-Semantik, kein eigener keydown-Handler noetig.
   li.innerHTML = `
-    <div class="title">${escapeHtml(baseName(record.source_pdf))}</div>
-    <div class="meta">
-      <span class="hint">${formatHistoryDate(record.finished_at)}</span>
-      <span class="badge">${record.dry_run ? "Vorschau" : "Geschrieben"}</span>
-      <span class="badge ${rcClass}">${rcLabel}</span>
-      <span class="badge">${notesCount} Notes</span>
-      ${summaryBadges.join("")}
-    </div>
-    <div class="hint">${escapeHtml(historyOptionsShort(record.options))}</div>`;
-  const open = () => renderHistoryResults(record);
-  li.addEventListener("click", open);
-  li.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); open(); }
-  });
+    <button type="button" class="history-open">
+      <div class="title">${escapeHtml(baseName(record.source_pdf))}</div>
+      <div class="meta">
+        <span class="hint">${formatHistoryDate(record.finished_at)}</span>
+        <span class="badge">${record.dry_run ? "Vorschau" : "Geschrieben"}</span>
+        <span class="badge ${rcClass}">${rcLabel}</span>
+        <span class="badge">${notesCount} Notes</span>
+        ${summaryBadges.join("")}
+      </div>
+      <div class="hint">${escapeHtml(historyOptionsShort(record.options))}</div>
+    </button>`;
+  li.querySelector(".history-open").addEventListener("click", () => renderHistoryResults(record));
   $("history-list").appendChild(li);
 }
 
@@ -370,7 +368,9 @@ function startStream() {
   startElapsed();
   // [0/7] = optionales Enrichment (Vor-Stufe) → keinen Step markieren.
   const onStage = (e) => { const d = JSON.parse(e.data); if (d.num >= 1) setStage(d.num); };
-  es.addEventListener("started", (e) => logLine("» Lauf gestartet"));
+  // P8: Fokus auf die Pipeline-Sektion, sobald der Lauf sichtbar startet
+  // (SSE-Reattach spielt "started" erneut ab -- Fokus-Sprung dann harmlos).
+  es.addEventListener("started", (e) => { logLine("» Lauf gestartet"); $("steps-h").focus(); });
   es.addEventListener("stage", onStage);
   es.addEventListener("note_progress", (e) => {
     const d = JSON.parse(e.data);
@@ -397,7 +397,12 @@ function startStream() {
     let rc = 0;
     try { rc = JSON.parse(e.data).returncode; } catch { }
     if (userCancelled) { markStageError(activeStage); logLine("■ Lauf abgebrochen."); }
-    else if (rc === 0) { setStage(99); renderRunSummaryLine(); logLine("● Lauf beendet."); loadOutputs(); }
+    else if (rc === 0) {
+      setStage(99); renderRunSummaryLine(); logLine("● Lauf beendet.");
+      // P8: Fokus-Sprung erst NACH dem Laden/Sichtbarwerden der Ergebnis-
+      // Sektion, und nur bei erfolgreichem Lauf (Fehler kommunizieren Banner/Stepper).
+      loadOutputs().then(() => $("results-h").focus());
+    }
     else { markStageError(activeStage); logLine(`✗ Lauf mit Fehlercode ${rc} beendet.`); }
     loadHistory();
     close();
@@ -457,10 +462,9 @@ function wireUpload() {
   const dz = $("dropzone");
   const input = $("file-input");
   $("upload-btn").addEventListener("click", () => input.click());
+  // Tastatur-Zugang laeuft ueber den nativ fokussierbaren "Datei auswaehlen…"-
+  // Button (P8: Dropzone selbst nicht mehr interaktiv, kein eigener keydown).
   dz.addEventListener("click", (e) => { if (e.target === dz) input.click(); });
-  dz.addEventListener("keydown", (e) => {
-    if (e.key === "Enter" || e.key === " ") { e.preventDefault(); input.click(); }
-  });
   input.addEventListener("change", () => uploadFile(input.files[0]));
   ["dragenter", "dragover"].forEach((ev) =>
     dz.addEventListener(ev, (e) => { e.preventDefault(); dz.classList.add("dragover"); }));
