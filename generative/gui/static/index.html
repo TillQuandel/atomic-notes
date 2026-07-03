@@ -75,6 +75,28 @@
           <p class="hint">Schneller/günstiger, aber kein Refine-Loop → systematisch schwächere Notes.</p>
         </fieldset>
 
+        <!-- B3: Ziel-Ordner waehlbar (Vault-Inbox vs. freier Export-Ordner).
+             Format-Wahl (z.B. HTML/PDF-Export statt .md) bewusst NICHT gebaut —
+             abhaengig von „Kanonisches Note-Modell und Renderer" (existiert
+             noch nicht, kein Dropdown fuer Nichtexistentes, L5). -->
+        <fieldset id="target-options">
+          <legend>Ziel</legend>
+          <label class="check">
+            <input type="radio" name="target-mode" id="target-vault-inbox" value="vault-inbox" checked>
+            Vault-Inbox (00-inbox)
+          </label>
+          <label class="check">
+            <input type="radio" name="target-mode" id="target-export-dir" value="export-dir">
+            Export-Ordner
+          </label>
+          <div id="target-export-path-wrap" hidden>
+            <label for="target-export-path">Export-Ordner-Pfad</label>
+            <input type="text" id="target-export-path" name="target-export-path"
+                   placeholder="Pfad zum Export-Ordner" autocomplete="off">
+          </div>
+          <p class="hint">Gilt nur für „In Vault schreiben" — im Vorschau-Modus wird das Ziel ignoriert.</p>
+        </fieldset>
+
         <div class="actions">
           <button type="submit" id="start-btn">Lauf starten</button>
           <button type="button" id="stop-btn" class="danger" hidden>Abbrechen</button>

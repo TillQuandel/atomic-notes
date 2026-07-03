@@ -134,7 +134,24 @@ function buildRunOptions() {
   if (backend) options.backend = backend;
   if (profile) options.profile = profile;
   if ($("opt-no-llm").checked) options.no_llm = true;
+  // B3: Export-Ordner statt Vault-Inbox — nur relevant im Schreib-Modus, der
+  // Server ignoriert inbox_dir im Dry-Run ohnehin (kein Fehler, s. build_run_spec).
+  if ($("target-export-dir").checked) {
+    const path = $("target-export-path").value.trim();
+    if (path) options.inbox_dir = path;
+  }
   return options;
+}
+
+// --- Ziel-Ordner (B3): Vault-Inbox (Default) vs. freier Export-Ordner -----
+
+function applyTargetGate() {
+  const usingExportDir = $("target-export-dir").checked;
+  $("target-export-path-wrap").hidden = !usingExportDir;
+  const path = $("target-export-path").value.trim();
+  const invalid = usingExportDir && !path;
+  $("target-export-path").classList.toggle("bad", invalid);
+  return invalid;
 }
 
 function renderRunHeader(options) {
@@ -554,12 +571,17 @@ async function saveSettings() {
 
 function applyStartGate() {
   // Start sperren, wenn ein required-Preflight-Check rot ist (Fehler vermeiden
-  // statt mitten im Lauf scheitern).
+  // statt mitten im Lauf scheitern) ODER (B3) „Export-Ordner" gewaehlt, aber
+  // kein Pfad eingetragen ist (vorab gesperrt statt nachtraeglicher 400, L5).
   const btn = $("start-btn");
+  const targetInvalid = applyTargetGate();
   if (!doctorOk) {
     btn.disabled = true;
     btn.title = "Preflight fehlgeschlagen — siehe Statuszeile oben.";
-  } else if (btn.title) {
+  } else if (targetInvalid) {
+    btn.disabled = true;
+    btn.title = "Export-Ordner-Pfad fehlt.";
+  } else {
     btn.disabled = false;
     btn.title = "";
   }
@@ -680,6 +702,11 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("opt-backend").addEventListener("change", saveSettings);
   $("opt-profile").addEventListener("change", saveSettings);
   $("opt-no-llm").addEventListener("change", saveSettings);
+  // B3: Ziel-Ordner-Wahl nicht in P2-Settings persistiert (nur `inbox_dir` als
+  // Lauf-Option, s. buildRunOptions) — nur der Sperr-Zustand aktualisiert sich.
+  $("target-vault-inbox").addEventListener("change", applyStartGate);
+  $("target-export-dir").addEventListener("change", applyStartGate);
+  $("target-export-path").addEventListener("input", applyStartGate);
 
   $("run-form").addEventListener("submit", async (e) => {
     e.preventDefault();
@@ -695,7 +722,11 @@ document.addEventListener("DOMContentLoaded", async () => {
     });
     if (!r.ok) {
       const err = await r.json().catch(() => ({}));
-      logLine("✗ " + (err.error || `Start fehlgeschlagen (${r.status})`));
+      const msg = err.error || `Start fehlgeschlagen (${r.status})`;
+      logLine("✗ " + msg);
+      // B3: serverseitig abgelehnter Export-Ordner (400) landet — wie jeder
+      // andere Lauf-Start-Fehler — im bestehenden Fehler-Banner (L5).
+      showBanner(msg);
       $("start-btn").disabled = false;
       applyStartGate();
       return;

@@ -522,6 +522,164 @@ def test_run_forwards_normalized_options_to_run_factory(tmp_path):
     assert captured["options"] == {"backend": "litellm", "profile": "fast"}
 
 
+def test_run_forwards_resolved_export_dir_to_run_factory(tmp_path):
+    # B3 (TOCTOU-Konsistenz): der an --inbox-dir durchgereichte Pfad muss der
+    # AUFGELOESTE sein (== gesnapshotteter session.export_dir), nicht der rohe
+    # Eingabe-String -- sonst koennte ein Symlink nach der Validierung woanders
+    # hinzeigen und der Subprocess ausserhalb des Snapshots schreiben.
+    captured = {}
+
+    def capturing_run(pdf, dry_run, register=None, options=None):
+        captured["options"] = options
+        yield {"type": "started", "argv": ["x"]}
+        yield {"type": "exited", "returncode": 0}
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    export = tmp_path / "export"
+    export.mkdir()
+    app = create_app(
+        run_factory=capturing_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+    )
+    c = TestClient(app, base_url="http://localhost")
+    # relativ-verschachtelter Eingabe-Pfad, der zu `export` aufloest
+    messy = str(export / "sub" / "..")
+    r = c.post(
+        "/api/run",
+        json={"pdf": str(pdf), "dry_run": False, "options": {"inbox_dir": messy}},
+    )
+    assert r.status_code == 200
+    c.get("/api/stream")
+    assert captured["options"]["inbox_dir"] == str(export.resolve())
+
+
+# --- B3: Output-Ziel waehlbar (options.inbox_dir) --------------------------
+
+
+def test_run_options_inbox_dir_string_accepted_in_dry_run(client):
+    # Dry-Run: inbox_dir wird normalisiert durchgereicht, aber serverseitig
+    # nicht auf Existenz geprueft (im Dry-Run schreibt vault_writer ohnehin nur
+    # eval-Kopien nach .cache/eval/baseline, unabhaengig von --inbox-dir).
+    c, pdf = client
+    r = c.post(
+        "/api/run",
+        json={"pdf": str(pdf), "dry_run": True, "options": {"inbox_dir": "C:/nicht-vorhanden"}},
+    )
+    assert r.status_code == 200
+    assert r.json()["options"]["inbox_dir"] == "C:/nicht-vorhanden"
+
+
+def test_run_options_inbox_dir_wrong_type_returns_422(client):
+    c, pdf = client
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True, "options": {"inbox_dir": 123}})
+    assert r.status_code == 422
+
+
+def test_run_options_inbox_dir_empty_string_omitted(client):
+    # Leerer String = kein Export-Wunsch, wie bei backend/profile (Server-Default).
+    c, pdf = client
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True, "options": {"inbox_dir": ""}})
+    assert r.status_code == 200
+    assert "inbox_dir" not in r.json()["options"]
+
+
+def test_run_write_mode_inbox_dir_nonexistent_returns_400(tmp_path):
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=vault,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+    )
+    c = TestClient(app, base_url="http://localhost")
+    r = c.post(
+        "/api/run",
+        json={"pdf": str(pdf), "dry_run": False, "options": {"inbox_dir": str(tmp_path / "fehlt")}},
+    )
+    assert r.status_code == 400
+
+
+def test_run_write_mode_inbox_dir_file_not_directory_returns_400(tmp_path):
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    not_a_dir = tmp_path / "datei.txt"
+    not_a_dir.write_text("x", encoding="utf-8")
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=vault,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+    )
+    c = TestClient(app, base_url="http://localhost")
+    r = c.post(
+        "/api/run",
+        json={"pdf": str(pdf), "dry_run": False, "options": {"inbox_dir": str(not_a_dir)}},
+    )
+    assert r.status_code == 400
+
+
+def test_run_write_mode_inbox_dir_valid_starts_and_sets_export_dir(tmp_path):
+    export_dir = tmp_path / "export"
+    export_dir.mkdir()
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=vault,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+    )
+    c = TestClient(app, base_url="http://localhost")
+    r = c.post(
+        "/api/run",
+        json={"pdf": str(pdf), "dry_run": False, "options": {"inbox_dir": str(export_dir)}},
+    )
+    assert r.status_code == 200
+    assert app.state.session.export_dir == export_dir.resolve()
+
+
+def test_run_dry_run_ignores_inbox_dir_no_export_dir_snapshot(tmp_path):
+    # Dry-Run: kein Export-Ordner-Snapshot, selbst wenn inbox_dir gesetzt ist
+    # (das Ziel wird im Vorschau-Modus schlicht ignoriert, kein Fehler, L5).
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=vault,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+    )
+    c = TestClient(app, base_url="http://localhost")
+    r = c.post(
+        "/api/run",
+        json={"pdf": str(pdf), "dry_run": True, "options": {"inbox_dir": str(tmp_path / "nicht-vorhanden")}},
+    )
+    assert r.status_code == 200
+    assert app.state.session.export_dir is None
+
+
 def test_doctor_reports_litellm_available_true_when_check_ok(tmp_path):
     from generative.doctor import CheckResult
 
@@ -788,6 +946,181 @@ def test_outputs_file_missing_returns_404(tmp_path):
     c, vault, _ = _write_mode_app(tmp_path)
     r = c.get("/api/outputs/file", params={"path": str(vault / "00-inbox" / "nicht-da.md")})
     assert r.status_code == 404
+
+
+# --- B3: Export-Ordner in der Download-Whitelist ---------------------------
+
+
+def test_validate_output_path_helper_allows_md_under_export_dir(tmp_path):
+    from generative.gui.app import _validate_output_path
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    preview = tmp_path / "preview"
+    preview.mkdir()
+    export_dir = tmp_path / "export"
+    export_dir.mkdir()
+    note = export_dir / "a.md"
+    note.write_text("x", encoding="utf-8")
+    resolved = _validate_output_path(str(note), vault_path=vault, preview_root=preview, export_dir=export_dir)
+    assert resolved == note.resolve()
+
+
+def test_validate_output_path_helper_rejects_outside_export_dir(tmp_path):
+    from generative.gui.app import _validate_output_path
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    preview = tmp_path / "preview"
+    preview.mkdir()
+    export_dir = tmp_path / "export"
+    export_dir.mkdir()
+    outside = tmp_path / "fremd.md"
+    outside.write_text("x", encoding="utf-8")
+    resolved = _validate_output_path(str(outside), vault_path=vault, preview_root=preview, export_dir=export_dir)
+    assert resolved is None
+
+
+def test_validate_output_path_helper_rejects_non_md_under_export_dir(tmp_path):
+    from generative.gui.app import _validate_output_path
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    preview = tmp_path / "preview"
+    preview.mkdir()
+    export_dir = tmp_path / "export"
+    export_dir.mkdir()
+    img = export_dir / "bild.png"
+    img.write_bytes(b"\x89PNG")
+    resolved = _validate_output_path(str(img), vault_path=vault, preview_root=preview, export_dir=export_dir)
+    assert resolved is None
+
+
+def test_validate_output_path_helper_without_export_dir_unaffected(tmp_path):
+    # export_dir=None (Default) -- bestehendes Verhalten unveraendert.
+    from generative.gui.app import _validate_output_path
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    preview = tmp_path / "preview"
+    preview.mkdir()
+    outside = tmp_path / "fremd.md"
+    outside.write_text("x", encoding="utf-8")
+    resolved = _validate_output_path(str(outside), vault_path=vault, preview_root=preview)
+    assert resolved is None
+
+
+def test_output_items_from_events_note_written_absolute_path_under_export_dir(tmp_path):
+    from generative.gui.app import _output_items_from_events
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    preview = tmp_path / "preview"
+    export_dir = tmp_path / "export"
+    export_dir.mkdir()
+    note = export_dir / "a.md"
+    note.write_text("x", encoding="utf-8")
+    events = [{"type": "note_written", "path": str(note), "routing": "vault"}]
+    items = _output_items_from_events(events, pdf=None, vault_path=vault, preview_root=preview, export_dir=export_dir)
+    assert items[0]["path"] == str(note.resolve())
+
+
+def test_output_items_from_events_note_written_outside_export_dir_no_path(tmp_path):
+    from generative.gui.app import _output_items_from_events
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    preview = tmp_path / "preview"
+    export_dir = tmp_path / "export"
+    export_dir.mkdir()
+    outside = tmp_path / "fremd.md"
+    outside.write_text("x", encoding="utf-8")
+    events = [{"type": "note_written", "path": str(outside), "routing": "vault"}]
+    items = _output_items_from_events(events, pdf=None, vault_path=vault, preview_root=preview, export_dir=export_dir)
+    assert "path" not in items[0]
+
+
+def _export_mode_app(tmp_path):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    export_dir = tmp_path / "export"
+    export_dir.mkdir()
+    note = export_dir / "Foo.md"
+    note.write_text("# Foo\nInhalt", encoding="utf-8")
+
+    def write_run(pdf, dry_run, register=None, options=None):
+        yield {"type": "started", "argv": ["x"]}
+        yield {"type": "note_written", "path": str(note), "routing": "vault"}
+        yield {"type": "done", "written": 1, "dry_run": dry_run}
+        yield {"type": "exited", "returncode": 0}
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=write_run, pdf_dirs=[tmp_path], vault_path=vault, backend="subscription", uploads_dir=tmp_path / "u"
+    )
+    c = TestClient(app, base_url="http://localhost")
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": False, "options": {"inbox_dir": str(export_dir)}})
+    _drain(c)
+    return c, vault, export_dir, note
+
+
+def test_outputs_lists_note_written_absolute_path_under_export_dir(tmp_path):
+    c, _vault, _export_dir, note = _export_mode_app(tmp_path)
+    items = c.get("/api/outputs").json()["items"]
+    assert items[0]["path"] == str(note.resolve())
+
+
+def test_outputs_file_downloads_md_under_export_dir(tmp_path):
+    c, _vault, _export_dir, note = _export_mode_app(tmp_path)
+    r = c.get("/api/outputs/file", params={"path": str(note)})
+    assert r.status_code == 200
+    assert r.content == note.read_bytes()
+
+
+def test_outputs_file_rejects_path_outside_export_dir(tmp_path):
+    c, _vault, export_dir, _note = _export_mode_app(tmp_path)
+    outside = export_dir.parent / "fremd.md"
+    outside.write_text("fremd", encoding="utf-8")
+    r = c.get("/api/outputs/file", params={"path": str(outside)})
+    assert r.status_code == 403
+
+
+def test_outputs_file_rejects_traversal_out_of_export_dir(tmp_path):
+    c, _vault, export_dir, _note = _export_mode_app(tmp_path)
+    outside = export_dir.parent / "geheim.md"
+    outside.write_text("geheim", encoding="utf-8")
+    traversal = str(export_dir / ".." / "geheim.md")
+    r = c.get("/api/outputs/file", params={"path": traversal})
+    assert r.status_code == 403
+
+
+def test_outputs_file_rejects_non_md_under_export_dir(tmp_path):
+    c, _vault, export_dir, _note = _export_mode_app(tmp_path)
+    img = export_dir / "bild.png"
+    img.write_bytes(b"\x89PNG")
+    r = c.get("/api/outputs/file", params={"path": str(img)})
+    assert r.status_code == 403
+
+
+def test_outputs_archive_includes_export_dir_note(tmp_path):
+    c, _vault, _export_dir, _note = _export_mode_app(tmp_path)
+    r = c.get("/api/outputs/archive")
+    assert r.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(r.content))
+    assert "Foo.md" in zf.namelist()
+
+
+def test_export_dir_session_snapshot_survives_vault_switch(tmp_path):
+    # Analog R1 (B2): der Export-Snapshot DIESES Laufs bleibt massgeblich, auch
+    # wenn der Vault danach per PUT /api/vault gewechselt wird.
+    c, _vault, _export_dir, note = _export_mode_app(tmp_path)
+    new_vault = tmp_path / "vault-b"
+    new_vault.mkdir()
+    r = c.put("/api/vault", json={"path": str(new_vault)})
+    assert r.status_code == 200
+    ok = c.get("/api/outputs/file", params={"path": str(note)})
+    assert ok.status_code == 200
 
 
 def test_archive_filename_helper_uses_pdf_stem():
