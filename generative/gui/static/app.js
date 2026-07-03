@@ -696,6 +696,53 @@ function wireVaultForm() {
   });
 }
 
+// --- litellm-API-Key setzen (B1b: write-only, nie zurueckgegeben/angezeigt) -
+
+function setLitellmKeyStatus(text, isError) {
+  const el = $("litellm-key-status");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.toggle("bad", !!isError);
+}
+
+async function saveLitellmKey(provider, key) {
+  setLitellmKeyStatus("");
+  try {
+    const r = await fetch("/api/access/litellm-key", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ provider, key }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (!r.ok) {
+      const msg = d.error || `Speichern fehlgeschlagen (${r.status})`;
+      showBanner(msg);
+      setLitellmKeyStatus("✗ " + msg, true);
+      return;
+    }
+    // Key nie zurueckanzeigen -- nur Erfolgsmeldung, Feld leeren.
+    $("litellm-key-value").value = "";
+    // L6-Ehrlichkeit: der laufende GUI-Prozess liest `.env`/os.environ NICHT
+    // neu (config.py laedt sie nur beim Start, override=False) -- ein frisch
+    // gesetzter Key wird erst nach GUI-Neustart aktiv. KEIN loadDoctor()-Aufruf
+    // hier: er wuerde weiter "litellm nicht verfuegbar" zeigen und so faelsch-
+    // lich Unwirksamkeit suggerieren. Die Meldung benennt die Neustart-Grenze.
+    setLitellmKeyStatus("✓ Key gespeichert. GUI neu starten, damit er aktiv wird.", false);
+  } catch {
+    setLitellmKeyStatus("✗ Speichern fehlgeschlagen (Netzwerkfehler).", true);
+  }
+}
+
+function wireLitellmKeyForm() {
+  $("litellm-key-form").addEventListener("submit", (e) => {
+    e.preventDefault();
+    const provider = $("litellm-key-provider").value;
+    const key = $("litellm-key-value").value;
+    if (!key.trim()) { setLitellmKeyStatus("Key darf nicht leer sein.", true); return; }
+    saveLitellmKey(provider, key);
+  });
+}
+
 async function attachIfRunActive() {
   // Lädt die Seite, während (woanders) bereits ein Lauf aktiv ist: anhängen
   // statt in die 409-Sackgasse zu laufen — Stop-Button + Stream-Reattach.
@@ -720,6 +767,7 @@ document.addEventListener("DOMContentLoaded", async () => {
   updateModeHint();
   wireUpload();
   wireVaultForm();
+  wireLitellmKeyForm();
   $("access-copy-btn").addEventListener("click", async () => {
     try {
       await navigator.clipboard.writeText("claude");

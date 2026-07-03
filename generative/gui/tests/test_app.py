@@ -7,6 +7,7 @@ echte Event-Dicts yieldet — keine Mock-Bibliothek.
 
 import io
 import json
+import logging
 import zipfile
 from pathlib import Path
 
@@ -2480,3 +2481,199 @@ def test_create_app_ignores_broken_stored_vault_path_no_crash(tmp_path):
     )
     body = TestClient(app, base_url="http://localhost").get("/api/vault").json()
     assert body["vault"] != str((tmp_path / "nicht-da").resolve())
+
+
+# --- B1b: litellm-API-Key write-only in generative/.env setzen -------------
+
+
+def _litellm_key_app(tmp_path, **kwargs):
+    kwargs.setdefault("run_factory", fake_run)
+    kwargs.setdefault("pdf_dirs", [tmp_path])
+    kwargs.setdefault("vault_path", tmp_path)
+    kwargs.setdefault("backend", "subscription")
+    kwargs.setdefault("uploads_dir", tmp_path / "u")
+    kwargs.setdefault("doctor_fn", fake_doctor)
+    kwargs.setdefault("settings_path", tmp_path / "gui" / "settings.json")
+    kwargs.setdefault("env_path", tmp_path / ".env")
+    return create_app(**kwargs)
+
+
+def test_litellm_key_success_returns_200_without_key_in_response(tmp_path):
+    c = TestClient(_litellm_key_app(tmp_path), base_url="http://localhost")
+    r = c.post("/api/access/litellm-key", json={"provider": "ANTHROPIC_API_KEY", "key": "sk-test-xxx"})
+    assert r.status_code == 200
+    body = r.json()
+    assert body == {"provider": "ANTHROPIC_API_KEY", "set": True}
+    assert "sk-test-xxx" not in r.text
+
+
+def test_litellm_key_writes_to_injected_env_path(tmp_path):
+    env_path = tmp_path / ".env"
+    c = TestClient(_litellm_key_app(tmp_path, env_path=env_path), base_url="http://localhost")
+    r = c.post("/api/access/litellm-key", json={"provider": "OPENAI_API_KEY", "key": "sk-openai-xxx"})
+    assert r.status_code == 200
+    assert env_path.read_text(encoding="utf-8") == "OPENAI_API_KEY=sk-openai-xxx\n"
+
+
+def test_litellm_key_merge_preserves_existing_env_content(tmp_path):
+    env_path = tmp_path / ".env"
+    env_path.write_text(
+        "# Kommentar\nATOMIC_AGENT_VAULT_PATH=/vault\nANTHROPIC_API_KEY=alt\nATOMIC_AGENT_BACKEND=subscription\n",
+        encoding="utf-8",
+    )
+    c = TestClient(_litellm_key_app(tmp_path, env_path=env_path), base_url="http://localhost")
+    r = c.post("/api/access/litellm-key", json={"provider": "ANTHROPIC_API_KEY", "key": "neu"})
+    assert r.status_code == 200
+    content = env_path.read_text(encoding="utf-8")
+    assert content == (
+        "# Kommentar\nATOMIC_AGENT_VAULT_PATH=/vault\nANTHROPIC_API_KEY=neu\nATOMIC_AGENT_BACKEND=subscription\n"
+    )
+
+
+def test_litellm_key_unknown_provider_returns_422(tmp_path):
+    c = TestClient(_litellm_key_app(tmp_path), base_url="http://localhost")
+    r = c.post("/api/access/litellm-key", json={"provider": "GEMINI_API_KEY", "key": "sk-test-xxx"})
+    assert r.status_code == 422
+    # Klartext-Fehler, aber der (hier ohnehin nicht vorhandene) key wird nicht erwaehnt.
+    assert "sk-test-xxx" not in r.text
+
+
+def test_litellm_key_missing_key_returns_400(tmp_path):
+    c = TestClient(_litellm_key_app(tmp_path), base_url="http://localhost")
+    r = c.post("/api/access/litellm-key", json={"provider": "ANTHROPIC_API_KEY"})
+    assert r.status_code == 400
+
+
+def test_litellm_key_empty_key_returns_400(tmp_path):
+    c = TestClient(_litellm_key_app(tmp_path), base_url="http://localhost")
+    r = c.post("/api/access/litellm-key", json={"provider": "ANTHROPIC_API_KEY", "key": ""})
+    assert r.status_code == 400
+
+
+def test_litellm_key_whitespace_only_key_returns_400(tmp_path):
+    c = TestClient(_litellm_key_app(tmp_path), base_url="http://localhost")
+    r = c.post("/api/access/litellm-key", json={"provider": "ANTHROPIC_API_KEY", "key": "   "})
+    assert r.status_code == 400
+
+
+@pytest.mark.parametrize("bad_char", ["\r", "\n", "\0", "\t", "\x7f"])
+def test_litellm_key_rejects_control_chars(tmp_path, bad_char):
+    env_path = tmp_path / ".env"
+    c = TestClient(_litellm_key_app(tmp_path, env_path=env_path), base_url="http://localhost")
+    r = c.post("/api/access/litellm-key", json={"provider": "ANTHROPIC_API_KEY", "key": f"sk-x{bad_char}rest"})
+    assert r.status_code == 400
+    assert not env_path.exists()
+
+
+def test_litellm_key_injection_attempt_rejected_nothing_written(tmp_path):
+    env_path = tmp_path / ".env"
+    env_path.write_text("ATOMIC_AGENT_BACKEND=subscription\n", encoding="utf-8")
+    c = TestClient(_litellm_key_app(tmp_path, env_path=env_path), base_url="http://localhost")
+    r = c.post(
+        "/api/access/litellm-key",
+        json={"provider": "ANTHROPIC_API_KEY", "key": "sk-x\nATOMIC_AGENT_BACKEND=evil"},
+    )
+    assert r.status_code == 400
+    content = env_path.read_text(encoding="utf-8")
+    assert content == "ATOMIC_AGENT_BACKEND=subscription\n"
+    assert "evil" not in content
+
+
+def test_litellm_key_rejects_invalid_json_body(tmp_path):
+    c = TestClient(_litellm_key_app(tmp_path), base_url="http://localhost")
+    r = c.post("/api/access/litellm-key", content="{invalid", headers={"Content-Type": "application/json"})
+    assert r.status_code == 400
+
+
+def test_litellm_key_rejects_non_object_json_body(tmp_path):
+    c = TestClient(_litellm_key_app(tmp_path), base_url="http://localhost")
+    for payload in ("null", "[]", "42", '"text"'):
+        r = c.post("/api/access/litellm-key", content=payload, headers={"Content-Type": "application/json"})
+        assert r.status_code == 400
+
+
+def test_litellm_key_rejects_cross_origin(tmp_path):
+    env_path = tmp_path / ".env"
+    c = TestClient(_litellm_key_app(tmp_path, env_path=env_path), base_url="http://localhost")
+    r = c.post(
+        "/api/access/litellm-key",
+        json={"provider": "ANTHROPIC_API_KEY", "key": "sk-test-xxx"},
+        headers={"Origin": "http://evil.example"},
+    )
+    assert r.status_code == 403
+    assert not env_path.exists()
+
+
+def test_litellm_key_rejects_cross_origin_port(tmp_path):
+    # M1-Haertung (analog /api/run, /api/vault): ein fremder localhost-Port
+    # ist KEIN Same-Origin.
+    env_path = tmp_path / ".env"
+    app = _litellm_key_app(tmp_path, env_path=env_path)
+    c = TestClient(app, base_url="http://127.0.0.1:8052")
+    r = c.post(
+        "/api/access/litellm-key",
+        json={"provider": "ANTHROPIC_API_KEY", "key": "sk-test-xxx"},
+        headers={"Origin": "http://127.0.0.1:3000"},
+    )
+    assert r.status_code == 403
+    assert not env_path.exists()
+
+
+def test_litellm_key_origin_check_happens_before_body_parse(tmp_path):
+    # Cross-Origin muss VOR dem JSON-Parsing abgewiesen werden -- ein kaputter
+    # Body darf die Origin-Pruefung nicht umgehen/verdecken.
+    c = TestClient(_litellm_key_app(tmp_path), base_url="http://localhost")
+    r = c.post(
+        "/api/access/litellm-key",
+        content="{invalid",
+        headers={"Content-Type": "application/json", "Origin": "http://evil.example"},
+    )
+    assert r.status_code == 403
+
+
+def test_litellm_key_no_leak_in_log(tmp_path, caplog):
+    c = TestClient(_litellm_key_app(tmp_path), base_url="http://localhost")
+    with caplog.at_level(logging.DEBUG):
+        c.post("/api/access/litellm-key", json={"provider": "ANTHROPIC_API_KEY", "key": "sk-super-secret-xxx"})
+        c.post(
+            "/api/access/litellm-key",
+            json={"provider": "ANTHROPIC_API_KEY", "key": "sk-super-secret-xxx\nevil=1"},
+        )
+    assert "sk-super-secret-xxx" not in caplog.text
+
+
+def test_litellm_key_appended_when_not_previously_set(tmp_path):
+    env_path = tmp_path / ".env"
+    env_path.write_text("ATOMIC_AGENT_BACKEND=subscription\n", encoding="utf-8")
+    c = TestClient(_litellm_key_app(tmp_path, env_path=env_path), base_url="http://localhost")
+    r = c.post("/api/access/litellm-key", json={"provider": "OLLAMA_API_BASE", "key": "http://localhost:11434"})
+    assert r.status_code == 200
+    content = env_path.read_text(encoding="utf-8")
+    assert content == "ATOMIC_AGENT_BACKEND=subscription\nOLLAMA_API_BASE=http://localhost:11434\n"
+
+
+def test_litellm_key_non_utf8_env_returns_500_no_traceback(tmp_path):
+    # Punkt 4 (fail-closed): eine bestehende nicht-UTF-8-`.env` (cp1252/BOM)
+    # wirft beim Read einen UnicodeDecodeError -- der Endpunkt muss ihn als
+    # generische 500 fangen (kein Traceback-Durchschlag, kein Key in der
+    # Response).
+    env_path = tmp_path / ".env"
+    env_path.write_bytes(b"ATOMIC_AGENT_BACKEND=subscription\n\xff\xfe not utf8\n")
+    c = TestClient(
+        _litellm_key_app(tmp_path, env_path=env_path), base_url="http://localhost", raise_server_exceptions=False
+    )
+    r = c.post("/api/access/litellm-key", json={"provider": "ANTHROPIC_API_KEY", "key": "sk-test-xxx"})
+    assert r.status_code == 500
+    body = r.json()
+    assert body == {"error": "Key konnte nicht gespeichert werden."}
+    assert "sk-test-xxx" not in r.text
+
+
+def test_litellm_key_rejects_leading_quote_400(tmp_path):
+    # Punkt 5 (Endpunkt-Ebene): ein mit Quote beginnender Key wird als 400
+    # abgewiesen, nichts geschrieben.
+    env_path = tmp_path / ".env"
+    c = TestClient(_litellm_key_app(tmp_path, env_path=env_path), base_url="http://localhost")
+    r = c.post("/api/access/litellm-key", json={"provider": "ANTHROPIC_API_KEY", "key": '"sk-x'})
+    assert r.status_code == 400
+    assert not env_path.exists()

@@ -21,3 +21,11 @@ def _isolate_default_runs_dir(tmp_path, monkeypatch):
 @pytest.fixture(autouse=True)
 def _isolate_default_settings_path(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "_DEFAULT_SETTINGS_PATH", tmp_path / "gui-settings-default" / "settings.json")
+
+
+@pytest.fixture(autouse=True)
+def _isolate_default_env_path(tmp_path, monkeypatch):
+    # B1b: Sicherheitsnetz zusaetzlich zu `create_app(env_path=...)` -- selbst
+    # ein Test, der `env_path` vergisst zu injizieren, darf NIE die echte
+    # `generative/.env` schreiben.
+    monkeypatch.setattr(app_module, "_DEFAULT_ENV_PATH", tmp_path / "gui-env-default" / ".env")
