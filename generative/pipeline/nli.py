@@ -63,13 +63,17 @@ def _load_model():
     with _MODEL_LOCK:
         if "loaded" in _MODEL_CACHE:  # Double-Checked Locking
             return _MODEL_CACHE["tokenizer"], _MODEL_CACHE["model"], _MODEL_CACHE["torch"]
-        _MODEL_CACHE["loaded"] = True
         try:
             tokenizer, model, torch_mod = _import_and_load()
             _MODEL_CACHE.update({"tokenizer": tokenizer, "model": model, "torch": torch_mod})
         except Exception as exc:
             print(f"  [nli] mDeBERTa-Modell nicht ladbar, Abstain: {exc}", file=sys.stderr)
             _MODEL_CACHE.update({"tokenizer": None, "model": None, "torch": None})
+        # "loaded" erst NACH dem Daten-Update setzen: der lock-freie Fast-Path
+        # oben liest die Daten-Keys, sobald er "loaded" sieht — stünde "loaded"
+        # vor dem Update, läse ein zweiter Thread während des Modell-Downloads
+        # einen leeren Cache (KeyError-Race, Qwen-Review E4).
+        _MODEL_CACHE["loaded"] = True
     return _MODEL_CACHE["tokenizer"], _MODEL_CACHE["model"], _MODEL_CACHE["torch"]
 
 
@@ -100,12 +104,21 @@ def _label_index_map(model) -> dict[str, int]:
     return {str(label).lower(): int(idx) for idx, label in labels.items()}
 
 
-def score_pairs(pairs: list[tuple[str, str]]) -> list[NliScores] | None:
+def score_pairs(pairs: list[tuple[str, str]], batch_size: int = 32) -> list[NliScores] | None:
     """Batched NLI-Scoring für `(premise, hypothesis)`-Paare.
 
-    Echtes Batching (ein Modell-Call für alle Paare, analog `eval_quality_v2._nli_batch`).
-    Truncation auf 512 Tokens (Modell-Limit). Gibt `None` zurück (Abstain), wenn
-    das Modell nicht ladbar ist — siehe Modul-Docstring.
+    Verarbeitet in Chunks von `batch_size` (ein Modell-Call pro Chunk — ein
+    einziger Tensor über beliebig viele Paare wäre ein OOM-Risiko bei langen
+    Quellfenstern). Truncation auf 512 Tokens (Modell-Limit). Gibt `None`
+    zurück (Abstain), wenn das Modell nicht ladbar ist, ein Kern-Label im
+    `id2label`-Mapping fehlt oder die Inferenz fehlschlägt — siehe Abstain-
+    Vertrag im Modul-Docstring.
+
+    Die Ergebnis-Reihenfolge entspricht exakt der Eingabe-Reihenfolge; das
+    Mapping auf Claims liegt beim Aufrufer. Aufrufer sollten Claims, die schon
+    deterministisch entschieden sind (z. B. `attribution.check_attribution` →
+    `author_missing`/`no_window`), vorab herausfiltern statt teure Inferenz
+    zu verschwenden.
     """
     if not pairs:
         return []
@@ -114,30 +127,42 @@ def score_pairs(pairs: list[tuple[str, str]]) -> list[NliScores] | None:
     if tokenizer is None or model is None or torch is None:
         return None
 
-    premises = [p for p, _ in pairs]
-    hypotheses = [h for _, h in pairs]
-    inputs = tokenizer(
-        premises,
-        hypotheses,
-        truncation=True,
-        max_length=512,
-        padding=True,
-        return_tensors="pt",
-    )
-    with torch.no_grad():
-        logits = model(**inputs).logits
-    probs = torch.softmax(logits, dim=-1).tolist()
-
     label_map = _label_index_map(model)
-    e_idx = label_map.get("entailment", 0)
-    n_idx = label_map.get("neutral", 1)
-    c_idx = label_map.get("contradiction", 2)
+    missing = {"entailment", "neutral", "contradiction"} - set(label_map)
+    if missing:
+        # Kein stiller Index-Fallback: falsches Label-Mapping produzierte
+        # lautlos vertauschte Scores (Qwen-Review E4) — lieber Abstain.
+        print(f"  [nli] id2label ohne Kern-Label {sorted(missing)}, Abstain", file=sys.stderr)
+        return None
+    e_idx, n_idx, c_idx = label_map["entailment"], label_map["neutral"], label_map["contradiction"]
 
-    return [
-        NliScores(
-            entailment=float(row[e_idx]),
-            neutral=float(row[n_idx]),
-            contradiction=float(row[c_idx]),
-        )
-        for row in probs
-    ]
+    results: list[NliScores] = []
+    try:
+        for start in range(0, len(pairs), batch_size):
+            chunk = pairs[start : start + batch_size]
+            inputs = tokenizer(
+                [p for p, _ in chunk],
+                [h for _, h in chunk],
+                truncation=True,
+                max_length=512,
+                padding=True,
+                return_tensors="pt",
+            )
+            with torch.no_grad():
+                logits = model(**inputs).logits
+            probs = torch.softmax(logits, dim=-1).tolist()
+            results.extend(
+                NliScores(
+                    entailment=float(row[e_idx]),
+                    neutral=float(row[n_idx]),
+                    contradiction=float(row[c_idx]),
+                )
+                for row in probs
+            )
+    except Exception as exc:
+        # Abstain-Vertrag gilt auch zur Laufzeit (OOM, Shape-Mismatch, …) —
+        # das Gate soll sich enthalten, nicht die Note-Pipeline crashen.
+        print(f"  [nli] Inferenz fehlgeschlagen, Abstain: {exc}", file=sys.stderr)
+        return None
+
+    return results

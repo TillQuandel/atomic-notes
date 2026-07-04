@@ -26,6 +26,12 @@ Namens-Extraktion aus dem Claim-Text (Regexes aus `claims.py`, importiert):
    prüft die NLI-Stufe (E5), nicht diese Präsenz-Heuristik.
 3. `laut <Name>` / `<Name> zufolge` (`LAUT_RE`/`ZUFOLGE_RE`).
 
+Bekannte Grenzen (bewusst, Qwen-Review E4): `\b`-Wortgrenzen matchen „Smith"
+auch in „Smith-Jones" (Bindestrich ist Non-Word-Char); der Primärautoren-
+Set-Vergleich ist case-sensitiv (Metadaten liefern konsistente Groß-
+schreibung). Beides Randfälle ohne beobachtete Instanz — bei Bedarf in der
+E5-Kalibrierung nachschärfen.
+
 Primärautoren (`primary_surnames`) sind von der Präsenz-Prüfung ausgenommen —
 die Quelle IST der Primärautor, er muss sich nicht selbst im eigenen Fenster
 nennen. Sind NACH Abzug der Primärautoren keine Fremd-Namen mehr übrig

@@ -227,3 +227,68 @@ def test_nli_available_does_not_attempt_model_load(monkeypatch):
 
     monkeypatch.setattr(nli, "_import_and_load", _boom)
     nli.nli_available()
+
+
+# ---- Review-Fixups E4 (Qwen): Chunking, Label-fail-safe, Inferenz-Abstain, DCL ----
+
+
+class _DynamicFakeModel:
+    """Liefert pro Call so viele Zeilen wie Eingaben — noetig fuer Chunk-Tests."""
+
+    def __init__(self, id2label):
+        self.config = _FakeConfig(id2label)
+        self.calls = []
+
+    def __call__(self, **inputs):
+        self.calls.append(inputs)
+        n = len(inputs["input_ids"])
+        return _FakeOutputs([[0.8, 0.1, 0.1]] * n)
+
+
+def test_score_pairs_chunks_into_batches(monkeypatch):
+    _reset_cache(monkeypatch)
+    tokenizer = _FakeTokenizer()
+    model = _DynamicFakeModel({0: "entailment", 1: "neutral", 2: "contradiction"})
+    monkeypatch.setattr(nli, "_import_and_load", lambda: (tokenizer, model, _FakeTorch))
+
+    pairs = [(f"P{i}", f"H{i}") for i in range(70)]
+    scores = nli.score_pairs(pairs, batch_size=32)
+
+    assert len(model.calls) == 3  # 32 + 32 + 6
+    assert scores is not None and len(scores) == 70
+    assert tokenizer.calls[0]["premises"][0] == "P0"
+    assert tokenizer.calls[2]["premises"][-1] == "P69"
+
+
+def test_missing_core_label_returns_none_instead_of_silent_fallback(monkeypatch):
+    _reset_cache(monkeypatch)
+    _install_fake_loader(monkeypatch, {0: "implied", 1: "neutral", 2: "contradiction"}, [[0.5, 0.3, 0.2]])
+    assert nli.score_pairs([("P", "H")]) is None
+
+
+def test_inference_error_returns_none(monkeypatch):
+    _reset_cache(monkeypatch)
+
+    class _BoomModel:
+        config = _FakeConfig({0: "entailment", 1: "neutral", 2: "contradiction"})
+
+        def __call__(self, **inputs):
+            raise RuntimeError("simulated OOM")
+
+    monkeypatch.setattr(nli, "_import_and_load", lambda: (_FakeTokenizer(), _BoomModel(), _FakeTorch))
+    assert nli.score_pairs([("P", "H")]) is None
+
+
+def test_loaded_flag_set_only_after_data_keys(monkeypatch):
+    # DCL-Race (Qwen HIGH): waehrend des Ladens darf der lock-freie Fast-Path
+    # "loaded" noch nicht sehen — sonst KeyError auf die Daten-Keys.
+    _reset_cache(monkeypatch)
+
+    def _loader_asserts_not_loaded():
+        assert "loaded" not in nli._MODEL_CACHE, "loaded stand VOR dem Daten-Update im Cache"
+        return _FakeTokenizer(), _DynamicFakeModel({0: "entailment", 1: "neutral", 2: "contradiction"}), _FakeTorch
+
+    monkeypatch.setattr(nli, "_import_and_load", _loader_asserts_not_loaded)
+    tokenizer, model, torch = nli._load_model()
+    assert tokenizer is not None
+    assert "loaded" in nli._MODEL_CACHE
