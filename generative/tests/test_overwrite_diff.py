@@ -59,7 +59,31 @@ class TestDryRunFlagsLineUtf8:
         out = capsys.readouterr().out
         assert "Qualität" in out
         assert "prüfbar" in out
-        assert "?" not in out.split("Flags:")[1].splitlines()[0]
+        flags_line = out.split("Flags:")[1].splitlines()[0]
+        assert "?" not in flags_line
+        # Explizit auch ausserhalb Latin-1 (Emoji), nicht nur Umlaute.
+        assert "⚠️" in flags_line
+
+    def test_dry_run_flags_line_ascii_fallback_no_duplication(self, tmp_path, monkeypatch):
+        # Konsolen-Fallback: kann stdout kein UTF-8 (UnicodeEncodeError), greift
+        # safe() — genau EINE Flags-Zeile (kein Duplikat durch den try/except),
+        # ASCII-replaced statt Crash.
+        import io
+        import sys
+
+        from generative.pipeline import vault_writer
+
+        buf = io.BytesIO()
+        ascii_out = io.TextIOWrapper(buf, encoding="ascii", errors="strict", line_buffering=True)
+        monkeypatch.setattr(sys, "stdout", ascii_out)
+
+        draft = _draft()
+        draft.quality_flags = ["⚠️ kein DOI — Qualität nicht automatisch prüfbar"]
+        vault_writer.write_note(draft, source_file="flags.pdf", dry_run=True, inbox_dir=tmp_path)
+        ascii_out.flush()
+        out = buf.getvalue().decode("ascii")
+        assert out.count("Flags:") == 1
+        assert "Qualit?t" in out  # safe()-Fallback hat gegriffen, kein Crash
 
 
 class TestMarkdownOverwriteDiff:
