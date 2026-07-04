@@ -46,6 +46,7 @@
             <option value="OPENAI_API_KEY">OPENAI_API_KEY</option>
             <option value="OLLAMA_API_BASE">OLLAMA_API_BASE</option>
           </select>
+          <label for="litellm-key-value" class="visually-hidden">API-Key (write-only)</label>
           <input type="password" id="litellm-key-value" name="litellm-key-value"
                  placeholder="Key eingeben" autocomplete="off">
           <button type="submit" id="litellm-key-btn">Speichern</button>
@@ -74,10 +75,9 @@
         <label for="pdf">Quell-PDF</label>
         <select id="pdf" name="pdf" required></select>
 
-        <div id="dropzone" class="dropzone" tabindex="0" role="button"
-             aria-label="PDF per Drag-and-Drop ablegen oder zum Auswählen klicken">
+        <div id="dropzone" class="dropzone">
           <p>PDF hierher ziehen <span class="muted">oder</span></p>
-          <button type="button" id="upload-btn">Datei auswählen…</button>
+          <button type="button" id="upload-btn" aria-label="PDF-Datei auswählen">Datei auswählen…</button>
           <input type="file" id="file-input" accept=".pdf,application/pdf" hidden>
           <p id="upload-status" class="hint" aria-live="polite"></p>
         </div>
@@ -145,7 +145,7 @@
     </section>
 
     <section class="panel" aria-labelledby="steps-h">
-      <h2 id="steps-h">Pipeline</h2>
+      <h2 id="steps-h" tabindex="-1">Pipeline</h2>
       <p id="run-header" class="hint" aria-live="polite"></p>
       <ol id="stepper" class="stepper" aria-live="polite"></ol>
       <p id="note-progress" class="note-progress" aria-live="polite"></p>
@@ -155,12 +155,12 @@
     <section class="panel" aria-labelledby="preview-h">
       <h2 id="preview-h">Erzeugte Notes</h2>
       <p id="preview-empty" class="hint">Noch keine Notes — starte einen Lauf.</p>
-      <ul id="preview-list" class="preview-list" role="log" aria-live="polite"></ul>
+      <ul id="preview-list" class="preview-list" aria-live="polite" aria-relevant="additions"></ul>
     </section>
 
     <section class="panel" aria-labelledby="results-h" id="results-section" hidden>
       <div class="actions">
-        <h2 id="results-h">Ergebnisse</h2>
+        <h2 id="results-h" tabindex="-1">Ergebnisse</h2>
         <a id="download-all" class="button" href="/api/outputs/archive" download hidden>Alle herunterladen (ZIP)</a>
       </div>
       <p id="results-empty" class="hint">Keine Notes in diesem Lauf.</p>
@@ -175,7 +175,7 @@
 
     <section class="panel" aria-labelledby="log-h">
       <h2 id="log-h">Log</h2>
-      <pre id="log" class="log" aria-live="polite"></pre>
+      <pre id="log" class="log" role="log" aria-live="polite" aria-label="Prozess-Log" tabindex="0"></pre>
     </section>
   </main>
 
