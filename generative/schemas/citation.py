@@ -79,7 +79,7 @@ def crossref_override_blocked(quality_report, q_title: str | None) -> bool:
     )
 
 
-def build_citation_meta(pdf_meta: dict, quality_report, q_title: str, source_file: str) -> CitationMeta:
+def build_citation_meta(pdf_meta: dict, quality_report, q_title: str | None, source_file: str) -> CitationMeta:
     """Konstruiert die kanonische CitationMeta EINMAL pro Lauf.
 
     Übernimmt exakt die CrossRef-Override-Blocklogik, die vorher in
@@ -100,7 +100,10 @@ def build_citation_meta(pdf_meta: dict, quality_report, q_title: str, source_fil
     fb_year = fb.get("Year")
 
     author = pdf_meta.get("Author")
-    year = pdf_meta.get("Year")
+    # fb_year-Fallback: im Pipeline-Fluss redundant (apply_filename_citation_metadata
+    # setzt das Filename-Jahr vorher autoritativ in pdf_meta), aber bei direkter
+    # Factory-Nutzung repliziert er die alte _short_label-Doppel-Absicherung.
+    year = pdf_meta.get("Year") or fb_year
     title = pdf_meta.get("Title")
 
     if not crossref_override_blocked(quality_report, q_title):

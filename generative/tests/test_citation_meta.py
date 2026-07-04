@@ -221,3 +221,17 @@ class TestGoldenEquivalence:
         with patch("generative.pipeline.vault_writer.date", _FixedDate):
             out = vault_writer.render_note(_golden_draft(), source_file, citation=citation)
         assert out == _GOLDEN_RENDER_NOTE
+
+
+def test_filename_year_fallback_on_direct_factory_use():
+    # Qwen-Review E3a: pdf_meta ohne Jahr, Dateiname mit Jahr — bei direkter
+    # Factory-Nutzung (ohne apply_filename_citation_metadata-Vorlauf) muss das
+    # Filename-Jahr greifen statt "[o. J.]" (alte _short_label-Doppel-Absicherung).
+    meta = build_citation_meta(
+        {"Author": "Schmidt, Anna", "Title": "Testwerk"},
+        _qr(),
+        "Testwerk",
+        "Schmidt - 2021 - Testwerk.pdf",
+    )
+    assert meta.year == "2021"
+    assert meta.short_label == "Schmidt 2021"
