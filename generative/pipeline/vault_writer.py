@@ -11,6 +11,7 @@ import yaml
 
 from generative.config import VAULT, INBOX, LITERATURE_DIR, CRITIC_AUTO_THRESHOLD
 from generative.schemas.atomic_note import AtomicNoteDraft
+from generative.schemas.citation import CitationMeta
 from shared.author_norm import drop_institutional_coauthors
 
 
@@ -102,31 +103,21 @@ def _strip_page_prefix(value: str) -> str:
     return _PAGE_PREFIX_RE.sub("", value)
 
 
-def build_quellen_block(note: AtomicNoteDraft, source_file: str, source_meta: dict[str, str] | None) -> str:
-    """Quellen-Block deterministisch aus PDF-Metadata + verifizierten Anker-Pages.
+def build_quellen_block(note: AtomicNoteDraft, source_file: str, citation: CitationMeta | None) -> str:
+    """Quellen-Block deterministisch aus CitationMeta + verifizierten Anker-Pages.
     Kein Halluzinations-Risiko, weil das Modell nichts mehr selbst schreibt.
     Public, damit Orchestrator den Block schon vor Critic an draft.body anhängen kann."""
-    meta = dict(source_meta or {})
-    # F4: Filename-Fallback wenn pdf_metadata leer/unsinnig
+    citation = citation or CitationMeta(author=None, year=None, title=None, doi=None, source_file=source_file)
+    # F4: Filename-Fallback wenn CitationMeta-Titel leer/unsinnig. CitationMeta
+    # garantiert das nicht selbst — build_citation_meta übernimmt exakt die
+    # bisherige CrossRef-Override-Logik und lässt einen unkorrigierten "bad"
+    # Title (z.B. "Microsoft Word - ...") durch, wenn kein CrossRef-Treffer greift.
     fallback = _parse_filename_fallback(source_file)
-    if not meta.get("Author"):
-        meta["Author"] = fallback.get("Author", "")
-    # v28: PDF-Filename-Year hat Vorrang vor source_meta-Year. CrossRef gibt für
-    # mehrfach aufgelegte Bücher oft das Year der jüngsten Auflage zurück (Hiatt-Bug:
-    # 2023 statt 2006). Filename-Year ist user-set und entspricht der vorliegenden
-    # PDF-Edition — autoritativ für die Quellen-Angabe.
-    if fallback.get("Year"):
-        meta["Year"] = fallback.get("Year")
-    elif not meta.get("Year"):
-        meta["Year"] = ""
-    raw_title = meta.get("Title", "").strip()
+    raw_title = (citation.title or "").strip()
     if not raw_title or _TITLE_LOOKS_BAD.match(raw_title):
-        meta["Title"] = fallback.get("Title", "") or raw_title
-
-    # Fallback auf Filename-Stem wenn Metadaten leer — kein "[unbekannt]" im Output
-    author = meta.get("Author", "").strip() or fallback.get("Author", "").strip() or Path(source_file).stem
-    year = meta.get("Year", "").strip() or fallback.get("Year", "").strip() or ""
-    title = meta.get("Title", "").strip() or fallback.get("Title", "").strip() or Path(source_file).stem
+        title = fallback.get("Title", "") or raw_title or Path(source_file).stem
+    else:
+        title = raw_title
 
     # Seiten aus verifizierten Ankern. F8: page (LLM-exact) ODER fuzzy_page
     # (rapidfuzz-Fallback) — beide sind valide Seitenbelege für den Quellen-Block.
@@ -150,7 +141,7 @@ def build_quellen_block(note: AtomicNoteDraft, source_file: str, source_meta: di
     # `98-system/attachments/literatur/`). Display-Alias `<Author> <Year>` für Lesbarkeit.
     # Kein separater `[PDF](file://...)`-Link mehr (redundant). Kein Year-Doublet
     # mehr (Jahr ist im PDF-Filename und im Alias enthalten).
-    short = _short_label({"Author": author, "Year": year}, source_file)
+    short = citation.short_label
     pdf_in_vault = (LITERATURE_DIR / source_file).exists()
     wikilink_unsafe = any(c in source_file for c in ("|", "#", "[", "]"))
     if pdf_in_vault and not wikilink_unsafe:
@@ -159,26 +150,6 @@ def build_quellen_block(note: AtomicNoteDraft, source_file: str, source_meta: di
         link = short  # Klartext-Fallback wenn PDF fehlt oder Filename unsafe
     pages_marker = f", S. {pages_str}" if pages_str else ""
     return f"## Quellen\n\n*Quelle: {link}: {title}{pages_marker}*\n"
-
-
-def _short_label(meta: dict[str, str] | None, source_file: str) -> str:
-    """`<Surname> <Year>` für Footnote-Defs. Surname aus `<Last>, <First>` (CrossRef)
-    oder `<First> <Last>`. Year aus pdf_metadata oder Filename-Fallback. Fällt auf
-    Filename-Stem zurück wenn nichts geht.
-    """
-    meta = dict(meta or {})
-    fallback = _parse_filename_fallback(source_file)
-    author = (meta.get("Author") or fallback.get("Author") or "").strip()
-    # Filename-Year hat Vorrang (siehe Begründung in build_quellen_block).
-    year = (fallback.get("Year") or meta.get("Year") or "").strip()
-    if not author:
-        return Path(source_file).stem
-    # Multi-Author auf erste Surname + et al.
-    parts = [p.strip() for p in re.split(r"\s*;\s*|\s+(?:und|and)\s+", author) if p.strip()]
-    surname = parts[0].split(",", 1)[0].strip() if "," in parts[0] else parts[0].split()[-1]
-    if len(parts) > 1:
-        surname = f"{surname} et al."
-    return f"{surname} {year}".strip()
 
 
 # Codex-Finding 1 (2026-05-10): erweitert auf Komma-Listen `(S. N, M)` und
@@ -320,12 +291,13 @@ def _render_proposed_tags_block(note: AtomicNoteDraft) -> str:
     return block
 
 
-def render_moc(note: AtomicNoteDraft, source_file: str, source_meta: dict[str, str] | None = None) -> str:
+def render_moc(note: AtomicNoteDraft, source_file: str, citation: CitationMeta | None = None) -> str:
     """Hub-Routing: Note als MoC-Note rendern (Schema-MoC).
     Frontmatter: type=moc, cssclasses=[moc], obsidianUIMode=preview. Kein H1, keine
     fixen H2-Sektionen. Body wird übernommen; Quellen-Block am Ende (optional per Schema)
     bleibt zur Traceability erhalten — MoC stammt aus PDF-Pipeline.
     """
+    citation = citation or CitationMeta(author=None, year=None, title=None, doi=None, source_file=source_file)
     today = date.today().isoformat()
     title_esc = note.title.replace('"', '\\"')
     aliases_yaml = _yaml_list(note.aliases)
@@ -356,7 +328,7 @@ sub-concepts:
     body = re.sub(
         r"\n+##\s+(Quellen?|Confidence-Notiz)\s*\n.*?(?=\n+##\s|\Z)", "", body, flags=re.IGNORECASE | re.DOTALL
     ).rstrip()
-    body = convert_inline_to_footnotes(body, _short_label(source_meta, source_file), source_file)
+    body = convert_inline_to_footnotes(body, citation.short_label, source_file)
 
     # v29f: Hub-Body-Layout: H1 → Einleitung (1. Absatz nach H1) → ## Komponenten
     # (nummerierte Liste mit Beschreibung pro Sub-Konzept) → Rest-Absätze (Substanz +
@@ -417,19 +389,15 @@ sub-concepts:
     # zurückbleiben (z.B. wenn redundanter Aufzählungs-Absatz gestrippt wurde).
     body_combined = renumber_footnotes("\n\n".join(sections))
     rendered = (
-        frontmatter
-        + "\n"
-        + body_combined
-        + "\n\n"
-        + build_quellen_block(note, source_file, source_meta).rstrip()
-        + "\n"
+        frontmatter + "\n" + body_combined + "\n\n" + build_quellen_block(note, source_file, citation).rstrip() + "\n"
     )
     return inject_content_hash(rendered)  # #47: auch Hubs hashen (Idempotenz bei Re-Run)
 
 
-def render_note(note: AtomicNoteDraft, source_file: str, source_meta: dict[str, str] | None = None) -> str:
+def render_note(note: AtomicNoteDraft, source_file: str, citation: CitationMeta | None = None) -> str:
     if note.action == "hub":
-        return render_moc(note, source_file, source_meta)
+        return render_moc(note, source_file, citation)
+    citation = citation or CitationMeta(author=None, year=None, title=None, doi=None, source_file=source_file)
     today = date.today().isoformat()
     related_yaml = _yaml_list(note.related)
     tags_yaml = "\n".join(f"  - {t}" for t in note.tags) if note.tags else "  []"
@@ -490,10 +458,10 @@ related:
     # v28: `(S. N)` → `[^i]`-Footnotes deterministisch im Renderer (Pipeline-Components
     # wie anchor_repair/verifier arbeiten weiter mit dem Inline-Format im Body-Draft).
     # v30: Page-Wikilink mit `#page=N` wenn PDF im Vault auflösbar.
-    body = convert_inline_to_footnotes(body, _short_label(source_meta, source_file), source_file)
+    body = convert_inline_to_footnotes(body, citation.short_label, source_file)
 
     sections: list[str] = [body]
-    sections.append(build_quellen_block(note, source_file, source_meta).rstrip())
+    sections.append(build_quellen_block(note, source_file, citation).rstrip())
 
     rendered = frontmatter + "\n" + "\n\n".join(sections) + "\n"
     # #47: content-hash ins Frontmatter, damit ein Re-Run erkennt, ob die Datei
@@ -610,7 +578,7 @@ def _read_source_field(note_path: Path) -> str | None:
 
 
 def render_merge_stub(
-    note: AtomicNoteDraft, source_file: str, existing_path: Path, source_meta: dict[str, str] | None = None
+    note: AtomicNoteDraft, source_file: str, existing_path: Path, citation: CitationMeta | None = None
 ) -> str:
     """v27 MVP — Diff-Stub für menschlichen Merge-Review.
 
@@ -619,6 +587,7 @@ def render_merge_stub(
     die existierende Note, damit kein -N-Suffix-Duplikat im Vault entsteht und
     SSoT bleibt.
     """
+    citation = citation or CitationMeta(author=None, year=None, title=None, doi=None, source_file=source_file)
     today = date.today().isoformat()
     title_esc = note.title.replace('"', '\\"')
     rel_existing = str(existing_path.relative_to(VAULT)).replace("\\", "/")
@@ -660,11 +629,11 @@ tags:
         # Footnotes auf die PDF-Seite haben (v30-Vollständigkeit).
         convert_inline_to_footnotes(
             note.body.strip(),
-            _short_label(source_meta, source_file),
+            citation.short_label,
             source_file,
         ),
         "",
-        build_quellen_block(note, source_file, source_meta).rstrip(),
+        build_quellen_block(note, source_file, citation).rstrip(),
     ]
     rendered = frontmatter + "\n" + "\n".join(body_parts) + "\n"
     return inject_content_hash(rendered)  # #47: Merge-Stubs hashen → editierte Stubs schützen
@@ -824,7 +793,7 @@ def write_note(
     note: AtomicNoteDraft,
     source_file: str,
     dry_run: bool = False,
-    source_meta: dict[str, str] | None = None,
+    citation: CitationMeta | None = None,
     existing_concepts: dict[str, str] | None = None,
     inbox_dir: Path | None = None,
 ) -> Path:
@@ -903,7 +872,7 @@ def write_note(
             )
         elif target.exists():
             target = _free_variant(target_dir, target.stem)
-        content = render_merge_stub(note, source_file, existing_vault, source_meta=source_meta)
+        content = render_merge_stub(note, source_file, existing_vault, citation=citation)
     else:
         # Idempotenz: eigener früherer Run derselben PDF → überschreibe
         existing_inbox = find_existing_in_inbox(source_file, note.title, inbox_dir)
@@ -934,7 +903,7 @@ def write_note(
             if kept_tags:
                 note.proposed_tags = kept_tags
                 note.tag_review_status = kept_status or "needs-review"
-        content = render_note(note, source_file, source_meta=source_meta)
+        content = render_note(note, source_file, citation=citation)
 
     if dry_run:
         if is_merge_stub:

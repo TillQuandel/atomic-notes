@@ -11,6 +11,7 @@ from unittest.mock import patch
 
 from generative.pipeline.vault_writer import convert_inline_to_footnotes, build_quellen_block, render_merge_stub, VAULT
 from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor
+from generative.schemas.citation import CitationMeta
 
 
 def _draft_with_anchors(anchors: list[TextAnchor]) -> AtomicNoteDraft:
@@ -135,7 +136,7 @@ class TestQuellenBlockPagePrefix(unittest.TestCase):
     voranstellen — sonst `S. S. 1`."""
 
     SRC = "Bates - 2017 - Information Behavior.pdf"
-    META = {"Author": "Bates", "Year": "2017", "Title": "Information Behavior"}
+    META = CitationMeta(author="Bates", year="2017", title="Information Behavior", doi=None, source_file=SRC)
 
     def test_page_with_prefix_not_doubled(self):
         draft = _draft_with_anchors([TextAnchor(quote="x", page="S. 1")])

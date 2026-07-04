@@ -13,6 +13,7 @@ from generative.agents.base import call_claude_async
 from generative.agents.structured_output import parse_extractor_output
 from generative.config import MODEL_EXTRACTOR
 from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor, ConceptPlan
+from generative.schemas.citation import CitationMeta
 
 _PROMPT = """Du extrahierst eine Atomic Note aus dem unten stehenden Textabschnitt — schemakonform für einen Obsidian-Vault.
 
@@ -141,11 +142,11 @@ Wenn ein Konzept aus der Liste nicht im Text vorkommt: keinen <!--NOTE-->-Block 
 """
 
 
-def _short_author(meta: dict[str, str]) -> str:
+def _short_author(citation: CitationMeta) -> str:
     """Kurzform für Inline-Zitate: 'Schlebbe & Greifeneder' oder 'Bertram'.
     Erkennt CrossRef-Format 'Lastname, Firstname; Lastname, Firstname' und
     einfaches 'A and B' / 'A; B'."""
-    a = (meta.get("Author") or "").strip()
+    a = (citation.author or "").strip()
     if not a:
         return "Autor"
     # Autor-Separator: Semikolon oder ' und ' / ' and '
@@ -260,7 +261,7 @@ def _format_tag_whitelist(tags: list[str] | None, source_text: str | None = None
     return "\n".join(f"- {t}" for t in tags)
 
 
-def _clean_source_file_display(source_file: str) -> str:
+def _clean_source_file_display(citation: CitationMeta) -> str:
     """Gibt den Dateinamen für die Prompt-`Datei:`-Zeile mit gesäubertem Autor
     zurück. Der rohe Zotero-Dateiname ('Mahmood und University of the Punjab -
     2016 - …') leakt den Affiliations-Koautor sonst trotz gesäubertem Autor-Feld
@@ -269,6 +270,7 @@ def _clean_source_file_display(source_file: str) -> str:
     Nicht-parsbare Namen bleiben unverändert."""
     from generative.pipeline.vault_writer import _parse_filename_fallback
 
+    source_file = citation.source_file
     fb = _parse_filename_fallback(source_file)
     author = fb.get("Author")
     if not author:
@@ -280,15 +282,19 @@ def _clean_source_file_display(source_file: str) -> str:
     return f"{core}{ext}"
 
 
-def _format_source_meta(meta: dict[str, str], source_file: str) -> str:
+def _format_source_meta(citation: CitationMeta) -> str:
     parts = []
-    if meta.get("Author"):
-        parts.append(f"Autor: {meta['Author']}")
-    if meta.get("Title"):
-        parts.append(f"Titel: {meta['Title']}")
-    if meta.get("Year"):
-        parts.append(f"Jahr: {meta['Year']}")
-    parts.append(f"Datei: {_clean_source_file_display(source_file)}")
+    if citation.author:
+        parts.append(f"Autor: {citation.author}")
+    if citation.title:
+        parts.append(f"Titel: {citation.title}")
+    # [o. J.]-Regel (#96 E3a): Jahr-Zeile IMMER zeigen (nie stillschweigend
+    # weglassen). Fehlt es, Hinweis für das LLM — exakt "[o. J.]" übernehmen,
+    # KEIN Jahr erfinden.
+    parts.append(f"Jahr: {citation.display_year}")
+    if not citation.year:
+        parts.append("Hinweis: Kein Jahr in der Quelle belegt — übernimm im Body exakt '[o. J.]', erfinde KEIN Jahr.")
+    parts.append(f"Datei: {_clean_source_file_display(citation)}")
     return "\n".join(f"- {p}" for p in parts)
 
 
@@ -333,8 +339,7 @@ async def run_per_concept(
     concept,
     concept_text: str,
     existing_concepts: dict[str, str],
-    source_meta: dict[str, str] | None = None,
-    source_file: str = "",
+    citation: CitationMeta | None = None,
     revision_hint: str | None = None,
     tag_whitelist: list[str] | None = None,
     background_context: list[str] | None = None,
@@ -352,7 +357,7 @@ async def run_per_concept(
     if not concept_text.strip():
         return None
 
-    source_meta = source_meta or {}
+    citation = citation or CitationMeta(author=None, year=None, title=None, doi=None, source_file="")
     _etoks = set(concept.title.lower().split())
     _esorted = sorted(existing_concepts, key=lambda k: len(_etoks & set(k.lower().split())), reverse=True)
     existing_str = "\n".join(f"- {k}" for k in _esorted[:75])
@@ -388,8 +393,8 @@ async def run_per_concept(
     prompt = (
         refine_block
         + _PROMPT.format(
-            source_meta=_format_source_meta(source_meta, source_file),
-            author_short=_short_author(source_meta),
+            source_meta=_format_source_meta(citation),
+            author_short=_short_author(citation),
             concepts=concepts_str,
             existing=existing_str or "(noch keine)",
             background_block=_format_background_block(background_context),
@@ -436,8 +441,8 @@ async def run_per_concept(
             "kürzen wenn Platzdruck. Definition + Substanz haben Vorrang."
         )
         retry_prompt = (f"## Trunkierungs-Hinweis (höchste Priorität)\n{trunc_hint}\n\n") + _PROMPT.format(
-            source_meta=_format_source_meta(source_meta, source_file),
-            author_short=_short_author(source_meta),
+            source_meta=_format_source_meta(citation),
+            author_short=_short_author(citation),
             concepts=concepts_str,
             existing=existing_str or "(noch keine)",
             background_block=_format_background_block(background_context),
@@ -476,12 +481,11 @@ async def run(
     chunk_text: str,
     concept_plan: ConceptPlan,
     existing_concepts: dict[str, str],
-    source_meta: dict[str, str] | None = None,
-    source_file: str = "",
+    citation: CitationMeta | None = None,
     tag_whitelist: list[str] | None = None,
 ) -> list[AtomicNoteDraft]:
 
-    source_meta = source_meta or {}
+    citation = citation or CitationMeta(author=None, year=None, title=None, doi=None, source_file="")
     target_concepts = [
         c
         for c in concept_plan.concepts
@@ -499,8 +503,8 @@ async def run(
     existing_str = "\n".join(f"- {k}" for k in _esorted2[:75])
 
     prompt = _PROMPT.format(
-        source_meta=_format_source_meta(source_meta, source_file),
-        author_short=_short_author(source_meta),
+        source_meta=_format_source_meta(citation),
+        author_short=_short_author(citation),
         concepts=concepts_str,
         existing=existing_str or "(noch keine)",
         background_block="",  # run() hat kein background_context — legacy-Pfad
