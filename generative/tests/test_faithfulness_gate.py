@@ -30,7 +30,7 @@ def stub_top_k_sentences(monkeypatch):
     prüfen. NICHT autouse: `TestTopKSentencesHelper` testet die echte Funktion
     und darf sie nicht ueberschrieben bekommen."""
 
-    def _fake(window_text: str, query: str, k: int) -> list[str]:
+    def _fake(window_text: str, query: str, k: int, **_kw) -> list[str]:
         stripped = fg.PAGE_MARKER_LINE_RE.sub("", window_text)
         sents = [s.strip() for s in stripped.replace("\n", " ").split(".") if s.strip()]
         return sents[:k]
@@ -101,7 +101,7 @@ class TestSupported:
         body = "Blended Learning ist effektiver als reines Praesenzlernen (S. 7)."
         page_index = {7: "Satz eins gibt Kontext. Satz zwei liefert den Beleg."}
 
-        def _two_sentences(window_text, query, k):
+        def _two_sentences(window_text, query, k, **_kw):
             return ["Satz eins gibt Kontext", "Satz zwei liefert den Beleg"]
 
         monkeypatch.setattr(fg, "top_k_sentences", _two_sentences)
@@ -278,3 +278,28 @@ class TestTopKSentencesHelper:
         result = fg.top_k_sentences(window, "QUERY", k=1)
 
         assert result == ["B."]
+
+
+def test_window_embeddings_cached_per_run(monkeypatch):
+    # Mistral-Review E5a: zwei Claims auf derselben Seite duerfen das Fenster
+    # nur EINMAL encoden (per-Lauf-Cache), nicht pro Claim erneut.
+    from generative.pipeline import faithfulness_gate as fg
+
+    encode_calls = []
+
+    class _FakeEmbModel:
+        def encode(self, texts, **kw):
+            encode_calls.append(list(texts))
+            import numpy as np
+
+            return [np.array([1.0, 0.0])] * len(texts)
+
+    monkeypatch.setattr(fg, "_model", lambda: _FakeEmbModel())
+    monkeypatch.setattr(fg, "_sentences", lambda t: [s for s in t.split(". ") if s])
+
+    cache = {}
+    fg.top_k_sentences("Satz eins. Satz zwei.", "query A", 2, _cache=cache)
+    fg.top_k_sentences("Satz eins. Satz zwei.", "query B", 2, _cache=cache)
+
+    window_encodes = [c for c in encode_calls if len(c) > 1]
+    assert len(window_encodes) == 1, "Fenster-Saetze wurden mehrfach encodet trotz Cache"

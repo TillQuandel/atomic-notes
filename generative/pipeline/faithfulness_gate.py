@@ -75,7 +75,29 @@ class GateResult:
     n_abstained: int
 
 
-def top_k_sentences(window_text: str, query: str, k: int) -> list[str]:
+def _window_sentence_embeddings(window_text: str, cache: dict | None = None):
+    """Sätze + Embeddings eines Fensters — optional per-Lauf-gecacht.
+
+    Mehrere Claims einer Note ankern oft auf derselben Seite; ohne Cache würde
+    dasselbe Fenster pro Claim erneut durchs MiniLM encodet (Mistral-Review
+    E5a, Performance). Der Cache lebt beim Aufrufer (ein Lauf), kein globaler
+    Zustand — die Funktionen bleiben pure.
+    """
+    if cache is not None and window_text in cache:
+        return cache[window_text]
+    stripped = PAGE_MARKER_LINE_RE.sub("", window_text)
+    sentences = _sentences(stripped)
+    if not sentences:
+        result = ([], None)
+    else:
+        embs = _model().encode(sentences, show_progress_bar=False, normalize_embeddings=True)
+        result = (sentences, embs)
+    if cache is not None:
+        cache[window_text] = result
+    return result
+
+
+def top_k_sentences(window_text: str, query: str, k: int, *, _cache: dict | None = None) -> list[str]:
     """Rankt Sätze aus `window_text` per MiniLM-Cosine-Similarity zu `query`.
 
     Entfernt vorher `[S. N]`-Markerzeilen (`PAGE_MARKER_LINE_RE`) — sonst
@@ -84,22 +106,18 @@ def top_k_sentences(window_text: str, query: str, k: int) -> list[str]:
     """
     if not window_text or not query:
         return []
-    stripped = PAGE_MARKER_LINE_RE.sub("", window_text)
-    sentences = _sentences(stripped)
+    sentences, sentence_embs = _window_sentence_embeddings(window_text, _cache)
     if not sentences:
         return []
 
-    model = _model()
-    sentence_embs = model.encode(sentences, show_progress_bar=False, normalize_embeddings=True)
-    query_emb = model.encode([query], show_progress_bar=False, normalize_embeddings=True)[0]
-
+    query_emb = _model().encode([query], show_progress_bar=False, normalize_embeddings=True)[0]
     ranked = sorted(zip(sentences, sentence_embs), key=lambda pair: -cosine(pair[1], query_emb))
     return [sentence for sentence, _ in ranked[:k]]
 
 
-def _claim_premises(window: str, claim: Claim, top_k: int) -> list[str]:
+def _claim_premises(window: str, claim: Claim, top_k: int, cache: dict | None = None) -> list[str]:
     """Top-k Fenster-Sätze plus deren Konkatenation als zusätzliche Premise."""
-    top_sentences = top_k_sentences(window, claim.text, top_k)
+    top_sentences = top_k_sentences(window, claim.text, top_k, _cache=cache)
     premises = list(top_sentences)
     if len(top_sentences) > 1:
         premises.append(" ".join(top_sentences))
@@ -153,9 +171,10 @@ def run_faithfulness_gate(
     pair_owner: list[int] = []
     all_pairs: list[tuple[str, str]] = []
 
+    window_cache: dict = {}
     for i in pending:
         claim = claims[i]
-        premises = _claim_premises(windows[i], claim, top_k)
+        premises = _claim_premises(windows[i], claim, top_k, cache=window_cache)
         claim_premises[i] = premises
         for premise in premises:
             pair_owner.append(i)
