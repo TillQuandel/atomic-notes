@@ -195,3 +195,46 @@ def test_causal_risk_true():
 
 def test_causal_risk_false():
     assert not causal_risk("Ein neutraler Satz ohne Kausalitaet.")
+
+
+# ---- Review-Fixups (Qwen-Review + Real-Check auf echter Pipeline-Note) ------
+
+
+def test_page_ref_ff_does_not_split_sentence():
+    body = "Die Studie belegt den Effekt ausfuehrlich (S. 5ff.) und nennt r = 0,3 als Wert."
+    claims = decompose_claims(body)
+    assert len(claims) == 1
+    assert claims[0].text == body
+    assert claims[0].anchor_page == 5
+
+
+def test_bzw_does_not_split_sentence():
+    body = "Es nahmen 19 Teilnehmende teil, Durchschnittsalter 38 bzw. 43 Jahre."
+    claims = decompose_claims(body)
+    assert len(claims) == 1
+    assert "bzw. 43" in claims[0].text
+
+
+def test_footnote_marker_digit_is_not_number_risk():
+    assert not number_risk("Der erste Typ bildet den Kern[^4].")
+    assert number_risk("Der Wert lag bei 0,42[^4].")
+
+
+def test_callout_header_is_skipped():
+    body = '> [!quote]- Hrastinski 2008, S. 2\n> "Ein Zitat mit Zahl 42." (S. 2)'
+    claims = decompose_claims(body)
+    assert all("[!quote]" not in c.text for c in claims)
+    assert any(c.is_quote and "42" in c.text for c in claims)
+
+
+def test_literatur_heading_stops_claims():
+    body = "Ein Satz mit Zahl 42 davor.\n\n## Literaturverzeichnis\n\nMeyer (2001): Titel mit 99 Seiten."
+    claims = decompose_claims(body)
+    assert len(claims) == 1
+    assert "42" in claims[0].text
+
+
+def test_inflected_comparison_and_causal_matched():
+    assert comparison_risk("Die Gruppe erzielte hoehere Werte.".replace("oe", "ö"))
+    assert causal_risk("Das Training fuehrte zu besseren Ergebnissen.".replace("ue", "ü"))
+    assert not causal_risk("Die Führung zu Ende bringen.")

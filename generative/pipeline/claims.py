@@ -43,8 +43,8 @@ class Claim:
 
 # ---- Attribution -----------------------------------------------------------
 
-ZIT_N_RE = re.compile(r"zit\.\s*n\.")
-ET_AL_RE = re.compile(r"et al\.")
+ZIT_N_RE = re.compile(r"zit\.\s*n\.", re.IGNORECASE)
+ET_AL_RE = re.compile(r"et al\.", re.IGNORECASE)
 AUTHOR_YEAR_RE = re.compile(r"[A-ZÄÖÜ][\wäöüß\-]+(?:\s+(?:&|und)\s+[A-ZÄÖÜ][\wäöüß\-]+)?\s*\(?(?:19|20)\d{2}\)?")
 LAUT_RE = re.compile(r"\b(?i:laut)\s+[A-ZÄÖÜ]\w+")
 ZUFOLGE_RE = re.compile(r"\b[A-ZÄÖÜ]\w+\s+(?i:zufolge)\b")
@@ -66,24 +66,28 @@ def attribution_risk(text: str) -> bool:
 
 # ---- Number -----------------------------------------------------------------
 
-# Seitenverweis-Kontext (auch Spannen `S. 5-8`, `S. 5, 8`) — wird vor der
-# Ziffern-Suche ausmaskiert, da Seitenzahlen selbst kein number-Risk sind.
-PAGE_REF_RE = re.compile(r"S\.\s*\d+(?:\s*[\-–,]\s*(?:S\.\s*)?\d+)*")
+# Seitenverweis-Kontext (auch Spannen `S. 5-8`, `S. 5, 8` und `S. 5f./ff.`) —
+# wird vor der Ziffern-Suche ausmaskiert, da Seitenzahlen selbst kein
+# number-Risk sind.
+PAGE_REF_RE = re.compile(r"S\.\s*\d+(?:\s*[\-–,]\s*(?:S\.\s*)?\d+)*(?:\s*f{1,2}\.)?")
 # Reine Jahreszahl (optional in Klammern) — ebenfalls kein number-Risk.
 YEAR_TOKEN_RE = re.compile(r"\(?(?:19|20)\d{2}\)?")
+# Footnote-Marker wie `[^8]` — deren Ziffern sind Referenzen, kein Zahlen-Claim.
+FOOTNOTE_MARKER_RE = re.compile(r"\[\^[^\]]+\]")
 
 
 def number_risk(text: str) -> bool:
     masked = PAGE_REF_RE.sub("", text)
     masked = YEAR_TOKEN_RE.sub("", masked)
+    masked = FOOTNOTE_MARKER_RE.sub("", masked)
     return bool(re.search(r"\d", masked))
 
 
 # ---- Comparison ---------------------------------------------------------------
 
-COMPARISON_TERMS = (
-    "mehr als",
-    "weniger als",
+# Komparativ-Adjektive als Stämme (matchen flektierte Formen: „höhere Werte",
+# „stärkeren Effekt"), feste Phrasen exakt.
+_COMPARISON_STEMS = (
     "höher",
     "niedriger",
     "stärker",
@@ -91,15 +95,23 @@ COMPARISON_TERMS = (
     "größer",
     "kleiner",
     "effektiver",
+    "überlegen",
+    "unterlegen",
+)
+_COMPARISON_PHRASES = (
+    "mehr als",
+    "weniger als",
     "besser als",
     "schlechter als",
     "im Vergleich",
     "gegenüber",
-    "überlegen",
-    "unterlegen",
 )
 COMPARISON_RE = re.compile(
-    r"\b(?:" + "|".join(re.escape(term) for term in COMPARISON_TERMS) + r")\b",
+    r"\b(?:"
+    + "|".join(re.escape(s) + r"\w*" for s in _COMPARISON_STEMS)
+    + "|"
+    + "|".join(re.escape(p) for p in _COMPARISON_PHRASES)
+    + r")\b",
     re.IGNORECASE,
 )
 
@@ -110,21 +122,15 @@ def comparison_risk(text: str) -> bool:
 
 # ---- Causal -------------------------------------------------------------------
 
-CAUSAL_TERMS = (
-    "führt zu",
-    "führen zu",
-    "bewirkt",
-    "verursacht",
-    "weil",
-    "daher",
-    "deshalb",
-    "infolge",
-    "aufgrund",
-    "bedingt durch",
-    "zur Folge",
-)
+# Verb-Flexionen explizit (führt/führte/führten/führen zu etc.) — offene
+# `\w*`-Stämme wären hier zu lax („Führung zu" ist kein Kausal-Claim).
 CAUSAL_RE = re.compile(
-    r"\b(?:" + "|".join(re.escape(term) for term in CAUSAL_TERMS) + r")\b",
+    r"\b(?:"
+    r"führ(?:t|te|ten|en)\s+zu"
+    r"|bewirk(?:t|te|ten|en)"
+    r"|verursach(?:t|te|ten|en)"
+    r"|weil|daher|deshalb|infolge|aufgrund|bedingt durch|zur Folge"
+    r")\b",
     re.IGNORECASE,
 )
 
@@ -135,13 +141,21 @@ def causal_risk(text: str) -> bool:
 
 # ---- Zeilen-Skip + Satz-Split -----------------------------------------------
 
-_QUELLEN_HEADING_RE = re.compile(r"^#+\s*Quellen\s*$", re.IGNORECASE)
+_QUELLEN_HEADING_RE = re.compile(r"^#+\s*(?:Quellen|Literatur(?:verzeichnis)?|References)\s*$", re.IGNORECASE)
 _FOOTNOTE_DEF_RE = re.compile(r"^\[\^[^\]]+\]:")
 _BLOCKQUOTE_PREFIX_RE = re.compile(r"^>\s?")
+# Obsidian-Callout-Header (`> [!quote]- Titel`) — Metazeile, kein Claim-Text.
+_CALLOUT_HEADER_RE = re.compile(r"^\[![\w-]+\]")
 
 # Bekannte Abkürzungs-Muster, deren Punkt vor dem Sentence-Split geschützt
-# werden muss (siehe Modul-Docstring).
-_ABBREV_GUARD_RE = re.compile(r"S\.\s*\d+|zit\.\s*n\.|et al\.")
+# werden muss (siehe Modul-Docstring). Neben den Risk-Pattern-Tokens auch
+# gängige deutsche Abkürzungen, die sonst Sätze mitten im Claim zerreißen
+# (real beobachtet: „38 bzw. 43 Jahre" wurde zweigeteilt).
+_ABBREV_GUARD_RE = re.compile(
+    r"S\.\s*\d+(?:\s*f{1,2}\.)?|zit\.\s*n\.|et al\."
+    r"|bzw\.|z\.\s*B\.|u\.\s*a\.|ca\.|vgl\.|d\.\s*h\.|sog\.|bspw\.|ggf\.",
+    re.IGNORECASE,
+)
 _MASK_CHAR = "\x00"
 
 # Seitenzahl-Extraktion: erste Übereinstimmung `S. <Zahl>` im Satz.
@@ -205,6 +219,8 @@ def decompose_claims(body: str) -> list[Claim]:
 
         is_quote = stripped.startswith(">")
         content = _BLOCKQUOTE_PREFIX_RE.sub("", stripped) if is_quote else stripped
+        if is_quote and _CALLOUT_HEADER_RE.match(content):
+            continue
 
         search_from = line_start
         for sentence in _split_sentences(content):
