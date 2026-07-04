@@ -208,6 +208,10 @@ a.button {
 .history-open {
   all: unset; display: block; width: 100%; box-sizing: border-box; cursor: pointer;
 }
+/* `all: unset` steht spaeter in der Kaskade als die globale :focus-visible-
+   Regel (gleiche Spezifitaet) und wuerde den Fokus-Ring zuruecksetzen --
+   deshalb hier explizit wiederholen. */
+.history-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 /* `.preview-card` liefert das Grid-`gap` sonst ueber direkte Kinder von `<li>` --
    davon gibt es hier nur noch den Button. Titel/Meta-Abstand hier nachbilden,
    damit sich am Kartenbild (P7-Look) nichts verschiebt. */
