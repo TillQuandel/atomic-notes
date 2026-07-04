@@ -23,27 +23,46 @@ def _claim(text: str, risk_types=("attribution",)) -> Claim:
     )
 
 
+# zit.-n.-Satz: nur das zit.-n.-Ziel (Hrastinski, Primärautor) wird extrahiert —
+# der berichtete Autor davor bewusst nicht mehr (False-Positive-Klasse bei
+# deutschen Substantiven vor der Klammer, siehe Modul-Docstring attribution.py).
 HRASTINSKI_CLAIM = _claim(
     "Drei Kommunikationstypen unterscheiden sich in Synchronität, führt Haythornthwaite aus (zit. n. Hrastinski, S. 2)."
 )
+
+# Fremd-Autor über die verbleibenden Extraktionswege (laut/AUTHOR_YEAR_RE) —
+# trägt die Fenster-Check-Tests nach dem Rückbau der Vor-Klammer-Extraktion.
+LAUT_CLAIM = _claim("Laut Haythornthwaite sind drei Kommunikationstypen zentral (S. 2).")
 
 
 class TestHrastinskiFixture:
     def test_supported_when_window_contains_reported_author(self):
         window = "[S. 2]\nHaythornthwaite unterscheidet drei Kommunikationstypen nach Synchronität."
-        assert check_attribution(HRASTINSKI_CLAIM, window, primary_surnames=["Hrastinski"]) == "supported"
+        assert check_attribution(LAUT_CLAIM, window, primary_surnames=["Hrastinski"]) == "supported"
+
+    def test_zit_n_claim_with_primary_target_is_supported_without_window(self):
+        # Nach dem Rückbau der Vor-Klammer-Extraktion nennt der zit.-n.-Claim
+        # nur noch Hrastinski (Primärautor) → Ausnahme greift, kein Fenster nötig.
+        assert check_attribution(HRASTINSKI_CLAIM, None, primary_surnames=["Hrastinski"]) == "supported"
 
     def test_author_missing_when_window_lacks_reported_author(self):
-        # Der dokumentierte Fehlerfall: Aussage dem falschen zitierten Autor
-        # zugeordnet — Hrastinskis Seite 2 nennt Haythornthwaite gar nicht.
+        # Fehlerfall über den laut-Weg: Fenster nennt Haythornthwaite nicht.
         window = "[S. 2]\nDrei Kommunikationstypen werden anhand ihrer Synchronität unterschieden."
-        assert check_attribution(HRASTINSKI_CLAIM, window, primary_surnames=["Hrastinski"]) == "author_missing"
+        assert check_attribution(LAUT_CLAIM, window, primary_surnames=["Hrastinski"]) == "author_missing"
 
     def test_no_window_when_source_window_is_none(self):
-        assert check_attribution(HRASTINSKI_CLAIM, None, primary_surnames=["Hrastinski"]) == "no_window"
+        assert check_attribution(LAUT_CLAIM, None, primary_surnames=["Hrastinski"]) == "no_window"
 
     def test_no_window_when_source_window_is_empty_string(self):
-        assert check_attribution(HRASTINSKI_CLAIM, "", primary_surnames=["Hrastinski"]) == "no_window"
+        assert check_attribution(LAUT_CLAIM, "", primary_surnames=["Hrastinski"]) == "no_window"
+
+    def test_german_noun_before_zit_n_is_not_treated_as_author(self):
+        # FP-Klasse vom echten PDF (Review 2026-07-04): deutsches Substantiv vor
+        # der zit.-n.-Klammer darf kein author_missing gegen ein englisches
+        # Fenster erzeugen.
+        claim = _claim("Der dritte Typ umfasst soziale Unterstützung (zit. n. Hrastinski, S. 2).")
+        window = "[S. 2]\nThree types of communication are distinguished by synchronicity."
+        assert check_attribution(claim, window, primary_surnames=["Hrastinski"]) == "supported"
 
 
 class TestNotApplicable:

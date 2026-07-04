@@ -15,13 +15,15 @@ Namens-Extraktion aus dem Claim-Text (Regexes aus `claims.py`, importiert):
 
 1. `AUTHOR_YEAR_RE`-Treffer ("Merrill (2006)", "Schlebbe & Greifeneder (2020)")
    — Nachnamen via `&`/`und`-Split wie in `citation_check._match_names_and_year`.
-2. `zit. n.`-Konstruktion (`ZIT_N_RE`): der Name NACH "zit. n." (das
-   Sekundärzitat-Ziel, i.d.R. der Primärautor) UND der nächste großgeschriebene
-   Name-Token VOR der öffnenden Klammer der Zit.-n.-Klausel — Beispiel:
-   "…, führt Haythornthwaite aus (zit. n. Hrastinski, S. 2)." nennt
-   "Hrastinski" als Zit.-n.-Ziel, aber "Haythornthwaite" ist der Fremdautor,
-   dessen Aussage berichtet wird — dessen Nennung sollte im Quellfenster
-   (Hrastinskis eigener Text) auftauchen, sonst ist die Zuordnung verdächtig.
+2. `zit. n.`-Konstruktion (`ZIT_N_RE`): NUR der Name NACH "zit. n." (das
+   Sekundärzitat-Ziel, i.d.R. der Primärautor). Der berichtete Fremdautor VOR
+   der Klammer ("…, führt Haythornthwaite aus (zit. n. Hrastinski)…") wird
+   bewusst NICHT heuristisch extrahiert: "letzter großgeschriebener Token" ist
+   im Deutschen regelmäßig ein Substantiv ("…soziale Unterstützung (zit. n. …)")
+   und matcht gegen englische Quellfenster nie — am echten Hrastinski-PDF
+   erzeugten 2 von 3 realitätsnahen zit.-n.-Sätzen author_missing-False-
+   Positives (Review 2026-07-04). Die Aussage↔Autor-Zuordnung solcher Sätze
+   prüft die NLI-Stufe (E5), nicht diese Präsenz-Heuristik.
 3. `laut <Name>` / `<Name> zufolge` (`LAUT_RE`/`ZUFOLGE_RE`).
 
 Primärautoren (`primary_surnames`) sind von der Präsenz-Prüfung ausgenommen —
@@ -57,13 +59,6 @@ def _surnames_from_zit_n(text: str) -> set[str]:
         after_match = _NAME_TOKEN_RE.match(after)
         if after_match:
             surnames.add(after_match.group(0))
-
-        before = text[: match.start()]
-        paren_idx = before.rfind("(")
-        segment = before[:paren_idx] if paren_idx != -1 else before
-        before_matches = _NAME_TOKEN_RE.findall(segment)
-        if before_matches:
-            surnames.add(before_matches[-1])
     return surnames
 
 
