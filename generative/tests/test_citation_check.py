@@ -169,3 +169,13 @@ def test_quote_content_with_foreign_name_not_flagged():
     # Woertliche Zitate duerfen fremde Autor-Jahr-Nennungen enthalten.
     body = '> [!quote]- Knowles [o. J.], S. 21\n> "Wie Thorndike (1928) zeigte, lernen Erwachsene."'
     assert validate_citation_attributions(body, _cit_knowles()) == []
+
+
+def test_zit_n_primary_reference_needs_word_boundary():
+    # "Berg" via Substring in "Bergbau" darf NICHT als Primaerquellen-Nennung gelten.
+    cit = CitationMeta(author="Berg", year="2010", title="T", doi=None, source_file="Berg - 2010 - X.pdf")
+    body = "Mueller betont Y (zit. n. Bergbau-Studie, S. 3)."
+    flags = validate_citation_attributions(body, cit)
+    assert len(flags) == 1 and "Sekund" in flags[0]
+    body_ok = "Mueller betont Y (zit. n. Berg, S. 3)."
+    assert validate_citation_attributions(body_ok, cit) == []

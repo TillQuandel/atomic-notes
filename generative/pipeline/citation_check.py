@@ -56,6 +56,8 @@ def _primary_surnames(author: str | None) -> list[str]:
 def _match_names_and_year(match_text: str) -> tuple[list[str], str]:
     """Zerlegt einen `AUTHOR_YEAR_RE`-Treffer ('Merrill (2006)', 'Schlebbe & Greifeneder
     (2020)') in die genannten Nachnamen und das Jahr."""
+    # Defensive: AUTHOR_YEAR_RE erzwingt ein Jahr, year_m ist praktisch nie None;
+    # year="" wuerde als abweichendes Jahr flaggen (fail-safe).
     year_m = _MATCH_YEAR_RE.search(match_text)
     year = year_m.group(0) if year_m else ""
     name_part = match_text[: year_m.start()] if year_m else match_text
@@ -122,7 +124,9 @@ def validate_citation_attributions(body: str, citation: CitationMeta) -> list[st
         zit_n_match = ZIT_N_RE.search(sentence)
         if zit_n_match:
             after = sentence[zit_n_match.end() :]
-            references_primary = any(s in after for s in primary_surnames) or (
+            # Wortgrenzen statt Substring (Qwen-Review): "Berg" darf nicht via
+            # "Bergbau" als genannt gelten (und umgekehrt beim Datei-Stem).
+            references_primary = any(re.search(r"\b" + re.escape(s) + r"\b", after) for s in primary_surnames) or (
                 bool(primary_stem) and primary_stem in after
             )
             if not references_primary:
