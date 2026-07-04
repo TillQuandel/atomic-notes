@@ -74,6 +74,7 @@ from generative.pipeline import (
     routing_report,
 )
 from generative.schemas.atomic_note import AtomicNoteDraft, ConceptPlan
+from generative.schemas.citation import CitationMeta, build_citation_meta, crossref_override_blocked
 from generative.config import (
     AGENT_VERSION,
     CRITIC_AUTO_THRESHOLD,
@@ -104,17 +105,17 @@ from generative.runtime_config import (
 LARGE_DOC_THRESHOLD = 15
 
 
-def _extract_primary_authors(pdf_meta: dict | None) -> list[str]:
-    """Normalisierte Autor-Nachnamen aus pdf_meta für Planner-origin-Klassifikation.
+def _extract_primary_authors(citation: CitationMeta | None) -> list[str]:
+    """Normalisierte Autor-Nachnamen aus CitationMeta für Planner-origin-Klassifikation.
 
     Unterstützt: "Lastname, F." / "Firstname Lastname" / "A & B" / "A et al."
     Gibt Liste von Nachnamen zurück, leer bei fehlendem/unbekanntem Author-Feld.
     """
-    if not pdf_meta:
+    if not citation or not citation.author:
         return []
     import re
 
-    raw = pdf_meta.get("Author") or pdf_meta.get("author") or ""
+    raw = citation.author
     if not raw or raw.strip() in ("?", "unknown", ""):
         return []
     # "et al." vorab entfernen (kann am Ende stehen oder ein Segment sein)
@@ -146,8 +147,7 @@ async def run_extractors_per_concept(
     full_text: str,
     concept_plan: ConceptPlan,
     existing_concepts: dict,
-    source_meta: dict | None = None,
-    source_file: str = "",
+    citation: CitationMeta | None = None,
     tag_whitelist: list[str] | None = None,
     background_map: dict[str, list[str]] | None = None,
     related_mentions: list[str] | None = None,
@@ -170,8 +170,7 @@ async def run_extractors_per_concept(
                 concept=concept,
                 concept_text=ctext,
                 existing_concepts=existing_concepts,
-                source_meta=source_meta,
-                source_file=source_file,
+                citation=citation,
                 tag_whitelist=tag_whitelist,
                 background_context=bg,
                 related_mentions=related_mentions,
@@ -568,7 +567,7 @@ def _run_note_pipeline(
     acronym_dict: dict,
     concept_map: dict,
     quality_report,
-    pdf_meta: dict,
+    citation: CitationMeta,
     source_path: Path,
     tag_whitelist: list,
     all_hub_concepts: dict | None = None,
@@ -719,8 +718,7 @@ def _run_note_pipeline(
                     concept=concept_obj,
                     concept_text=ctext,
                     existing_concepts=existing_concepts,
-                    source_meta=pdf_meta,
-                    source_file=source_path.name,
+                    citation=citation,
                     revision_hint=augmented_hint,
                     tag_whitelist=tag_whitelist,
                     background_context=_bg,
@@ -782,7 +780,7 @@ async def process_all_notes_async(
     acronym_dict: dict,
     concept_map: dict,
     quality_report,
-    pdf_meta: dict,
+    citation: CitationMeta,
     source_path: Path,
     tag_whitelist: list,
     background_map: dict | None = None,
@@ -841,7 +839,7 @@ async def process_all_notes_async(
                 acronym_dict,
                 concept_map,
                 quality_report,
-                pdf_meta,
+                citation,
                 source_path,
                 tag_whitelist,
                 all_hub_concepts,
@@ -1369,6 +1367,24 @@ def _setup_phoenix_tracing() -> None:
         print(f"[phoenix] Tracing nicht verfügbar ({e}) — Pipeline läuft ohne Traces")
 
 
+def _build_citation(pdf_meta: dict, quality_report, q_title: str | None, source_name: str) -> CitationMeta:
+    """Baut die kanonische CitationMeta + druckt die CrossRef-Override-Diagnose.
+
+    Aufgerufen sowohl im Normalpfad (`_run_extraction_stages`, vor dem Planner)
+    als auch im `--load-drafts`-Pfad (Stage 1–5 dort übersprungen, `citation` muss
+    trotzdem vor Stage 6 stehen). Deterministisch/idempotent — dieselbe Eingabe
+    liefert dieselbe CitationMeta (Analogie zum bestehenden Muster, `q_title`/
+    `_parse_filename_fallback` bei Bedarf erneut abzuleiten statt durchzureichen).
+    """
+    citation = build_citation_meta(pdf_meta, quality_report, q_title, source_name)
+    if crossref_override_blocked(quality_report, q_title):
+        print(
+            f"      [quality] CrossRef-Override verworfen (schwacher Titel-Match): "
+            f"'{quality_report.crossref_title[:60]}'"
+        )
+    return citation
+
+
 def _run_extraction_stages(
     args, source_path: Path, runtime_config=None
 ):  # main() übergibt immer einen RuntimeConfig; None = kein Runtime-Config / Capping deaktiviert
@@ -1378,7 +1394,7 @@ def _run_extraction_stages(
         (drafts, concept_map, existing_concepts, concept_links,
          text, chunks, acronym_dict, quality_report, pdf_meta,
          source_path, tag_whitelist, background_map, fb_year,
-         dropped_total, word_count)
+         dropped_total, word_count, related_mentions, q_title, citation)
     """
     from generative.agents.base import trace_run_start as _trace_run_start
     from generative.config import MODEL_CONFIG as _MODEL_CONFIG
@@ -1492,6 +1508,12 @@ def _run_extraction_stages(
     else:
         print("      Keine Qualitäts-Warnungen")
 
+    # E3a (#96): CitationMeta EINMAL konstruieren — VOR den Planner-/Extractor-
+    # Aufrufen, damit beide (statt wie bisher nur der Vault-Writer) die CrossRef-
+    # korrigierten Werte sehen. quality_report + q_title liegen hier bereits vor
+    # (Quality ist Stage 3, Planner Stage 4).
+    citation = _build_citation(pdf_meta, quality_report, q_title, source_path.name)
+
     tag_whitelist = relevance_profile.get("tag_whitelist", [])
     background_map: dict = {}
     related_mentions: list[str] = []
@@ -1513,7 +1535,7 @@ def _run_extraction_stages(
                 print("      Leerer Chunk, uebersprungen")
                 continue
 
-            primary_authors = _extract_primary_authors(pdf_meta)
+            primary_authors = _extract_primary_authors(citation)
             chapter_plan = planner.run(chunk.text, relevance_profile, primary_authors=primary_authors)
             chapter_plan, hallucinated = planner.filter_hallucinated(chapter_plan, chunk.text)
             if hallucinated:
@@ -1551,8 +1573,7 @@ def _run_extraction_stages(
                     chunk.text,
                     chapter_plan,
                     existing_concepts,
-                    source_meta=pdf_meta,
-                    source_file=source_path.name,
+                    citation=citation,
                     tag_whitelist=tag_whitelist,
                     background_map={},
                     related_mentions=ch_related,
@@ -1571,7 +1592,7 @@ def _run_extraction_stages(
     else:
         # --- Schritt 4: Planner + Halluzinations-Filter ---
         print("[4/7] Planner: Konzept-Plan erstellen…")
-        primary_authors = _extract_primary_authors(pdf_meta)
+        primary_authors = _extract_primary_authors(citation)
         with _span("Planner", pdf=source_path.name, n_chunks=len(chunks)):
             concept_plan = planner.run(overview, relevance_profile, primary_authors=primary_authors)
             concept_plan, hallucinated = planner.filter_hallucinated(concept_plan, text)
@@ -1624,8 +1645,7 @@ def _run_extraction_stages(
                     text,
                     concept_plan,
                     existing_concepts,
-                    source_meta=pdf_meta,
-                    source_file=source_path.name,
+                    citation=citation,
                     tag_whitelist=tag_whitelist,
                     background_map=background_map,
                     related_mentions=related_mentions,
@@ -1651,6 +1671,7 @@ def _run_extraction_stages(
         word_count,
         related_mentions,
         q_title,
+        citation,
     )
 
 
@@ -1847,6 +1868,10 @@ def main(argv: list[str] | None = None):
         # q_title wird im Normalpfad von _run_extraction_stages durchgereicht;
         # der load-drafts-Pfad überspringt Stage 1–5, daher hier aus pdf_meta ableiten.
         q_title = (pdf_meta or {}).get("Title")
+        # citation (CitationMeta, #96 E3a) ebenso: Stage 1–5 übersprungen, daher
+        # hier aus dem geladenen pdf_meta/quality_report neu konstruiert — dieselbe
+        # deterministische Factory wie im Normalpfad (_run_extraction_stages).
+        citation = _build_citation(pdf_meta, quality_report, q_title, source_path.name)
         word_count = len(text.split())
         dropped_total = 0
         print(f"\n=== Atomic Agent (load-drafts): {source_path.name} ===\n")
@@ -1874,6 +1899,7 @@ def main(argv: list[str] | None = None):
             word_count,
             related_mentions,
             q_title,
+            citation,
         ) = _run_extraction_stages(args, source_path, runtime_config)
         if args.save_drafts:
             _save_draft_state(
@@ -1956,7 +1982,7 @@ def main(argv: list[str] | None = None):
                 acronym_dict=acronym_dict,
                 concept_map=concept_map,
                 quality_report=quality_report,
-                pdf_meta=pdf_meta,
+                citation=citation,
                 source_path=source_path,
                 tag_whitelist=tag_whitelist,
                 background_map=background_map,
@@ -1992,31 +2018,9 @@ def main(argv: list[str] | None = None):
         )
 
     # --- Schritt 7: Vault-Writer ---
-    # F2: enriched_meta = CrossRef-Daten überschreiben pdf_metadata wo vorhanden.
-    # Ein per Title-RATEN gefundener CrossRef-Treffer (kein harter ID-Match) darf die
-    # Quelle nur überschreiben, wenn sein Titel zum erwarteten Titel passt — sonst
-    # verfälscht ein Fehltreffer (gleiche Klasse wie das OpenAlex-Title-Gate) Quelle,
-    # Autor, Jahr und alle Footnotes der Note.
-    enriched_meta = dict(pdf_meta or {})
-    from generative.tools.pdf_enrich import _title_match_confident
-
-    _block_crossref_override = (
-        quality_report.doi_from_title_match
-        and quality_report.crossref_title
-        and not _title_match_confident(q_title or "", quality_report.crossref_title)
-    )
-    if _block_crossref_override:
-        print(
-            f"  [quality] CrossRef-Override verworfen (schwacher Titel-Match): '{quality_report.crossref_title[:60]}'"
-        )
-    else:
-        if quality_report.crossref_title:
-            enriched_meta["Title"] = quality_report.crossref_title
-        if quality_report.crossref_author:
-            enriched_meta["Author"] = quality_report.crossref_author
-        if quality_report.crossref_year and not fb_year:
-            # Filename-Year hat Vorrang (v28): CrossRef darf nur überschreiben wenn Filename kein Jahr hat
-            enriched_meta["Year"] = quality_report.crossref_year
+    # E3a (#96): citation (CitationMeta) wurde bereits vor dem Planner konstruiert
+    # (siehe _build_citation) — die frühere enriched_meta/pdf_meta-Zweiteilung
+    # entfällt, Extractor/Planner/Writer lesen dieselbe CrossRef-korrigierte Quelle.
 
     # #45: fail-closed sichtbar machen — wenn die Quelle nicht zuverlässig
     # aufgelöst werden konnte (CrossRef-Override verworfen ODER Autor/Jahr nach
@@ -2027,7 +2031,9 @@ def main(argv: list[str] | None = None):
     # geparst (deterministisch, idempotent — dieselbe Funktion wie in der
     # Extraction-Stage). Nur create-Notes werden markiert (extend/hub out-of-scope).
     _fb = vault_writer._parse_filename_fallback(source_path.name)
-    _source_unresolved = routing_report.is_source_unresolved(enriched_meta, _fb, _block_crossref_override)
+    _source_unresolved = routing_report.is_source_unresolved(
+        citation.as_meta_dict(), _fb, crossref_override_blocked(quality_report, q_title)
+    )
     if _source_unresolved:
         _marked = 0
         for draft in drafts:
@@ -2111,7 +2117,7 @@ def main(argv: list[str] | None = None):
                 draft,
                 source_file=source_path.name,
                 dry_run=args.dry_run,
-                source_meta=enriched_meta,
+                citation=citation,
                 existing_concepts=existing_concepts,
                 inbox_dir=_inbox_dir,
             )

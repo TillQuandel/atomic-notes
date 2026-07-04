@@ -137,7 +137,7 @@ def test_process_all_notes_drops_crashed_draft(monkeypatch, tmp_path):
             acronym_dict={},
             concept_map={},
             quality_report=None,
-            pdf_meta={},
+            citation=None,
             source_path=Path("test.pdf"),
             tag_whitelist=[],
             failed_dir=failed_dir,
