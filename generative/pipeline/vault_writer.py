@@ -947,7 +947,11 @@ def write_note(
             f"    Score: {note.critic_score}/5 | Hard-Gates: {'pass' if note.hard_gates_pass else 'fail'} | Confidence: {note.synthesis_confidence}"
         )
         if note.quality_flags:
-            print(f"    Flags: {safe(', '.join(note.quality_flags))}")
+            _flags_line = f"    Flags: {', '.join(note.quality_flags)}"
+            try:
+                print(_flags_line)
+            except UnicodeEncodeError:
+                print(safe(_flags_line))
         # #46: Overwrite-Fall — target.exists() ⟺ Idempotenz-Re-Run überschreibt
         # eine bestehende Datei. Schlanker Markdown-Diff zeigt, WAS sich ändert.
         if target.exists():

@@ -46,6 +46,46 @@ class TestDryRunOverwriteWiring:
         assert "Overwrite-Diff" not in out
 
 
+class TestDryRunFlagsLineUtf8:
+    def test_dry_run_flags_line_keeps_utf8_no_ascii_replace(self, tmp_path, capsys):
+        # #120: die Flags-Zeile wurde bisher bedingungslos ASCII-safed (⚠️/Umlaute
+        # -> '?'), was der GUI-Parser als Mojibake übernahm. Seit dem Fix wird
+        # UTF-8-treu gedruckt, ASCII nur noch als Fallback bei UnicodeEncodeError.
+        from generative.pipeline import vault_writer
+
+        draft = _draft()
+        draft.quality_flags = ["⚠️ kein DOI — Qualität nicht automatisch prüfbar"]
+        vault_writer.write_note(draft, source_file="flags.pdf", dry_run=True, inbox_dir=tmp_path)
+        out = capsys.readouterr().out
+        assert "Qualität" in out
+        assert "prüfbar" in out
+        flags_line = out.split("Flags:")[1].splitlines()[0]
+        assert "?" not in flags_line
+        # Explizit auch ausserhalb Latin-1 (Emoji), nicht nur Umlaute.
+        assert "⚠️" in flags_line
+
+    def test_dry_run_flags_line_ascii_fallback_no_duplication(self, tmp_path, monkeypatch):
+        # Konsolen-Fallback: kann stdout kein UTF-8 (UnicodeEncodeError), greift
+        # safe() — genau EINE Flags-Zeile (kein Duplikat durch den try/except),
+        # ASCII-replaced statt Crash.
+        import io
+        import sys
+
+        from generative.pipeline import vault_writer
+
+        buf = io.BytesIO()
+        ascii_out = io.TextIOWrapper(buf, encoding="ascii", errors="strict", line_buffering=True)
+        monkeypatch.setattr(sys, "stdout", ascii_out)
+
+        draft = _draft()
+        draft.quality_flags = ["⚠️ kein DOI — Qualität nicht automatisch prüfbar"]
+        vault_writer.write_note(draft, source_file="flags.pdf", dry_run=True, inbox_dir=tmp_path)
+        ascii_out.flush()
+        out = buf.getvalue().decode("ascii")
+        assert out.count("Flags:") == 1
+        assert "Qualit?t" in out  # safe()-Fallback hat gegriffen, kein Crash
+
+
 class TestMarkdownOverwriteDiff:
     def test_identical_content_returns_empty(self):
         from generative.pipeline.vault_writer import markdown_overwrite_diff

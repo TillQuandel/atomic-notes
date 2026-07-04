@@ -162,7 +162,9 @@ class RunParser:
             return []
 
         # 3) Flags-Zeile (optional) fuellt den laufenden Preview-Block. Roh-String:
-        # die Quelle joint mit ", " und ASCII-safed → kein verlässlicher Split.
+        # die Quelle druckt seit #120 UTF-8-treu (ASCII-Replace nur noch als
+        # Konsolen-Fallback bei UnicodeEncodeError) → weiterhin kein verlässlicher
+        # Split moeglich, daher Roh-String uebernehmen.
         m = _FLAGS_RE.match(line)
         if m and self._pending is not None:
             self._pending["flags"] = m.group(1).strip()
