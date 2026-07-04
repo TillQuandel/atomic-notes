@@ -11,6 +11,7 @@ const $ = (id) => document.getElementById(id);
 let currentPdfStem = "";
 let running = false;
 let userCancelled = false;
+let runStartFocusPending = false; // P8: started-Fokus nur nach eigenem Start-Klick
 let activeStage = 0;
 let stageStartedAt = 0;
 let elapsedTimer = null;
@@ -368,9 +369,14 @@ function startStream() {
   startElapsed();
   // [0/7] = optionales Enrichment (Vor-Stufe) → keinen Step markieren.
   const onStage = (e) => { const d = JSON.parse(e.data); if (d.num >= 1) setStage(d.num); };
-  // P8: Fokus auf die Pipeline-Sektion, sobald der Lauf sichtbar startet
-  // (SSE-Reattach spielt "started" erneut ab -- Fokus-Sprung dann harmlos).
-  es.addEventListener("started", (e) => { logLine("» Lauf gestartet"); $("steps-h").focus(); });
+  // P8: Fokus auf die Pipeline-Sektion -- aber nur beim user-initiierten
+  // Start in diesem Tab. SSE-Reattach/-Reconnect spielt "started" erneut ab;
+  // ein Fokus-Sprung waehrend der Nutzer woanders tippt waere Focus-Stealing
+  // (WCAG 3.2.1, Qwen-Review-Fund).
+  es.addEventListener("started", (e) => {
+    logLine("» Lauf gestartet");
+    if (runStartFocusPending) { runStartFocusPending = false; $("steps-h").focus(); }
+  });
   es.addEventListener("stage", onStage);
   es.addEventListener("note_progress", (e) => {
     const d = JSON.parse(e.data);
@@ -833,7 +839,8 @@ document.addEventListener("DOMContentLoaded", async () => {
     const started = await r.json().catch(() => ({}));
     currentPdfStem = pdf.split(/[\\/]/).pop().replace(/\.pdf$/i, "");
     renderRunHeader(started.options || options);
-    running = true; userCancelled = false; $("stop-btn").hidden = false;
+    running = true; userCancelled = false; runStartFocusPending = true;
+    $("stop-btn").hidden = false;
     applyVaultGate();
     startStream();
   });
