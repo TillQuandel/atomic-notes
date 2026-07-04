@@ -81,11 +81,7 @@ def test_all_inputs_and_selects_have_label_binding():
         if _is_exempt(control):
             continue
         attrs = control["attrs"]
-        labeled = (
-            control["in_label"]
-            or bool(attrs.get("aria-label"))
-            or attrs.get("id") in parser.label_fors
-        )
+        labeled = control["in_label"] or bool(attrs.get("aria-label")) or attrs.get("id") in parser.label_fors
         if not labeled:
             unlabeled.append((control["tag"], attrs.get("id"), attrs.get("type")))
     assert not unlabeled, f"Controls ohne Label-Bindung: {unlabeled}"
@@ -96,9 +92,7 @@ def test_heading_levels_do_not_skip():
     assert parser.heading_levels, "Parser hat keine Ueberschriften gefunden -- Test kaputt?"
     max_seen = 0
     for level in parser.heading_levels:
-        assert level <= max_seen + 1, (
-            f"Ueberschriften-Sprung: h{level} nach hoechstens h{max_seen} gesehen"
-        )
+        assert level <= max_seen + 1, f"Ueberschriften-Sprung: h{level} nach hoechstens h{max_seen} gesehen"
         max_seen = max(max_seen, level)
 
 
