@@ -34,6 +34,11 @@ from generative.schemas.citation import CitationMeta
 # Multi-Autor-Trenner in CitationMeta.author — identisch zu CitationMeta.short_label
 # (";"/"und"/"and"), damit beide Stellen dieselben Nachnamen als Primärautor sehen.
 _AUTHOR_SPLIT_RE = re.compile(r"\s*;\s*|\s+(?:und|and)\s+")
+# Obsidian-Callout-Header (`[!quote]- Landry 2019, S. 24` nach Blockquote-Strip):
+# der Header-Text ist LLM-generiert (Prompt-Template `[!quote]- {author_short}
+# {year}, S. N`) und damit prüfpflichtig — anders als Quote-INHALT (wörtliche
+# Zitate dürfen fremde Namen nennen) und Footnote-Defs (deterministisch, E3a).
+_CALLOUT_HEADER_TEXT_RE = re.compile(r"^\[![\w-]+\][+-]?\s*(?P<text>.*)$")
 # Co-Autor-Trenner INNERHALB einer Body-Attribution ("Schlebbe & Greifeneder (2020)").
 _MATCH_NAME_SPLIT_RE = re.compile(r"\s+(?:&|und)\s+")
 _MATCH_YEAR_RE = re.compile(r"(?:19|20)\d{2}")
@@ -77,7 +82,14 @@ def _iter_checkable_sentences(body: str):
             continue
         if _FOOTNOTE_DEF_RE.match(stripped):
             continue
-        if stripped.startswith(">"):  # Blockquote inkl. Callout-Header (`> [!quote]- …`)
+        if stripped.startswith(">"):
+            # Quote-INHALT skippen, aber Callout-HEADER prüfen: der Header
+            # (`> [!quote]- Landry 2019, S. 24`) ist LLM-generiert — genau dort
+            # standen die Fehl-Attributionen der historischen #96-Notes.
+            inner = stripped.lstrip("> ").strip()
+            header = _CALLOUT_HEADER_TEXT_RE.match(inner)
+            if header and header.group("text"):
+                yield header.group("text")
             continue
         yield from _split_sentences(stripped)
 

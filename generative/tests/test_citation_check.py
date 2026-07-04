@@ -135,3 +135,37 @@ class TestIdempotentOrchestratorWiring:
 
         landry_flags = [f for f in draft.quality_flags if "Landry" in f]
         assert len(landry_flags) == 1
+
+
+# ---- Real-Check-Fixup: Callout-Header sind LLM-generiert und pruefpflichtig ----
+
+
+def _cit_knowles():
+    return CitationMeta(
+        author="Knowles",
+        year=None,
+        title="T",
+        doi=None,
+        source_file="Knowles - From Pedagogy to Andragogy.pdf",
+    )
+
+
+def test_callout_header_with_foreign_author_is_flagged():
+    # Historischer #96-Fall: gerenderte/gedraftete Note traegt die Fehl-Attribution
+    # im Callout-Header, nicht im Fliesstext.
+    body = '> [!quote]- Landry 2019, S. 24\n> "Woertliches Zitat."'
+    flags = validate_citation_attributions(body, _cit_knowles())
+    assert len(flags) == 1
+    assert "Landry 2019" in flags[0]
+
+
+def test_callout_header_with_correct_author_year_not_flagged():
+    cit = CitationMeta(author="Hrastinski", year="2008", title="T", doi=None, source_file="Hrastinski - 2008 - X.pdf")
+    body = '> [!quote]- Hrastinski 2008, S. 2\n> "Zitat."'
+    assert validate_citation_attributions(body, cit) == []
+
+
+def test_quote_content_with_foreign_name_not_flagged():
+    # Woertliche Zitate duerfen fremde Autor-Jahr-Nennungen enthalten.
+    body = '> [!quote]- Knowles [o. J.], S. 21\n> "Wie Thorndike (1928) zeigte, lernen Erwachsene."'
+    assert validate_citation_attributions(body, _cit_knowles()) == []
