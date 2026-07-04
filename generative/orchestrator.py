@@ -70,6 +70,7 @@ from generative.pipeline import (
     acronym_fix,
     anchor_repair,
     boilerplate_dedup,
+    citation_check,
     figure_alt,
     routing_report,
 )
@@ -2016,6 +2017,15 @@ def main(argv: list[str] | None = None):
         print(
             f"[redundanz-flag] {n_redund} Note-Paar(e) mit hoher Body-Überlappung markiert (Review-Hinweis, kein Merge)"
         )
+
+    # --- E3b (#96): Zitations-Attributions-Validierung gegen CitationMeta ---
+    # Analog zu #8 (flag_redundant_siblings): seiteneffekt-freier Flag, wenn eine
+    # LLM-generierte Autor-/Jahr-Attribution im Body von der kanonischen
+    # CitationMeta abweicht (Regressionsfall: "Landry 2019" statt Knowles).
+    # Kein Body-Edit, kein Routing-Eingriff — nur ein Review-Hinweis.
+    n_citation_flags = citation_check.apply_citation_check(drafts, citation)
+    if n_citation_flags:
+        print(f"[citation-check] {n_citation_flags} Attribution(s) ohne Quellendeckung geflaggt")
 
     # --- Schritt 7: Vault-Writer ---
     # E3a (#96): citation (CitationMeta) wurde bereits vor dem Planner konstruiert
