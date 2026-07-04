@@ -100,10 +100,16 @@ def test_extractor_source_meta_datei_line_drops_affiliation():
     Zotero-Dateinamen → der Affiliations-Koautor leakte trotz gesäubertem
     Autor-Feld in LLM-Sekundärzitate ('zit. n. Mahmood & Punjab')."""
     from generative.agents.extractor import _format_source_meta
+    from generative.schemas.citation import CitationMeta
 
     out = _format_source_meta(
-        {"Author": "Mahmood", "Year": "2016", "Title": "Do People Overestimate Their Information Literacy Skills"},
-        _MAHMOOD,
+        CitationMeta(
+            author="Mahmood",
+            year="2016",
+            title="Do People Overestimate Their Information Literacy Skills",
+            doi=None,
+            source_file=_MAHMOOD,
+        )
     )
     assert "University of the Punjab" not in out
     assert "Mahmood" in out

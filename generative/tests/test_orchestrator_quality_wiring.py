@@ -61,6 +61,16 @@ def test_quality_module_not_shadowed_by_text_quality_gate(monkeypatch):
     assert calls["n"] == 1
     # quality_report wandert an Tupel-Position 7.
     assert isinstance(result[7], QualityReport)
-    # q_title (erwarteter Quell-Titel) muss als LETZTER Wert mitkommen, sonst
-    # crasht main() beim CrossRef-Override-Check mit NameError (Ebner-Run-Regression).
-    assert result[-1] == "Titel"
+    # q_title (erwarteter Quell-Titel) — vorletzter Wert, sonst crasht main() beim
+    # CrossRef-Override-Check mit NameError (Ebner-Run-Regression).
+    assert result[-2] == "Titel"
+    # citation (CitationMeta, #96 E3a) muss als LETZTER Wert mitkommen — konstruiert
+    # in _run_extraction_stages VOR dem Planner (Stage 3→4-Grenze), damit Extractor/
+    # Planner dieselben (CrossRef-korrigierten) Werte sehen wie der Vault-Writer.
+    from generative.schemas.citation import CitationMeta
+
+    citation = result[-1]
+    assert isinstance(citation, CitationMeta)
+    assert citation.author == "Autor"
+    assert citation.year == "2020"
+    assert citation.title == "Titel"
