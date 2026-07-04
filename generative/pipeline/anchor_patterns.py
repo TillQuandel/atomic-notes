@@ -22,6 +22,11 @@ PAGE_ANCHOR_RE = re.compile(r"\(S\.\s*\d+(?:\s*[\-–,]\s*(?:S\.\s*)?\d+)*\)")
 # Page-Marker im PDF-Volltext, vom pdf_chunker an Seitenanfänge injiziert.
 PAGE_MARKER_RE = re.compile(r"\[S\.\s*(\d+)\]")
 
+# Zeilen-isolierte Variante: nur Marker, die allein auf einer Zeile stehen,
+# zählen als Seitengrenze. Inline-Quellenverweise wie „vgl. [S. 12]" im
+# Fließtext matchen bewusst NICHT (dokumentierte Fehlerklasse in diesem Repo).
+PAGE_MARKER_LINE_RE = re.compile(r"^[ \t]*\[S\.\s*(\d+)\][ \t]*$", re.MULTILINE)
+
 # Variante mit Capture-Group für reine Zahlen-Extraktion (Verifier).
 PAGE_ANCHOR_NUMS_RE = re.compile(r"\(S\.\s*(\d+(?:\s*,\s*(?:S\.\s*)?\d+)*)\)")
 
