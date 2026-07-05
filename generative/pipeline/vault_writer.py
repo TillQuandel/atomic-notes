@@ -291,6 +291,22 @@ def _render_proposed_tags_block(note: AtomicNoteDraft) -> str:
     return block
 
 
+_LEGACY_SECTIONS_RE = re.compile(
+    r"\n+##\s+(Quellen?|Confidence-Notiz)\s*\n.*?(?=\n+##\s|\Z)", re.IGNORECASE | re.DOTALL
+)
+
+
+def strip_legacy_sections(body: str) -> str:
+    """Entfernt legacy `## Quellen`/`## Confidence-Notiz`-Sektionen aus dem Body.
+
+    Idempotent: vorhandene Quellen-/Confidence-Notiz-Sektionen entfernen, falls noch
+    aus alten Pipeline-Versionen im Body vorhanden. Saubere Drafts (post Stabilisierungs-
+    Refactor) haben weder noch — dieser Strip ist Defensiv-Code für Cache-Drafts.
+    Von `render_note` und `render_moc` geteilt (vorher dupliziert).
+    """
+    return _LEGACY_SECTIONS_RE.sub("", body).rstrip()
+
+
 def render_moc(note: AtomicNoteDraft, source_file: str, citation: CitationMeta | None = None) -> str:
     """Hub-Routing: Note als MoC-Note rendern (Schema-MoC).
     Frontmatter: type=moc, cssclasses=[moc], obsidianUIMode=preview. Kein H1, keine
@@ -325,9 +341,7 @@ sub-concepts:
 ---"""
 
     body = note.body.strip()
-    body = re.sub(
-        r"\n+##\s+(Quellen?|Confidence-Notiz)\s*\n.*?(?=\n+##\s|\Z)", "", body, flags=re.IGNORECASE | re.DOTALL
-    ).rstrip()
+    body = strip_legacy_sections(body)
     body = convert_inline_to_footnotes(body, citation.short_label, source_file)
 
     # v29f: Hub-Body-Layout: H1 → Einleitung (1. Absatz nach H1) → ## Komponenten
@@ -448,12 +462,7 @@ related:
 ---"""
 
     body = note.body.strip()
-    # Idempotent: vorhandene Quellen-/Confidence-Notiz-Sektionen entfernen, falls noch
-    # aus alten Pipeline-Versionen im Body vorhanden. Saubere Drafts (post Stabilisierungs-
-    # Refactor) haben weder noch — dieser Strip ist Defensiv-Code für Cache-Drafts.
-    body = re.sub(
-        r"\n+##\s+(Quellen?|Confidence-Notiz)\s*\n.*?(?=\n+##\s|\Z)", "", body, flags=re.IGNORECASE | re.DOTALL
-    ).rstrip()
+    body = strip_legacy_sections(body)
 
     # v28: `(S. N)` → `[^i]`-Footnotes deterministisch im Renderer (Pipeline-Components
     # wie anchor_repair/verifier arbeiten weiter mit dem Inline-Format im Body-Draft).
