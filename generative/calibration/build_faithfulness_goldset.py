@@ -20,6 +20,11 @@ Zwei Normalisierungen, ohne die gerenderte Notes nicht gate-fähig sind:
 
 Kein ML-Load: das Kontext-Snippet wird lexikalisch gewählt (Token-Überlapp),
 nicht per Embedding — das Tool muss ohne Modell-Cache laufen können.
+
+`claims.jsonl`/`verdicts.jsonl` werden APPENDET (gewollt: ein Gold-Set entsteht
+aus mehreren Aufrufen, einer pro Quelle). Beim Neubau des Sets das
+Ausgabe-Verzeichnis vorher leeren — Wiederholungsläufe duplizieren sonst
+Records (Mistral-Review E5b).
 """
 
 from __future__ import annotations
