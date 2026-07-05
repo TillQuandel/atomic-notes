@@ -39,6 +39,13 @@ extractive = [
     "langdetect>=1.0.9",
     "keybert>=0.8",
 ]
+# Export-Konvertierung (F3): portables Markdown -> docx/pdf/html/odt/epub via
+# pandoc+typst, pip-only (pandoc.exe im pypandoc_binary-Wheel gebuendelt, kein
+# System-Pandoc noetig; typst-py bettet den Compiler als Python-API ein).
+export = [
+    "pypandoc-binary>=1.13",
+    "typst>=0.13",
+]
 dev = [
     "pytest>=9.0",
     "pytest-asyncio>=0.23",
@@ -48,6 +55,9 @@ dev = [
     "fastapi>=0.110",
     "httpx>=0.27",
     "python-multipart>=0.0.9",
+    # Export-Smoke-Tests (test_export_convert.py) brauchen pandoc+typst auch im dev-Lauf
+    "pypandoc-binary>=1.13",
+    "typst>=0.13",
     # Formatter — exakte Version via uv.lock gepinnt (local == CI, kein Drift)
     "ruff>=0.8",
 ]

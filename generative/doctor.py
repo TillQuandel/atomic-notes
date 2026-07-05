@@ -169,6 +169,16 @@ def check_import(module: str, hint: str, required: bool = False) -> CheckResult:
     return CheckResult(name=module, ok=False, detail=f"{module} fehlt", hint=hint, required=required)
 
 
+def check_export() -> CheckResult:
+    """Export-Konvertierung (docx/pdf/html/odt/epub via pandoc+typst, F3) verfügbar?
+    Optional — die Kern-Pipeline läuft ohne, nur F4 (Formatwahl) braucht es."""
+    from generative.pipeline.export_convert import export_available
+
+    ok, detail = export_available()
+    hint = 'pip install "atomic-notes[export]"  (Export-Formate docx/pdf/html sind optional; Kern-Pipeline läuft ohne)'
+    return CheckResult(name="export (docx/pdf/html)", ok=ok, detail=detail, hint="" if ok else hint, required=False)
+
+
 def run_all() -> list[CheckResult]:
     from generative.config import BACKEND, VAULT
 
@@ -179,6 +189,7 @@ def run_all() -> list[CheckResult]:
         check_vault(VAULT),
         check_import("pypdf", "pip install pypdf (PDF-Metadaten-Enrichment)"),
         check_import("sentence_transformers", "pip install sentence-transformers (Embeddings/Entity-Resolution)"),
+        check_export(),
     ]
     if BACKEND == "litellm":
         results.append(check_import("litellm", "pip install litellm"))
