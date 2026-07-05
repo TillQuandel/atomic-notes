@@ -321,3 +321,118 @@ def test_wegen_triggers_causal_risk():
     from generative.pipeline.claims import causal_risk
 
     assert causal_risk("Treffen sind wegen zeitzonenbedingter Verpflichtungen nicht planbar.")
+
+
+# ---- Fix 1 (E5b): Prefix-Konkatenationen als Premises --------------------------
+
+
+class TestPrefixConcatPremises:
+    def test_top1_top2_concat_rescues_claim_that_full_concat_dilutes(self, monkeypatch):
+        # Kalibrierungs-Befund E5b (Hrastinski FP-A): top1+top2 entailen mit
+        # e=0.998, die Voll-Konkatenation aller 5 verwaessert auf e=0.149.
+        # Nur die Prefix-Konkat "S1 S2" traegt hier — weder Einzelsaetze noch
+        # die Voll-Konkat mit dem Rausch-Satz S3.
+        body = "Die Analyse zeigt, dass 90 Prozent der Saetze inhaltsbezogen waren (S. 3)."
+        page_index = {3: "S1. S2. S3."}
+
+        monkeypatch.setattr(fg, "top_k_sentences", lambda w, q, k, **_kw: ["S1", "S2", "S3"])
+
+        def _score_by_premise(pairs, batch_size=32):
+            return [
+                NliScores(0.95, 0.03, 0.02) if premise == "S1 S2" else NliScores(0.1, 0.88, 0.02)
+                for premise, _hyp in pairs
+            ]
+
+        monkeypatch.setattr(fg, "score_pairs", _score_by_premise)
+
+        result = fg.run_faithfulness_gate(body, page_index, _citation())
+
+        assert len(result.verdicts) == 1
+        v = result.verdicts[0]
+        assert v.status == "supported"
+        assert v.evidence == "S1 S2"
+        assert v.entailment == pytest.approx(0.95)
+
+
+# ---- Fix 2 (E5b): abstain_unverifiable_numbers ---------------------------------
+
+
+class TestAbstainUnverifiableNumbers:
+    def _low_nli(self, monkeypatch):
+        monkeypatch.setattr(fg, "score_pairs", lambda pairs, batch_size=32: [NliScores(0.05, 0.9, 0.05)] * len(pairs))
+
+    def test_numbers_present_in_table_fragments_abstain_instead_of_fail(self, monkeypatch, stub_top_k_sentences):
+        # Hrastinski FP-B: exakte Prozentwerte stehen nur in pdftotext-
+        # Tabellen-Fragmenten — Satz-NLI kann sie nicht verifizieren.
+        body = "Synchrone Beitraege entfallen zu 58 % auf Inhalte und 34 % auf Planung (S. 4)."
+        page_index = {4: "Almost 60 percent related to content.\n876  (58%)\n507  (34%)"}
+        self._low_nli(monkeypatch)
+
+        result = fg.run_faithfulness_gate(body, page_index, _citation())
+
+        assert len(result.verdicts) == 1
+        v = result.verdicts[0]
+        assert v.status == "abstain_unverifiable_numbers"
+        assert result.failed is False
+        assert result.n_abstained == 1
+        assert result.n_failed == 0
+
+    def test_fabricated_number_missing_from_window_still_fails(self, monkeypatch, stub_top_k_sentences):
+        body = "Synchrone Beitraege entfallen zu 77 % auf Inhalte (S. 4)."
+        page_index = {4: "Almost 60 percent related to content.\n876  (58%)\n507  (34%)"}
+        self._low_nli(monkeypatch)
+
+        result = fg.run_faithfulness_gate(body, page_index, _citation())
+
+        assert result.verdicts[0].status == "failed_entailment"
+        assert result.failed is True
+
+    def test_one_of_two_numbers_missing_still_fails(self, monkeypatch, stub_top_k_sentences):
+        # ALLE Claim-Zahlen muessen belegt sein — eine erfundene reicht zum Fail.
+        body = "Die Verteilung lag bei 58 % zu 77 % (S. 4)."
+        page_index = {4: "876  (58%)"}
+        self._low_nli(monkeypatch)
+
+        result = fg.run_faithfulness_gate(body, page_index, _citation())
+
+        assert result.verdicts[0].status == "failed_entailment"
+
+    def test_causal_claim_without_numbers_still_fails(self, monkeypatch, stub_top_k_sentences):
+        # Zeitzonen-Pflichtfall-Schutz: causal-Claims ohne number-Risk duerfen
+        # nie in den Zahlen-Abstain rutschen.
+        body = "Treffen sind wegen zeitzonenbedingter Verpflichtungen nicht planbar (S. 4)."
+        page_index = {4: "When synchronous meetings cannot be scheduled. 876  (58%)"}
+        self._low_nli(monkeypatch)
+
+        result = fg.run_faithfulness_gate(body, page_index, _citation())
+
+        assert result.verdicts[0].status == "failed_entailment"
+        assert result.failed is True
+
+    def test_page_refs_years_footnotes_masked_before_number_check(self, monkeypatch, stub_top_k_sentences):
+        # Seitenanker "S. 12", Jahr "(2008)" und Footnote-Marker duerfen die
+        # Zahlen-Menge nicht befuellen — sonst wuerde jeder Claim abstainen,
+        # dessen Seitenzahl im Fenster steht.
+        # "bereits 2008" bewusst kleingeschrieben davor — ein grossgeschriebenes
+        # Wort vor der Jahreszahl wuerde AUTHOR_YEAR_RE (Attribution) triggern.
+        body = "Es wurden bereits 2008 insgesamt 42 Faelle gezaehlt (S. 12)."
+        page_index = {12: "Im Jahr 2008 auf Seite 12 steht nichts von der Zahl."}
+        self._low_nli(monkeypatch)
+
+        result = fg.run_faithfulness_gate(body, page_index, _citation())
+
+        # 42 fehlt im Fenster -> failed, obwohl 2008 und 12 dort stehen
+        assert result.verdicts[0].status == "failed_entailment"
+
+
+class TestClaimNumbersHelper:
+    def test_separator_normalization_matches_thousands_variants(self):
+        assert fg._numbers_present_in_window("Es wurden 1.507 Saetze analysiert.", "insgesamt 1,507 (100%)")
+
+    def test_digit_glued_to_letter_does_not_count_as_presence(self):
+        # Footnote-Superscript "hypothesis19" belegt keine 19 — konservativ
+        # Richtung Fail, nicht Richtung Abstain.
+        assert not fg._numbers_present_in_window("Es gab 19 Interviews.", "media naturalness hypothesis19 predicts")
+
+    def test_claim_without_extractable_numbers_returns_false(self):
+        assert not fg._numbers_present_in_window("Die Studie (2008) belegt dies (S. 4).", "876 (58%)")
