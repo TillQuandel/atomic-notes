@@ -84,19 +84,31 @@ def validate_export_formats(value) -> tuple[list[str] | None, str | None]:
     `None` = kein Override (Server-Default `[]`, analog backend/profile).
     Eine leere Liste ist ein gueltiger, bewusst gesetzter Wert (alle Formate
     abgewaehlt) -- anders als bei backend/profile gibt es hier keinen
-    "leerer String = Server-Default"-Sonderfall, weil der Typ eine Liste ist."""
+    "leerer String = Server-Default"-Sonderfall, weil der Typ eine Liste ist.
+
+    Normalisierung (Review-Fund PR #136, konsistent zur CLI-Seite
+    `export_runner.parse_export_formats`): Werte werden getrimmt +
+    lowercased und ordnungserhaltend dedupliziert -- gespeichert/zurueckgegeben
+    wird immer die kanonische (lowercase) Form."""
     if value is None:
         return None, None
     if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
         return None, "export_formats muss eine Liste von Strings sein."
-    unknown = [v for v in value if v not in EXPORT_FORMAT_GUI_CHOICES]
+    normalized: list[str] = []
+    unknown: list[str] = []
+    for raw in value:
+        fmt = raw.strip().lower()
+        if fmt not in EXPORT_FORMAT_GUI_CHOICES:
+            unknown.append(raw)
+        elif fmt not in normalized:
+            normalized.append(fmt)
     if unknown:
         return (
             None,
             f"Unbekannte(s) Export-Format(e): {', '.join(unknown)} "
             f"(erlaubt: {', '.join(sorted(EXPORT_FORMAT_GUI_CHOICES))})",
         )
-    return value, None
+    return normalized, None
 
 
 def validate_settings(payload) -> tuple[dict, str | None]:

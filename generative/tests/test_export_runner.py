@@ -15,6 +15,7 @@ from generative.pipeline.export_runner import (
     EXPORT_FORMAT_CHOICES,
     FUTURE_FORMATS,
     parse_export_formats,
+    requires_export_deps,
     run_export,
 )
 from generative.pipeline.note_json import dumps, note_to_json_dict, run_to_json_dict
@@ -84,6 +85,19 @@ class TestParseExportFormats:
             parse_export_formats("rtf")
         msg = str(exc.value).lower()
         assert "geplant" in msg
+
+
+class TestRequiresExportDeps:
+    def test_pure_formats_need_no_deps(self):
+        assert requires_export_deps(("json",)) is False
+        assert requires_export_deps(("portable-md", "obsidian-md")) is False
+        assert requires_export_deps(()) is False
+
+    def test_binary_formats_need_deps(self):
+        assert requires_export_deps(("pdf",)) is True
+        assert requires_export_deps(("json", "docx")) is True
+        for fmt in ("docx", "pdf", "html", "odt", "epub"):
+            assert requires_export_deps((fmt,)) is True
 
 
 # --- run_export: json --------------------------------------------------
@@ -252,13 +266,36 @@ class TestRunExportObsidianMd:
         assert "obsidian-md" in messages[0]
         assert "dry" in messages[0].lower() or "vorschau" in messages[0].lower()
 
-    def test_no_written_files_produces_skip_message(self, tmp_path):
+    def test_no_written_files_produces_distinct_skip_message(self, tmp_path):
+        # Echter Lauf (dry_run=False) ohne written_files: die Meldung darf NICHT
+        # faelschlich von einem Dry-Run sprechen (Review-Fund 3).
         export_root = tmp_path / "export"
         drafts = [_draft(title="Erste Note")]
         citation = _citation()
         written, messages = run_export(drafts, citation, ("obsidian-md",), export_root, written_files=None)
         assert written == []
         assert len(messages) == 1
+        assert "obsidian-md" in messages[0]
+        assert "dry" not in messages[0].lower()
+
+    def test_missing_source_file_produces_visible_skip_message(self, tmp_path):
+        # Review-Fund 2: eine nicht (mehr) existente Quelle darf nicht STILL
+        # uebersprungen werden — sichtbare Meldung je Datei.
+        src_dir = tmp_path / "vault-inbox"
+        src_dir.mkdir()
+        existing = src_dir / "Da.md"
+        existing.write_text("# Da", encoding="utf-8")
+        missing = src_dir / "Weg.md"  # nie geschrieben
+        export_root = tmp_path / "export"
+
+        drafts = [_draft(title="Da")]
+        citation = _citation()
+        written, messages = run_export(
+            drafts, citation, ("obsidian-md",), export_root, written_files=[existing, missing], dry_run=False
+        )
+        assert (export_root / "Da.md").exists()
+        assert len(messages) == 1
+        assert "Weg.md" in messages[0]
         assert "obsidian-md" in messages[0]
 
 
@@ -277,3 +314,28 @@ class TestTitleCollision:
         # waeren noetig fuer echten Inhaltsvergleich; hier reicht Existenzpruefung).
         assert (tmp_path / "Doppelter Titel.json").exists()
         assert (tmp_path / "Doppelter Titel-2.json").exists()
+
+    def test_note_titled_like_gesamt_file_does_not_clobber_it(self, tmp_path):
+        # Review-Fund 4 (Mistral+Eigen): eine Note mit Titel exakt
+        # "<pdf-stem>-gesamt" darf die Sammel-Datei nicht ueberschreiben --
+        # der Sammel-Stem ist reserviert, die Note weicht auf -2 aus.
+        drafts = [_draft(title="luhmann-gesamt")]
+        citation = _citation()  # source_file=luhmann.pdf -> Sammel-Stem "luhmann-gesamt"
+        written, _ = run_export(drafts, citation, ("json",), tmp_path, generated_at="2020-01-01")
+        names = sorted(p.name for p in written)
+        assert names == ["luhmann-gesamt-2.json", "luhmann-gesamt.json"]
+        # Sammel-Datei enthaelt das run-Dict (notes-Liste), nicht die Einzel-Note
+        gesamt = json.loads((tmp_path / "luhmann-gesamt.json").read_text(encoding="utf-8"))
+        assert "notes" in gesamt
+        note = json.loads((tmp_path / "luhmann-gesamt-2.json").read_text(encoding="utf-8"))
+        assert note["note"]["title"] == "luhmann-gesamt"
+
+
+class TestEmptyDrafts:
+    def test_empty_drafts_skips_export_with_message(self, tmp_path):
+        # Review-Fund 6: keine leeren -gesamt-Dateien fuer einen Lauf ohne Notes.
+        written, messages = run_export([], _citation(), ("json", "portable-md"), tmp_path)
+        assert written == []
+        assert len(messages) == 1
+        assert "keine Notes" in messages[0]
+        assert list(tmp_path.iterdir()) == []  # export_root bleibt leer

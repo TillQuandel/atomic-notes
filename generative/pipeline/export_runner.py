@@ -77,11 +77,23 @@ def parse_export_formats(raw: str) -> tuple[str, ...]:
     return tuple(seen)
 
 
-def _unique_stems(titles: list[str]) -> list[str]:
+def requires_export_deps(formats) -> bool:
+    """True, wenn mindestens ein Format aus `formats` die optionalen
+    pandoc/typst-Deps (`pip install "atomic-notes[export]"`) braucht — für den
+    Fail-Fast-Check des CLI-Aufrufers (Deps-Fehler VOR dem teuren Lauf melden,
+    nicht erst im Export-Block danach)."""
+    return any(fmt in _BINARY_FORMATS for fmt in formats)
+
+
+def _unique_stems(titles: list[str], reserved: tuple[str, ...] = ()) -> list[str]:
     """Dateiname-Stem je Note aus `vault_writer.slugify(title)`; Kollisionen
     innerhalb des Laufs (zwei Notes mit identischem Titel) bekommen einen
-    `-2`/`-3`/…-Suffix statt sich gegenseitig zu überschreiben."""
-    used: dict[str, int] = {}
+    `-2`/`-3`/…-Suffix statt sich gegenseitig zu überschreiben.
+
+    `reserved`: Stems, die bereits vergeben sind, bevor die erste Note dran ist
+    (der `<pdf-stem>-gesamt`-Sammel-Stem) — eine Note mit exakt diesem Titel
+    weicht dann auf `-2` aus, statt die Sammel-Datei zu überschreiben."""
+    used: dict[str, int] = {r: 1 for r in reserved}
     stems: list[str] = []
     for title in titles:
         base = vault_writer.slugify(title)
@@ -130,6 +142,11 @@ def run_export(
 
     Rückgabe: (geschriebene Dateien, Hinweis-/Skip-Meldungen).
     """
+    # Guard (Review-Fund 6): ohne Notes gibt es nichts Sinnvolles zu exportieren
+    # — keine leeren -gesamt-Dateien erzeugen, sichtbare Meldung statt still.
+    if not drafts:
+        return [], ["Export übersprungen: keine Notes im Lauf."]
+
     export_root = Path(export_root)
     export_root.mkdir(parents=True, exist_ok=True)
 
@@ -137,7 +154,9 @@ def run_export(
     messages: list[str] = []
 
     stem = Path(citation.source_file).stem
-    note_stems = _unique_stems([draft.title for draft in drafts])
+    # Sammel-Stem reservieren (Review-Fund 4): eine Note mit Titel exakt
+    # "<stem>-gesamt" bekommt -2 statt die Sammel-Datei zu überschreiben.
+    note_stems = _unique_stems([draft.title for draft in drafts], reserved=(f"{stem}-gesamt",))
     collective_title = citation.title or citation.short_label
 
     # Lazy/einmalig berechnete Zwischenergebnisse — nur gebaut, wenn ein
@@ -229,14 +248,21 @@ def run_export(
             written.append(collective_out)
 
         elif fmt == "obsidian-md":
-            if dry_run or not written_files:
+            if dry_run:
                 messages.append(
                     "obsidian-md übersprungen: Dry-Run schreibt keine Notes in den Vault — nichts zu kopieren."
                 )
+            elif not written_files:
+                # Review-Fund 3: eigener Text — im ECHTEN Lauf ohne written_files
+                # wäre die Dry-Run-Meldung faktisch falsch.
+                messages.append("obsidian-md übersprungen: keine geschriebenen Notes übergeben — nichts zu kopieren.")
             else:
                 for src in written_files:
                     src = Path(src)
                     if not src.is_file():
+                        # Review-Fund 2: sichtbar melden statt still überspringen
+                        # (Quelle zwischen Schreiben und Export verschwunden/verschoben).
+                        messages.append(f"obsidian-md: {src.name} nicht gefunden — übersprungen.")
                         continue
                     dest = export_root / src.name
                     dest.write_bytes(src.read_bytes())

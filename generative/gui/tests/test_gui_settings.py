@@ -244,3 +244,23 @@ def test_write_then_read_roundtrip_with_export_formats(tmp_path):
     data, warning = gui_settings.read_settings(path)
     assert warning is None
     assert data == {"export_formats": ["docx", "html"]}
+
+
+def test_validate_export_formats_normalizes_case(tmp_path):
+    # Review-Fund 5 (Mistral): konsistent zur CLI (parse_export_formats ist
+    # case-insensitiv) -- "JSON" wird akzeptiert und kanonisch (lowercase) gespeichert.
+    value, error = gui_settings.validate_export_formats(["JSON", "Pdf"])
+    assert error is None
+    assert value == ["json", "pdf"]
+
+
+def test_validate_export_formats_strips_whitespace():
+    value, error = gui_settings.validate_export_formats([" docx "])
+    assert error is None
+    assert value == ["docx"]
+
+
+def test_validate_export_formats_dedupes_order_preserving():
+    value, error = gui_settings.validate_export_formats(["json", "pdf", "JSON"])
+    assert error is None
+    assert value == ["json", "pdf"]

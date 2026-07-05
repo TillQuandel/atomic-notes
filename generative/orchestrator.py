@@ -1880,6 +1880,20 @@ def main(argv: list[str] | None = None):
             export_formats = export_runner.parse_export_formats(args.export_format)
         except ValueError as e:
             sys.exit(str(e))
+        # Auch die Export-Deps fail-fast prüfen (Review-Fund PR #136): ein
+        # Binärformat (docx/pdf/…) ohne installierte pandoc/typst-Deps würde
+        # sonst erst NACH dem kompletten Lauf im Export-Block crashen. Lazy
+        # Import — reine Formate (json/portable-md/obsidian-md) berühren
+        # export_convert weiterhin nie.
+        if export_runner.requires_export_deps(export_formats):
+            from generative.pipeline import export_convert as _export_convert
+
+            _deps_ok, _deps_detail = _export_convert.export_available()
+            if not _deps_ok:
+                sys.exit(
+                    f"--export-format {args.export_format}: pandoc/typst nicht verfügbar: {_deps_detail} — "
+                    'installiere sie mit: pip install "atomic-notes[export]"'
+                )
 
     _setup_phoenix_tracing()
     # Im GUI-Modus (ATOMIC_AGENT_GUI=1, gesetzt vom GUI-Subprocess-Runner) die
