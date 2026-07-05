@@ -199,6 +199,20 @@ class TestRunToJsonDict(unittest.TestCase):
         self.assertFalse(result["notes"][1]["routing"]["auto_vault_recommended"])
 
 
+class TestSingleAndRunFormsEquivalent(unittest.TestCase):
+    def test_run_entry_matches_single_form(self):
+        # Mistral-Review MED (PR #133): pinnt die Helper-Garantie — wer künftig
+        # eine der beiden Formen am `_note_and_routing`-Helper vorbei baut,
+        # bricht diesen Test statt still zu driften.
+        draft = _draft()
+        citation = _citation()
+        single = note_to_json_dict(draft, citation, generated_at="2020-01-01")
+        run = run_to_json_dict([draft], citation, generated_at="2020-01-01")
+        self.assertEqual(run["notes"][0]["note"], single["note"])
+        self.assertEqual(run["notes"][0]["routing"], single["routing"])
+        self.assertEqual(run["source"], single["source"])
+
+
 class TestStripLegacySections(unittest.TestCase):
     def test_quellen_section_removed(self):
         body = "Text.\n\n## Quellen\n\n*Quelle: foo*\n"
