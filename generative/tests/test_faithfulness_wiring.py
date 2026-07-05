@@ -128,6 +128,25 @@ def test_apply_faithfulness_gate_skipped_when_no_page_index(monkeypatch):
     assert draft.faithfulness_fail is False
 
 
+def test_apply_faithfulness_gate_skipped_when_empty_page_index(monkeypatch):
+    # build_page_index("") liefert {} (markerloser Text) — auch das leere Dict
+    # muss das Gate skippen, nicht nur None (Mistral-Review E6, LOW).
+    monkeypatch.setattr(orchestrator, "ENABLE_FAITHFULNESS_GATE", True)
+    called: list[bool] = []
+
+    def _fake_run_gate(*a, **kw):
+        called.append(True)
+        return GateResult(verdicts=[], failed=True, n_supported=0, n_failed=1, n_abstained=0)
+
+    monkeypatch.setattr("generative.pipeline.faithfulness_gate.run_faithfulness_gate", _fake_run_gate)
+
+    draft = _draft(action="create")
+    orchestrator._apply_faithfulness_gate(draft, {}, _citation())
+
+    assert called == []
+    assert draft.faithfulness_fail is False
+
+
 def test_apply_faithfulness_gate_abstain_only_no_fail(monkeypatch):
     monkeypatch.setattr(orchestrator, "ENABLE_FAITHFULNESS_GATE", True)
 
