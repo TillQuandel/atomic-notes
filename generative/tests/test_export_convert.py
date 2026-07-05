@@ -42,6 +42,20 @@ def test_export_available_true_with_installed_deps():
     assert detail
 
 
+def test_missing_output_directory_is_created(tmp_path):
+    # Mistral-MED (PR #135): fehlendes Zielverzeichnis quittierte pandoc mit
+    # kryptischem Writer-Fehler — der Konverter legt es jetzt selbst an.
+    out = tmp_path / "nicht" / "vorhanden" / "out.html"
+    result = convert_portable_md("# H\n\nAbsatz.", "html", out, title="T")
+    assert result.exists()
+
+
+def test_empty_markdown_does_not_crash(tmp_path):
+    out = tmp_path / "leer.html"
+    result = convert_portable_md("", "html", out, title="Leer")
+    assert result.exists()
+
+
 def test_html_smoke_umlauts_footnote_title(tmp_path):
     md = (
         "# Überschrift mit „Anführungszeichen“\n\n"

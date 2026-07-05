@@ -134,6 +134,9 @@ def convert_portable_md(
         raise ValueError(f"Unbekanntes Export-Format {fmt!r}; gültig: {', '.join(EXPORT_FORMATS)}")
 
     out_path = Path(out_path)
+    # Zielverzeichnis anlegen — sonst quittiert pandoc ein fehlendes Verzeichnis
+    # mit einem kryptischen Writer-Fehler statt einem klaren OSError (Mistral-MED, PR #135).
+    out_path.parent.mkdir(parents=True, exist_ok=True)
 
     if fmt == "pdf":
         return _convert_pdf(md_text, out_path, title=title, author=author, date=date, lang=lang)
