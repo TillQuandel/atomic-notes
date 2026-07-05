@@ -166,7 +166,12 @@ def _offset_footnotes(text: str, offset: int) -> tuple[str, int]:
     wird bewusst NICHT genutzt/verändert — das arbeitet dokumentweit ab 1, hier
     wird pro Note nur um einen laufenden Offset verschoben.
     """
-    used = sorted({int(m.group(1)) for m in _FN_MARKER_RE.finditer(text)})
+    # Marker UND Defs einsammeln: eine Orphan-Def (Def ohne Marker, möglich auf
+    # dem „Body bereits konvertiert"-Pfad) muss mitverschoben werden — sonst
+    # KeyError beim Def-Rewrite bzw. Nummern-Kollision mit einer Folge-Note.
+    used = sorted(
+        {int(m.group(1)) for m in _FN_MARKER_RE.finditer(text)} | {int(m.group(1)) for m in _FN_DEF_RE.finditer(text)}
+    )
     if not used:
         return text, offset
     mapping = {str(n): str(n + offset) for n in used}

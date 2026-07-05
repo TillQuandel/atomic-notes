@@ -193,6 +193,19 @@ class TestRenderPortableRun(unittest.TestCase):
         # interner Link auf Note 1 als funktionierender Anker (Slug von "# Atomic Notes")
         self.assertIn("(#atomic-notes)", out)
 
+    def test_offset_footnotes_orphan_def_no_crash(self):
+        # Verifizierter Review-Fund (PR #134): eine Def ohne Marker (Orphan,
+        # möglich auf dem „Body bereits konvertiert"-Pfad) crashte mit KeyError.
+        # Orphan-Defs werden mitverschoben — eindeutig nummeriert, keine
+        # Kollision mit der Folge-Note.
+        from generative.pipeline.portable_md import _offset_footnotes
+
+        text = "Text[^1].\n\n[^1]: def eins.\n[^9]: orphan def."
+        out, offset = _offset_footnotes(text, 2)
+        self.assertIn("[^3]", out)  # Marker 1 + Offset 2
+        self.assertIn("[^11]: orphan def.", out)  # Orphan 9 + Offset 2
+        self.assertEqual(offset, 11)  # Folge-Note startet nach der Orphan-Def
+
 
 class TestMetadataSection(unittest.TestCase):
     """Regel 7: Betriebsdaten standardmäßig verborgen, nur mit include_metadata=True."""
