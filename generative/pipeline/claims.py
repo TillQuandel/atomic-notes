@@ -129,7 +129,7 @@ CAUSAL_RE = re.compile(
     r"führ(?:t|te|ten|en)\s+zu"
     r"|bewirk(?:t|te|ten|en)"
     r"|verursach(?:t|te|ten|en)"
-    r"|weil|daher|deshalb|infolge|aufgrund|bedingt durch|zur Folge"
+    r"|weil|wegen|daher|deshalb|infolge|aufgrund|bedingt durch|zur Folge"
     r")\b",
     re.IGNORECASE,
 )
@@ -150,12 +150,21 @@ _CALLOUT_HEADER_RE = re.compile(r"^\[![\w-]+\]")
 # Bekannte Abkürzungs-Muster, deren Punkt vor dem Sentence-Split geschützt
 # werden muss (siehe Modul-Docstring). Neben den Risk-Pattern-Tokens auch
 # gängige deutsche Abkürzungen, die sonst Sätze mitten im Claim zerreißen
-# (real beobachtet: „38 bzw. 43 Jahre" wurde zweigeteilt).
+# (real beobachtet: „38 bzw. 43 Jahre" wurde zweigeteilt). Ordinale vor
+# „Jahrhundert"/„Jh." inkl. Aufzählungs-Brücke („im 18. und 19. Jahrhundert")
+# ebenso — die zerrissenen Teil-Claims erzeugten echte Gate-False-Positives
+# (Knowles-Kalibrierung E5b, 2026-07-05).
 _ABBREV_GUARD_RE = re.compile(
     r"S\.\s*\d+(?:\s*f{1,2}\.)?|zit\.\s*n\.|et al\."
-    r"|bzw\.|z\.\s*B\.|u\.\s*a\.|ca\.|vgl\.|d\.\s*h\.|sog\.|bspw\.|ggf\.",
+    r"|bzw\.|z\.\s*B\.|u\.\s*a\.|ca\.|vgl\.|d\.\s*h\.|sog\.|bspw\.|ggf\."
+    r"|\d{1,2}\.(?=\s+(?:und\s|bis\s|oder\s|Jahrhundert|Jh\.))",
     re.IGNORECASE,
 )
+
+# Nummerierte Listen-Marker am Zeilenanfang („1. Ein Klima schaffen …") —
+# der Marker selbst würde sonst als Pseudo-Satz „1." abgespalten und als
+# number-Risk-Claim geführt (Junk-Claims im E5b-Gold-Set).
+_LIST_MARKER_RE = re.compile(r"^\d+\.\s+")
 _MASK_CHAR = "\x00"
 
 # Seitenzahl-Extraktion: erste Übereinstimmung `S. <Zahl>` im Satz.
@@ -221,6 +230,7 @@ def decompose_claims(body: str) -> list[Claim]:
         content = _BLOCKQUOTE_PREFIX_RE.sub("", stripped) if is_quote else stripped
         if is_quote and _CALLOUT_HEADER_RE.match(content):
             continue
+        content = _LIST_MARKER_RE.sub("", content)
 
         search_from = line_start
         for sentence in _split_sentences(content):

@@ -49,12 +49,44 @@ _NAME_TOKEN_RE = re.compile(r"[A-ZÄÖÜ][\wäöüß\-]+")
 _MULTI_AUTHOR_SPLIT_RE = re.compile(r"\s+(?:&|und)\s+")
 _YEAR_RE = re.compile(r"(?:19|20)\d{2}")
 
+# Großgeschriebene deutsche Funktions-/Zeitwörter, die vor Jahreszahlen stehen
+# („Zwischen 1929 und 1948 …", „Seit 2005 …") und AUTHOR_YEAR_RE matchen, aber
+# nie Nachnamen sind — Kalibrierungs-Fund E5b am Knowles-Gold-Set
+# (author_missing-FP, Geschwister von „Großschreibung ist kein Eigennamen-Signal").
+_NON_NAME_BEFORE_YEAR = frozenset(
+    {
+        "Zwischen",
+        "Seit",
+        "Bis",
+        "Von",
+        "Vor",
+        "Nach",
+        "Um",
+        "Ab",
+        "Im",
+        "Bereits",
+        "Schon",
+        "Erst",
+        "Etwa",
+        "Anfang",
+        "Mitte",
+        "Ende",
+        "Jahr",
+        "Jahre",
+        "Jahren",
+    }
+)
+
 
 def _surnames_from_author_year(text: str) -> set[str]:
     surnames: set[str] = set()
     for match in AUTHOR_YEAR_RE.finditer(text):
         name_part = _YEAR_RE.sub("", match.group(0)).strip(" ()")
-        surnames.update(n.strip() for n in _MULTI_AUTHOR_SPLIT_RE.split(name_part) if n.strip())
+        surnames.update(
+            n.strip()
+            for n in _MULTI_AUTHOR_SPLIT_RE.split(name_part)
+            if n.strip() and n.strip() not in _NON_NAME_BEFORE_YEAR
+        )
     return surnames
 
 

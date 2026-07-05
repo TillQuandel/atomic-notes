@@ -19,11 +19,24 @@ erst in E6):
    → `failed_attribution`. Sonst weiter zu Schritt 4 (`no_window` kann hier
    nicht mehr auftreten, Schritt 2 hat das schon gefiltert).
 4. Entailment für ALLE verbliebenen Claims: die Top-`top_k`-Sätze des Fensters
-   (via `top_k_sentences`, MiniLM-Cosine-Ranking) plus deren Konkatenation als
-   zusätzliche Premise (Deckung kann über mehrere Sätze verteilt sein —
-   reduziert False-Fails bei legitimer Synthese). Maximaler Entailment-Score
-   über alle Premises ≥ `entail_threshold` → `supported`, sonst
-   `failed_entailment`. `score_pairs` → `None` → `abstain_nli`.
+   (via `top_k_sentences`, MiniLM-Cosine-Ranking) plus deren kumulative
+   Prefix-Konkatenationen top1..j als zusätzliche Premises (Deckung kann über
+   mehrere Sätze verteilt sein — reduziert False-Fails bei legitimer Synthese;
+   Prefix- statt nur Voll-Konkat, siehe `_claim_premises`). Maximaler
+   Entailment-Score über alle Premises ≥ `entail_threshold` → `supported`,
+   sonst `failed_entailment`. `score_pairs` → `None` → `abstain_nli`.
+4b. Unverifizierbare-Zahlen-Abstain (Kalibrierung E5b, 2026-07-05): ein Claim
+   mit `number`-Risk, der an 4. scheitern würde, dessen sämtliche Zahlen aber
+   (kanonisiert, Seiten-Refs/Jahre/Footnote-Marker maskiert) im Fenster
+   vorkommen, wird `abstain_unverifiable_numbers` statt `failed_entailment`:
+   pdftotext zerlegt Tabellen in zuordnungslose Zahlen-Fragmente (`369 (99%)`),
+   und Synthese-Claims über mehrere Absätze entailen satz-basiert nicht (der
+   perfekte Stütz-Satz „group sizes (8 versus 19)" ergab e=0.000 am echten
+   Methodik-Claim). Tabellen-Zeilen als Pseudo-Satz-Premise wurden empirisch
+   verworfen: mDeBERTa entailt daraus VERTAUSCHTE Aussagen mit e≈0.97–0.99
+   und widerspricht wahren mit c=0.996. Erfundene Zahlen (nicht im Fenster)
+   bleiben `failed_entailment`; Claims ohne Zahlen (causal/attribution)
+   erreichen diesen Zweig nie — der Zeitzonen-Pflichtfall bleibt gefangen.
 
 **Batching-Entscheidung:** Alle NLI-Paare ALLER pending Claims werden in
 EINEM `score_pairs`-Aufruf gesammelt (statt ein Call pro Claim) und danach
@@ -45,13 +58,20 @@ der importierten Bausteine.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from generative.config import MDEBERTA_THRESHOLD_CONFIRMED, MDEBERTA_THRESHOLD_CONTRA
 from generative.pipeline.anchor_patterns import PAGE_MARKER_LINE_RE
 from generative.pipeline.attribution import check_attribution
 from generative.pipeline.citation_check import _primary_surnames
-from generative.pipeline.claims import Claim, decompose_claims
+from generative.pipeline.claims import (
+    FOOTNOTE_MARKER_RE,
+    PAGE_REF_RE,
+    YEAR_TOKEN_RE,
+    Claim,
+    decompose_claims,
+)
 from generative.pipeline.embeddings import _model, _sentences, cosine
 from generative.pipeline.nli import score_pairs
 from generative.pipeline.page_index import claim_source_window
@@ -61,7 +81,9 @@ from generative.schemas.citation import CitationMeta
 @dataclass(frozen=True)
 class ClaimVerdict:
     claim: Claim
-    status: str  # "supported" | "failed_attribution" | "failed_entailment" | "abstain_no_window" | "abstain_nli"
+    # "supported" | "failed_attribution" | "failed_entailment"
+    # | "abstain_no_window" | "abstain_nli" | "abstain_unverifiable_numbers"
+    status: str
     evidence: str | None  # bester Stütz-Satz aus dem Fenster (bei NLI-Prüfung), sonst None
     entailment: float | None  # max-Entailment-Score, sonst None
 
@@ -115,13 +137,69 @@ def top_k_sentences(window_text: str, query: str, k: int, *, _cache: dict | None
     return [sentence for sentence, _ in ranked[:k]]
 
 
+# Seiten-Anker-Klammern im Claim-Text: "(S. 2)", "(zit. n. X, S. 2)". Für das
+# NLI ist der Anker Metadatum, keine prüfbare Behauptung — mit Anker kippt
+# mDeBERTa auf neutral (empirisch: identischer Claim e=0.998 ohne vs. e=0.002
+# MIT "(S. 2)" — Kalibrierungs-Befund E5b, 2026-07-05).
+_ANCHOR_PAREN_RE = re.compile(r"\s*\([^()]*?S\.\s*\d+[^()]*?\)")
+
+
+def _nli_hypothesis(claim_text: str) -> str:
+    """Claim-Text ohne Seiten-Anker-Klammern — die NLI-Hypothese."""
+    return _ANCHOR_PAREN_RE.sub("", claim_text).strip()
+
+
 def _claim_premises(window: str, claim: Claim, top_k: int, cache: dict | None = None) -> list[str]:
-    """Top-k Fenster-Sätze plus deren Konkatenation als zusätzliche Premise."""
-    top_sentences = top_k_sentences(window, claim.text, top_k, _cache=cache)
+    """Top-k Fenster-Sätze plus kumulative Prefix-Konkatenationen top1..j.
+
+    Prefix-Konkate statt nur der Voll-Konkatenation: Rausch-Sätze am Ende der
+    Top-k verwässern das Entailment der Voll-Konkat (Kalibrierung E5b am
+    Hrastinski-PDF: top1+top2 e=0.998, top1..3 e=0.993, top1..5 e=0.149 am
+    identischen Claim) — die Präfixe geben legitimer Zwei-Satz-Synthese eine
+    unverdünnte Premise. Max-über-Premises bleibt die Verdikt-Regel.
+    """
+    top_sentences = top_k_sentences(window, _nli_hypothesis(claim.text), top_k, _cache=cache)
     premises = list(top_sentences)
-    if len(top_sentences) > 1:
-        premises.append(" ".join(top_sentences))
+    for j in range(2, len(top_sentences) + 1):
+        premises.append(" ".join(top_sentences[:j]))
     return premises
+
+
+# Zahlen-Token für den Unverifizierbar-Abstain (Schritt 4b): Digit-Gruppen
+# inkl. Tausender-/Dezimaltrenner ("1,507", "0,59") als EIN Token.
+_NUMBER_TOKEN_RE = re.compile(r"\d+(?:[.,]\d+)*")
+
+
+def _canonical_number(token: str) -> str:
+    """Trenner-invariante Vergleichsform: "1,507" == "1.507" == "1507"."""
+    return token.replace(".", "").replace(",", "")
+
+
+def _numbers_present_in_window(claim_text: str, window: str) -> bool:
+    """True wenn der Claim ≥1 echte Zahl trägt UND alle davon im Fenster stehen.
+
+    Claim-Seite: Seiten-Refs, Jahre und Footnote-Marker werden wie in
+    `claims.number_risk` maskiert — sonst würde jeder Claim abstainen, dessen
+    Seitenzahl im Fenster auftaucht. Fenster-Seite: Digit-Tokens, die direkt
+    an einem Buchstaben kleben ("hypothesis19" — Footnote-Superscript aus
+    pdftotext), zählen nicht als Beleg — konservativ Richtung Fail.
+    """
+    masked = PAGE_REF_RE.sub("", claim_text)
+    masked = YEAR_TOKEN_RE.sub("", masked)
+    masked = FOOTNOTE_MARKER_RE.sub("", masked)
+    claim_numbers = {_canonical_number(m.group(0)) for m in _NUMBER_TOKEN_RE.finditer(masked)}
+    if not claim_numbers:
+        return False
+
+    window_numbers: set[str] = set()
+    for match in _NUMBER_TOKEN_RE.finditer(window):
+        before = window[match.start() - 1] if match.start() > 0 else ""
+        after = window[match.end()] if match.end() < len(window) else ""
+        if before.isalpha() or after.isalpha():
+            continue
+        window_numbers.add(_canonical_number(match.group(0)))
+
+    return claim_numbers <= window_numbers
 
 
 def run_faithfulness_gate(
@@ -178,7 +256,7 @@ def run_faithfulness_gate(
         claim_premises[i] = premises
         for premise in premises:
             pair_owner.append(i)
-            all_pairs.append((premise, claim.text))
+            all_pairs.append((premise, _nli_hypothesis(claim.text)))
 
     scores = score_pairs(all_pairs) if all_pairs else []
 
@@ -196,6 +274,10 @@ def run_faithfulness_gate(
 
         if best_score.entailment >= entail_threshold:
             verdicts[i] = ClaimVerdict(claim, "supported", best_premise, best_score.entailment)
+        elif "number" in claim.risk_types and _numbers_present_in_window(claim.text, windows[i]):
+            # Schritt 4b: Zahlen belegt, Aussage satz-NLI-unverifizierbar
+            # (Tabellen-Fragmente/Absatz-Synthese) — Abstain, nie Fail.
+            verdicts[i] = ClaimVerdict(claim, "abstain_unverifiable_numbers", best_premise, best_score.entailment)
         else:
             verdicts[i] = ClaimVerdict(claim, "failed_entailment", best_premise, best_score.entailment)
 

@@ -127,3 +127,25 @@ class TestMultiAuthor:
         claim = _claim("Schlebbe & Greifeneder (2020) zeigen einen Effekt.")
         window = "[S. 2]\nSchlebbe berichtet von einem Effekt."
         assert check_attribution(claim, window, primary_surnames=[]) == "author_missing"
+
+
+class TestGermanNonNameWordsBeforeYear:
+    """Kalibrierungs-Fund E5b (Knowles-Gold-Set): Satzanfangs-Funktionswörter
+    vor Jahreszahlen („Zwischen 1929 und 1948 …") matchen AUTHOR_YEAR_RE und
+    wurden als Fremd-Autor extrahiert → author_missing-FP am englischen
+    Quellfenster. Großschreibung ist kein Eigennamen-Signal."""
+
+    def test_zwischen_before_year_is_not_an_author(self):
+        claim = _claim("Zwischen 1929 und 1948 veröffentlichte das Journal Praxisberichte (S. 3).")
+        window = "[S. 3]\nBetween 1929 and 1948 the Journal of Adult Education carried articles."
+        assert check_attribution(claim, window, primary_surnames=[]) == "not_applicable"
+
+    def test_seit_before_year_is_not_an_author(self):
+        claim = _claim("Seit 2005 wächst das Feld stetig (S. 4).")
+        window = "[S. 4]\nThe field has grown since 2005."
+        assert check_attribution(claim, window, primary_surnames=[]) == "not_applicable"
+
+    def test_real_surname_before_year_still_checked(self):
+        claim = _claim("Houle (1961) identifizierte drei Lerntypen (S. 3).")
+        window = "[S. 3]\nText ohne den Namen."
+        assert check_attribution(claim, window, primary_surnames=[]) == "author_missing"
