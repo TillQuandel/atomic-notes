@@ -129,7 +129,7 @@ CAUSAL_RE = re.compile(
     r"führ(?:t|te|ten|en)\s+zu"
     r"|bewirk(?:t|te|ten|en)"
     r"|verursach(?:t|te|ten|en)"
-    r"|weil|daher|deshalb|infolge|aufgrund|bedingt durch|zur Folge"
+    r"|weil|wegen|daher|deshalb|infolge|aufgrund|bedingt durch|zur Folge"
     r")\b",
     re.IGNORECASE,
 )

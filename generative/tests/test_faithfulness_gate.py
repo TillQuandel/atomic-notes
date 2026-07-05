@@ -303,3 +303,21 @@ def test_window_embeddings_cached_per_run(monkeypatch):
 
     window_encodes = [c for c in encode_calls if len(c) > 1]
     assert len(window_encodes) == 1, "Fenster-Saetze wurden mehrfach encodet trotz Cache"
+
+
+def test_nli_hypothesis_strips_page_anchors():
+    # Kalibrierungs-Befund E5b: "(S. 2)" im Hypothesen-Text kippt mDeBERTa auf
+    # neutral (e=0.998 ohne vs. 0.002 mit Anker am identischen Claim).
+    from generative.pipeline.faithfulness_gate import _nli_hypothesis
+
+    assert _nli_hypothesis("Es wurden 12 Interviews gefuehrt (S. 2).") == "Es wurden 12 Interviews gefuehrt."
+    assert (
+        _nli_hypothesis("X betont Y (zit. n. Hrastinski, S. 2). Und Z (S. 5-8) bleibt.") == "X betont Y. Und Z bleibt."
+    )
+    assert _nli_hypothesis("Ohne Anker bleibt alles.") == "Ohne Anker bleibt alles."
+
+
+def test_wegen_triggers_causal_risk():
+    from generative.pipeline.claims import causal_risk
+
+    assert causal_risk("Treffen sind wegen zeitzonenbedingter Verpflichtungen nicht planbar.")

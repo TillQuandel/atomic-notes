@@ -45,6 +45,7 @@ der importierten Bausteine.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 
 from generative.config import MDEBERTA_THRESHOLD_CONFIRMED, MDEBERTA_THRESHOLD_CONTRA
@@ -115,9 +116,21 @@ def top_k_sentences(window_text: str, query: str, k: int, *, _cache: dict | None
     return [sentence for sentence, _ in ranked[:k]]
 
 
+# Seiten-Anker-Klammern im Claim-Text: "(S. 2)", "(zit. n. X, S. 2)". Für das
+# NLI ist der Anker Metadatum, keine prüfbare Behauptung — mit Anker kippt
+# mDeBERTa auf neutral (empirisch: identischer Claim e=0.998 ohne vs. e=0.002
+# MIT "(S. 2)" — Kalibrierungs-Befund E5b, 2026-07-05).
+_ANCHOR_PAREN_RE = re.compile(r"\s*\([^()]*?S\.\s*\d+[^()]*?\)")
+
+
+def _nli_hypothesis(claim_text: str) -> str:
+    """Claim-Text ohne Seiten-Anker-Klammern — die NLI-Hypothese."""
+    return _ANCHOR_PAREN_RE.sub("", claim_text).strip()
+
+
 def _claim_premises(window: str, claim: Claim, top_k: int, cache: dict | None = None) -> list[str]:
     """Top-k Fenster-Sätze plus deren Konkatenation als zusätzliche Premise."""
-    top_sentences = top_k_sentences(window, claim.text, top_k, _cache=cache)
+    top_sentences = top_k_sentences(window, _nli_hypothesis(claim.text), top_k, _cache=cache)
     premises = list(top_sentences)
     if len(top_sentences) > 1:
         premises.append(" ".join(top_sentences))
@@ -178,7 +191,7 @@ def run_faithfulness_gate(
         claim_premises[i] = premises
         for premise in premises:
             pair_owner.append(i)
-            all_pairs.append((premise, claim.text))
+            all_pairs.append((premise, _nli_hypothesis(claim.text)))
 
     scores = score_pairs(all_pairs) if all_pairs else []
 
