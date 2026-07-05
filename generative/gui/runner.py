@@ -51,6 +51,15 @@ def build_run_spec(
     eval-Kopien nach `.cache/eval/baseline`, unabhaengig von `--inbox-dir`
     (Orchestrator-Flag greift dort nicht). Reine Uebersetzung, keine Existenz-
     Validierung hier (die passiert serverseitig in `app.py:start_run`).
+
+    `options["export_formats"]` (F4, Output-Projekt): anders als `inbox_dir`
+    AUCH im Dry-Run wirksam -- json/portable-md/docx/... brauchen keinen
+    Vault-Schreib-Lauf, nur die bereits erzeugten Drafts (s.
+    `pipeline.export_runner.run_export`). `options["export_formats_dir"]` ist
+    der von `app.py:start_run` server-seitig berechnete Session-Export-Ordner
+    (Snapshot, analog `session.vault_path`) -- ohne ihn wird `--export-format`
+    zwar gesetzt, aber ohne `--export-dir` (Orchestrator faellt dann auf
+    seinen eigenen Default zurueck).
     """
     options = options or {}
     extra: list[str] = []
@@ -58,6 +67,10 @@ def build_run_spec(
         extra.append("--no-llm")
     if options.get("inbox_dir") and not dry_run:
         extra.extend(["--inbox-dir", str(options["inbox_dir"])])
+    if options.get("export_formats"):
+        extra.extend(["--export-format", ",".join(options["export_formats"])])
+        if options.get("export_formats_dir"):
+            extra.extend(["--export-dir", str(options["export_formats_dir"])])
     argv = build_argv(pdf_path, dry_run=dry_run, extra=extra or None)
     env_overrides: dict[str, str] = {}
     if options.get("backend"):

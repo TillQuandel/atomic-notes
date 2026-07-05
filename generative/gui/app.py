@@ -14,6 +14,7 @@ from __future__ import annotations
 import io
 import json
 import logging
+import mimetypes
 import re
 import threading
 import time
@@ -26,6 +27,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Streamin
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from generative.gui import env_file, gui_settings, run_history, runner
+from generative.pipeline.export_runner import EXPORT_FILE_SUFFIXES
 
 logger = logging.getLogger(__name__)
 
@@ -44,6 +46,13 @@ _MAX_RUN_RECORDS = 50
 # -- Modul-Konstante, damit Tests sie per monkeypatch isolieren koennen (s.
 # tests/conftest.py) und create_app(settings_path=...) sie injizieren kann.
 _DEFAULT_SETTINGS_PATH = Path(__file__).resolve().parents[1] / ".cache" / "gui" / "settings.json"
+
+# F4 (Output-Projekt): Wurzel fuer die pro-Lauf angelegten Session-Export-Ordner
+# (--export-format-Outputs wie docx/pdf/html/json/...) -- analog _DEFAULT_RUNS_DIR,
+# damit Tests sie per monkeypatch isolieren koennen (s. tests/conftest.py) und
+# create_app(exports_dir=...) sie injizieren kann. NICHT zu verwechseln mit B3s
+# `session.export_dir` (freier Zielordner fuer normale .md-Notes statt Vault-Inbox).
+_DEFAULT_EXPORTS_DIR = Path(__file__).resolve().parents[1] / ".cache" / "gui" / "exports"
 
 # B1b: Ziel-Datei fuer den litellm-API-Key-Endpunkt -- FEST auf generative/.env
 # (identisch zu config.py: `Path(__file__).resolve().parent / ".env"`, dort
@@ -67,7 +76,11 @@ _DEFAULT_ALLOWED_HOSTS = ["127.0.0.1", "localhost", "::1"]
 # (P2 hat dieselbe Pruefung fuer `PUT /api/settings` -- ausfaktoriert statt
 # dupliziert, s. gui_settings.py). `inbox_dir` (B3): freier Export-Ordner statt
 # Vault-Inbox -- nur im Schreib-Modus wirksam (s. `start_run`/`build_run_spec`).
-_OPTION_KEYS = frozenset({"backend", "profile", "no_llm", "inbox_dir"})
+# `export_formats` (F4): zusaetzliche Export-Formate (docx/pdf/html/json/...),
+# wirksam UNABHAENGIG vom Schreib-/Dry-Run-Modus (s. `runner.build_run_spec`).
+# `export_formats_dir` ist server-berechnet (s. `start_run`) und deshalb
+# ABSICHTLICH NICHT hier -- ein Client kann ihn nicht setzen (Whitelist-Reject).
+_OPTION_KEYS = frozenset({"backend", "profile", "no_llm", "inbox_dir", "export_formats"})
 
 
 def _validate_run_options(options) -> tuple[dict, str | None]:
@@ -114,6 +127,16 @@ def _validate_run_options(options) -> tuple[dict, str | None]:
             return {}, "inbox_dir muss ein String sein."
         if inbox_dir.strip():
             normalized["inbox_dir"] = inbox_dir
+
+    # F4: dieselbe Pruefung wie `PUT /api/settings` (gui_settings.validate_export_formats),
+    # ausfaktoriert statt dupliziert. Leere Liste = kein Export gewuenscht, wie
+    # bei einem weggelassenen Feld -- deshalb per Truthiness statt `is not None`
+    # gespeichert (anders als bei den Settings, wo `[]` ein bewusster Wert ist).
+    export_formats, error = gui_settings.validate_export_formats(options.get("export_formats"))
+    if error:
+        return {}, error
+    if export_formats:
+        normalized["export_formats"] = export_formats
 
     return normalized, None
 
@@ -165,6 +188,29 @@ def _active_export_dir(session: "RunSession | None") -> Path | None:
     if session is not None:
         return getattr(session, "export_dir", None)
     return None
+
+
+def _active_export_formats_dir(session: "RunSession | None") -> Path | None:
+    """F4 (analog `_active_export_dir`, aber ein separater Snapshot): der
+    Session-Export-Ordner für --export-format-Outputs (docx/pdf/html/json/...)
+    DIESES Laufs. `None` ohne Session oder ohne angeforderte Export-Formate."""
+    if session is not None:
+        return getattr(session, "export_formats_dir", None)
+    return None
+
+
+def _export_items(export_formats_dir: Path | None) -> list[dict]:
+    """Listet die Dateien im Session-Export-Ordner (F4) für `GET /api/outputs`
+    (`"exports"`-Feld) — sortiert, nur Dateien. Fehlendes/leeres Verzeichnis
+    (kein Export angefordert, oder der Subprocess hat noch nichts geschrieben)
+    → `[]`, kein Fehler (L5: kein Erfinden, aber auch kein Crash)."""
+    if export_formats_dir is None:
+        return []
+    try:
+        entries = sorted((p for p in Path(export_formats_dir).iterdir() if p.is_file()), key=lambda p: p.name)
+    except OSError:
+        return []
+    return [{"name": p.name, "path": str(p)} for p in entries]
 
 
 def _is_within(path: str, root: Path) -> bool:
@@ -261,15 +307,24 @@ def _run_summary_from_events(events: list[dict]) -> dict:
 
 
 def _validate_output_path(
-    path: str, *, vault_path: Path, preview_root: Path, export_dir: Path | None = None
+    path: str,
+    *,
+    vault_path: Path,
+    preview_root: Path,
+    export_dir: Path | None = None,
+    export_formats_dir: Path | None = None,
 ) -> Path | None:
     """Pfad-Whitelist (L4) fuer `/api/outputs/file` + `/api/outputs/archive`:
     nur `.md`-Dateien unterhalb `vault_path`, oder `.md`-Dateien unterhalb
     `preview_root` (die eval-Kopien der Dry-Run-Vorschau), oder `.md`-Dateien
     unterhalb `export_dir` (B3: der zur Laufzeit gewaehlte freie Export-Ordner
     -- gleiche `.md`-Beschraenkung wie beim Vault, da der Export-Ordner
-    ebenso ein beliebiger lokaler Ordner ist). `resolve()` neutralisiert
-    Symlink-Escapes. Alles andere: `None` -> Aufrufer antwortet 403.
+    ebenso ein beliebiger lokaler Ordner ist), oder eine Export-Datei
+    (`EXPORT_FILE_SUFFIXES`: .json/.md/.docx/.pdf/.html/.odt/.epub) unterhalb
+    `export_formats_dir` (F4: Session-Export-Ordner für --export-format-Outputs
+    -- hier sind mehrere Endungen erlaubt, nicht nur `.md`, weil dort echte
+    Binärformate liegen). `resolve()` neutralisiert Symlink-Escapes. Alles
+    andere: `None` -> Aufrufer antwortet 403.
     """
     try:
         resolved = Path(path).resolve()
@@ -291,6 +346,10 @@ def _validate_output_path(
     if export_dir is not None:
         export_base = Path(export_dir).resolve()
         if resolved.is_relative_to(export_base) and resolved.suffix == ".md":
+            return resolved
+    if export_formats_dir is not None:
+        export_formats_base = Path(export_formats_dir).resolve()
+        if resolved.is_relative_to(export_formats_base) and resolved.suffix.lower() in EXPORT_FILE_SUFFIXES:
             return resolved
     return None
 
@@ -318,6 +377,11 @@ class RunSession:
         # `vault_path` oben. `None` = Vault-Inbox (Default) oder Dry-Run
         # (inbox_dir wird dort ignoriert, s. `start_run`).
         self.export_dir: Path | None = None
+        # F4 (Output-Projekt): Snapshot des Session-Export-Ordners fuer
+        # --export-format-Outputs -- eigenstaendig neben `export_dir` (B3, s.
+        # oben), weil beide unabhaengig voneinander gesetzt werden koennen
+        # (Vault-Inbox-Schreib-Lauf + zusaetzliche Formatexporte gleichzeitig).
+        self.export_formats_dir: Path | None = None
         self.preview_root: Path | None = None
         self.runs_dir: Path | None = None
         self.clock: Callable[[], float] = time.time
@@ -429,6 +493,7 @@ def create_app(
     access_summary_fn: Callable[[], dict] | None = None,
     preview_root: Path | None = None,
     runs_dir: Path | None = None,
+    exports_dir: Path | None = None,
     settings_path: Path | None = None,
     env_path: Path | None = None,
     clock: Callable[[], float] | None = None,
@@ -455,6 +520,9 @@ def create_app(
     if runs_dir is None:
         runs_dir = _DEFAULT_RUNS_DIR
     runs_dir = Path(runs_dir)
+    if exports_dir is None:
+        exports_dir = _DEFAULT_EXPORTS_DIR
+    exports_dir = Path(exports_dir)
     if settings_path is None:
         settings_path = _DEFAULT_SETTINGS_PATH
     settings_path = Path(settings_path)
@@ -650,6 +718,15 @@ def create_app(
             # -- ein Symlink koennte sonst nach der Validierung woanders
             # hinzeigen und der Subprocess ausserhalb des Snapshots schreiben.
             options = {**options, "inbox_dir": str(export_dir)}
+        # F4 (Output-Projekt): anders als inbox_dir gilt export_formats UNABHAENGIG
+        # vom Dry-Run-Modus (json/portable-md/docx/... brauchen keinen Vault-
+        # Schreib-Lauf). Der Session-Export-Ordner ist frisch je Lauf (Run-ID,
+        # wie die Historie) -- kein Client-Input, deshalb keine Existenz-/
+        # Pfad-Validierung noetig (anders als bei inbox_dir).
+        export_formats_dir: Path | None = None
+        if options.get("export_formats"):
+            export_formats_dir = (exports_dir / run_history.make_run_id(clock())).resolve()
+            options = {**options, "export_formats_dir": str(export_formats_dir)}
         if not pdf or not Path(pdf).exists():
             return JSONResponse({"error": f"PDF nicht gefunden: {pdf}"}, status_code=400)
         # #2: Quelle muss unter einem erlaubten Root liegen (gelistet/hochgeladen).
@@ -674,6 +751,7 @@ def create_app(
             # weitergewechselt wurde.
             session.vault_path = app.state.vault_path
             session.export_dir = export_dir
+            session.export_formats_dir = export_formats_dir
             session.preview_root = preview_root
             session.runs_dir = runs_dir
             session.clock = clock
@@ -750,31 +828,49 @@ def create_app(
     @app.get("/api/outputs")
     def outputs() -> JSONResponse:
         """Ergebnisliste des aktuellen/letzten Laufs (P3). Nur GET, nicht
-        mutierend -> kein Origin-Check (L4-Ausnahme, wie /api/preview)."""
+        mutierend -> kein Origin-Check (L4-Ausnahme, wie /api/preview).
+
+        `exports` (F4): zusätzlich zu den Notes (`items`) die Dateien im
+        Session-Export-Ordner (--export-format-Outputs) -- eigene, unabhängige
+        Liste, da diese Dateien nicht aus Events aggregiert werden (der
+        Subprocess druckt keine [export]-Events, nur stdout-Log-Zeilen),
+        sondern direkt vom Dateisystem gelistet werden (s. `_export_items`).
+        """
         session = app.state.session
         events = session.events if session is not None else []
         pdf = getattr(session, "pdf", None) if session is not None else None
         dry_run = getattr(session, "dry_run", None) if session is not None else None
         active_vault = _active_vault(session, app.state.vault_path)
         active_export_dir = _active_export_dir(session)
+        active_export_formats_dir = _active_export_formats_dir(session)
         items = _output_items_from_events(
             events, pdf=pdf, vault_path=active_vault, preview_root=preview_root, export_dir=active_export_dir
         )
-        return JSONResponse({"items": items, "dry_run": dry_run})
+        exports = _export_items(active_export_formats_dir)
+        return JSONResponse({"items": items, "dry_run": dry_run, "exports": exports})
 
     @app.get("/api/outputs/file")
     def outputs_file(path: str):
         session = app.state.session
         active_vault = _active_vault(session, app.state.vault_path)
         active_export_dir = _active_export_dir(session)
+        active_export_formats_dir = _active_export_formats_dir(session)
         resolved = _validate_output_path(
-            path, vault_path=active_vault, preview_root=preview_root, export_dir=active_export_dir
+            path,
+            vault_path=active_vault,
+            preview_root=preview_root,
+            export_dir=active_export_dir,
+            export_formats_dir=active_export_formats_dir,
         )
         if resolved is None:
             return JSONResponse({"error": "Pfad nicht erlaubt"}, status_code=403)
         if not resolved.is_file():
             return JSONResponse({"error": "nicht gefunden"}, status_code=404)
-        return FileResponse(resolved, filename=resolved.name, media_type="text/markdown")
+        # F4: Export-Ordner enthält auch Binärformate (docx/pdf/html/odt/epub) --
+        # media_type per Endung statt hart "text/markdown" (das stimmte nur für
+        # Vault-/Preview-/B3-Notes, die ausschließlich .md sind).
+        guessed, _ = mimetypes.guess_type(str(resolved))
+        return FileResponse(resolved, filename=resolved.name, media_type=guessed or "application/octet-stream")
 
     @app.get("/api/outputs/archive")
     def outputs_archive() -> StreamingResponse:
@@ -783,18 +879,24 @@ def create_app(
         pdf = getattr(session, "pdf", None) if session is not None else None
         active_vault = _active_vault(session, app.state.vault_path)
         active_export_dir = _active_export_dir(session)
+        active_export_formats_dir = _active_export_formats_dir(session)
         items = _output_items_from_events(
             events, pdf=pdf, vault_path=active_vault, preview_root=preview_root, export_dir=active_export_dir
         )
+        exports = _export_items(active_export_formats_dir)
         buf = io.BytesIO()
         used: dict[str, int] = {}
         with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
-            for item in items:
+            for item in [*items, *exports]:
                 raw = item.get("path")
                 if not raw:
                     continue
                 resolved = _validate_output_path(
-                    raw, vault_path=active_vault, preview_root=preview_root, export_dir=active_export_dir
+                    raw,
+                    vault_path=active_vault,
+                    preview_root=preview_root,
+                    export_dir=active_export_dir,
+                    export_formats_dir=active_export_formats_dir,
                 )
                 if resolved is None or not resolved.is_file():
                     continue

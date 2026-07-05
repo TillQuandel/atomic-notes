@@ -71,6 +71,7 @@ from generative.pipeline import (
     anchor_repair,
     boilerplate_dedup,
     citation_check,
+    export_runner,
     figure_alt,
     routing_report,
 )
@@ -1851,9 +1852,34 @@ def main(argv: list[str] | None = None):
         help="Zielordner statt 00-inbox/ (wird erstellt falls nicht vorhanden). "
         "Nützlich für A/B-Vergleiche: --inbox-dir 00-inbox/ab-llm/",
     )
+    ap.add_argument(
+        "--export-format",
+        default=None,
+        metavar="FMT[,FMT...]",
+        help="Kommaliste zusätzlicher Export-Formate (Output-Projekt F4): Kern-Set "
+        "json, obsidian-md, portable-md, docx, pdf, html — odt/epub zuschaltbar. "
+        f"Geplante, noch nicht aktivierbare Formate: {', '.join(export_runner.FUTURE_FORMATS)}. "
+        "Ohne dieses Flag kein zusätzlicher Export (unverändertes Verhalten).",
+    )
+    ap.add_argument(
+        "--export-dir",
+        default=None,
+        metavar="PATH",
+        help="Zielordner für --export-format (Default: generative/.cache/exports/<pdf-stem>/).",
+    )
     args = ap.parse_args(argv)
     if not args.source and not args.load_drafts:
         ap.error("--source ist erforderlich (außer mit --load-drafts)")
+
+    # Fail-fast (F4): Format-Fehler VOR jeder teuren/mutierenden Pipeline-Stufe
+    # melden, nicht erst nach Stunden LLM-Arbeit im [7/7]-Block. Ergebnis wird
+    # unten am eigentlichen Verwendungsort wiederverwendet (kein zweites Parsen).
+    export_formats: tuple[str, ...] = ()
+    if args.export_format:
+        try:
+            export_formats = export_runner.parse_export_formats(args.export_format)
+        except ValueError as e:
+            sys.exit(str(e))
 
     _setup_phoenix_tracing()
     # Im GUI-Modus (ATOMIC_AGENT_GUI=1, gesetzt vom GUI-Subprocess-Runner) die
@@ -2216,6 +2242,30 @@ def main(argv: list[str] | None = None):
     from generative.agents.tracing import flush_tracing as _flush_tracing
 
     _flush_tracing()
+
+    # F4 (Output-Projekt): zusätzliche Export-Formate — läuft bewusst UNABHÄNGIG
+    # von args.dry_run (json/portable-md/docx/… brauchen keinen Vault-Schreib-
+    # Lauf, nur die bereits vorhandenen Drafts). export_formats ist oben bereits
+    # fail-fast validiert; hier nur noch die Ausführung + sichtbares Reporting.
+    if export_formats:
+        export_root = (
+            Path(args.export_dir)
+            if args.export_dir
+            else Path(__file__).resolve().parent / ".cache" / "exports" / source_path.stem
+        )
+        exported_files, export_messages = export_runner.run_export(
+            drafts,
+            citation,
+            export_formats,
+            export_root,
+            written_files=[_t for _t, _ in written_targets],
+            dry_run=args.dry_run,
+        )
+        print(f"\n[export] {len(exported_files)} Datei(en) → {export_root}")
+        for _f in exported_files:
+            print(f"  [export] {_f.name}")
+        for _msg in export_messages:
+            print(f"  [export] {_msg}")
 
     # Token + Laufzeit-Summary (Pipeline Stages 1–7) — immer gedruckt (auch dry-run).
     # Stage-8-Eval läuft erst danach; deren Tokens/Zeit kommen in der finalen

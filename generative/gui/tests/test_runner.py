@@ -160,3 +160,51 @@ def test_build_run_spec_inbox_dir_combines_with_other_options():
     assert "--inbox-dir" in argv
     assert argv[argv.index("--inbox-dir") + 1] == "C:/export"
     assert env == {"ATOMIC_AGENT_BACKEND": "litellm"}
+
+
+# --- build_run_spec export_formats (F4: Export-Formatwahl als Lauf-Option) --
+
+
+def test_build_run_spec_export_formats_appends_flags():
+    argv, env = build_run_spec(
+        "foo.pdf",
+        dry_run=True,
+        options={"export_formats": ["docx", "pdf"], "export_formats_dir": "C:/exports/run-1"},
+    )
+    assert "--export-format" in argv
+    assert argv[argv.index("--export-format") + 1] == "docx,pdf"
+    assert "--export-dir" in argv
+    assert argv[argv.index("--export-dir") + 1] == "C:/exports/run-1"
+
+
+def test_build_run_spec_export_formats_empty_list_omits_flags():
+    argv, env = build_run_spec("foo.pdf", dry_run=True, options={"export_formats": []})
+    assert "--export-format" not in argv
+    assert "--export-dir" not in argv
+
+
+def test_build_run_spec_no_export_formats_omits_flags():
+    argv, env = build_run_spec("foo.pdf", dry_run=True, options={})
+    assert "--export-format" not in argv
+    assert "--export-dir" not in argv
+
+
+def test_build_run_spec_export_formats_without_dir_omits_export_dir_flag():
+    # Sollte serverseitig nicht vorkommen (start_run setzt export_formats_dir
+    # immer mit), aber die Funktion selbst darf nicht abstuerzen.
+    argv, env = build_run_spec("foo.pdf", dry_run=True, options={"export_formats": ["docx"]})
+    assert "--export-format" in argv
+    assert "--export-dir" not in argv
+
+
+def test_build_run_spec_export_formats_works_in_dry_run():
+    # Anders als inbox_dir gilt export_formats AUCH im Dry-Run (json/portable-md/
+    # docx/... brauchen keinen Vault-Schreib-Lauf, nur die Drafts).
+    argv, env = build_run_spec(
+        "foo.pdf",
+        dry_run=True,
+        options={"export_formats": ["json"], "export_formats_dir": "C:/exports/run-1"},
+    )
+    assert "--dry-run" in argv
+    assert "--export-format" in argv
+    assert argv[argv.index("--export-format") + 1] == "json"

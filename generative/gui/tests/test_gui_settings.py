@@ -164,3 +164,83 @@ def test_write_then_read_roundtrip_with_vault_path(tmp_path):
     data, warning = gui_settings.read_settings(path)
     assert warning is None
     assert data == {"backend": "litellm", "vault_path": "C:/Vault"}
+
+
+# --- export_formats (F4: Export-Format-Auswahl als Lauf-Option) -----------
+
+
+def test_validate_export_formats_none_means_unset():
+    value, error = gui_settings.validate_export_formats(None)
+    assert error is None
+    assert value is None
+
+
+def test_validate_export_formats_empty_list_ok():
+    value, error = gui_settings.validate_export_formats([])
+    assert error is None
+    assert value == []
+
+
+def test_validate_export_formats_accepts_core_formats():
+    value, error = gui_settings.validate_export_formats(["portable-md", "docx", "pdf", "html", "json"])
+    assert error is None
+    assert value == ["portable-md", "docx", "pdf", "html", "json"]
+
+
+def test_validate_export_formats_accepts_odt_epub():
+    value, error = gui_settings.validate_export_formats(["odt", "epub"])
+    assert error is None
+    assert value == ["odt", "epub"]
+
+
+def test_validate_export_formats_rejects_obsidian_md():
+    # obsidian-md gibt es in der GUI ohnehin als Download (keine GUI-Format-Option).
+    value, error = gui_settings.validate_export_formats(["obsidian-md"])
+    assert value is None
+    assert error is not None
+    assert "obsidian-md" in error
+
+
+def test_validate_export_formats_rejects_unknown_format():
+    value, error = gui_settings.validate_export_formats(["bogus"])
+    assert value is None
+    assert error is not None
+    assert "bogus" in error
+
+
+def test_validate_export_formats_rejects_non_list():
+    value, error = gui_settings.validate_export_formats("docx")
+    assert value is None
+    assert error is not None
+
+
+def test_validate_export_formats_rejects_non_string_items():
+    value, error = gui_settings.validate_export_formats(["docx", 1])
+    assert value is None
+    assert error is not None
+
+
+def test_validate_settings_accepts_export_formats():
+    normalized, error = gui_settings.validate_settings({"export_formats": ["docx", "pdf"]})
+    assert error is None
+    assert normalized == {"export_formats": ["docx", "pdf"]}
+
+
+def test_validate_settings_accepts_empty_export_formats_list():
+    normalized, error = gui_settings.validate_settings({"export_formats": []})
+    assert error is None
+    assert normalized == {"export_formats": []}
+
+
+def test_validate_settings_rejects_invalid_export_formats():
+    normalized, error = gui_settings.validate_settings({"export_formats": ["bogus"]})
+    assert normalized == {}
+    assert error is not None
+
+
+def test_write_then_read_roundtrip_with_export_formats(tmp_path):
+    path = tmp_path / "gui" / "settings.json"
+    gui_settings.write_settings({"export_formats": ["docx", "html"]}, path)
+    data, warning = gui_settings.read_settings(path)
+    assert warning is None
+    assert data == {"export_formats": ["docx", "html"]}

@@ -114,10 +114,51 @@
           <p class="hint">Schneller/günstiger, aber kein Refine-Loop → systematisch schwächere Notes.</p>
         </fieldset>
 
-        <!-- B3: Ziel-Ordner waehlbar (Vault-Inbox vs. freier Export-Ordner).
-             Format-Wahl (z.B. HTML/PDF-Export statt .md) bewusst NICHT gebaut —
-             abhaengig von „Kanonisches Note-Modell und Renderer" (existiert
-             noch nicht, kein Dropdown fuer Nichtexistentes, L5). -->
+        <!-- F4 (Output-Projekt): zusätzliche Export-Formate als Lauf-Option --
+             Formatwahl VOR dem Lauf (Entscheid Till 2026-07-05), keine
+             On-Demand-Konvertierung beim Download. Gilt UNABHÄNGIG vom
+             Dry-Run/Vault-Ziel (json/portable-md/docx/... brauchen keinen
+             Vault-Schreib-Lauf). obsidian-md fehlt bewusst -- die .md-Notes
+             gibt es in der GUI ohnehin als Download. -->
+        <fieldset id="export-options">
+          <legend>Export-Formate</legend>
+          <p class="hint">Zusätzlich zu den Notes werden diese Formate im Export-Bereich der Ergebnisse erzeugt.</p>
+          <label class="check">
+            <input type="checkbox" class="opt-export-format" value="portable-md">
+            Portables Markdown
+          </label>
+          <label class="check">
+            <input type="checkbox" class="opt-export-format" value="docx">
+            Word (.docx)
+          </label>
+          <label class="check">
+            <input type="checkbox" class="opt-export-format" value="pdf">
+            PDF
+          </label>
+          <label class="check">
+            <input type="checkbox" class="opt-export-format" value="html">
+            HTML
+          </label>
+          <label class="check">
+            <input type="checkbox" class="opt-export-format" value="json">
+            JSON
+          </label>
+          <details>
+            <summary>mehr Formate</summary>
+            <label class="check">
+              <input type="checkbox" class="opt-export-format" value="odt">
+              OpenDocument (.odt)
+            </label>
+            <label class="check">
+              <input type="checkbox" class="opt-export-format" value="epub">
+              EPUB
+            </label>
+          </details>
+        </fieldset>
+
+        <!-- B3: Ziel-Ordner waehlbar (Vault-Inbox vs. freier Export-Ordner) fuer
+             die normalen .md-Notes. Format-Wahl (HTML/PDF/docx/...) ist die
+             separate "Export-Formate"-Fieldset oben (F4, Output-Projekt). -->
         <fieldset id="target-options">
           <legend>Ziel</legend>
           <label class="check">
@@ -165,6 +206,13 @@
       </div>
       <p id="results-empty" class="hint">Keine Notes in diesem Lauf.</p>
       <ul id="results-list" class="preview-list"></ul>
+
+      <!-- F4 (Output-Projekt): zusätzliche Export-Formate (docx/pdf/html/json/...),
+           nur sichtbar wenn tatsächlich welche angefordert wurden (GET /api/outputs → exports). -->
+      <div id="exports-section" hidden>
+        <h3 id="exports-h">Exporte</h3>
+        <ul id="exports-list" class="preview-list"></ul>
+      </div>
     </section>
 
     <section class="panel" aria-labelledby="history-h">

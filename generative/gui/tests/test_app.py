@@ -919,7 +919,8 @@ def test_outputs_empty_without_any_run(tmp_path):
     )
     r = TestClient(app, base_url="http://localhost").get("/api/outputs")
     assert r.status_code == 200
-    assert r.json() == {"items": [], "dry_run": None}
+    # F4: "exports" ist additiv immer im Response (leer ohne Export-Formate/Session).
+    assert r.json() == {"items": [], "dry_run": None, "exports": []}
 
 
 def test_outputs_lists_preview_items_after_dry_run(client):
@@ -1384,6 +1385,224 @@ def test_export_dir_session_snapshot_survives_vault_switch(tmp_path):
     assert r.status_code == 200
     ok = c.get("/api/outputs/file", params={"path": str(note)})
     assert ok.status_code == 200
+
+
+# --- F4 (Output-Projekt): Export-Formatwahl als Lauf-Option ----------------
+# Session-Export-Ordner fuer --export-format-Outputs (docx/pdf/html/json/...) --
+# eigener Snapshot `session.export_formats_dir`, getrennt von B3s `session.export_dir`
+# (dort geht es um den Vault-Inbox-Ersatz fuer normale .md-Notes).
+
+
+def test_run_options_export_formats_valid_accepted(client):
+    c, pdf = client
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True, "options": {"export_formats": ["docx", "pdf"]}})
+    assert r.status_code == 200
+    assert r.json()["options"]["export_formats"] == ["docx", "pdf"]
+
+
+def test_run_options_export_formats_invalid_returns_422(client):
+    c, pdf = client
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True, "options": {"export_formats": ["bogus"]}})
+    assert r.status_code == 422
+
+
+def test_run_options_export_formats_rejects_obsidian_md(client):
+    # obsidian-md ist kein GUI-Format (die .md-Notes gibt es ohnehin als Download).
+    c, pdf = client
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True, "options": {"export_formats": ["obsidian-md"]}})
+    assert r.status_code == 422
+
+
+def test_run_options_export_formats_empty_list_omitted_from_response(client):
+    c, pdf = client
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True, "options": {"export_formats": []}})
+    assert r.status_code == 200
+    assert "export_formats" not in r.json()["options"]
+
+
+def _export_formats_app(tmp_path, *, dry_run=True, export_formats=("json", "docx")):
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=fake_run,
+        pdf_dirs=[tmp_path],
+        vault_path=vault,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+        exports_dir=tmp_path / "exports",
+    )
+    c = TestClient(app, base_url="http://localhost")
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": dry_run, "options": {"export_formats": list(export_formats)}})
+    _drain(c)
+    return c, app
+
+
+def test_start_run_with_export_formats_sets_session_snapshot_dir(tmp_path):
+    _c, app = _export_formats_app(tmp_path)
+    export_dir = app.state.session.export_formats_dir
+    assert export_dir is not None
+    assert export_dir.is_relative_to((tmp_path / "exports").resolve())
+
+
+def test_start_run_export_formats_works_in_dry_run(tmp_path):
+    # Anders als B3 inbox_dir: export_formats gilt AUCH im Dry-Run (json/
+    # portable-md/docx/... brauchen keinen Vault-Schreib-Lauf).
+    _c, app = _export_formats_app(tmp_path, dry_run=True)
+    assert app.state.session.export_formats_dir is not None
+
+
+def test_start_run_without_export_formats_no_session_snapshot_dir(client):
+    c, pdf = client
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    _drain(c)
+
+
+def test_start_run_forwards_export_formats_dir_to_run_factory(tmp_path):
+    captured = {}
+
+    def capturing_run(pdf, dry_run, register=None, options=None):
+        captured["options"] = options
+        yield {"type": "started", "argv": ["x"]}
+        yield {"type": "exited", "returncode": 0}
+
+    pdf = tmp_path / "x.pdf"
+    pdf.write_bytes(b"%PDF-1.4")
+    app = create_app(
+        run_factory=capturing_run,
+        pdf_dirs=[tmp_path],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "u",
+        doctor_fn=fake_doctor,
+        exports_dir=tmp_path / "exports",
+    )
+    c = TestClient(app, base_url="http://localhost")
+    r = c.post("/api/run", json={"pdf": str(pdf), "dry_run": True, "options": {"export_formats": ["docx"]}})
+    assert r.status_code == 200
+    c.get("/api/stream")
+    assert captured["options"]["export_formats"] == ["docx"]
+    export_formats_dir = Path(captured["options"]["export_formats_dir"])
+    assert export_formats_dir.is_relative_to((tmp_path / "exports").resolve())
+
+
+def test_outputs_exports_empty_when_no_export_formats_requested(client):
+    c, pdf = client
+    c.post("/api/run", json={"pdf": str(pdf), "dry_run": True})
+    _drain(c)
+    assert c.get("/api/outputs").json()["exports"] == []
+
+
+def test_outputs_exports_empty_when_export_formats_dir_has_no_files(tmp_path):
+    c, _app = _export_formats_app(tmp_path)
+    assert c.get("/api/outputs").json()["exports"] == []
+
+
+def test_outputs_exports_lists_files_sorted(tmp_path):
+    c, app = _export_formats_app(tmp_path)
+    export_dir = app.state.session.export_formats_dir
+    # Im echten Lauf legt export_runner.run_export das Verzeichnis an -- der
+    # Fake-run_factory hier tut das nicht, also simuliert der Test es.
+    export_dir.mkdir(parents=True, exist_ok=True)
+    (export_dir / "b.docx").write_bytes(b"stub")
+    (export_dir / "a.json").write_text("{}", encoding="utf-8")
+    body = c.get("/api/outputs").json()
+    names = [item["name"] for item in body["exports"]]
+    assert names == ["a.json", "b.docx"]
+    for item in body["exports"]:
+        assert Path(item["path"]).is_file()
+
+
+def test_outputs_file_downloads_binary_export_with_guessed_mimetype(tmp_path):
+    c, app = _export_formats_app(tmp_path)
+    export_dir = app.state.session.export_formats_dir
+    export_dir.mkdir(parents=True, exist_ok=True)
+    pdf_file = export_dir / "Note.pdf"
+    pdf_file.write_bytes(b"%PDF-1.4 stub")
+    r = c.get("/api/outputs/file", params={"path": str(pdf_file)})
+    assert r.status_code == 200
+    assert r.headers["content-type"] == "application/pdf"
+    assert r.content == b"%PDF-1.4 stub"
+
+
+def test_outputs_file_rejects_path_outside_export_formats_dir(tmp_path):
+    c, app = _export_formats_app(tmp_path)
+    export_dir = app.state.session.export_formats_dir
+    export_dir.mkdir(parents=True, exist_ok=True)
+    outside = export_dir.parent / "fremd.pdf"
+    outside.write_bytes(b"x")
+    r = c.get("/api/outputs/file", params={"path": str(outside)})
+    assert r.status_code == 403
+
+
+def test_outputs_file_rejects_disallowed_suffix_under_export_formats_dir(tmp_path):
+    c, app = _export_formats_app(tmp_path)
+    export_dir = app.state.session.export_formats_dir
+    export_dir.mkdir(parents=True, exist_ok=True)
+    exe = export_dir / "bad.exe"
+    exe.write_bytes(b"x")
+    r = c.get("/api/outputs/file", params={"path": str(exe)})
+    assert r.status_code == 403
+
+
+def test_outputs_archive_includes_export_formats_files(tmp_path):
+    c, app = _export_formats_app(tmp_path)
+    export_dir = app.state.session.export_formats_dir
+    export_dir.mkdir(parents=True, exist_ok=True)
+    (export_dir / "Note.json").write_text("{}", encoding="utf-8")
+    r = c.get("/api/outputs/archive")
+    assert r.status_code == 200
+    zf = zipfile.ZipFile(io.BytesIO(r.content))
+    assert "Note.json" in zf.namelist()
+
+
+def test_validate_output_path_helper_allows_json_under_export_formats_dir(tmp_path):
+    from generative.gui.app import _validate_output_path
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    preview = tmp_path / "preview"
+    preview.mkdir()
+    export_formats_dir = tmp_path / "exports" / "run-1"
+    export_formats_dir.mkdir(parents=True)
+    f = export_formats_dir / "a.json"
+    f.write_text("{}", encoding="utf-8")
+    resolved = _validate_output_path(
+        str(f), vault_path=vault, preview_root=preview, export_formats_dir=export_formats_dir
+    )
+    assert resolved == f.resolve()
+
+
+def test_validate_output_path_helper_rejects_outside_export_formats_dir(tmp_path):
+    from generative.gui.app import _validate_output_path
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    preview = tmp_path / "preview"
+    preview.mkdir()
+    export_formats_dir = tmp_path / "exports" / "run-1"
+    export_formats_dir.mkdir(parents=True)
+    outside = tmp_path / "a.json"
+    outside.write_text("{}", encoding="utf-8")
+    resolved = _validate_output_path(
+        str(outside), vault_path=vault, preview_root=preview, export_formats_dir=export_formats_dir
+    )
+    assert resolved is None
+
+
+def test_validate_output_path_helper_without_export_formats_dir_unaffected(tmp_path):
+    from generative.gui.app import _validate_output_path
+
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    preview = tmp_path / "preview"
+    preview.mkdir()
+    outside = tmp_path / "a.json"
+    outside.write_text("{}", encoding="utf-8")
+    resolved = _validate_output_path(str(outside), vault_path=vault, preview_root=preview)
+    assert resolved is None
 
 
 def test_archive_filename_helper_uses_pdf_stem():
