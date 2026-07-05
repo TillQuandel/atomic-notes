@@ -572,6 +572,12 @@ def _apply_faithfulness_gate(draft: AtomicNoteDraft, page_index: dict | None, ci
     importiert.
     """
     if not (ENABLE_FAITHFULNESS_GATE and page_index and draft.action == "create"):
+        if ENABLE_FAITHFULNESS_GATE and page_index and draft.action != "create":
+            # Skip sichtbar machen — ein stilles Gate wäre die dokumentierte
+            # Anti-Klasse „Signal gesetzt, aber nie gelesen" in neuer Form
+            # (realer Hrastinski-E2E 2026-07-05: alle Notes via cross_reference
+            # auf extend gedreht, Gate skippte kommentarlos).
+            print(f"      [faithfulness] skipped (action={draft.action})")
         return
 
     from generative.pipeline.faithfulness_gate import run_faithfulness_gate
