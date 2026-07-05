@@ -323,6 +323,33 @@ def test_wegen_triggers_causal_risk():
     assert causal_risk("Treffen sind wegen zeitzonenbedingter Verpflichtungen nicht planbar.")
 
 
+class TestSentenceSplitCalibrationE5b:
+    """Splitter-Fixes aus der Gold-Set-Kalibrierung (E5b, 2026-07-05):
+    nummerierte Listen-Marker und Ordinale vor Jahrhundert/Jh. erzeugten
+    Junk-Claims bzw. zerrissene Claims (real: Knowles-Notes)."""
+
+    def test_numbered_list_marker_produces_no_junk_claim(self):
+        from generative.pipeline.claims import decompose_claims
+
+        body = "1. Ein Klima schaffen, das 90 Prozent Beteiligung beguenstigt (S. 8).\n2. Strukturen etablieren.\n"
+        claims = decompose_claims(body)
+
+        assert all(c.text != "1." for c in claims)
+        assert all(c.text != "2." for c in claims)
+        # der eigentliche Inhalt des ersten Items bleibt Claim (number-Risk)
+        assert any("90 Prozent" in c.text for c in claims)
+
+    def test_ordinal_before_jahrhundert_does_not_split_sentence(self):
+        from generative.pipeline.claims import decompose_claims
+
+        body = "Sie verbreiteten sich im 18. und 19. Jahrhundert auf 95 Prozent der Schulen (S. 2).\n"
+        claims = decompose_claims(body)
+
+        assert len(claims) == 1
+        assert "18. und 19. Jahrhundert" in claims[0].text
+        assert claims[0].anchor_page == 2
+
+
 # ---- Fix 1 (E5b): Prefix-Konkatenationen als Premises --------------------------
 
 
