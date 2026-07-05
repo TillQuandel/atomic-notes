@@ -10,7 +10,7 @@ from pathlib import Path
 import yaml
 
 from generative.config import VAULT, INBOX, LITERATURE_DIR, CRITIC_AUTO_THRESHOLD
-from generative.schemas.atomic_note import AtomicNoteDraft
+from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor
 from generative.schemas.citation import CitationMeta
 from shared.author_norm import drop_institutional_coauthors
 
@@ -103,6 +103,32 @@ def _strip_page_prefix(value: str) -> str:
     return _PAGE_PREFIX_RE.sub("", value)
 
 
+def collect_anchor_pages(note_anchors: list[TextAnchor]) -> list[str]:
+    """Extrahiert, dedupliziert und sortiert Seiten-Belege aus Text-Ankern.
+
+    Geteilter Helper zwischen `build_quellen_block` (Vault-Quellen-Block mit
+    Wikilink) und `portable_md.render_portable_note` (Output-Projekt F2,
+    Klartext-Quellen-Absatz) — beide brauchen dieselbe Seiten-Logik für
+    unterschiedliche Ausgabeformate.
+
+    F8: `page` (LLM-exact) ODER `fuzzy_page` (rapidfuzz-Fallback) — beide sind
+    valide Seitenbelege. Issue #20: Anker-Werte tragen bereits den `S. `-Prefix
+    (Verifier setzt `page_str = f"S. {n}"`) — hier gestrippt, da beide Aufrufer
+    ihn selbst voranstellen. Numerisch statt lexikografisch sortiert und
+    range-aware (Anker tragen auch "159–160" → int() auf die erste Zahl, sonst
+    mis-sortiert/crasht ein Range). (Qwen-Review HIGH, 2. Durchgang.)
+    """
+    _seen_pages = {
+        _strip_page_prefix((a.page or a.fuzzy_page).strip())
+        for a in note_anchors
+        if (a.page or a.fuzzy_page) and (a.page or a.fuzzy_page).strip().lower() not in ("none", "null", "")
+    }
+    return sorted(
+        (p for p in _seen_pages if p),
+        key=lambda p: (int(m.group()) if (m := re.match(r"\d+", p)) else 10**9, p),
+    )
+
+
 def build_quellen_block(note: AtomicNoteDraft, source_file: str, citation: CitationMeta | None) -> str:
     """Quellen-Block deterministisch aus CitationMeta + verifizierten Anker-Pages.
     Kein Halluzinations-Risiko, weil das Modell nichts mehr selbst schreibt.
@@ -119,22 +145,9 @@ def build_quellen_block(note: AtomicNoteDraft, source_file: str, citation: Citat
     else:
         title = raw_title
 
-    # Seiten aus verifizierten Ankern. F8: page (LLM-exact) ODER fuzzy_page
-    # (rapidfuzz-Fallback) — beide sind valide Seitenbelege für den Quellen-Block.
-    # Issue #20: Anker-Werte enthalten bereits den `S. `-Prefix (Verifier setzt
-    # `page_str = f"S. {n}"`). Hier strippen, da Z. 119 ihn erneut voranstellt.
-    _seen_pages = {
-        _strip_page_prefix((a.page or a.fuzzy_page).strip())
-        for a in note.source_anchors
-        if (a.page or a.fuzzy_page) and (a.page or a.fuzzy_page).strip().lower() not in ("none", "null", "")
-    }
-    # Leere Reste (z.B. "S. " ohne Zahl → "") raus; numerisch statt lexikografisch
-    # sortieren und range-aware (Anker tragen auch "159–160" → int() auf die erste
-    # Zahl, sonst mis-sortiert/crasht ein Range). (Qwen-Review HIGH, 2. Durchgang.)
-    pages = sorted(
-        (p for p in _seen_pages if p),
-        key=lambda p: (int(m.group()) if (m := re.match(r"\d+", p)) else 10**9, p),
-    )
+    # Seiten aus verifizierten Ankern — geteilter Helper (siehe collect_anchor_pages
+    # Docstring), auch vom portablen Markdown-Renderer (F2) genutzt.
+    pages = collect_anchor_pages(note.source_anchors)
     pages_str = ", ".join(pages) if pages else ""
 
     # Quellen-Block: Wikilink zeigt direkt auf die PDF im Vault (Junction
