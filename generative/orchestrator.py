@@ -74,6 +74,7 @@ from generative.pipeline import (
     figure_alt,
     routing_report,
 )
+from generative.pipeline.page_index import build_page_index
 from generative.schemas.atomic_note import AtomicNoteDraft, ConceptPlan
 from generative.schemas.citation import CitationMeta, build_citation_meta, crossref_override_blocked
 from generative.config import (
@@ -92,6 +93,7 @@ from generative.config import (
     MAX_CHUNKS_SHORT_DOC,
     MAX_PAGES_SHORT_DOC,
     REDUNDANT_SIBLING_COSINE_THRESHOLD,
+    ENABLE_FAITHFULNESS_GATE,
 )
 from generative.runtime_config import (
     load_runtime_config,
@@ -556,6 +558,36 @@ def _collect_stage6_results(results, failed_dir: Path):
     return survived, crashes
 
 
+def _apply_faithfulness_gate(draft: AtomicNoteDraft, page_index: dict | None, citation: CitationMeta) -> None:
+    """Faithfulness-Gate-Anwendung (E6, #69) — mutiert `draft` in-place, sonst pure.
+
+    Aus `_run_note_pipeline` extrahiert, damit der Kleber (welche Felder/Flags
+    gesetzt werden) isoliert testbar ist, ohne die volle Pipeline mocken zu
+    müssen (Lehre: Orchestrator-Wiring-Bugs entstehen im Kleber).
+
+    Enthält den vollen Guard: Flag default aus bis Human-Kalibrierung (#123);
+    nur für `action=="create"` — Merge-Stubs/Extends tragen Verwaltungstext,
+    der Junk-Claims erzeugt (Kalibrierungs-Report E5b §Konsequenzen), Hubs
+    sind Übersichts-Notes. Lazy Import: bei Flag aus wird kein ML-Modul
+    importiert.
+    """
+    if not (ENABLE_FAITHFULNESS_GATE and page_index and draft.action == "create"):
+        return
+
+    from generative.pipeline.faithfulness_gate import run_faithfulness_gate
+
+    gate = run_faithfulness_gate(draft.body, page_index, citation)
+    if gate.failed:
+        draft.faithfulness_fail = True
+    for v in gate.verdicts:
+        if v.status.startswith("failed_"):
+            e_txt = f" e={v.entailment:.2f}" if v.entailment is not None else ""
+            draft.quality_flags.append(f"⚠️ Faithfulness: {v.status}{e_txt} — {v.claim.text[:100]}")
+    if gate.n_abstained:
+        draft.quality_flags.append(f"Faithfulness: {gate.n_abstained} Claim(s) abstained (nicht prüfbar — kein Fail)")
+    print(f"      [faithfulness] {gate.n_supported} supported / {gate.n_failed} failed / {gate.n_abstained} abstained")
+
+
 def _run_note_pipeline(
     i: int,
     n_total: int,
@@ -577,6 +609,7 @@ def _run_note_pipeline(
     related_mentions: list[str] | None = None,
     runtime_config=None,  # None → LEGACY-Fallback; refine_budget=None → unbegrenztes Budget
     refine_budget: RunBudget | None = None,
+    page_index: dict | None = None,  # E6, #69: nur gesetzt wenn ENABLE_FAITHFULNESS_GATE
 ) -> tuple[int, AtomicNoteDraft]:
     """Stage-6-Pipeline für eine einzelne Note. Läuft in asyncio.to_thread().
 
@@ -765,6 +798,10 @@ def _run_note_pipeline(
                     f"{draft.critic_score}/{draft.hard_gates_pass}, Original behalten"
                 )
 
+    # Faithfulness-Gate (E6, #69): prüft High-Risk-Claims gegen das PDF-Seitenfenster.
+    # Ein Einhängepunkt für Erst- UND Refine-Pfad, da draft hier final ist.
+    _apply_faithfulness_gate(draft, page_index, citation)
+
     # #45: Routing-Grund + konkrete Quality-Flags auch im echten Lauf sichtbar
     # (bisher erschienen die Flags nur im --dry-run).
     print(f"      {routing_report.routing_status_line(draft)}")
@@ -825,6 +862,11 @@ async def process_all_notes_async(
         failed_dir = CACHE_DIR / "failed" / _RUN_ID
     run_meta = {"run_id": _RUN_ID, "pdf": source_path.name, "backend": BACKEND}
 
+    # Faithfulness-Gate (E6, #69): EINMAL pro Lauf gebaut, nicht pro Note.
+    # Nur bei aktivem Flag — build_page_index selbst ist ML-frei, aber ohne
+    # Flag hat kein Aufrufer Verwendung dafür.
+    page_index = build_page_index(full_text) if ENABLE_FAITHFULNESS_GATE else None
+
     async def _with_sem(i: int, draft: AtomicNoteDraft):
         async with sem:
             return await asyncio.to_thread(
@@ -849,6 +891,7 @@ async def process_all_notes_async(
                 related_mentions,
                 runtime_config,
                 refine_budget,
+                page_index=page_index,
                 _run_meta=run_meta,
             )
 

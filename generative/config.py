@@ -255,6 +255,11 @@ NLI_CONTRADICTION_THRESHOLD = 0.7
 # Default: disabled — per ENV ENABLE_MDEBERTA_NLI=1 aktivieren.
 ENABLE_MDEBERTA_NLI = os.getenv("ENABLE_MDEBERTA_NLI", "0") in ("1", "true", "True")
 MDEBERTA_NLI_MODEL = "MoritzLaurer/mDeBERTa-v3-base-mnli-xnli"
+
+# Faithfulness-Gate (E6, #69): verdrahtet run_faithfulness_gate in die Note-Pipeline
+# (orchestrator.py) und ins Vault-Routing (auto_write_decision). Default aus bis
+# Human-Kalibrierung (#123); bei aus wird kein ML-Modell geladen.
+ENABLE_FAITHFULNESS_GATE = os.getenv("ENABLE_FAITHFULNESS_GATE", "0") in ("1", "true", "True")
 # Thresholds für NLI-Labels (unkalibriert — Youden-J-Kalibrierung vorgesehen).
 # entailment >= CONFIRMED → confirmed; contradiction >= CONTRA → hallucinated; else uncertain.
 # CONFIRMED: nur bei direkten Zitaten / sehr engem Entailment (0.7+)

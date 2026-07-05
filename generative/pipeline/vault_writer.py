@@ -492,6 +492,12 @@ def auto_write_decision(note: AtomicNoteDraft) -> tuple[bool, str]:
     if note.source_status == "edition-unverified":
         return False, "edition unverifiziert (Auszug ohne DOI)"
 
+    # Faithfulness-Gate-Veto (E6, #69): überstimmt auch die Hub-Ausnahme —
+    # ein High-Risk-Claim ohne Quellendeckung ist unabhängig vom Note-Typ
+    # ein Review-Fall, kein Auto-Vault-Kandidat.
+    if note.faithfulness_fail:
+        return False, "Faithfulness-Gate: High-Risk-Claim nicht durch Quelle gedeckt — Review nötig"
+
     if not note.hard_gates_pass and not is_strong_hub:
         return False, "hard-gate fail (Glance/Future-Self/Quellen)"
     # Pfad C: Hub-Note mit Score ≥ 4 und ≥2 Sub-Konzepten → Vault auch ohne HG-pass

@@ -30,6 +30,8 @@ class AtomicNoteDraft:
     )  # title → Kerncharakteristik aus Sub-Note-H1
     critic_score: int = 0  # 0–5 (5 Tests: Title, Glance, Future-Self, Quellen, Deletion)
     hard_gates_pass: bool = False  # Glance + Future-Self + Quellen alle bestanden
+    faithfulness_fail: bool = False  # Faithfulness-Gate (E6): >=1 High-Risk-Claim failed
+    # — Routing-Veto in auto_write_decision
     revision_hint: Optional[str] = None  # für Self-Refine-Loop (Milestone 3.6)
     confidence_reasoning: Optional[str] = None  # CERQual-Begründung bei low/medium
     auto_vault_recommended: Optional[bool] = None  # v23: vault-vs-inbox-Routing ist

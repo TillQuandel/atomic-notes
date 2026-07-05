@@ -7,7 +7,7 @@ bleiben unverändert). Der dritte NLI-Nutzer `agents.cross_reference._nli_valida
 nutzt ein anderes Modell (CrossEncoder `NLI_MODEL_NAME`) mit anderer Semantik (Contradiction-
 Gate gegen Vault-Kandidaten) und wird bewusst NICHT migriert.
 
-Keine Pipeline-Verdrahtung, kein Gate, kein ENV-Flag-Auswertung hier — `ENABLE_MDEBERTA_NLI`
+Keine Pipeline-Verdrahtung, kein Gate, kein ENV-Flag-Auswertung hier — `ENABLE_FAITHFULNESS_GATE`
 wird erst vom Faithfulness-Gate (Etappe E6) konsultiert. Dieses Modul ist flag-frei nutzbar.
 
 **Abstain-Vertrag:** Ist das Modell nicht ladbar (fehlende `transformers`/`torch`,
