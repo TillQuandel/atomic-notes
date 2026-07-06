@@ -458,3 +458,19 @@ def test_pdfinfo_keeps_title_and_pages():
     meta = _parse_pdfinfo_output(_PDFINFO_RETYPED)
     assert meta.get("Title") == "What Is Andragogy?"
     assert meta.get("Pages") == "25"
+
+
+def test_pdf_metadata_missing_pdfinfo_binary_returns_empty(monkeypatch, tmp_path):
+    # CI-Smoke-Fund (#97, windows-latest): fehlendes pdfinfo-Binary (WinError 2,
+    # choco-Xpdf-Paketierung) crashte die Pipeline hart, obwohl pdf_metadata
+    # fail-soft designt ist (returncode != 0 -> {}). Not-Found muss denselben
+    # Pfad nehmen.
+    import subprocess as _subprocess
+
+    from generative.pipeline import pdf_chunker as _pc
+
+    def _raise_not_found(*args, **kwargs):
+        raise FileNotFoundError(2, "The system cannot find the file specified")
+
+    monkeypatch.setattr(_pc.subprocess, "run", _raise_not_found)
+    assert _pc.pdf_metadata(tmp_path / "x.pdf") == {}

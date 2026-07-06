@@ -455,10 +455,20 @@ def _parse_pdfinfo_output(stdout: str) -> dict[str, str]:
 
 def pdf_metadata(pdf_path: Path) -> dict[str, str]:
     """Liest pdfinfo-Metadaten als dict (Title, Subject, Pages zitierfähig;
-    Info-Dict-Autor/-CreationDate nur diagnostisch — siehe _parse_pdfinfo_output)."""
-    result = subprocess.run(
-        ["pdfinfo", str(pdf_path)], capture_output=True, text=True, encoding="utf-8", errors="replace"
-    )
+    Info-Dict-Autor/-CreationDate nur diagnostisch — siehe _parse_pdfinfo_output).
+
+    Fail-soft wie der returncode-Pfad: fehlt das pdfinfo-Binary ganz (WinError 2
+    — z. B. choco-Xpdf-Paketierung mit pdftotext, aber ohne pdfinfo), liefert
+    die Funktion {} statt die Pipeline hart zu crashen. pdfinfo-Metadaten sind
+    optional; die Nutzer-Meldung dafür macht der doctor-Check (check_tool).
+    Fund: erster CI-Lauf des Smoke-E2E (#97) auf windows-latest.
+    """
+    try:
+        result = subprocess.run(
+            ["pdfinfo", str(pdf_path)], capture_output=True, text=True, encoding="utf-8", errors="replace"
+        )
+    except (FileNotFoundError, OSError):
+        return {}
     if result.returncode != 0:
         return {}
     return _parse_pdfinfo_output(result.stdout)
