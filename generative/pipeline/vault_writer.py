@@ -1035,7 +1035,10 @@ def write_note(
             marker = f"[Merge-Stub -> {existing_vault.relative_to(VAULT)}]"
         else:
             marker = "[Vault-Empf.]" if auto else f"[Inbox-Review: {reason}]"
-        safe = lambda s: s.encode("ascii", "replace").decode("ascii")
+
+        def safe(s):
+            return s.encode("ascii", "replace").decode("ascii")
+
         print(f"  [DRY-RUN] -> Inbox: {target.name}  {marker}")
         print(
             f"    Score: {note.critic_score}/5 | Hard-Gates: {'pass' if note.hard_gates_pass else 'fail'} | Confidence: {note.synthesis_confidence}"

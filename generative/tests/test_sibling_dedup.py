@@ -195,7 +195,7 @@ def test_heading_self_link_removed():
     kept, dropped = resolve_sibling_dups([d_a, d_b])
 
     assert dropped == 1
-    assert not any("affektiver zugang" in l.lower() for l in kept[0].related)
+    assert not any("affektiver zugang" in link.lower() for link in kept[0].related)
     assert "[[Keep]]" in kept[0].related
 
 

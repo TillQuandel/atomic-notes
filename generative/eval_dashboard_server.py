@@ -1114,8 +1114,8 @@ def main() -> None:
     server = HTTPServer(("127.0.0.1", args.port), Handler)
     url = f"http://localhost:{args.port}"
     print(f"[dashboard] Server laeuft auf {url}")
-    print(f"[dashboard] Daten werden alle 15 Sekunden automatisch aktualisiert.")
-    print(f"[dashboard] Beenden mit Ctrl+C")
+    print("[dashboard] Daten werden alle 15 Sekunden automatisch aktualisiert.")
+    print("[dashboard] Beenden mit Ctrl+C")
 
     Timer(0.5, lambda: webbrowser.open(url)).start()
 

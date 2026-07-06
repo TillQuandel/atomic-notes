@@ -2,6 +2,12 @@
 
 from __future__ import annotations
 
+from generative.agents.base import call_claude
+from generative.agents.cross_reference import _tokens  # Stoppwort-gefilterte Content-Tokens
+from generative.agents.structured_output import parse_planner_output
+from generative.config import MODEL_PLANNER, TITLE_PRESENCE_COSINE_THRESHOLD
+from generative.schemas.atomic_note import ConceptPlan, ConceptItem
+
 
 # Generika-Blacklist (portiert aus extractive/gliner_planner.py, angepasst für LLM-Output).
 # Fängt seltene LLM-"Ausrutscher" ab wenn trotz Prompt-Vorgabe abstrakte Einzel-Konzepte
@@ -55,12 +61,6 @@ _GENERIC_BLACKLIST: frozenset[str] = frozenset(
         "elements",
     }
 )
-
-from generative.agents.base import call_claude
-from generative.agents.cross_reference import _tokens  # Stoppwort-gefilterte Content-Tokens
-from generative.agents.structured_output import parse_planner_output
-from generative.config import MODEL_PLANNER, TITLE_PRESENCE_COSINE_THRESHOLD
-from generative.schemas.atomic_note import ConceptPlan, ConceptItem
 
 _PROMPT = """Du bist ein Wissensmanagement-Assistent, der Atomic Notes in Obsidian anlegt.
 

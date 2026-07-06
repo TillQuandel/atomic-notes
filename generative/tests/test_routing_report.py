@@ -114,10 +114,10 @@ class TestFinalReportAggregateLine:
 
         drafts = [_draft(critic_score=5, hard_gates_pass=True, source_status="unresolved")]
         lines = final_report_lines(drafts)
-        inbox_line = next(l for l in lines if "Inbox" in l)
+        inbox_line = next(line for line in lines if "Inbox" in line)
         assert "Quelle offen" not in inbox_line
         # und die Vault-Note IST trotzdem als Quelle-offen gezählt
-        assert any("Quelle offen" in l and "1" in l for l in lines)
+        assert any("Quelle offen" in line and "1" in line for line in lines)
 
 
 class TestSourceStatusFraming:

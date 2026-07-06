@@ -11,8 +11,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent.parent
-
 from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor
 
 from generative.pipeline.figure_alt import (
@@ -24,6 +22,7 @@ from generative.pipeline.figure_alt import (
     pdf_index_to_anchor_page,
 )
 
+ROOT = Path(__file__).resolve().parent.parent
 FIXTURES = ROOT / "tests" / "fixtures"
 
 

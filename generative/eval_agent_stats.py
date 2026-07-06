@@ -19,7 +19,7 @@ def aggregate(trace_path: Path) -> dict[str, dict]:
     LLM-Call-Entries haben kein 'type'-Feld (base._trace()-Format).
     Strukturierte Events haben type: run_start | anchor_stats | score_result | ...
     """
-    entries = [json.loads(l) for l in trace_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+    entries = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
     llm_calls: dict[str, list] = defaultdict(list)
     anchor_rates: dict[str, list] = defaultdict(list)
@@ -184,7 +184,7 @@ def main() -> None:
 
     if len(paths) == 1:
         trace_path = paths[0]
-        entries = [json.loads(l) for l in trace_path.read_text(encoding="utf-8").splitlines() if l.strip()]
+        entries = [json.loads(line) for line in trace_path.read_text(encoding="utf-8").splitlines() if line.strip()]
         run_start = next((e for e in entries if e.get("type") == "run_start"), {})
         stats = aggregate(trace_path)
         _print_table(stats, run_start.get("model_config"), run_start.get("run_id", trace_path.stem))
@@ -193,7 +193,7 @@ def main() -> None:
         print(f"{'Run':<24} {'Agent':<14} {'Calls':>5} {'In-Tok':>8} {'Out-Tok':>8} {'avg ms':>7} {'Vault%':>7}")
         print("-" * 75)
         for p in sorted(paths):
-            entries = [json.loads(l) for l in p.read_text(encoding="utf-8").splitlines() if l.strip()]
+            entries = [json.loads(line) for line in p.read_text(encoding="utf-8").splitlines() if line.strip()]
             run_start = next((e for e in entries if e.get("type") == "run_start"), {})
             run_id = run_start.get("run_id", p.stem)
             stats = aggregate(p)

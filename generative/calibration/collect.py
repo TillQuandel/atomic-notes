@@ -237,7 +237,7 @@ def main() -> None:
     except Exception as _e:
         print(f"  [warn] DB-Write fehlgeschlagen: {_e}", file=_sys.stderr)
 
-    print(f"=== Zusammenfassung ===")
+    print("=== Zusammenfassung ===")
     print(f"  Claims total:    {total_claims}")
     print(f"  Gelabelt:        {labeled}")
     print(f"  Leer:            {empty}")

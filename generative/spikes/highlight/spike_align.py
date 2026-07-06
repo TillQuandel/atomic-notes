@@ -190,7 +190,7 @@ def main():
         f"Zitate gesamt: {len(real)}  |  verbatim-praesent: {len(present)}  "
         f"|  nicht-verbatim (upstream-Sidecar): {len(absent)}"
     )
-    print(f"\nHIGHLIGHT-GEOMETRIE auf praesenten Zitaten:")
+    print("\nHIGHLIGHT-GEOMETRIE auf praesenten Zitaten:")
     print(f"  lokalisiert: {len(present) - len(gaps)}/{len(present)}")
     if present:
         print(f"  ECHTE LUECKE: {len(gaps)}/{len(present)} = {len(gaps) / len(present) * 100:.1f}%")
@@ -207,16 +207,16 @@ def main():
                 f"score={h['score']:.0f} ratio={h['len_ratio']:.2f} -- {r['quote']}"
             )
 
-    print(f"\n--- Echte Luecken (praesent, aber nicht lokalisiert) ---")
+    print("\n--- Echte Luecken (praesent, aber nicht lokalisiert) ---")
     for r in gaps:
         print(f"  GAP char={r['char_score']:.0f} S.{r['page']} {r['source']} -- {r['quote']}")
 
-    print(f"\n--- Nicht-verbatim (kein Highlight, ehrlich in Sidecar) ---")
+    print("\n--- Nicht-verbatim (kein Highlight, ehrlich in Sidecar) ---")
     for r in absent:
         print(f"  char={r['char_score']:.0f} cite=S.{r['cite']} {r['source']} -- {r['quote']}")
 
     if args.verbose:
-        print(f"\n--- Alle praesenten Treffer ---")
+        print("\n--- Alle praesenten Treffer ---")
         for r in present:
             if r["hit"]:
                 h = r["hit"]

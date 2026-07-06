@@ -107,7 +107,8 @@ def test_crossref_lookup_returns_dict_on_valid_doi(monkeypatch):
 
 def test_crossref_lookup_returns_none_on_error(monkeypatch):
     from generative.tools.pdf_enrich import crossref_lookup
-    import urllib.request, urllib.error
+    import urllib.request
+    import urllib.error
 
     monkeypatch.setattr(
         urllib.request,

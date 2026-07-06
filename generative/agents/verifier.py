@@ -9,6 +9,7 @@ from generative.agents.base import call_claude, trace_event
 from generative.agents.structured_output import parse_verifier_output
 from generative import config as _config
 from generative.config import MODEL_VERIFIER, SEMANTIC_PREPASS_THRESHOLD
+from generative.pipeline.anchor_patterns import PAGE_MARKER_RE, PAGE_ANCHOR_NUMS_RE as _NEAR_PAGE_RE
 from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor
 
 FUZZY_THRESHOLD = 85
@@ -17,7 +18,6 @@ FUZZY_THRESHOLD = 85
 # matchen sonst trivial. Cross-Model-Konsens Codex/Gemini 2026-05-11.
 FUZZY_PREPASS_THRESHOLD = 98
 MIN_QUOTE_LEN_FOR_PREPASS = 30
-from generative.pipeline.anchor_patterns import PAGE_MARKER_RE, PAGE_ANCHOR_NUMS_RE as _NEAR_PAGE_RE
 
 # Hebel #3: Body-Anker-Sync. Direktzitate im Body stehen typischerweise als
 # „..." gefolgt von einer Seitenangabe `(S. N)`. Opening: U+201E (vom Extractor

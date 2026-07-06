@@ -47,7 +47,7 @@ def main() -> None:
     if not notes:
         sys.exit(f"Keine .md-Dateien in {notes_dir}")
 
-    print(f"\n=== run_eval.py ===")
+    print("\n=== run_eval.py ===")
     print(f"Run:     {args.run_id}")
     print(f"Version: {pipeline_version}")
     print(f"Notes:   {len(notes)} in {notes_dir}")

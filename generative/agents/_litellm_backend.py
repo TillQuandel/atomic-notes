@@ -14,13 +14,13 @@ import time
 
 import litellm
 
+from generative.config import CALL_TIMEOUT_SEC
+
 # litellm registriert intern async Callbacks die beim Event-Loop-Close nicht sauber
 # awaited werden → RuntimeWarning + hängender Prozess bei asyncio.run()-Kontext.
 litellm.success_callback = []
 litellm.failure_callback = []
 litellm._async_success_callback = []  # undokumentierte interne Liste (Gemini-Finding)
-
-from generative.config import CALL_TIMEOUT_SEC
 
 _MAX_RETRIES = 2
 
