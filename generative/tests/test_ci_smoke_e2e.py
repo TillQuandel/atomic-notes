@@ -243,10 +243,20 @@ def test_ci_smoke_e2e_full_stage_wiring(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(agents_base, "_backend_call_full", sync_backend)
     monkeypatch.setattr(agents_base, "_backend_call_full_async", async_backend)
 
+    # PDF-Kopie unter EIGENEM Namen: write_note schreibt Dry-Run-eval-Kopien
+    # hart nach `.cache/eval/baseline/<pdf-stem>/` (vault_writer, nicht
+    # parametrisierbar) — mit dem Original-Namen würde dieser Test bei jedem
+    # lokalen Suite-Lauf die ECHTE zettelkasten-primer-Baseline mit Stub-Notes
+    # überschreiben (empirisch passiert, 2026-07-06). Eigener Stub-Namespace
+    # `ci-smoke-fixture` + Cleanup im finally unten.
+    smoke_pdf = tmp_path / "ci-smoke-fixture.pdf"
+    shutil.copyfile(EXAMPLE_PDF, smoke_pdf)
+    smoke_eval_dir = REPO_ROOT / "generative" / ".cache" / "eval" / "baseline" / "ci-smoke-fixture"
+
     inbox_dir = tmp_path / "inbox"
     argv = [
         "--source",
-        str(EXAMPLE_PDF),
+        str(smoke_pdf),
         "--dry-run",
         "--no-llm",
         "--inbox-dir",
@@ -264,6 +274,8 @@ def test_ci_smoke_e2e_full_stage_wiring(tmp_path, monkeypatch, capsys):
         orchestrator.main(argv)
     finally:
         agents_base.clear_llm_runtime_config()
+        # Stub-Baseline-Namespace aufräumen (kein Artefakt-Müll im eval-Cache).
+        shutil.rmtree(smoke_eval_dir, ignore_errors=True)
     elapsed_s = time.time() - t0
 
     captured = capsys.readouterr()
