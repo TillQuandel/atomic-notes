@@ -11,7 +11,7 @@ Transformations-Reihenfolge pro Note (siehe Docstrings der Helper unten):
 2. Dokumentkopf (H1 + kursive Quellzeile statt YAML)
 3. Callout → Standard-Blockquote
 4. Wikilink-Auflösung (intern → Link, extern → Klartext)
-5. Quellen-Absatz (deterministisch aus source_anchors)
+5. Quellen-Absatz (deterministisch aus dem final gerenderten Body, Issue #76)
 6. optionaler Metadaten-Abschnitt
 
 `render_portable_run` fügt zusätzlich alle Notes eines Laufs zu einem
@@ -22,8 +22,7 @@ from __future__ import annotations
 
 import re
 
-from generative.pipeline.vault_writer import collect_anchor_pages, convert_inline_to_footnotes
-from generative.schemas.atomic_note import TextAnchor
+from generative.pipeline.vault_writer import convert_inline_to_footnotes, pages_from_body
 
 _HAS_FOOTNOTE_RE = re.compile(r"\[\^\d+\]")
 _CALLOUT_RE = re.compile(r"^(>\s*)\[!(\w+)\]([-+]?)\s*(.*)$")
@@ -113,14 +112,20 @@ def _resolve_wikilinks(text: str, exported_titles: dict[str, str], link_mode: st
     return _WIKILINK_RE.sub(repl, text)
 
 
-def _render_quellen_section(note: dict, source: dict) -> str:
-    """`## Quellen` + `*<short_label>: <title>, S. <pages>*` — Seiten aus
-    `note.source_anchors` via `collect_anchor_pages` (Regel 8)."""
+def _render_quellen_section(body: str, source: dict) -> str:
+    """`## Quellen` + `*<short_label>: <title>, S. <pages>*` — Seiten aus dem
+    final gerenderten `body` via `pages_from_body` (Regel 8).
+
+    Issue #76: vorher aus `note.source_anchors` via `collect_anchor_pages` —
+    das kann vom tatsächlich gerenderten Body abweichen (Critic/Layout/
+    Renumber ändern Fußnoten, ohne `source_anchors` nachzuziehen). `body` ist
+    hier derselbe (konvertierte, wikilink-aufgelöste) Text, der auch als
+    Note-Inhalt gerendert wird — Konsistenz zwischen Quellen-Absatz und
+    tatsächlichem Dokumentinhalt garantiert."""
     citation = source.get("citation") or {}
     short_label = citation.get("short_label") or ""
     title = citation.get("title") or short_label
-    anchors = [TextAnchor(**a) for a in note.get("source_anchors", [])]
-    pages = collect_anchor_pages(anchors)
+    pages = pages_from_body(body)
     pages_marker = f", S. {', '.join(pages)}" if pages else ""
     return f"## Quellen\n\n*{short_label}: {title}{pages_marker}*"
 
@@ -211,7 +216,7 @@ def render_portable_note(
     h1_line = _resolve_wikilinks(h1_line, titles_map, link_mode)
     rest = _resolve_wikilinks(rest, titles_map, link_mode)
 
-    parts = [h1_line, _source_line(source), rest.strip(), _render_quellen_section(note, source)]
+    parts = [h1_line, _source_line(source), rest.strip(), _render_quellen_section(rest, source)]
     if include_metadata:
         parts.append(_render_metadata_section(note, routing))
 
