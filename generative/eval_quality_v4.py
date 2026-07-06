@@ -571,7 +571,14 @@ def _claim_scores_from_judge(
 
 
 def _empty_result(
-    note_path: Path, pdf_path: Path, pipeline_version: str, timestamp: str, error: str, total: int = 0
+    note_path: Path,
+    pdf_path: Path,
+    pipeline_version: str,
+    timestamp: str,
+    error: str,
+    total: int = 0,
+    *,
+    content_hash: str | None = None,
 ) -> dict:
     return {
         "note": note_path.name,
@@ -579,6 +586,7 @@ def _empty_result(
         "language": None,
         "version": pipeline_version,
         "eval_version": EVAL_VERSION,
+        "content_hash": content_hash,
         "timestamp": timestamp,
         "error": error,
         "claims_total": total,
@@ -623,6 +631,8 @@ def _aggregate(
     chunks: list[Chunk],
     claim_scores: list[dict[str, Any]],
     llm_meta: dict[str, Any],
+    *,
+    content_hash: str | None = None,
 ) -> dict:
     total = len(claim_scores)
     counts = Counter(score["label"] for score in claim_scores)
@@ -674,6 +684,7 @@ def _aggregate(
         "language": language_pair,
         "version": pipeline_version,
         "eval_version": EVAL_VERSION,
+        "content_hash": content_hash,
         "timestamp": timestamp,
         "claims_total": engine_metrics["claims_total"],
         "claims_supported_exact": engine_metrics["claims_supported_exact"],
@@ -718,27 +729,51 @@ def _aggregate(
 
 
 def eval_note(
-    note_path: Path | str, pdf_path: Path | str, pipeline_version: str = AGENT_VERSION, no_cache: bool = False
+    note_path: Path | str,
+    pdf_path: Path | str,
+    pipeline_version: str = AGENT_VERSION,
+    no_cache: bool = False,
+    content_hash: str | None = None,
 ) -> dict:
-    """Evaluiert eine Note gegen ihre Quell-PDF und gibt v3-Metriken zurueck."""
+    """Evaluiert eine Note gegen ihre Quell-PDF und gibt v3-Metriken zurueck.
+
+    `content_hash` (optional): pipeline-content-hash der Note (#47, vault_writer.
+    extract_content_hash) — wird nur durchgereicht und ins Ergebnis geschrieben,
+    damit der Re-Eval-Hash-Guard (Stage 8) spaetere identische Notes ohne neuen
+    Judge-Call wiederverwenden kann. Ohne Angabe bleibt das Feld None.
+    """
     note_path = Path(note_path)
     pdf_path = Path(pdf_path)
     timestamp = datetime.now().isoformat()
     use_cache = not no_cache
 
     if not note_path.exists():
-        return _empty_result(note_path, pdf_path, pipeline_version, timestamp, "note_not_found")
+        return _empty_result(
+            note_path, pdf_path, pipeline_version, timestamp, "note_not_found", content_hash=content_hash
+        )
     if not pdf_path.exists():
-        return _empty_result(note_path, pdf_path, pipeline_version, timestamp, "pdf_not_found")
+        return _empty_result(
+            note_path, pdf_path, pipeline_version, timestamp, "pdf_not_found", content_hash=content_hash
+        )
 
     note_body = _read_note_body(note_path)
     claims = extract_claims(note_path)
     if not claims:
-        return _empty_result(note_path, pdf_path, pipeline_version, timestamp, "no_claims_found")
+        return _empty_result(
+            note_path, pdf_path, pipeline_version, timestamp, "no_claims_found", content_hash=content_hash
+        )
 
     chunks = build_chunks(pdf_path)
     if not chunks:
-        result = _empty_result(note_path, pdf_path, pipeline_version, timestamp, "pdf_not_parseable", total=len(claims))
+        result = _empty_result(
+            note_path,
+            pdf_path,
+            pipeline_version,
+            timestamp,
+            "pdf_not_parseable",
+            total=len(claims),
+            content_hash=content_hash,
+        )
         result["claim_scores"] = []
         return result
 
@@ -769,7 +804,60 @@ def eval_note(
     # mögliche Retrieval-Misses flaggen (kein Relabel → kein Masking; nur sichtbar machen).
     claim_scores = apply_source_presence_fallback(claim_scores, _build_presence_scorer(pdf_path, claim_scores))
 
-    return _aggregate(note_path, pdf_path, pipeline_version, timestamp, language_pair, chunks, claim_scores, llm_meta)
+    return _aggregate(
+        note_path,
+        pdf_path,
+        pipeline_version,
+        timestamp,
+        language_pair,
+        chunks,
+        claim_scores,
+        llm_meta,
+        content_hash=content_hash,
+    )
+
+
+def find_cached_eval(
+    content_hash: str | None,
+    eval_version: str,
+    pipeline_version: str,
+    *,
+    history_path: Path | None = None,
+) -> dict | None:
+    """Re-Eval-Hash-Guard: sucht in quality_history.jsonl nach einem wiederverwendbaren
+    Ergebnis fuer denselben Note-Inhalt.
+
+    Match-Kriterium: identischer `content_hash` (pipeline-content-hash aus dem
+    Note-Frontmatter, #47) UND identische `eval_version` (Judge-Semantik/-Version)
+    UND identische `pipeline_version` (AGENT_VERSION). Alte Records ohne
+    `content_hash`-Feld (vor diesem Feature) matchen nie — konservativ, kein
+    falscher Cache-Hit statt eines echten.
+
+    Reine Wiederverwendung, keine Bewertungs-Entscheidung: Judge-Prompts, Schwellen
+    und EVAL_VERSION bleiben unberuehrt (siehe Modul-Docstring-Kontext).
+
+    Gibt den zuletzt gespeicherten Treffer zurueck (juengster Stand gewinnt) oder
+    None, wenn kein Treffer moeglich ist — dann laeuft der Judge normal.
+    """
+    if not content_hash:
+        return None
+    path = history_path if history_path is not None else _QUALITY_HISTORY
+    if not path.exists():
+        return None
+    match: dict | None = None
+    with path.open("r", encoding="utf-8") as fh:
+        for line in fh:
+            try:
+                entry = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if (
+                entry.get("content_hash") == content_hash
+                and entry.get("eval_version") == eval_version
+                and entry.get("version") == pipeline_version
+            ):
+                match = entry
+    return match
 
 
 def save_result(result: dict) -> None:
