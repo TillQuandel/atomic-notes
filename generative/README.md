@@ -62,6 +62,45 @@ hint, window reset, litellm alternative) instead of retrying or dumping a traceb
 
 Obsidian output is currently the best-tested target, but the pipeline should not be treated as Obsidian-specific long term.
 
+## Export Formats
+
+Beyond writing notes into the vault/inbox, a run can additionally render its notes into portable file formats — for archiving, sharing, or reading outside Obsidian. Opt-in via `--export-format` (CLI) or the run settings (GUI); without it, nothing changes.
+
+Core set:
+
+| Format | Purpose |
+|---|---|
+| `json` | Canonical machine-readable export (schema in `pipeline/note_json.py`) — for external tooling. |
+| `obsidian-md` | Copy of the `.md` files already written to the vault/inbox — no new rendering, just gathered in the export folder. |
+| `portable-md` | Standard CommonMark + footnotes (no Obsidian wikilinks/callouts) — readable in any Markdown viewer. |
+| `docx` | Microsoft Word, via pandoc. |
+| `pdf` | PDF, via pandoc + typst. |
+| `html` | Standalone HTML page, via pandoc. |
+
+Optional, zusätzlich zuschaltbar: `odt` (OpenDocument Text), `epub` (EPUB e-book) — both via pandoc.
+
+`docx`/`pdf`/`html`/`odt`/`epub` need the optional `export` dependency group (pandoc+typst, pip-only — no system pandoc/typst binary required):
+
+```bash
+pip install "atomic-notes[export]"
+```
+
+`json`/`obsidian-md`/`portable-md` work without it.
+
+CLI:
+
+```bash
+atomic-notes run --source "path/to/paper.pdf" --dry-run \
+  --export-format json,portable-md,docx,pdf,html \
+  --export-dir path/to/exports/
+```
+
+Formats are comma-separated, case-insensitive, deduplicated. `--export-dir` defaults to `generative/.cache/exports/<pdf-stem>/`.
+
+GUI: pick formats in the run settings ("Export-Formate") before starting a run — a "mehr Formate" toggle exposes `odt`/`epub`. Exported files appear under "Exporte" in the results section once the run finishes, downloadable individually.
+
+Planned, not yet selectable: `rtf`, `latex`, `typst`, `mediawiki`, `rst`, `epub3` (decision 2026-07-05). Requesting one of these raises a "planned, not yet enabled" error instead of a generic "unknown format" one.
+
 ## Relationship To `extractive/`
 
 `extractive/` is the local sentence-extraction pipeline. It is useful for privacy-preserving runs, low-hallucination baselines, and comparisons against generated notes.

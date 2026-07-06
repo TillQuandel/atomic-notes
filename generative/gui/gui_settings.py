@@ -9,12 +9,16 @@ Reine Datei-/Validierungslogik, kein FastAPI (analog run_history.py). Die
 Backend-/Profil-Wertepruefung wird von `app._validate_run_options`
 wiederverwendet (`validate_backend`/`validate_profile`) statt dupliziert.
 
-Schema: `{backend?, profile?, no_llm?, dry_run?, vault_path?}` -- alle Keys
-optional, nur tatsaechlich gesetzte Werte werden gespeichert/gelesen. Keine
-Secrets (API-Keys bleiben in `.env`). `vault_path` (B2): der zuletzt per
-`PUT /api/vault` gewaehlte Ziel-Vault -- geschrieben vom Vault-Endpunkt in
-`app.py`, nicht von `PUT /api/settings` (das schreibt nur die vier
-Lauf-Einstellungen, s. dortiges Full-Replace-Verhalten).
+Schema: `{backend?, profile?, no_llm?, dry_run?, vault_path?, export_formats?}`
+-- alle Keys optional, nur tatsaechlich gesetzte Werte werden gespeichert/
+gelesen. Keine Secrets (API-Keys bleiben in `.env`). `vault_path` (B2): der
+zuletzt per `PUT /api/vault` gewaehlte Ziel-Vault -- geschrieben vom
+Vault-Endpunkt in `app.py`, nicht von `PUT /api/settings` (das schreibt nur
+die Lauf-Einstellungen, s. dortiges Full-Replace-Verhalten). `export_formats`
+(F4, Output-Projekt): die zuletzt in den Lauf-Einstellungen angehakten
+Export-Formate (portable-md/docx/pdf/html/json/odt/epub) -- `obsidian-md`
+ist KEINE GUI-Format-Option (die .md-Notes gibt es in der GUI ohnehin als
+Download), deshalb aus der erlaubten Menge ausgeschlossen.
 """
 
 from __future__ import annotations
@@ -25,12 +29,16 @@ import os
 import tempfile
 from pathlib import Path
 
+from generative.pipeline.export_runner import EXPORT_FORMAT_CHOICES
 from generative.runtime_config import PRESETS
 
 logger = logging.getLogger(__name__)
 
 BACKENDS = frozenset({"subscription", "litellm"})
-SETTINGS_KEYS = frozenset({"backend", "profile", "no_llm", "dry_run", "vault_path"})
+SETTINGS_KEYS = frozenset({"backend", "profile", "no_llm", "dry_run", "vault_path", "export_formats"})
+
+# F4: obsidian-md ausgenommen -- kein waehlbares GUI-Exportformat (s. Docstring oben).
+EXPORT_FORMAT_GUI_CHOICES = frozenset(EXPORT_FORMAT_CHOICES) - {"obsidian-md"}
 
 
 def validate_backend(value) -> tuple[str | None, str | None]:
@@ -69,6 +77,38 @@ def validate_vault_path(value) -> tuple[str | None, str | None]:
     if not isinstance(value, str) or not value.strip():
         return None, "vault_path muss ein nicht-leerer String sein."
     return value, None
+
+
+def validate_export_formats(value) -> tuple[list[str] | None, str | None]:
+    """F4: `export_formats`-Wert pruefen (Liste der angehakten Export-Formate).
+    `None` = kein Override (Server-Default `[]`, analog backend/profile).
+    Eine leere Liste ist ein gueltiger, bewusst gesetzter Wert (alle Formate
+    abgewaehlt) -- anders als bei backend/profile gibt es hier keinen
+    "leerer String = Server-Default"-Sonderfall, weil der Typ eine Liste ist.
+
+    Normalisierung (Review-Fund PR #136, konsistent zur CLI-Seite
+    `export_runner.parse_export_formats`): Werte werden getrimmt +
+    lowercased und ordnungserhaltend dedupliziert -- gespeichert/zurueckgegeben
+    wird immer die kanonische (lowercase) Form."""
+    if value is None:
+        return None, None
+    if not isinstance(value, list) or not all(isinstance(v, str) for v in value):
+        return None, "export_formats muss eine Liste von Strings sein."
+    normalized: list[str] = []
+    unknown: list[str] = []
+    for raw in value:
+        fmt = raw.strip().lower()
+        if fmt not in EXPORT_FORMAT_GUI_CHOICES:
+            unknown.append(raw)
+        elif fmt not in normalized:
+            normalized.append(fmt)
+    if unknown:
+        return (
+            None,
+            f"Unbekannte(s) Export-Format(e): {', '.join(unknown)} "
+            f"(erlaubt: {', '.join(sorted(EXPORT_FORMAT_GUI_CHOICES))})",
+        )
+    return normalized, None
 
 
 def validate_settings(payload) -> tuple[dict, str | None]:
@@ -117,6 +157,12 @@ def validate_settings(payload) -> tuple[dict, str | None]:
         return {}, error
     if vault_path is not None:
         normalized["vault_path"] = vault_path
+
+    export_formats, error = validate_export_formats(payload.get("export_formats"))
+    if error:
+        return {}, error
+    if export_formats is not None:
+        normalized["export_formats"] = export_formats
 
     return normalized, None
 

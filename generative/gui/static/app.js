@@ -130,6 +130,8 @@ function resetRun() {
   $("results-list").innerHTML = "";
   $("results-empty").style.display = "block";
   $("download-all").hidden = true;
+  $("exports-section").hidden = true;
+  $("exports-list").innerHTML = "";
 }
 
 function buildRunOptions() {
@@ -147,7 +149,24 @@ function buildRunOptions() {
     const path = $("target-export-path").value.trim();
     if (path) options.inbox_dir = path;
   }
+  // F4: Export-Formate gelten UNABHAENGIG vom Dry-Run/Ziel-Modus (json/
+  // portable-md/docx/... brauchen keinen Vault-Schreib-Lauf).
+  const exportFormats = checkedExportFormats();
+  if (exportFormats.length) options.export_formats = exportFormats;
   return options;
+}
+
+// --- Export-Formate (F4: Lauf-Option, VOR dem Lauf gewaehlt) --------------
+
+function checkedExportFormats() {
+  return [...document.querySelectorAll(".opt-export-format:checked")].map((el) => el.value);
+}
+
+function setCheckedExportFormats(formats) {
+  const wanted = new Set(formats || []);
+  for (const el of document.querySelectorAll(".opt-export-format")) {
+    el.checked = wanted.has(el.value);
+  }
 }
 
 // --- Ziel-Ordner (B3): Vault-Inbox (Default) vs. freier Export-Ordner -----
@@ -257,11 +276,23 @@ function addResultCard(item) {
   $("results-list").appendChild(li);
 }
 
+// F4: "Exporte"-Karte fuer eine Datei im Session-Export-Ordner (docx/pdf/
+// html/json/...) -- schlichter als addResultCard (kein Routing/Score/Body-
+// Preview, nur Name + Download-Link ueber denselben /api/outputs/file-Weg).
+function addExportCard(item) {
+  const li = document.createElement("li");
+  li.className = "preview-card";
+  li.innerHTML = `
+    <div class="title">${escapeHtml(item.name)}</div>
+    <div class="actions"><a class="button" href="/api/outputs/file?path=${encodeURIComponent(item.path)}" download>Herunterladen</a></div>`;
+  $("exports-list").appendChild(li);
+}
+
 async function loadOutputs() {
   try {
     const r = await fetch("/api/outputs");
     if (!r.ok) return;
-    const { items, dry_run } = await r.json();
+    const { items, dry_run, exports } = await r.json();
     $("results-h").textContent = dry_run ? "Vorschau-Ergebnisse (nichts im Vault geschrieben)" : "Ergebnisse";
     $("results-section").hidden = false;
     $("results-list").innerHTML = "";
@@ -269,6 +300,10 @@ async function loadOutputs() {
     $("results-empty").style.display = hasItems ? "none" : "block";
     $("download-all").hidden = !hasItems;
     for (const item of items) addResultCard(item);
+    const hasExports = (exports || []).length > 0;
+    $("exports-section").hidden = !hasExports;
+    $("exports-list").innerHTML = "";
+    for (const item of exports || []) addExportCard(item);
   } catch { }
 }
 
@@ -302,6 +337,10 @@ function renderHistoryResults(record) {
   // ZIP-Endpunkt bezieht sich auf die aktuelle RunSession, nicht auf diesen
   // historischen Lauf — hier verstecken statt falscher Inhalte anzubieten.
   $("download-all").hidden = true;
+  // F4: Exporte werden (noch) nicht in der Run-Historie gespeichert -- Sektion
+  // ausblenden statt stale Daten aus dem vorherigen loadOutputs()-Aufruf zu zeigen.
+  $("exports-section").hidden = true;
+  $("exports-list").innerHTML = "";
   const notes = record.notes || [];
   const hasItems = notes.length > 0;
   $("results-empty").style.display = hasItems ? "none" : "block";
@@ -569,6 +608,9 @@ function currentSettingsPayload() {
     profile: $("opt-profile").value,
     no_llm: $("opt-no-llm").checked,
     dry_run: $("dry-run").checked,
+    // F4: Export-Formate persistieren wie die anderen Lauf-Einstellungen --
+    // leere Liste ist ein bewusster Wert (alle abgewaehlt), kein "unset".
+    export_formats: checkedExportFormats(),
   };
   // B2: PUT /api/settings ersetzt die Datei vollstaendig (kein Merge) -- ohne
   // den zuletzt geladenen/uebernommenen Vault hier mitzuschicken wuerde ein
@@ -602,6 +644,7 @@ function applyStoredSettings(settings) {
   if (settings.profile) $("opt-profile").value = settings.profile;
   if (settings.no_llm !== undefined) $("opt-no-llm").checked = !!settings.no_llm;
   if (settings.dry_run !== undefined) $("dry-run").checked = !!settings.dry_run;
+  if (settings.export_formats !== undefined) setCheckedExportFormats(settings.export_formats);
   updateModeHint();
 }
 
@@ -807,6 +850,10 @@ document.addEventListener("DOMContentLoaded", async () => {
   $("opt-backend").addEventListener("change", saveSettings);
   $("opt-profile").addEventListener("change", saveSettings);
   $("opt-no-llm").addEventListener("change", saveSettings);
+  // F4: jede Export-Format-Checkbox loest denselben stillen Auto-Save aus.
+  for (const el of document.querySelectorAll(".opt-export-format")) {
+    el.addEventListener("change", saveSettings);
+  }
   // B3: Ziel-Ordner-Wahl nicht in P2-Settings persistiert (nur `inbox_dir` als
   // Lauf-Option, s. buildRunOptions) — nur der Sperr-Zustand aktualisiert sich.
   $("target-vault-inbox").addEventListener("change", applyStartGate);

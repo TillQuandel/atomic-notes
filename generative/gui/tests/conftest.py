@@ -19,6 +19,14 @@ def _isolate_default_runs_dir(tmp_path, monkeypatch):
 
 
 @pytest.fixture(autouse=True)
+def _isolate_default_exports_dir(tmp_path, monkeypatch):
+    # F4 (Output-Projekt): Session-Export-Ordner fuer --export-format-Outputs --
+    # analoges Sicherheitsnetz zu _DEFAULT_RUNS_DIR, damit kein Test je in das
+    # echte generative/.cache/gui/exports/ schreibt.
+    monkeypatch.setattr(app_module, "_DEFAULT_EXPORTS_DIR", tmp_path / "gui-exports-default")
+
+
+@pytest.fixture(autouse=True)
 def _isolate_default_settings_path(tmp_path, monkeypatch):
     monkeypatch.setattr(app_module, "_DEFAULT_SETTINGS_PATH", tmp_path / "gui-settings-default" / "settings.json")
 
