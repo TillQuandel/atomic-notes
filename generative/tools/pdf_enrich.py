@@ -743,12 +743,12 @@ def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False, re
             if cr and _meta_complete(cr):
                 # Book-chapter DOI: ISBN-Lookup bevorzugen wenn ISBN im Kopfbereich
                 if cr.get("type") in _BOOK_PART_TYPES and extract_isbn(header_text):
-                    print(f"  -> CrossRef Buchkapitel — versuche ISBN-Lookup")
+                    print("  -> CrossRef Buchkapitel — versuche ISBN-Lookup")
                 else:
                     meta = cr
                     print(f"  -> CrossRef: {meta['author']} ({meta['year']}) -- {meta['title'][:60]}")
             elif cr:
-                print(f"  -> CrossRef unvollstaendig (kein Autor/Titel) — weiter")
+                print("  -> CrossRef unvollstaendig (kein Autor/Titel) — weiter")
 
     # Stage 2: ISBN -> Open Library -> Google Books
     if not meta:
@@ -799,16 +799,16 @@ def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False, re
             """Sammelt aufeinanderfolgende nicht-header Zeilen zu einem Titelblock."""
             block: list[str] = []
             for line in text.splitlines():
-                l = line.strip()
-                if not l:
+                stripped = line.strip()
+                if not stripped:
                     if block:
                         break  # Leerzeile beendet Block
                     continue
-                if _HEADER_RE.match(l) or _AUTHOR_LINE_RE.match(l) or len(l) < 15:
+                if _HEADER_RE.match(stripped) or _AUTHOR_LINE_RE.match(stripped) or len(stripped) < 15:
                     if block:
                         break  # Header nach erstem Inhalt beendet Block
                     continue
-                block.append(l)
+                block.append(stripped)
                 if sum(len(x) for x in block) >= max_chars:
                     break
             return " ".join(block).strip()
@@ -872,7 +872,9 @@ def _llm_extract(text: str) -> dict | None:
             f"Text:\n{text}"
         )
         r = _sp.run(["claude", "-p", "--model", "haiku"], input=prompt, capture_output=True, text=True, timeout=30)
-        lines = {l.split(":")[0].strip(): l.split(":", 1)[1].strip() for l in r.stdout.splitlines() if ":" in l}
+        lines = {
+            line.split(":")[0].strip(): line.split(":", 1)[1].strip() for line in r.stdout.splitlines() if ":" in line
+        }
         return (
             {
                 "title": lines.get("title", ""),

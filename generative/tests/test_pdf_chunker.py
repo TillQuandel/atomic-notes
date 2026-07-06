@@ -465,7 +465,6 @@ def test_pdf_metadata_missing_pdfinfo_binary_returns_empty(monkeypatch, tmp_path
     # choco-Xpdf-Paketierung) crashte die Pipeline hart, obwohl pdf_metadata
     # fail-soft designt ist (returncode != 0 -> {}). Not-Found muss denselben
     # Pfad nehmen.
-    import subprocess as _subprocess
 
     from generative.pipeline import pdf_chunker as _pc
 

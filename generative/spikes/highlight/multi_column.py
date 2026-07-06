@@ -50,7 +50,6 @@ Usage
   ----------------------------------------------------------------------------------
 """
 
-import os
 import sys
 import fitz
 
@@ -85,7 +84,7 @@ def column_boxes(page, footer_margin=50, header_margin=50, no_image_text=True):
             True if 'temp' has no intersections with items of 'bboxlist'.
         """
         for b in bboxlist:
-            if not intersects_bboxes(temp, vert_bboxes) and (b == None or b == bb or (temp & b).is_empty):
+            if not intersects_bboxes(temp, vert_bboxes) and (b is None or b == bb or (temp & b).is_empty):
                 continue
             return False
 
@@ -142,7 +141,7 @@ def column_boxes(page, footer_margin=50, header_margin=50, no_image_text=True):
             if check:
                 bboxes[i] = temp  # replace with enlarged bbox
 
-        return [b for b in bboxes if b != None]
+        return [b for b in bboxes if b is not None]
 
     def clean_nblocks(nblocks):
         """Do some elementary cleaning."""
@@ -248,7 +247,7 @@ def column_boxes(page, footer_margin=50, header_margin=50, no_image_text=True):
             nbb = nblocks[j]  # a new block
 
             # never join across columns
-            if bb == None or nbb.x1 < bb.x0 or bb.x1 < nbb.x0:
+            if bb is None or nbb.x1 < bb.x0 or bb.x1 < nbb.x0:
                 continue
 
             # never join across different background colors
@@ -257,7 +256,7 @@ def column_boxes(page, footer_margin=50, header_margin=50, no_image_text=True):
 
             temp = bb | nbb  # temporary extension of new block
             check = can_extend(temp, nbb, nblocks)
-            if check == True:
+            if check:
                 break
 
         if not check:  # bb cannot be used to extend any of the new bboxes
@@ -267,7 +266,7 @@ def column_boxes(page, footer_margin=50, header_margin=50, no_image_text=True):
 
         # check if some remaining bbox is contained in temp
         check = can_extend(temp, bb, bboxes)
-        if check == False:
+        if not check:
             nblocks.append(bb)
         else:
             nblocks[j] = temp

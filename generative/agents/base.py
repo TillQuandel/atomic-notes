@@ -11,6 +11,7 @@ import hashlib
 import json
 import threading
 import time
+from contextlib import contextmanager as _contextmanager
 from dataclasses import dataclass
 from typing import Optional
 
@@ -214,9 +215,6 @@ def _trace(
     from generative.agents.tracing import _backend as _tracing_backend
 
     _tracing_backend.write(entry)
-
-
-from contextlib import contextmanager as _contextmanager
 
 
 @_contextmanager

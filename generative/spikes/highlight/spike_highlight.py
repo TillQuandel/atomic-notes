@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-import json, re, sys
+import json
+import re
 import fitz
 from rapidfuzz import fuzz
 
@@ -41,7 +42,6 @@ def try_wordlist_sequence(page, quote, min_ratio=80, min_coverage=0.7):
     matched_rects = []
     pw_idx = 0
     matched_count = 0
-    search_window = 0
     for qw in q_sig:
         found_here = False
         # search forward within a reasonable window from last match to allow skips

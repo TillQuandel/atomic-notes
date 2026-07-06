@@ -24,7 +24,7 @@ def migrate_quality_history(conn, dry_run: bool = False) -> int:
         print("quality_history.jsonl nicht gefunden — übersprungen.")
         return 0
 
-    rows = [json.loads(l) for l in QUALITY_HISTORY.read_text(encoding="utf-8").splitlines() if l.strip()]
+    rows = [json.loads(line) for line in QUALITY_HISTORY.read_text(encoding="utf-8").splitlines() if line.strip()]
     migrated = 0
     for r in rows:
         if r.get("error"):

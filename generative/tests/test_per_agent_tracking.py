@@ -72,7 +72,7 @@ def test_verifier_run_emits_anchor_stats(tmp_path, monkeypatch):
     trace_file = tmp_path / "test-run.jsonl"
     assert trace_file.exists(), "Kein JSONL geschrieben"
     lines = trace_file.read_text(encoding="utf-8").splitlines()
-    events = [__import__("json").loads(l) for l in lines]
+    events = [__import__("json").loads(line) for line in lines]
     anchor_events = [e for e in events if e.get("type") == "anchor_stats"]
     assert len(anchor_events) == 1
     ev = anchor_events[0]
@@ -106,7 +106,7 @@ def test_critic_run_emits_score_result(tmp_path, monkeypatch):
     critic.run(draft)
 
     lines = (tmp_path / "test-run.jsonl").read_text(encoding="utf-8").splitlines()
-    events = [json.loads(l) for l in lines]
+    events = [json.loads(line) for line in lines]
     score_events = [e for e in events if e.get("type") == "score_result"]
     assert len(score_events) == 1
     ev = score_events[0]

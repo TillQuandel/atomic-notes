@@ -1,4 +1,6 @@
-import re, json, pathlib
+import re
+import json
+import pathlib
 
 inbox = pathlib.Path("Obsidian_Vault/00-inbox/atomic-review")
 results = []
@@ -11,7 +13,7 @@ for md in sorted(inbox.glob("*.md")):
     # quote blocks: "> [!quote]- ... \n> „...""
     for qm in re.finditer(r"> \[!quote\]-[^\n]*\n((?:> [^\n]*\n?)+)", text):
         block = qm.group(1)
-        lines = [l[2:].strip() for l in block.strip().split("\n")]
+        lines = [raw_line[2:].strip() for raw_line in block.strip().split("\n")]
         quote_text = " ".join(lines)
         quote_text = quote_text.strip('„""').strip()
         # find page from the heading line just before

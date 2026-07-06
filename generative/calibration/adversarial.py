@@ -200,11 +200,11 @@ def main() -> None:
             print(f"  [{idx}] {note_name} claim_idx={claim_idx} ({ptype})")
             perturbed = call_gemini_perturb(original_claim, ptype)
             if not perturbed or perturbed.strip() == original_claim.strip():
-                print(f"      → unverändert, skip")
+                print("      → unverändert, skip")
                 continue
             new_body = perturb_note_body(perturbed_body, original_claim, perturbed)
             if new_body is None:
-                print(f"      → Original-Claim nicht im Body gefunden, skip")
+                print("      → Original-Claim nicht im Body gefunden, skip")
                 continue
             perturbed_body = new_body
             perturbed_claims_info.append(

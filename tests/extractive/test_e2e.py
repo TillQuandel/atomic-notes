@@ -60,7 +60,7 @@ def test_zero_hallucination(out_dir):
     assert r.returncode == 0, r.stderr
     jl = out_dir / "eval.jsonl"
     assert jl.exists(), "eval.jsonl nicht erzeugt"
-    rates = [json.loads(l)["hallucination_rate"] for l in jl.read_text().splitlines() if l.strip()]
+    rates = [json.loads(line)["hallucination_rate"] for line in jl.read_text().splitlines() if line.strip()]
     assert rates, "Keine Eval-Ergebnisse"
     assert all(r == 0.0 for r in rates), f"Halluzinationen gefunden: {rates}"
 
@@ -69,7 +69,7 @@ def test_anchor_rate_above_80(out_dir):
     r = _run_pipeline(out_dir)
     assert r.returncode == 0, r.stderr
     jl = out_dir / "eval.jsonl"
-    rates = [json.loads(l)["anchor_rate"] for l in jl.read_text().splitlines() if l.strip()]
+    rates = [json.loads(line)["anchor_rate"] for line in jl.read_text().splitlines() if line.strip()]
     if not rates:
         pytest.skip("Keine Eval-Ergebnisse")
     avg = sum(rates) / len(rates)

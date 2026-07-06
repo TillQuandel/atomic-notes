@@ -1146,7 +1146,7 @@ def resolve_sibling_dups(
             s.extend_path = None
 
         # Self-Links (auf Survivor-Titel oder absorbierte Aliase) entfernen, dann deckeln
-        s.related = [l for l in s.related if _link_norm(l) not in alias_norms][:MAX_RELATED]
+        s.related = [link for link in s.related if _link_norm(link) not in alias_norms][:MAX_RELATED]
 
     kept = [d for i, d in enumerate(drafts) if i not in drop_idx]
     return kept, len(drop_idx)
@@ -1212,7 +1212,8 @@ def flag_redundant_siblings(
 
 def _auto_start_dashboard() -> None:
     """Startet den Dashboard-Server im Hintergrund falls er noch nicht läuft."""
-    import socket, subprocess
+    import socket
+    import subprocess
 
     try:
         with socket.create_connection(("localhost", 8051), timeout=0.5):
@@ -1257,7 +1258,9 @@ def dry_run_eval_targets(written: list[tuple[Path, bool]], cache_note_dir: Path)
 
 def _auto_version_bump() -> None:
     """Erhöht AGENT_VERSION Patch wenn sich Pipeline-Code seit letztem Run geändert hat."""
-    import hashlib, json as _json, re as _re
+    import hashlib
+    import json as _json
+    import re as _re
 
     state_file = Path(__file__).parent / ".cache" / "pipeline_state.json"
     state_file.parent.mkdir(parents=True, exist_ok=True)
@@ -1348,7 +1351,8 @@ def _ensure_phoenix_server(port: int | None = None, venv: Path | None = None, ti
     und beendet sich, beide sehen am Ende den offenen Port. Für ein Tracing-Hilfsmittel
     akzeptabel — ein File-Lock wäre unverhältnismäßig.
     """
-    import subprocess, time
+    import subprocess
+    import time
     from generative import config
 
     port = config.PHOENIX_PORT if port is None else port
@@ -2240,7 +2244,7 @@ def main(argv: list[str] | None = None):
             "werden übersprungen (nur getaggte PDFs liefern Alt-Text)."
         )
 
-    print(f"\n[7/7] Vault-Writer…")
+    print("\n[7/7] Vault-Writer…")
     written = 0
     written_targets: list[tuple[Path, bool]] = []
     with _span("VaultWriter", pdf=source_path.name, n_drafts=len(drafts), dry_run=args.dry_run):
@@ -2341,7 +2345,7 @@ def main(argv: list[str] | None = None):
             f"\n[8/8] Qualitäts-Eval übersprungen (Profil: {runtime_config.profile}, inline_eval deaktiviert) — retro via reeval_baseline.py."
         )
         return
-    print(f"\n[8/8] Qualitäts-Eval…")
+    print("\n[8/8] Qualitäts-Eval…")
     try:
         from generative import eval_quality_v4 as _eq
         from generative.config import CACHE_DIR as _CACHE_DIR
@@ -2451,7 +2455,7 @@ def main(argv: list[str] | None = None):
         _eval_out = _grand["output"] - _pre["output"]
         _eval_wall = round(_final_wall - _wall_s, 1)
         _eval_pct = (_eval_out / _grand["output"]) if _grand["output"] else 0.0
-        print(f"\n   === Run-Gesamt (inkl. Stage-8-Eval) ===")
+        print("\n   === Run-Gesamt (inkl. Stage-8-Eval) ===")
         print(f"   -> Zeit:   {_final_wall}s  (davon Stage-8: +{_eval_wall}s)")
         print(
             f"   -> Tokens: {_grand['total']:,} (In:{_grand['input']:,} Out:{_grand['output']:,} Cache-R:{_grand['cache_read']:,} Cache-C:{_grand['cache_create']:,})"

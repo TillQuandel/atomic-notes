@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
-import json, re
+import json
+import re
 import fitz
 from rapidfuzz import fuzz
 

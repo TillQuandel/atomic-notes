@@ -139,3 +139,16 @@ ignore = ["E501"]  # Zeilenlaenge regelt der Formatter
 "tests/**" = ["F401", "F841"]
 "**/__init__.py" = ["F401"]
 "**/conftest.py" = ["F401"]
+# sys.stdout/stderr.reconfigure(encoding="utf-8") (Windows-Codepage-Fix, s. Kommentar
+# im Code) muss laufen, BEVOR die Agent-/Pipeline-Module importiert werden — echte
+# Reihenfolge-Abhaengigkeit, kein Stil-Ausrutscher. Daher alle Modul-Imports danach.
+"generative/orchestrator.py" = ["E402"]
+# Diese Testdateien wachsen als Regressions-Log: jede neue Sektion haengt ihren Import
+# direkt vor den Test, den sie belegt (Kommentar davor dokumentiert i.d.R. den
+# Bug/Commit). Umsortieren an den Datei-Kopf wuerde den Bezug Kommentar->Import->Test
+# zerreissen — bewusstes Anhaenge-Pattern, kein Ausrutscher.
+"generative/tests/test_backends.py" = ["E402"]
+"generative/tests/test_pdf_chunker.py" = ["E402"]
+"generative/tests/test_pdf_enrich.py" = ["E402"]
+"generative/tests/test_runtime_config.py" = ["E402"]
+"generative/tests/test_vault_writer.py" = ["E402"]

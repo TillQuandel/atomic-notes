@@ -83,7 +83,7 @@ def parse_output(output: str) -> tuple[int, int]:
             total = int(m2.group(1))
     # Fallback: DRY-RUN-Zeilen zählen wenn Fertig-Zeile fehlt
     if total == 0:
-        total = sum(1 for l in output.splitlines() if _DRY_RUN_RE.match(l))
+        total = sum(1 for line in output.splitlines() if _DRY_RUN_RE.match(line))
     return vault, total
 
 

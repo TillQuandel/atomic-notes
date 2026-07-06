@@ -15,11 +15,10 @@ import argparse
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parent
-
 from generative import eval_quality_v4 as _eq
 from generative import db as _db
 
+ROOT = Path(__file__).resolve().parent
 BASELINE_DIR = ROOT / ".cache" / "eval" / "baseline"
 
 # Mapping: Ordner-Präfix → PDF-Pfad
