@@ -38,12 +38,26 @@ jobs:
         if: runner.os == 'Windows'
         run: choco install poppler -y --no-progress
 
+      # Retry-Schleife: uvs interne 3 HTTP-Retries reichen bei längeren Index-Ausfällen
+      # nicht (2026-07-06: download.pytorch.org ~2h unerreichbar von den Runnern, erster
+      # Lauf nach uv.lock-Änderung = Cache-Kaltstart → Install-Step rot ohne Code-Bezug).
       - name: Abhängigkeiten installieren (uv, aus Lockfile)
-        run: uv sync --extra dev --locked --python 3.12
+        shell: bash
+        run: |
+          for i in 1 2 3; do
+            uv sync --extra dev --locked --python 3.12 && exit 0
+            echo "uv sync Versuch $i fehlgeschlagen — warte $((i * 30))s"
+            sleep $((i * 30))
+          done
+          uv sync --extra dev --locked --python 3.12
 
       # Format-Gate (gepinnte ruff-Version aus uv.lock; nur Formatierung, kein Lint/--fix)
       - name: Ruff-Format-Check
         run: uv run ruff format --check .
+
+      # Lint-Gate (seit #141 repo-weit sauber; Regelwerk in pyproject.toml)
+      - name: Ruff-Lint-Check
+        run: uv run ruff check .
 
       # Nicht `pdftotext -v` direkt: Xpdf-basierte Windows-Builds exiten dabei non-zero
       - name: pdftotext-Smoke-Test
