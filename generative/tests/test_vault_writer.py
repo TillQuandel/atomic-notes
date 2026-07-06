@@ -10,19 +10,8 @@ import unittest
 from unittest.mock import patch
 
 from generative.pipeline.vault_writer import convert_inline_to_footnotes, build_quellen_block, render_merge_stub, VAULT
-from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor
+from generative.schemas.atomic_note import AtomicNoteDraft
 from generative.schemas.citation import CitationMeta
-
-
-def _draft_with_anchors(anchors: list[TextAnchor]) -> AtomicNoteDraft:
-    return AtomicNoteDraft(
-        title="Test-Konzept",
-        body="Body.",
-        source_anchors=anchors,
-        related=[],
-        tags=[],
-        synthesis_confidence="high",
-    )
 
 
 class TestPageRange(unittest.TestCase):
@@ -131,54 +120,38 @@ class TestBlockQuotePreservation(unittest.TestCase):
 
 
 class TestQuellenBlockPagePrefix(unittest.TestCase):
-    """Issue #20: Anker-Page-Werte enthalten bereits `S. ` (Verifier setzt
-    `page_str = f"S. {n}"`). Der Quellen-Block darf den Prefix nicht erneut
-    voranstellen — sonst `S. S. 1`."""
+    """Issue #20: Footnote-Def-Seiten tragen bereits `S. ` (Format aus
+    `convert_inline_to_footnotes`). Der Quellen-Block darf den Prefix nicht
+    erneut voranstellen — sonst `S. S. 1`.
+
+    Issue #76: `build_quellen_block` liest Seiten seither aus dem übergebenen
+    Body-Text (`pages_from_body`), nicht mehr aus `source_anchors` — die Tests
+    reichen deshalb Footnote-Def-Body-Text statt eines Draft-Objekts. Die
+    ursprünglich hier getesteten `fuzzy_page`/prefix-loses-Extractor-Szenarien
+    sind Ankerformat-Details von `collect_anchor_pages`, nicht mehr von
+    `build_quellen_block` erreichbar — weiterhin über
+    `test_portable_md.TestCollectAnchorPagesHelper` abgedeckt."""
 
     SRC = "Bates - 2017 - Information Behavior.pdf"
     META = CitationMeta(author="Bates", year="2017", title="Information Behavior", doi=None, source_file=SRC)
 
     def test_page_with_prefix_not_doubled(self):
-        draft = _draft_with_anchors([TextAnchor(quote="x", page="S. 1")])
-        out = build_quellen_block(draft, self.SRC, self.META)
+        body = "Text[^1].\n\n[^1]: Bates 2017, S. 1."
+        out = build_quellen_block(body, self.SRC, self.META)
         self.assertIn(", S. 1*", out)
         self.assertNotIn("S. S.", out)
 
-    def test_fuzzy_page_with_prefix_not_doubled(self):
-        draft = _draft_with_anchors([TextAnchor(quote="x", page=None, fuzzy_page="S. 2")])
-        out = build_quellen_block(draft, self.SRC, self.META)
-        self.assertIn(", S. 2*", out)
-        self.assertNotIn("S. S.", out)
-
-    def test_page_without_prefix_still_renders(self):
-        # Extractor-Pfad kann rohe "page"-Werte ohne Prefix liefern.
-        draft = _draft_with_anchors([TextAnchor(quote="x", page="3")])
-        out = build_quellen_block(draft, self.SRC, self.META)
-        self.assertIn(", S. 3*", out)
-        self.assertNotIn("S. S.", out)
-
     def test_multiple_pages_each_stripped(self):
-        draft = _draft_with_anchors(
-            [
-                TextAnchor(quote="a", page="S. 1"),
-                TextAnchor(quote="b", page="S. 5"),
-            ]
-        )
-        out = build_quellen_block(draft, self.SRC, self.META)
+        body = "Text[^1][^2].\n\n[^1]: Bates 2017, S. 1.\n[^2]: Bates 2017, S. 5."
+        out = build_quellen_block(body, self.SRC, self.META)
         self.assertIn(", S. 1, 5*", out)
         self.assertNotIn("S. S.", out)
 
     def test_pages_sorted_numerically_not_lexicographically(self):
         # Gemischt-stellige Seiten (durch den page-label-Fix: Druckseiten 9, 159…)
         # müssen numerisch sortiert werden, nicht lexikografisch (Qwen-Review HIGH).
-        draft = _draft_with_anchors(
-            [
-                TextAnchor(quote="a", page="S. 159"),
-                TextAnchor(quote="b", page="S. 9"),
-                TextAnchor(quote="c", page="S. 159–160"),
-            ]
-        )
-        out = build_quellen_block(draft, self.SRC, self.META)
+        body = "Text[^1][^2][^3].\n\n[^1]: Bates 2017, S. 159.\n[^2]: Bates 2017, S. 9.\n[^3]: Bates 2017, S. 159–160."
+        out = build_quellen_block(body, self.SRC, self.META)
         self.assertIn(", S. 9, 159, 159–160*", out)
 
 

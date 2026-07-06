@@ -103,36 +103,59 @@ def _strip_page_prefix(value: str) -> str:
     return _PAGE_PREFIX_RE.sub("", value)
 
 
+def _sort_pages(pages) -> list[str]:
+    """Numerisch + range-aware sortierter Dedupe-Kern, geteilt zwischen
+    `collect_anchor_pages` (Quelle: `source_anchors`) und `pages_from_body`
+    (Quelle: gerenderter Body, Issue #76).
+
+    Numerisch statt lexikografisch sortiert und range-aware (Seiten tragen auch
+    "159–160" → int() auf die erste Zahl, sonst mis-sortiert/crasht ein Range).
+    (Qwen-Review HIGH, 2. Durchgang.)
+    """
+    return sorted(
+        (p for p in pages if p),
+        key=lambda p: (int(m.group()) if (m := re.match(r"\d+", p)) else 10**9, p),
+    )
+
+
 def collect_anchor_pages(note_anchors: list[TextAnchor]) -> list[str]:
     """Extrahiert, dedupliziert und sortiert Seiten-Belege aus Text-Ankern.
-
-    Geteilter Helper zwischen `build_quellen_block` (Vault-Quellen-Block mit
-    Wikilink) und `portable_md.render_portable_note` (Output-Projekt F2,
-    Klartext-Quellen-Absatz) — beide brauchen dieselbe Seiten-Logik für
-    unterschiedliche Ausgabeformate.
 
     F8: `page` (LLM-exact) ODER `fuzzy_page` (rapidfuzz-Fallback) — beide sind
     valide Seitenbelege. Issue #20: Anker-Werte tragen bereits den `S. `-Prefix
     (Verifier setzt `page_str = f"S. {n}"`) — hier gestrippt, da beide Aufrufer
-    ihn selbst voranstellen. Numerisch statt lexikografisch sortiert und
-    range-aware (Anker tragen auch "159–160" → int() auf die erste Zahl, sonst
-    mis-sortiert/crasht ein Range). (Qwen-Review HIGH, 2. Durchgang.)
+    ihn selbst voranstellen.
+
+    Issue #76: NICHT mehr von `build_quellen_block` oder
+    `portable_md._render_quellen_section` genutzt — `source_anchors` ist der
+    Verifier-Stand VOR Critic/Layout/Renumber und kann vom final gerenderten
+    Body abdriften (Phantom-Seiten aus verwaisten Ankern, fehlende Seiten aus
+    nachträglich ergänzten Fußnoten). Beide Konsumenten lesen jetzt
+    `pages_from_body(<finaler Body>)`. Bleibt als eigenständiger, getesteter
+    Helper erhalten (kein aktueller Produktions-Konsument mehr) — bei Bedarf
+    für Tooling, das direkt auf `source_anchors` zugreifen will, ohne einen
+    gerenderten Body zur Hand zu haben.
     """
     _seen_pages = {
         _strip_page_prefix((a.page or a.fuzzy_page).strip())
         for a in note_anchors
         if (a.page or a.fuzzy_page) and (a.page or a.fuzzy_page).strip().lower() not in ("none", "null", "")
     }
-    return sorted(
-        (p for p in _seen_pages if p),
-        key=lambda p: (int(m.group()) if (m := re.match(r"\d+", p)) else 10**9, p),
-    )
+    return _sort_pages(_seen_pages)
 
 
-def build_quellen_block(note: AtomicNoteDraft, source_file: str, citation: CitationMeta | None) -> str:
-    """Quellen-Block deterministisch aus CitationMeta + verifizierten Anker-Pages.
-    Kein Halluzinations-Risiko, weil das Modell nichts mehr selbst schreibt.
-    Public, damit Orchestrator den Block schon vor Critic an draft.body anhängen kann."""
+def build_quellen_block(body: str, source_file: str, citation: CitationMeta | None) -> str:
+    """Quellen-Block deterministisch aus CitationMeta + Seiten-Belegen im
+    übergebenen (finalen) Body. Kein Halluzinations-Risiko, weil das Modell
+    nichts mehr selbst schreibt.
+
+    Issue #76: `body` ist der tatsächlich neben diesem Block gerenderte
+    Body-Text — Seiten kommen aus `pages_from_body(body)`, nicht mehr aus
+    `note.source_anchors` (das driftete nach Critic/Layout/Renumber vom Body
+    ab: Phantom-Seiten aus verwaisten Ankern, fehlende Seiten aus nachträglich
+    ergänzten Fußnoten). Aufrufer müssen daher exakt den Body-Stand
+    durchreichen, der neben dem Block gerendert wird — nicht `note.body` roh.
+    """
     citation = citation or CitationMeta(author=None, year=None, title=None, doi=None, source_file=source_file)
     # F4: Filename-Fallback wenn CitationMeta-Titel leer/unsinnig. CitationMeta
     # garantiert das nicht selbst — build_citation_meta übernimmt exakt die
@@ -145,9 +168,11 @@ def build_quellen_block(note: AtomicNoteDraft, source_file: str, citation: Citat
     else:
         title = raw_title
 
-    # Seiten aus verifizierten Ankern — geteilter Helper (siehe collect_anchor_pages
-    # Docstring), auch vom portablen Markdown-Renderer (F2) genutzt.
-    pages = collect_anchor_pages(note.source_anchors)
+    # Seiten aus dem finalen Body — kein Fallback auf source_anchors: das würde
+    # die Phantom-Seiten-Klasse aus Issue #76 wieder öffnen. Trägt der Body
+    # keinen Seiten-Beleg, bleibt der Marker ehrlich leer (wie bisher bei
+    # leeren Ankern).
+    pages = pages_from_body(body)
     pages_str = ", ".join(pages) if pages else ""
 
     # Quellen-Block: Wikilink zeigt direkt auf die PDF im Vault (Junction
@@ -254,6 +279,70 @@ def convert_inline_to_footnotes(body: str, source_label: str, source_file: str |
     if defs:
         out = out.rstrip() + "\n\n" + "\n".join(defs)
     return out
+
+
+# Footnote-Def-Seiten-Wert extrahieren: Wikilink-Form zuerst probieren
+# (`[[Datei#page=N|S. <label>]]`, siehe convert_inline_to_footnotes), sonst
+# Klartext-Form (`S. <label>.` am Zeilenende).
+_DEF_WIKILINK_PAGE_RE = re.compile(r"\[\[[^\[\]]*\|\s*S\.\s*([^\]]+)\]\]")
+_DEF_PLAINTEXT_PAGE_RE = re.compile(r"S\.\s*(\d[\d,\s\-–]*)\.?\s*$")
+
+
+def _normalize_page_token(raw: str) -> str:
+    """Ein Komma-Split-Teilstück einer Seiten-Angabe normalisieren: führendes
+    `S. ` strippen (Komma-Listen im rohen Inline-Ankerformat tragen es pro
+    Teilstück, z.B. `(S. 13, S. 15)`), Bindestrich zu Halbgeviertstrich
+    (matcht die Normalisierung in `convert_inline_to_footnotes`, falls der Body
+    noch nicht konvertiert ist)."""
+    token = _strip_page_prefix(raw.strip())
+    token = re.sub(r"\s*-\s*", "–", token)
+    return token.strip()
+
+
+def pages_from_body(body: str) -> list[str]:
+    """Extrahiert, dedupliziert und sortiert Seiten-Belege aus dem tatsächlich
+    übergebenen Body-Text (Issue #76) — Gegenstück zu `collect_anchor_pages`,
+    das stattdessen `source_anchors` liest.
+
+    `source_anchors` und der final gerenderte Body können auseinanderdriften:
+    Critic/Layout/Renumber entfernen oder ergänzen Fußnoten, ohne
+    `source_anchors` nachzuziehen. Zwei belegte Drift-Klassen — Phantom-Seiten
+    aus einem Anker ohne Body-Beleg, fehlende Seiten aus einer nachträglich
+    ergänzten Fußnote ohne zugehörigen Anker. Quellen-Block-Seiten müssen daher
+    direkt aus dem Body kommen.
+
+    Deckt beide Body-Zustände ab, je nachdem in welcher Renderer-Phase der
+    Aufrufer steht:
+    - bereits footnote-konvertiert: `[^n]: <label>, S. N.` ODER
+      `[^n]: <label>, [[Datei#page=N|S. N]].` (beide Def-Formen aus
+      `convert_inline_to_footnotes`)
+    - noch nicht konvertiert: Inline-`(S. N)`-Anker (`_PAGE_INLINE_RE`)
+
+    Blockquote-Zeilen (`> ...`) werden übersprungen — dortige `S. N`-Angaben
+    gehören zum Callout-Header, nicht zu einem Anker (wie in
+    `convert_inline_to_footnotes`). Komma-Listen (`S. 13, 15`) werden in
+    Einzel-Seiten aufgesplittet, Ranges (`S. 159–160`) bleiben als ein Token
+    erhalten — sonst würde eine Range beim numerischen Sortieren mit anderen
+    Seiten aus derselben/anderen Fußnoten falsch interleaved.
+    """
+    tokens: set[str] = set()
+    for line in body.splitlines():
+        if line.lstrip().startswith(">"):
+            continue
+        def_match = _FN_DEF_LINE_RE.match(line)
+        if def_match:
+            content = def_match.group(2)
+            m = _DEF_WIKILINK_PAGE_RE.search(content)
+            raw_value = m.group(1) if m else None
+            if raw_value is None:
+                m = _DEF_PLAINTEXT_PAGE_RE.search(content)
+                raw_value = m.group(1) if m else None
+            if raw_value:
+                tokens.update(_normalize_page_token(p) for p in raw_value.split(","))
+            continue
+        for m in _PAGE_INLINE_RE.finditer(line):
+            tokens.update(_normalize_page_token(p) for p in m.group(1).split(","))
+    return _sort_pages(tokens)
 
 
 def _read_proposed_tags_from_inbox(path: Path) -> tuple[list[str], str | None]:
@@ -416,7 +505,12 @@ sub-concepts:
     # zurückbleiben (z.B. wenn redundanter Aufzählungs-Absatz gestrippt wurde).
     body_combined = renumber_footnotes("\n\n".join(sections))
     rendered = (
-        frontmatter + "\n" + body_combined + "\n\n" + build_quellen_block(note, source_file, citation).rstrip() + "\n"
+        frontmatter
+        + "\n"
+        + body_combined
+        + "\n\n"
+        + build_quellen_block(body_combined, source_file, citation).rstrip()
+        + "\n"
     )
     return inject_content_hash(rendered)  # #47: auch Hubs hashen (Idempotenz bei Re-Run)
 
@@ -483,7 +577,7 @@ related:
     body = convert_inline_to_footnotes(body, citation.short_label, source_file)
 
     sections: list[str] = [body]
-    sections.append(build_quellen_block(note, source_file, citation).rstrip())
+    sections.append(build_quellen_block(body, source_file, citation).rstrip())
 
     rendered = frontmatter + "\n" + "\n\n".join(sections) + "\n"
     # #47: content-hash ins Frontmatter, damit ein Re-Run erkennt, ob die Datei
@@ -640,6 +734,16 @@ tags:
   - merge-pending
 ---"""
 
+    # Codex-Finding 2 (2026-05-10): Merge-Stub-Body durch dieselbe Footnote-
+    # Konvertierung wie render_note routen, damit auch Merge-Stubs Wikilink-
+    # Footnotes auf die PDF-Seite haben (v30-Vollständigkeit). In einer Variable
+    # gehalten (statt inline), damit build_quellen_block (Issue #76) exakt
+    # denselben Body-Stand sieht, der unten tatsächlich gerendert wird.
+    converted_body = convert_inline_to_footnotes(
+        note.body.strip(),
+        citation.short_label,
+        source_file,
+    )
     body_parts = [
         f"# Merge-Stub: {note.title}",
         "",
@@ -652,16 +756,9 @@ tags:
         "",
         "## Neuer Pipeline-Body (zur Integration)",
         "",
-        # Codex-Finding 2 (2026-05-10): Merge-Stub-Body durch dieselbe Footnote-
-        # Konvertierung wie render_note routen, damit auch Merge-Stubs Wikilink-
-        # Footnotes auf die PDF-Seite haben (v30-Vollständigkeit).
-        convert_inline_to_footnotes(
-            note.body.strip(),
-            citation.short_label,
-            source_file,
-        ),
+        converted_body,
         "",
-        build_quellen_block(note, source_file, citation).rstrip(),
+        build_quellen_block(converted_body, source_file, citation).rstrip(),
     ]
     rendered = frontmatter + "\n" + "\n".join(body_parts) + "\n"
     return inject_content_hash(rendered)  # #47: Merge-Stubs hashen → editierte Stubs schützen

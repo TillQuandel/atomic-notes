@@ -233,17 +233,13 @@ class TestMetadataSection(unittest.TestCase):
 
 
 class TestQuellenSection(unittest.TestCase):
-    """Regel 8: deterministischer Quellen-Absatz aus source_anchors (page/fuzzy_page,
-    dedupliziert, numerisch sortiert)."""
+    """Regel 8: deterministischer Quellen-Absatz aus dem final gerenderten Body
+    (Issue #76: vorher aus source_anchors), dedupliziert, numerisch sortiert."""
 
     def test_pages_deduplicated_and_sorted(self):
         draft = _draft(
-            source_anchors=[
-                TextAnchor(quote="a", page="S. 159"),
-                TextAnchor(quote="b", page="S. 9"),
-                TextAnchor(quote="c", page="S. 159–160"),
-                TextAnchor(quote="d", page=None, fuzzy_page="S. 9"),  # Dedup gegen b
-            ]
+            body="# Foo\n\nA (S. 159). B (S. 9). C (S. 159-160). D (S. 9).",
+            source_anchors=[],
         )
         citation = _citation(author="Foo", year="2020", title="Foo Titel", source_file="foo.pdf")
         note_json = note_to_json_dict(draft, citation)
