@@ -84,6 +84,19 @@ def _usable_page_labels(labels: list | None) -> list | None:
     return labels
 
 
+def pdf_uses_physical_pages(pdf_path: Path) -> bool:
+    """True wenn `pdf_to_pages` für dieses PDF auf den `i+1`-Fallback zurückfällt
+    (keine nutzbaren `/PageLabels`) — die zurückgegebene Seitenzahl ist dann die
+    physische PDF-Position, keine gedruckte Seite (Issue #95).
+
+    Eigenständiger, günstiger Zweit-Check (dieselbe fail-open `_pdf_page_labels`-
+    Logik, die `orchestrator.main()` bereits für die Edition-Verifikation nutzt)
+    statt eines Rückgabe-Umbaus von `pdf_to_pages`/`pdf_to_text` — deren Signatur
+    bleibt für die bestehenden Aufrufer (calibration-/eval-Skripte) unverändert.
+    """
+    return _pdf_page_labels(pdf_path) is None
+
+
 def _resolve_page_numbers(pages_raw: list[str], labels: list | None) -> list[tuple[int, str]]:
     """Ordnet jeder Seite ihre zitierfähige Seitenzahl zu: das numerische
     Druckseiten-Label, sonst die 1-basierte Form-Feed-Position.

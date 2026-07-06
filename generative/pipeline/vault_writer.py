@@ -186,7 +186,10 @@ def build_quellen_block(body: str, source_file: str, citation: CitationMeta | No
         link = f"[[{source_file}|{short}]]"
     else:
         link = short  # Klartext-Fallback wenn PDF fehlt oder Filename unsafe
-    pages_marker = f", S. {pages_str}" if pages_str else ""
+    # Issue #95: Quelle ohne /PageLabels -> Seiten sind physische PDF-Position,
+    # keine gedruckte Seite. Gleiche Kennzeichnung wie in convert_inline_to_footnotes.
+    page_word = "PDF-S." if citation.physical_pages else "S."
+    pages_marker = f", {page_word} {pages_str}" if pages_str else ""
     return f"## Quellen\n\n*Quelle: {link}: {title}{pages_marker}*\n"
 
 
@@ -232,7 +235,9 @@ def renumber_footnotes(text: str) -> str:
     return "\n".join(new_lines)
 
 
-def convert_inline_to_footnotes(body: str, source_label: str, source_file: str | None = None) -> str:
+def convert_inline_to_footnotes(
+    body: str, source_label: str, source_file: str | None = None, physical_pages: bool = False
+) -> str:
     """Konvertiert `(S. N)`-Inline-Marker zu `[^i]`-Footnote-Markern. Footnote-Defs
     werden an den Body-Ende als nackter Block angehängt (Reading-Mode rendert sie eh
     am Ende der Note). Block-Quote-Callouts (`> ...`) werden NICHT umgeschrieben —
@@ -243,9 +248,16 @@ def convert_inline_to_footnotes(body: str, source_label: str, source_file: str |
     Obsidian-Wikilink mit `#page=N` gerendert — Klick öffnet Obsidian-internen
     PDF-Viewer auf der richtigen Seite. Bei Page-Range `13–14` zeigt das
     `#page=`-Fragment auf die erste Zahl, das Label behält die Range.
+
+    `physical_pages` (Issue #95): True wenn die Quelle keine `/PageLabels` führt —
+    das Label wird dann als `PDF-S. N` statt `S. N` gerendert (ehrliche Kennzeichnung:
+    die Seitenzahl ist die physische PDF-Position, keine gedruckte Seite). Nur das
+    LABEL ändert sich; das `#page=N`-Fragment bleibt die nackte Zahl (der Obsidian-
+    PDF-Viewer braucht den physischen Index — der stimmt hier gerade).
     """
     counter = [0]
     defs: list[str] = []
+    label_prefix = "PDF-S." if physical_pages else "S."
     # Filename mit Wikilink-Syntax-Zeichen würde den Wikilink semantisch
     # zerbrechen. Defensiv: Klartext-Fallback. Codex-Finding 1 (`|`, `#`),
     # Gemini-Finding G1 (einzelne `[`, `]`).
@@ -263,9 +275,9 @@ def convert_inline_to_footnotes(body: str, source_label: str, source_file: str |
         if pdf_in_vault:
             first = re.match(r"\d+", page_label)
             page_anchor = first.group(0) if first else page_label
-            page_md = f"[[{source_file}#page={page_anchor}|S. {page_label}]]"
+            page_md = f"[[{source_file}#page={page_anchor}|{label_prefix} {page_label}]]"
         else:
-            page_md = f"S. {page_label}"
+            page_md = f"{label_prefix} {page_label}"
         defs.append(f"[^{i}]: {source_label}, {page_md}.")
         return f"[^{i}]"
 
@@ -283,8 +295,13 @@ def convert_inline_to_footnotes(body: str, source_label: str, source_file: str |
 
 # Footnote-Def-Seiten-Wert extrahieren: Wikilink-Form zuerst probieren
 # (`[[Datei#page=N|S. <label>]]`, siehe convert_inline_to_footnotes), sonst
-# Klartext-Form (`S. <label>.` am Zeilenende).
-_DEF_WIKILINK_PAGE_RE = re.compile(r"\[\[[^\[\]]*\|\s*S\.\s*([^\]]+)\]\]")
+# Klartext-Form (`S. <label>.` am Zeilenende). `(?:PDF-)?`-Präfix optional
+# (Issue #95): Quellen ohne /PageLabels rendern das Label als `PDF-S. <label>`
+# statt `S. <label>` — die Def-Seiten-Extraktion muss beide Formen verstehen,
+# sonst verliert der Quellen-Block bei gekennzeichneten Notes seine Seiten.
+# Die Klartext-Form (`_DEF_PLAINTEXT_PAGE_RE`) braucht keine Anpassung: `search()`
+# findet `S. <label>` auch als Teilstring von `PDF-S. <label>`.
+_DEF_WIKILINK_PAGE_RE = re.compile(r"\[\[[^\[\]]*\|\s*(?:PDF-)?S\.\s*([^\]]+)\]\]")
 _DEF_PLAINTEXT_PAGE_RE = re.compile(r"S\.\s*(\d[\d,\s\-–]*)\.?\s*$")
 
 
@@ -444,7 +461,7 @@ sub-concepts:
 
     body = note.body.strip()
     body = strip_legacy_sections(body)
-    body = convert_inline_to_footnotes(body, citation.short_label, source_file)
+    body = convert_inline_to_footnotes(body, citation.short_label, source_file, citation.physical_pages)
 
     # v29f: Hub-Body-Layout: H1 → Einleitung (1. Absatz nach H1) → ## Komponenten
     # (nummerierte Liste mit Beschreibung pro Sub-Konzept) → Rest-Absätze (Substanz +
@@ -574,7 +591,8 @@ related:
     # v28: `(S. N)` → `[^i]`-Footnotes deterministisch im Renderer (Pipeline-Components
     # wie anchor_repair/verifier arbeiten weiter mit dem Inline-Format im Body-Draft).
     # v30: Page-Wikilink mit `#page=N` wenn PDF im Vault auflösbar.
-    body = convert_inline_to_footnotes(body, citation.short_label, source_file)
+    # #95: physical_pages kennzeichnet das Label als `PDF-S.` bei Quellen ohne /PageLabels.
+    body = convert_inline_to_footnotes(body, citation.short_label, source_file, citation.physical_pages)
 
     sections: list[str] = [body]
     sections.append(build_quellen_block(body, source_file, citation).rstrip())
@@ -743,6 +761,7 @@ tags:
         note.body.strip(),
         citation.short_label,
         source_file,
+        citation.physical_pages,
     )
     body_parts = [
         f"# Merge-Stub: {note.title}",

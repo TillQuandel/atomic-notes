@@ -74,3 +74,46 @@ def test_quality_module_not_shadowed_by_text_quality_gate(monkeypatch):
     assert citation.author == "Autor"
     assert citation.year == "2020"
     assert citation.title == "Titel"
+
+
+def test_physical_pages_signal_wired_from_pdf_chunker_into_citation(monkeypatch):
+    """Issue #95: `_run_extraction_stages` muss `pdf_chunker.pdf_uses_physical_pages`
+    (Zweit-Check auf `_pdf_page_labels`, PDF ohne `/PageLabels` -> Fallback) auf die
+    konstruierte `CitationMeta` durchreichen — sonst rendert der Vault-Writer
+    Seitenangaben aus label-losen PDFs unmarkiert als vermeintlich gedruckte Seite."""
+    pc = orchestrator.pdf_chunker
+    monkeypatch.setattr(pc, "pdf_to_text", lambda *_a, **_k: "Etwas Quelltext mit Wörtern.")
+    monkeypatch.setattr(pc, "split_by_chapters", lambda *_a, **_k: [SimpleNamespace(title="Intro", text="body")])
+    monkeypatch.setattr(
+        pc, "pdf_metadata", lambda *_a, **_k: {"Author": "Autor", "Year": "2020", "Title": "Titel", "Pages": "1"}
+    )
+    monkeypatch.setattr(pc, "extract_overview", lambda *_a, **_k: "Überblick")
+    monkeypatch.setattr(orchestrator.acronym_fix, "extract_acronym_pairs", lambda *_a, **_k: {})
+    monkeypatch.setattr(
+        orchestrator.context_builder,
+        "build_relevance_profile",
+        lambda *_a, **_k: {"existing_concepts": [], "tag_whitelist": []},
+    )
+    monkeypatch.setattr(orchestrator.context_builder, "build_concept_links", lambda *_a, **_k: {})
+    monkeypatch.setattr(orchestrator, "ENABLE_BACKGROUND_EXTRACTOR", False)
+    monkeypatch.setattr(orchestrator.planner, "run", lambda *_a, **_k: ConceptPlan("Titel", "Summary", []))
+    monkeypatch.setattr(orchestrator.planner, "filter_hallucinated", lambda plan, _text: (plan, []))
+
+    async def _no_concepts(*_a, **_k):
+        return ([], {}, 0)
+
+    monkeypatch.setattr(orchestrator, "run_extractors_per_concept", _no_concepts)
+    monkeypatch.setattr(
+        orchestrator.quality,
+        "check_quality",
+        lambda **_kw: QualityReport(peer_reviewed=None, citation_count=None, retracted=False, flags=[]),
+    )
+    # Kein echtes /PageLabels-Parsing im Test — direktes Signal stubben, analog zum
+    # bestehenden `_pdf_page_labels`-Zweit-Check der Edition-Verifikation (main()).
+    monkeypatch.setattr(pc, "pdf_uses_physical_pages", lambda *_a, **_k: True)
+
+    args = SimpleNamespace(by_chapter=False, dry_run=True, doi=None, llm_fallback=False)
+    result = orchestrator._run_extraction_stages(args, Path("fake.pdf"), None)
+
+    citation = result[-1]
+    assert citation.physical_pages is True
