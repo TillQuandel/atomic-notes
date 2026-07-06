@@ -126,7 +126,10 @@ def _render_quellen_section(body: str, source: dict) -> str:
     short_label = citation.get("short_label") or ""
     title = citation.get("title") or short_label
     pages = pages_from_body(body)
-    pages_marker = f", S. {', '.join(pages)}" if pages else ""
+    # Issue #95: Quelle ohne /PageLabels -> Seiten sind physische PDF-Position,
+    # keine gedruckte Seite. Gleiche Kennzeichnung wie im Obsidian-Renderer.
+    page_word = "PDF-S." if citation.get("physical_pages") else "S."
+    pages_marker = f", {page_word} {', '.join(pages)}" if pages else ""
     return f"## Quellen\n\n*{short_label}: {title}{pages_marker}*"
 
 
@@ -208,8 +211,11 @@ def render_portable_note(
     if _HAS_FOOTNOTE_RE.search(raw_body):
         body = raw_body
     else:
-        short_label = (source.get("citation") or {}).get("short_label")
-        body = convert_inline_to_footnotes(raw_body, short_label, source_file=None)
+        note_citation = source.get("citation") or {}
+        short_label = note_citation.get("short_label")
+        body = convert_inline_to_footnotes(
+            raw_body, short_label, source_file=None, physical_pages=bool(note_citation.get("physical_pages"))
+        )
 
     h1_line, rest = _split_h1(body, note["title"])
     rest = _convert_callouts(rest)
@@ -229,7 +235,9 @@ def render_portable_run(run_json: dict, *, include_metadata: bool = False) -> st
     enthaltenen Notes. Notes durch `\n\n---\n\n` getrennt; Footnotes pro Note
     per laufendem Offset renummeriert (Regel 6)."""
     source = run_json["source"]
-    run_short_label = (source.get("citation") or {}).get("short_label")
+    run_citation = source.get("citation") or {}
+    run_short_label = run_citation.get("short_label")
+    run_physical_pages = bool(run_citation.get("physical_pages"))
 
     # 1) exported_titles vorab aus allen Notes bauen (H1-Text je Note — der
     # spätere Anchor-Slug hängt vom GESAMTEN H1 inkl. Untertitel ab, Regel 5).
@@ -240,7 +248,9 @@ def render_portable_run(run_json: dict, *, include_metadata: bool = False) -> st
         if _HAS_FOOTNOTE_RE.search(raw_body):
             body = raw_body
         else:
-            body = convert_inline_to_footnotes(raw_body, run_short_label, source_file=None)
+            body = convert_inline_to_footnotes(
+                raw_body, run_short_label, source_file=None, physical_pages=run_physical_pages
+            )
         h1_line, _rest = _split_h1(body, note["title"])
         h1_text = h1_line[2:].strip()
         for key in [note["title"], *note.get("aliases", [])]:

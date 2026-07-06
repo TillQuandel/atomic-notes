@@ -156,6 +156,25 @@ def validate_citation_attributions(body: str, citation: CitationMeta) -> list[st
     return flags
 
 
+_PHYSICAL_PAGES_FLAG = "Seitenangaben = PDF-Position (Quelle ohne /PageLabels — gedruckte Seiten unbekannt)"
+
+
+def apply_physical_pages_flag(drafts: list[AtomicNoteDraft], citation: CitationMeta) -> int:
+    """Markiert alle Drafts einer Quelle ohne `/PageLabels` (Issue #95): die vom
+    Renderer als `PDF-S. N` gekennzeichneten Seitenangaben sind die physische
+    PDF-Position, nicht die gedruckte Seite. Seiteneffekt-freier Review-Hinweis,
+    idempotent wie `apply_citation_check` — gibt die Zahl neu geflaggter Drafts
+    zurück."""
+    if not citation or not citation.physical_pages:
+        return 0
+    added = 0
+    for draft in drafts:
+        if _PHYSICAL_PAGES_FLAG not in draft.quality_flags:
+            draft.quality_flags.append(_PHYSICAL_PAGES_FLAG)
+            added += 1
+    return added
+
+
 def apply_citation_check(drafts: list[AtomicNoteDraft], citation: CitationMeta) -> int:
     """Wendet `validate_citation_attributions` auf jeden Draft an und hängt neue
     Flags an `draft.quality_flags` — idempotent (Duplikat-Check vor dem Anhängen,

@@ -1500,7 +1500,9 @@ def _setup_phoenix_tracing() -> None:
         print(f"[phoenix] Tracing nicht verfügbar ({e}) — Pipeline läuft ohne Traces")
 
 
-def _build_citation(pdf_meta: dict, quality_report, q_title: str | None, source_name: str) -> CitationMeta:
+def _build_citation(
+    pdf_meta: dict, quality_report, q_title: str | None, source_name: str, physical_pages: bool = False
+) -> CitationMeta:
     """Baut die kanonische CitationMeta + druckt die CrossRef-Override-Diagnose.
 
     Aufgerufen sowohl im Normalpfad (`_run_extraction_stages`, vor dem Planner)
@@ -1508,8 +1510,12 @@ def _build_citation(pdf_meta: dict, quality_report, q_title: str | None, source_
     trotzdem vor Stage 6 stehen). Deterministisch/idempotent — dieselbe Eingabe
     liefert dieselbe CitationMeta (Analogie zum bestehenden Muster, `q_title`/
     `_parse_filename_fallback` bei Bedarf erneut abzuleiten statt durchzureichen).
+
+    `physical_pages` (#95): vom Aufrufer via `pdf_chunker.pdf_uses_physical_pages(
+    source_path)` ermittelt — hier nicht selbst berechnet, weil dieser Helper nur
+    `source_name` (Anzeigename) kennt, nicht den tatsächlichen `Path`.
     """
-    citation = build_citation_meta(pdf_meta, quality_report, q_title, source_name)
+    citation = build_citation_meta(pdf_meta, quality_report, q_title, source_name, physical_pages=physical_pages)
     if crossref_override_blocked(quality_report, q_title):
         print(
             f"      [quality] CrossRef-Override verworfen (schwacher Titel-Match): "
@@ -1645,7 +1651,15 @@ def _run_extraction_stages(
     # Aufrufen, damit beide (statt wie bisher nur der Vault-Writer) die CrossRef-
     # korrigierten Werte sehen. quality_report + q_title liegen hier bereits vor
     # (Quality ist Stage 3, Planner Stage 4).
-    citation = _build_citation(pdf_meta, quality_report, q_title, source_path.name)
+    # #95: physical_pages-Signal aus demselben PDF, das text/pdf_meta oben schon
+    # gelesen hat — Quellen ohne /PageLabels rendern Seitenangaben gekennzeichnet.
+    citation = _build_citation(
+        pdf_meta,
+        quality_report,
+        q_title,
+        source_path.name,
+        physical_pages=pdf_chunker.pdf_uses_physical_pages(source_path),
+    )
 
     tag_whitelist = relevance_profile.get("tag_whitelist", [])
     background_map: dict = {}
@@ -2053,7 +2067,18 @@ def main(argv: list[str] | None = None):
         # citation (CitationMeta, #96 E3a) ebenso: Stage 1–5 übersprungen, daher
         # hier aus dem geladenen pdf_meta/quality_report neu konstruiert — dieselbe
         # deterministische Factory wie im Normalpfad (_run_extraction_stages).
-        citation = _build_citation(pdf_meta, quality_report, q_title, source_path.name)
+        # #95: physical_pages hier per Zweit-Check auf dieselbe source_path neu
+        # ermittelt (analog zur bestehenden Edition-Verifikation weiter unten, die
+        # _pdf_page_labels(source_path) ebenfalls unabhängig vom load-drafts-Pfad
+        # neu aufruft) statt über den State persistiert — deterministisch, solange
+        # die PDF-Datei am gespeicherten Pfad noch existiert.
+        citation = _build_citation(
+            pdf_meta,
+            quality_report,
+            q_title,
+            source_path.name,
+            physical_pages=pdf_chunker.pdf_uses_physical_pages(source_path),
+        )
         word_count = len(text.split())
         dropped_total = 0
         print(f"\n=== Atomic Agent (load-drafts): {source_path.name} ===\n")
@@ -2207,6 +2232,14 @@ def main(argv: list[str] | None = None):
     n_citation_flags = citation_check.apply_citation_check(drafts, citation)
     if n_citation_flags:
         print(f"[citation-check] {n_citation_flags} Attribution(s) ohne Quellendeckung geflaggt")
+
+    # --- Issue #95: Quelle ohne /PageLabels -> Seitenangaben sind PDF-Position ---
+    # Seiteneffekt-freier Review-Hinweis (analog #8/E3b): render_note/render_moc
+    # kennzeichnen Seitenangaben bereits als "PDF-S." (citation.physical_pages),
+    # dieses Flag macht die Einschränkung zusätzlich im Frontmatter sichtbar.
+    n_physical_flags = citation_check.apply_physical_pages_flag(drafts, citation)
+    if n_physical_flags:
+        print(f"[physical-pages] {n_physical_flags} Note(s) ohne /PageLabels — Seiten als PDF-Position geflaggt")
 
     # --- Schritt 7: Vault-Writer ---
     # E3a (#96): citation (CitationMeta) wurde bereits vor dem Planner konstruiert

@@ -8,10 +8,10 @@ Feld-Semantik
 - `schema_version`: int, siehe Versionierungs-Regel unten.
 - `generated_at`: ISO-Datum des Exports (nicht des Pipeline-Laufs).
 - `agent_version`: `config.AGENT_VERSION` zum Zeitpunkt des Exports.
-- `source`: Quelldatei + `CitationMeta` 1:1 (Autor/Jahr/Titel/DOI), ergänzt um
-  die zwei abgeleiteten (`@property`) Felder `short_label` und `display_year` —
-  beide werden bei jedem Export frisch aus `CitationMeta` berechnet, nicht
-  zwischengespeichert.
+- `source`: Quelldatei + `CitationMeta` 1:1 (Autor/Jahr/Titel/DOI, `physical_pages`
+  — #95, additiv), ergänzt um die zwei abgeleiteten (`@property`) Felder
+  `short_label` und `display_year` — beide werden bei jedem Export frisch aus
+  `CitationMeta` berechnet, nicht zwischengespeichert.
 - `note`: `dataclasses.asdict(draft)` — ALLE Felder von `AtomicNoteDraft`
   automatisch, ohne Feld-Enumeration hier (Contract bleibt synchron, wenn
   künftig Felder dazukommen). Einzige Abweichung: `note["body"]` wird durch
@@ -73,6 +73,9 @@ def _source_block(citation: CitationMeta) -> dict:
             "doi": citation.doi,
             "short_label": citation.short_label,
             "display_year": citation.display_year,
+            # Additiv (#95, kein SCHEMA_VERSION-Bump): True wenn die Quelle keine
+            # /PageLabels führt (Seitenangaben sind physische PDF-Position).
+            "physical_pages": citation.physical_pages,
         },
     }
 

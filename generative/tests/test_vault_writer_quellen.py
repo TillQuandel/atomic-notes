@@ -181,6 +181,27 @@ class TestRenderNoteCoherence(unittest.TestCase):
         self.assertNotIn("999", out)
 
 
+class TestRenderNoteCoherencePhysicalPages(unittest.TestCase):
+    """Issue #95: dieselbe Kohärenz-Property wie `TestRenderNoteCoherence`, aber
+    mit `physical_pages=True` (PDF ohne `/PageLabels`) — die gekennzeichnete
+    `PDF-S.`-Form darf die Seiten-Kohärenz zwischen Footnote-Defs und Quellen-
+    Block nicht brechen (`pages_from_body` muss beide Formen verstehen)."""
+
+    def test_quellen_pages_match_rendered_footnote_def_pages_when_marked(self):
+        draft = _draft(
+            body="# T\n\nA (S. 3). B (S. 3). C (S. 21).",
+            source_anchors=[TextAnchor(quote="x", page="S. 999")],  # bewusst veraltet/falsch
+        )
+        out = render_note(draft, "autor-2020.pdf", citation=_citation(physical_pages=True))
+        def_pages = set(re.findall(r"\[\^\d+\]: [^,]+, PDF-S\. ([\d–]+)\.", out))
+        quellen_line = next(line for line in out.splitlines() if line.startswith("*Quelle:"))
+        m = re.search(r", PDF-S\. (.+)\*$", quellen_line)
+        quellen_pages = {p.strip() for p in m.group(1).split(",")} if m else set()
+        self.assertEqual(def_pages, quellen_pages)
+        self.assertEqual(def_pages, {"3", "21"})
+        self.assertNotIn("999", out)
+
+
 class TestRenderMocUsesFinalBody(unittest.TestCase):
     """render_moc kann Absätze (und damit Fußnoten) nach der Konvertierung noch
     über den Hub-Redundanz-Filter + renumber_footnotes verlieren — der Quellen-

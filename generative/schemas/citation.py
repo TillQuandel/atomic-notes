@@ -23,6 +23,14 @@ class CitationMeta:
     title: Optional[str]
     doi: Optional[str]
     source_file: str
+    # Additiv (#95, kein SCHEMA_VERSION-Bump): True wenn die Quelle KEINE
+    # eingebetteten `/PageLabels` führt und `pdf_chunker.pdf_to_pages` deshalb auf
+    # den `i+1`-Fallback (physische PDF-Position statt gedruckter Seite)
+    # zurückfällt. Der Renderer (vault_writer/portable_md) kennzeichnet
+    # Seitenangaben dann sichtbar als „PDF-S." statt unmarkiert als „S." — das
+    # pipeline-interne `(S. N)`-Inline-Format im Draft-Body bleibt davon
+    # unberührt (nur eine Render-Kennzeichnung, kein Format-Refactor).
+    physical_pages: bool = False
 
     @property
     def display_year(self) -> str:
@@ -79,7 +87,13 @@ def crossref_override_blocked(quality_report, q_title: str | None) -> bool:
     )
 
 
-def build_citation_meta(pdf_meta: dict, quality_report, q_title: str | None, source_file: str) -> CitationMeta:
+def build_citation_meta(
+    pdf_meta: dict,
+    quality_report,
+    q_title: str | None,
+    source_file: str,
+    physical_pages: bool = False,
+) -> CitationMeta:
     """Konstruiert die kanonische CitationMeta EINMAL pro Lauf.
 
     Übernimmt exakt die CrossRef-Override-Blocklogik, die vorher in
@@ -92,6 +106,11 @@ def build_citation_meta(pdf_meta: dict, quality_report, q_title: str | None, sou
     punkt statt der beiden getrennten Welten `pdf_meta`/`enriched_meta`. Dadurch
     sehen Extractor und Planner ab jetzt dieselben CrossRef-korrigierten Werte
     wie vorher nur der Vault-Writer (dokumentierte Verhaltensänderung, #96 E3a).
+
+    `physical_pages` (#95): vom Aufrufer durchgereichtes Signal aus
+    `pdf_chunker.pdf_uses_physical_pages(source_path)` — hier nicht selbst
+    ermittelt, weil `build_citation_meta` `source_path` (die Datei) nicht kennt,
+    nur `source_file` (den Namen für Anzeigezwecke).
     """
     from generative.pipeline.vault_writer import _parse_filename_fallback
 
@@ -117,4 +136,6 @@ def build_citation_meta(pdf_meta: dict, quality_report, q_title: str | None, sou
 
     doi = pdf_meta.get("DOI") or pdf_meta.get("doi")
 
-    return CitationMeta(author=author, year=year, title=title, doi=doi, source_file=source_file)
+    return CitationMeta(
+        author=author, year=year, title=title, doi=doi, source_file=source_file, physical_pages=physical_pages
+    )
