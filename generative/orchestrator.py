@@ -1256,6 +1256,61 @@ def dry_run_eval_targets(written: list[tuple[Path, bool]], cache_note_dir: Path)
     return files
 
 
+def run_stage8_eval(
+    note_files: list[Path],
+    source_path: Path,
+    run_meta: dict,
+    *,
+    fresh_run: bool = False,
+) -> tuple[list[dict], int, int]:
+    """Stage-8-Kernschleife: bewertet jede Note gegen die Quell-PDF.
+
+    Re-Eval-Hash-Guard: eine Note deren pipeline-content-hash (#47) + eval_version +
+    pipeline_version bereits in quality_history.jsonl stehen, wird nicht erneut vom
+    Judge bewertet — das Alt-Ergebnis wird fuer die Lauf-Aggregation wiederverwendet
+    (spart ~2 Sonnet-Calls / ~26k Input-Tokens pro unveraenderter Note). `fresh_run`
+    (--fresh-run) bypassed den Guard bewusst — er ist semantisch ein Cache, und
+    --fresh-run fordert garantiert frische Ergebnisse an.
+
+    Gibt (eval_results, evaluated_count, reused_count) zurueck; druckt eine sichtbare
+    Zusammenfassungszeile (nie ein stiller Skip).
+    """
+    from generative import eval_quality_v4 as _eq
+
+    eval_results: list[dict] = []
+    evaluated_count = 0
+    reused_count = 0
+
+    for note_path in note_files[:10]:
+        note_hash: str | None = None
+        try:
+            note_text = note_path.read_text(encoding="utf-8")
+        except OSError:
+            note_text = None
+        if note_text is not None:
+            note_hash = vault_writer.extract_content_hash(note_text)
+
+        cached = None
+        if note_hash and not fresh_run:
+            cached = _eq.find_cached_eval(note_hash, _eq.EVAL_VERSION, AGENT_VERSION)
+
+        if cached is not None:
+            result = dict(cached)
+            result.update(run_meta)
+            eval_results.append(result)
+            reused_count += 1
+            continue
+
+        result = _eq.eval_note(note_path, source_path, pipeline_version=AGENT_VERSION, content_hash=note_hash)
+        result.update(run_meta)
+        _eq.save_result(result)
+        eval_results.append(result)
+        evaluated_count += 1
+
+    print(f"[8/8] {evaluated_count} evaluiert, {reused_count} unveraendert uebernommen (Hash-Guard)")
+    return eval_results, evaluated_count, reused_count
+
+
 def _auto_version_bump() -> None:
     """Erhöht AGENT_VERSION Patch wenn sich Pipeline-Code seit letztem Run geändert hat."""
     import hashlib
@@ -2347,7 +2402,6 @@ def main(argv: list[str] | None = None):
         return
     print("\n[8/8] Qualitäts-Eval…")
     try:
-        from generative import eval_quality_v4 as _eq
         from generative.config import CACHE_DIR as _CACHE_DIR
 
         # Dry-Run: Notes im Cache-Verzeichnis; Live: im Vault (00-inbox oder 04-wissen)
@@ -2423,12 +2477,9 @@ def main(argv: list[str] | None = None):
         except Exception as _db_err:
             print(f"   [warn] DB-Write fehlgeschlagen: {_db_err}")
 
-        eval_results = []
-        for note_path in note_files[:10]:
-            result = _eq.eval_note(note_path, source_path, pipeline_version=AGENT_VERSION)
-            result.update(run_meta)
-            _eq.save_result(result)
-            eval_results.append(result)
+        eval_results, _evaluated_count, _reused_count = run_stage8_eval(
+            note_files, source_path, run_meta, fresh_run=bool(getattr(args, "fresh_run", False))
+        )
 
         if eval_results:
             hall_rates = [
@@ -2445,7 +2496,8 @@ def main(argv: list[str] | None = None):
                 avg_hall = sum(hall_rates) / len(hall_rates)
                 avg_cov = sum(cov_rates) / len(cov_rates) if cov_rates else 0.0
                 print(f"      Ø Halluzinationsrate: {avg_hall:.1%}  |  Ø Coverage (faktisch): {avg_cov:.1%}")
-                print(f"      {len(eval_results)} Notes → .cache/quality_history.jsonl")
+                reused_note = f"  (+{_reused_count} wiederverwendet, Hash-Guard)" if _reused_count else ""
+                print(f"      {_evaluated_count} Notes → .cache/quality_history.jsonl{reused_note}")
 
         # Re-Aggregation NACH der Eval-Schleife: die eval_quality-Calls stehen jetzt
         # im Trace. Macht den sonst unsichtbaren Stage-8-Tail (~33 % Out-Tok, Eval-
