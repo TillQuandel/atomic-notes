@@ -1738,9 +1738,24 @@ function renderInsights(d) {
 
   // Übersicht: Stand der neuesten Pipeline-Version, rein deskriptiv bei kleinem n
   if (n > 0 && k.avg_hall != null) {
+    // #36 Punkt 4: Version-über-Version-Delta ergänzen. kpi_trend.deltas.hall
+    // ist bereits serverseitig mit N-Guard berechnet (version_delta() in
+    // generative/eval_dashboard.py, per TDD getestet) — hier nur verdrahtet.
+    // Bei n<20 in einer der beiden Versionen keine Besser/Schlechter-Wertung,
+    // nur die nackten Zahlen (gleiches Rausch-Schutz-Muster wie das KPI-Spark-Delta).
+    const kt = d.kpi_trend || {};
+    const vers = kt.versions || [];
+    const vd = kt.deltas?.hall;
+    let deltaTxt = '';
+    if (vd && vd.prev != null && vers.length >= 2) {
+      const prevVer = esc(vers[vers.length - 2]);
+      const nPrev = (kt.n || [])[(kt.n || []).length - 2];
+      deltaTxt = ` vs. <strong>${prevVer}</strong>: ${_fmtDE(vd.prev)} % (n=${nPrev})` +
+        (vd.reliable ? '' : ` <span class="caveat">(n&lt;20 — nicht belastbar)</span>`);
+    }
     _setInsight('ins-overview',
       `Pipeline <strong>${esc(k.kpi_version||'–')}</strong>: Fehlerquote <strong>${_fmtDE(k.avg_hall)} %</strong>, ` +
-      `Belegrate <strong>${_fmtDE(k.avg_cov)} %</strong> über ${n} evaluierte Note${n===1?'':'s'}.${caveat}`);
+      `Belegrate <strong>${_fmtDE(k.avg_cov)} %</strong> über ${n} evaluierte Note${n===1?'':'s'}.${caveat}${deltaTxt}`);
   } else { _setInsight('ins-overview', ''); }
 
   // Qualität: Spannweite der Akzeptanz über PDFs
