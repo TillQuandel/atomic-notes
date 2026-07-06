@@ -155,6 +155,7 @@ async def run_extractors_per_concept(
     tag_whitelist: list[str] | None = None,
     background_map: dict[str, list[str]] | None = None,
     related_mentions: list[str] | None = None,
+    max_concurrent_calls: int | None = None,
 ) -> tuple[list[AtomicNoteDraft], dict, int]:
     """Pro Konzept ein Extractor-Call mit den relevanten Textstellen aus ALLEN Chunks.
 
@@ -162,10 +163,13 @@ async def run_extractors_per_concept(
     werden vor dem LLM-Call verworfen (zusätzlicher Halluzinations-Schutz neben
     planner.filter_hallucinated).
 
+    max_concurrent_calls: aus RuntimeConfig gespeist (#101); None → Legacy-Fallback
+    auf die feste Konstante MAX_CONCURRENT_CALLS.
+
     Returns: (drafts, concept_map) — concept_map[concept.title] = (concept, ctext) für
     Self-Refine-Loop (Milestone 3.6).
     """
-    sem = asyncio.Semaphore(MAX_CONCURRENT_CALLS)
+    sem = asyncio.Semaphore(max_concurrent_calls if max_concurrent_calls is not None else MAX_CONCURRENT_CALLS)
 
     async def _run_with_sem(concept, ctext):
         async with sem:
@@ -835,7 +839,10 @@ async def process_all_notes_async(
     failed_dir: Path | None = None,
 ) -> list[AtomicNoteDraft]:
     """Stage-6-Pipeline für alle Notes parallel via asyncio.to_thread() + Semaphore."""
-    sem = asyncio.Semaphore(MAX_CONCURRENT_CALLS)
+    # #101: aus RuntimeConfig gespeist statt fester Konstante; runtime_config=None
+    # (Legacy-Aufrufpfad) fällt auf MAX_CONCURRENT_CALLS zurück.
+    _max_concurrent = runtime_config.max_concurrent_calls if runtime_config is not None else MAX_CONCURRENT_CALLS
+    sem = asyncio.Semaphore(_max_concurrent)
     initial_drafts = list(drafts)
     n_total = len(drafts)
 
@@ -1628,6 +1635,7 @@ def _run_extraction_stages(
                     tag_whitelist=tag_whitelist,
                     background_map={},
                     related_mentions=ch_related,
+                    max_concurrent_calls=(runtime_config.max_concurrent_calls if runtime_config is not None else None),
                 )
             )
             for t in ch_related:
@@ -1700,6 +1708,7 @@ def _run_extraction_stages(
                     tag_whitelist=tag_whitelist,
                     background_map=background_map,
                     related_mentions=related_mentions,
+                    max_concurrent_calls=(runtime_config.max_concurrent_calls if runtime_config is not None else None),
                 )
             )
         print(f"      {len(drafts)} Draft-Notes extrahiert")
