@@ -1,4 +1,5 @@
 import os
+import re
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -294,12 +295,16 @@ def compute_cost_per_call(
 ) -> float:
     """Kosten eines einzelnen LLM-Calls in USD.
     Gibt 0.0 zurück wenn BACKEND!='api' oder Modell nicht in MODEL_PRICING.
-    Strips provider-Prefix (z.B. 'anthropic/claude-opus-4-7' → 'claude-opus-4-7').
+    Strips provider-Prefix (z.B. 'anthropic/claude-opus-4-7' → 'claude-opus-4-7')
+    UND einen Datums-Suffix (z.B. 'claude-haiku-4-5-20251001' → 'claude-haiku-4-5'),
+    da MODEL_HAIKU einen Datums-Pin trägt, der Pricing-Key aber nicht (#100).
     """
     if BACKEND == "subscription":
         return 0.0
     # Provider-Prefix normalisieren: "anthropic/model" → "model"
     model_key = model.split("/", 1)[-1] if "/" in model else model
+    # Datums-Suffix strippen (Modell-Pin wie "-20251001") — nicht Teil des Pricing-Keys.
+    model_key = re.sub(r"-\d{8}$", "", model_key)
     pricing = MODEL_PRICING.get(model_key, {})
     if not pricing:
         return 0.0
