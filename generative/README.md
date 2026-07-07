@@ -16,9 +16,10 @@ It is the high-quality path for turning PDFs and later other rich sources into s
 ## Quick Start
 
 ```bash
-pip install -e .   # from the repository root
-cp .env.example .env
-# Edit .env for local paths and model/backend settings.
+# all commands from the repository root
+pip install -e .
+cp generative/.env.example generative/.env
+# Edit generative/.env for local paths and model/backend settings.
 atomic-notes doctor   # preflight: poppler, backend login, vault path
 atomic-notes run --source "path/to/paper.pdf" --dry-run
 ```
@@ -77,7 +78,7 @@ Core set:
 | `pdf` | PDF, via pandoc + typst. |
 | `html` | Standalone HTML page, via pandoc. |
 
-Optional, zusätzlich zuschaltbar: `odt` (OpenDocument Text), `epub` (EPUB e-book) — both via pandoc.
+Optional, additionally selectable: `odt` (OpenDocument Text), `epub` (EPUB e-book) — both via pandoc.
 
 `docx`/`pdf`/`html`/`odt`/`epub` need the optional `export` dependency group (pandoc+typst, pip-only — no system pandoc/typst binary required):
 

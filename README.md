@@ -59,13 +59,27 @@ pulls a CPU build of `torch` (no multi-gigabyte CUDA wheels):
 ```bash
 git clone https://github.com/TillQuandel/atomic-notes.git
 cd atomic-notes
-uv sync                       # creates .venv and installs from the lockfile
-uv run atomic-notes doctor    # preflight check
+uv sync                                       # creates .venv and installs from the lockfile
+cp generative/.env.example generative/.env    # then set ATOMIC_AGENT_VAULT_PATH to your vault
+uv run atomic-notes doctor                    # preflight check
 uv run atomic-notes run --source examples/zettelkasten-primer.pdf --dry-run
 ```
 
 > `--dry-run` skips writing to your vault, but still runs the full LLM pipeline and
 > uses your backend quota. It is a safe *preview*, not a free one.
+
+Three things to know before your first run:
+
+- **Output goes to your inbox.** Notes are written to `<vault>/00-inbox/` —
+  review-first, nothing lands anywhere else in the vault.
+- **Note bodies are currently generated in German** (regardless of source
+  language). Making the output language configurable is tracked in issue #157.
+- **A run has two side effects on your machine:** it starts a local metrics
+  dashboard on `http://127.0.0.1:8051`, and after pipeline-code changes —
+  including the first run of a fresh clone — it bumps `AGENT_VERSION` in
+  `generative/config.py`, so `git status` may show a modified file (issue #156).
+  The first run also downloads sentence-transformer models into your HuggingFace
+  cache (roughly 0.5 GB; the optional NLI gate adds ~280 MB).
 
 Run tools through the environment with `uv run <cmd>`. Plain `pip install -e .`
 still works, but `uv` is the supported path. One-shot setup incl. preflight:
@@ -99,13 +113,9 @@ For an API-based backend (Anthropic, OpenAI, Ollama, …) set
 > **Privacy:** the `litellm` backend sends PDF text to the configured external API.
 > For a fully local path, use the `extractive` pipeline or a local `litellm`
 > provider such as Ollama. The default `subscription` backend uses your own account.
-
-Point the output at your vault:
-
-```bash
-cp generative/.env.example generative/.env
-# set ATOMIC_AGENT_VAULT_PATH to your Obsidian vault
-```
+> Regardless of backend, the quality agent and PDF enrichment send bibliographic
+> **metadata only** (title, DOI, ISBN — never source text) to public lookup
+> services: Crossref, OpenAlex, arXiv, PubMed, Open Library, and Google Books.
 
 </details>
 
@@ -115,7 +125,8 @@ cp generative/.env.example generative/.env
 A local web GUI wraps the same pipeline: pick or drag-and-drop a PDF, watch live
 per-stage progress, and in dry-run mode preview each note before any write. It runs
 the CLI as a subprocess and streams progress over SSE — no React/npm, no telemetry,
-fully offline.
+and all GUI assets are served locally (no CDN). The pipeline behind it still calls
+your configured LLM backend and the metadata lookup services.
 
 ```bash
 uv sync --extra gui
@@ -133,6 +144,7 @@ uv run atomic-notes gui   # http://127.0.0.1:8052
 | `uv sync --extra dev` | + tests/lint stack | development |
 | `uv sync --extra gui` | + FastAPI/uvicorn | the web GUI |
 | `uv sync --extra extractive` | + GLiNER/torch NLP stack | the local extractive pipeline |
+| `uv sync --extra export` | + pandoc/typst (pip-only) | `docx`/`pdf`/`html`/`odt`/`epub` export (`json`/`portable-md` need no extra) |
 
 </details>
 
@@ -221,8 +233,12 @@ uv run python extractive/orchestrator.py --source <pdf> --output obsidian --out-
 ### Output direction
 
 The output contract is a structured atomic note: title, body, source anchors,
-source metadata, quality status, optional links/tags. Obsidian Markdown is one
-renderer; plain Markdown, JSON, and other PKM formats are renderer concerns.
+source metadata, quality status, optional links/tags. Obsidian Markdown is the
+primary renderer; per run, `--export-format` additionally renders each note (plus
+a combined document) to JSON, portable Markdown, or pandoc/typst-based formats
+(`docx`/`pdf`/`html`/`odt`/`epub`) — see
+[generative/README.md](generative/README.md#export-formats). Other PKM formats
+remain renderer concerns.
 
 ### Input direction
 
@@ -235,7 +251,8 @@ concept-rich sources into the same model. Stage-0 baseline is `pdftotext` (a Jun
 ## Status &amp; roadmap
 
 LLM-free unit suite green on ubuntu, windows, and macOS (see CI badge), in a
-`uv`-locked Python 3.12 environment. Releases: generative v0.3.x · extractive v0.2.0.
+`uv`-locked Python 3.12 environment. Pipeline versions: generative v0.3.x ·
+extractive v0.2.0 (internal versioning; no GitHub releases yet).
 
 1. **M1 — installable by strangers.** Packaging, entry point, `doctor`, hardened
    backends, CI on all three OSes, reproducible `uv` setup, bundled example. Done.
