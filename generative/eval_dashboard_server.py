@@ -24,6 +24,32 @@ from generative import eval_dashboard as D
 
 PORT = 8051
 
+# S1 (#150): Host-Header-Allowlist gegen DNS-Rebinding. Anders als die GUI
+# (FastAPI + TrustedHostMiddleware, gui/app.py:72) ist dieser Server ein nackter
+# BaseHTTPRequestHandler ohne solche Middleware — ohne Check koennte ein Angreifer
+# per DNS-Rebinding aus dem Browser des Opfers `/data.json`/`/live.json` lesen
+# (Note-Titel, PDF-Namen, Claim-Statistiken, Vault-Name). Der Server bindet zwar
+# nur an 127.0.0.1, aber das schuetzt nicht gegen Rebinding: der Request landet
+# lokal, nur der Host-Header traegt den Angreifer-Namen.
+_ALLOWED_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _host_allowed(host_header: str | None) -> bool:
+    """True, wenn der Host-Header auf einen lokalen Host zeigt.
+
+    Port-Suffix wird abgeschnitten; fehlender/leerer Host -> False (fail-closed).
+    IPv6-Literale kommen im Host-Header geklammert an (`[::1]:8051`).
+    """
+    if not host_header:
+        return False
+    host = host_header.strip()
+    if host.startswith("["):  # IPv6-Literal, evtl. mit Port: "[::1]:8051"
+        host = host[1:].partition("]")[0]
+    elif host.count(":") == 1:  # "localhost:8051" / "127.0.0.1:8051"
+        host = host.rsplit(":", 1)[0]
+    return host.lower() in _ALLOWED_HOSTS
+
+
 # ---------------------------------------------------------------------------
 # Daten-Endpunkt
 # ---------------------------------------------------------------------------
@@ -1025,6 +1051,14 @@ class Handler(BaseHTTPRequestHandler):
         pass  # kein Server-Log im Terminal
 
     def do_GET(self):
+        # S1 (#150): DNS-Rebinding-Schutz — Fremd-Host abweisen, bevor irgendein
+        # Daten-Endpunkt greift (analog GUI-TrustedHostMiddleware).
+        if not _host_allowed(self.headers.get("Host")):
+            self.send_response(403)
+            self.send_header("Content-Type", "text/plain; charset=utf-8")
+            self.end_headers()
+            self.wfile.write("Forbidden: unerlaubter Host-Header.".encode("utf-8"))
+            return
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
 
