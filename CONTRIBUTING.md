@@ -30,10 +30,10 @@ runs in a couple of minutes locally. Format check:
 
 ```bash
 uv run ruff format --check .       # CI gate; `uv run ruff format .` to apply
+uv run ruff check .                # CI gate (lint)
 ```
 
-Only formatting is enforced for now; the `ruff` linter (`ruff check`) is
-intentionally deferred and not part of CI yet.
+Both the format check and `ruff check` are CI gates — run them before pushing.
 
 ## ML notes (model cache & slow tests)
 
@@ -51,9 +51,12 @@ excluded from the default dev loop. Run only the fast suite, or include slow tes
 explicitly:
 
 ```bash
-uv run python -m pytest -m "not slow" generative -q   # fast (default in dev)
-uv run python -m pytest generative -q                 # everything
+uv run python -m pytest generative -q          # fast (slow tests excluded by default via pytest.ini)
+uv run python -m pytest -m "" generative -q    # everything, incl. slow LLM/model tests
 ```
+
+Note: `pytest.ini` sets `addopts = -m "not slow"`, so slow tests are excluded
+even without an explicit marker filter; `-m ""` overrides that.
 
 GPU override (optional, local only): the lockfile pins CPU `torch` (Win/Linux). To
 use a CUDA build, install it outside the locked sync:

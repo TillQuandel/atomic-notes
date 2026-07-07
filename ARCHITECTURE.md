@@ -27,7 +27,7 @@ product.
 | `extractive/` | Local sentence-extraction pipeline (GLiNER + LexRank). No free generation — notes are built from source sentences. |
 | `shared/` | Schemas, the SQLite DB schema, and cross-pipeline utilities used by both pipelines. |
 | `lib/decision_engine/` | Aggregation + decision rules (packaged as `decision_engine`). |
-| `tests/`, `generative/tests/`, `extractive/tests/` | Test suites. The canonical CI suite is `generative` + `lib/decision_engine/tests` (LLM-free). |
+| `generative/tests/`, `generative/gui/tests/`, `lib/decision_engine/tests/`, `tests/extractive/` | Test suites. The canonical CI suite is `generative` + `lib/decision_engine/tests` (LLM-free); the extractive tests live in `tests/extractive/` and need the `extractive` extra. |
 | `examples/` | Bundled `zettelkasten-primer.pdf` for the quickstart and the demo script. |
 
 ## Generative pipeline stages
@@ -47,6 +47,13 @@ logs a `[n/7]` banner:
 
 Post-pipeline (optional, logged as `[8/8]`): **quality eval** — faithfulness eval
 that can be deferred to `reeval_baseline.py`.
+
+Optional export: `--export-format` renders each note (plus a combined document)
+to `json`, `portable-md`, `obsidian-md`, or pandoc/typst-based formats
+(`docx`/`pdf`/`html`/`odt`/`epub`). The chain is
+`pipeline/note_json.py` (canonical JSON contract) → `pipeline/portable_md.py` →
+`pipeline/export_convert.py`, orchestrated by `pipeline/export_runner.py` — see
+[generative/README.md](generative/README.md#export-formats).
 
 ```mermaid
 flowchart LR

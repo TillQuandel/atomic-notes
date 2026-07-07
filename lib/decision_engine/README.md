@@ -2,8 +2,8 @@
 
 Domain-agnostic rule pipeline for claim decisions. The module knows only abstract labels,
 retrieval confidence, evidence verification state, parse status, and optional audit labels.
-It does not import `atomic-agent` code and does not know about PDFs, prompts, vault notes, or
-JSONL persistence.
+It does not import code from the generative pipeline and does not know about PDFs, prompts,
+vault notes, or JSONL persistence.
 
 ## Public API
 
