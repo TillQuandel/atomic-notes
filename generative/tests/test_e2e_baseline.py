@@ -7,10 +7,12 @@ Voraussetzungen:
   - Baseline-PDFs in ~/OneDrive/Dokumente/Literatur/ vorhanden
   - Pipeline ohne --dry-run würde schreiben; hier immer --dry-run
 
-Schwellen (konservativ: aktueller Bestwert - 2):
-  - Schlebbe 2022: ≥ 14/17
-  - Kuhlthau ISP: wird nach erstem Run gesetzt
-  - Bates 2017:   wird nach erstem Run gesetzt
+Schwellen (absoluter Vault-Floor je PDF, kein Totalcheck — expected_total=None;
+gelockert gegenüber v35, weil der Vault gewachsen ist → der Planner skippt mehr
+Notes als „existing", die Vault-Quote sinkt entsprechend; siehe THRESHOLDS):
+  - Schlebbe 2022: ≥ 5
+  - Kuhlthau ISP:  ≥ 6
+  - Bates 2017:    ≥ 2
 
 Warnung: Jeder Run dauert ~15–30 min. Nur für Release-Checks und
 nach größeren Refactors ausführen, nicht im Entwicklungs-Loop.

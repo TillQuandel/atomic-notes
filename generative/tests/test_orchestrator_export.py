@@ -33,6 +33,12 @@ def test_future_format_exits_with_geplant_hint(monkeypatch):
 
 
 def test_valid_export_format_passes_fail_fast_check(monkeypatch):
+    # Braucht echtes pandoc+typst: die Deps sind hier NICHT gemockt, also laeuft
+    # der reale export_available()-Check gegen ein Binaerformat (pdf,docx). Ohne
+    # die [export]-Deps quittiert der Fail-Fast-Pfad mit SystemExit -- dann
+    # sauber skippen statt fehlschlagen (Muster wie test_export_convert.py).
+    pytest.importorskip("pypandoc")
+    pytest.importorskip("typst")
     # Gueltiges Format darf die Validierung NICHT stoppen -- Beweis: der
     # naechste Schritt (_setup_phoenix_tracing) wird tatsaechlich erreicht.
     # ATOMIC_AGENT_GUI=1 unterdrueckt _auto_version_bump()/_auto_start_dashboard()
