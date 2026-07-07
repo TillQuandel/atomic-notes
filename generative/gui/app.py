@@ -42,6 +42,23 @@ _DEFAULT_RUNS_DIR = Path(__file__).resolve().parents[1] / ".cache" / "gui" / "ru
 # P4: mehr als so viele Records im runs_dir -> aelteste werden geloescht.
 _MAX_RUN_RECORDS = 50
 
+# S2 (#150): Default-Ablage fuer hochgeladene PDFs — unter generative/.cache/gui/
+# (konsistent zu _DEFAULT_RUNS_DIR), NICHT mehr im System-Temp mit festem Namen
+# (`<temp>/atomic-notes-gui-uploads` war auf Multi-User-Unix vorbelegbar:
+# Besitz/TOCTOU). Modul-Konstante, damit Tests sie per monkeypatch isolieren
+# koennen und create_app(uploads_dir=...) sie injizieren kann.
+_DEFAULT_UPLOADS_DIR = Path(__file__).resolve().parents[1] / ".cache" / "gui" / "uploads"
+
+# S3 (#150): Obergrenze fuer hochgeladene PDFs (chunked gelesen, nicht komplett
+# in den RAM). 100 MB deckt reale Buecher/Scans, blockt aber RAM-Erschoepfung.
+_MAX_UPLOAD_BYTES = 100 * 1024 * 1024
+
+# S3 (#150): Windows-reservierte Geraetenamen (case-insensitiv, auch mit
+# Extension wie `CON.pdf`) — als Dateiname unter Windows nicht anlegbar/gefaehrlich.
+_WINDOWS_RESERVED_NAMES = frozenset(
+    {"con", "prn", "aux", "nul"} | {f"com{i}" for i in range(1, 10)} | {f"lpt{i}" for i in range(1, 10)}
+)
+
 # P2 (Einstellungs-Defaults): GUI-eigene Settings-Datei, analog _DEFAULT_RUNS_DIR
 # -- Modul-Konstante, damit Tests sie per monkeypatch isolieren koennen (s.
 # tests/conftest.py) und create_app(settings_path=...) sie injizieren kann.
@@ -557,9 +574,7 @@ def create_app(
             backend = _cfg.BACKEND
     pdf_dirs = [Path(d) for d in pdf_dirs if d]
     if uploads_dir is None:
-        import tempfile
-
-        uploads_dir = Path(tempfile.gettempdir()) / "atomic-notes-gui-uploads"
+        uploads_dir = _DEFAULT_UPLOADS_DIR
     uploads_dir = Path(uploads_dir)
     # #2: Lauf-Quellen auf gelistete PDF-Verzeichnisse + Upload-Ablage begrenzen —
     # ein existierender Pfad allein genügt nicht (sonst beliebige lokale Datei).
@@ -624,15 +639,48 @@ def create_app(
         safe_name = Path(raw.replace("\\", "/")).name
         if not safe_name.lower().endswith(".pdf"):
             return JSONResponse({"error": "Nur PDF-Dateien werden akzeptiert."}, status_code=400)
-        data = await file.read()
+        # S3 (#150): Windows-reservierte Geraetenamen (CON, PRN, NUL, COM1-9,
+        # LPT1-9 — case-insensitiv, auch mit Extension) ablehnen. Der reservierte
+        # Teil ist der Name vor dem ERSTEN Punkt (Windows-Semantik: `CON.pdf`
+        # reserviert, `foo.con.pdf` nicht).
+        if safe_name.split(".", 1)[0].lower() in _WINDOWS_RESERVED_NAMES:
+            return JSONResponse(
+                {"error": f"Dateiname „{safe_name}“ ist ein reservierter Windows-Gerätename."},
+                status_code=400,
+            )
+        # S3 (#150): chunked mit Obergrenze lesen statt `await file.read()`
+        # (unbegrenzt in den RAM). Bei Ueberschreitung 413 (Payload Too Large).
+        chunks: list[bytes] = []
+        total = 0
+        while True:
+            chunk = await file.read(1024 * 1024)
+            if not chunk:
+                break
+            total += len(chunk)
+            if total > _MAX_UPLOAD_BYTES:
+                return JSONResponse(
+                    {"error": f"Datei zu groß (max. {_MAX_UPLOAD_BYTES // (1024 * 1024)} MB)."},
+                    status_code=413,
+                )
+            chunks.append(chunk)
+        data = b"".join(chunks)
         if not data:
             return JSONResponse({"error": "Leere Datei."}, status_code=400)
         uploads_dir.mkdir(parents=True, exist_ok=True)
         target = (uploads_dir / safe_name).resolve()
         if not target.is_relative_to(uploads_dir.resolve()):
             return JSONResponse({"error": "ungültiger Dateiname"}, status_code=400)
+        # S3 (#150): Kollisionssuffix statt stillem Overwrite (name.pdf ->
+        # name-2.pdf). Ein vorhandener Upload wird so nie unbemerkt ueberschrieben.
+        stem, suffix = Path(safe_name).stem, Path(safe_name).suffix
+        final_name = safe_name
+        counter = 2
+        while target.exists():
+            final_name = f"{stem}-{counter}{suffix}"
+            target = (uploads_dir / final_name).resolve()
+            counter += 1
         target.write_bytes(data)
-        return JSONResponse({"name": safe_name, "path": str(target)})
+        return JSONResponse({"name": final_name, "path": str(target)})
 
     @app.get("/api/doctor")
     def doctor() -> JSONResponse:
@@ -946,8 +994,20 @@ def create_app(
         normalized, error = gui_settings.validate_settings(body)
         if error:
             return JSONResponse({"error": error}, status_code=422)
+        # S4 (#150): `vault_path`-SSoT. `PUT /api/settings` ersetzt die Datei
+        # vollstaendig -- ohne den bereits persistierten `vault_path` (per `PUT
+        # /api/vault` gesetzt) hier zu uebernehmen, wuerde der Full-Replace ihn
+        # loeschen. Nur `PUT /api/vault` darf ihn aendern, also hier bewahren und
+        # einen mitgeschickten `vault_path` ignorieren (+ in der Response
+        # vermerken).
+        stored, _ = gui_settings.read_settings(settings_path)
+        if stored.get("vault_path"):
+            normalized["vault_path"] = stored["vault_path"]
         gui_settings.write_settings(normalized, settings_path)
-        return JSONResponse(normalized)
+        response = dict(normalized)
+        if isinstance(body, dict) and "vault_path" in body:
+            response["ignored"] = ["vault_path"]
+        return JSONResponse(response)
 
     @app.get("/api/vault")
     def get_vault() -> JSONResponse:

@@ -79,35 +79,32 @@ def test_validate_settings_rejects_non_dict_payload():
     assert error is not None
 
 
-# --- vault_path (B2: Vault-/Ordner-Wahl) --------------------------------
+# --- vault_path SSoT (S4, #150): nicht ueber validate_settings setzbar -----
 
 
-def test_validate_settings_accepts_vault_path_string():
+def test_validate_settings_ignores_vault_path_string():
+    # S4 (#150): `vault_path` ist NICHT ueber PUT /api/settings setzbar -- er wird
+    # ignoriert (kein Fehler, damit ein alter Client keinen 422 kassiert) und
+    # taucht NICHT im normalisierten Ergebnis auf. Nur PUT /api/vault aendert ihn.
     normalized, error = gui_settings.validate_settings({"vault_path": "C:/Users/x/Vault"})
     assert error is None
-    assert normalized == {"vault_path": "C:/Users/x/Vault"}
+    assert "vault_path" not in normalized
 
 
-def test_validate_settings_rejects_empty_vault_path():
-    # Anders als backend/profile (dort bedeutet "" "Server-Default"): ein leerer
-    # vault_path hat keine sinnvolle Bedeutung -- Fehler statt stillem Weglassen.
-    normalized, error = gui_settings.validate_settings({"vault_path": ""})
-    assert normalized == {}
-    assert error is not None
-
-
-def test_validate_settings_rejects_non_string_vault_path():
-    normalized, error = gui_settings.validate_settings({"vault_path": 123})
-    assert normalized == {}
-    assert error is not None
-
-
-def test_validate_settings_vault_path_no_existence_check():
-    # validate_settings prueft NICHT ob der Pfad existiert -- das macht der
-    # Endpunkt (PUT /api/vault). Ein beliebiger nicht-leerer String ist hier gueltig.
-    normalized, error = gui_settings.validate_settings({"vault_path": "/nicht/vorhanden"})
+def test_validate_settings_ignores_vault_path_alongside_valid_keys():
+    # Andere Keys bleiben gueltig, nur vault_path faellt weg.
+    normalized, error = gui_settings.validate_settings({"backend": "litellm", "vault_path": "C:/x"})
     assert error is None
-    assert normalized == {"vault_path": "/nicht/vorhanden"}
+    assert normalized == {"backend": "litellm"}
+
+
+def test_validate_settings_ignores_empty_or_nonstring_vault_path():
+    # Auch ungueltige vault_path-Werte fuehren nicht mehr zu einem Fehler --
+    # sie werden schlicht ignoriert (der Endpunkt bewahrt den persistierten Wert).
+    for bad in ("", 123, None):
+        normalized, error = gui_settings.validate_settings({"vault_path": bad})
+        assert error is None, bad
+        assert "vault_path" not in normalized
 
 
 # --- write_settings / read_settings ------------------------------------
