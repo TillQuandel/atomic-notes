@@ -231,6 +231,61 @@ def test_upload_sanitizes_filename_no_traversal(client):
     assert saved.name == "evil.pdf"
 
 
+# --- S2 (#150): Upload-Verzeichnis nicht mehr im System-Temp ---------------
+
+
+def test_default_uploads_dir_under_cache_gui_not_systemp():
+    import tempfile
+
+    from generative.gui import app as app_module
+
+    d = app_module._DEFAULT_UPLOADS_DIR
+    # Geschwister von .cache/gui/runs, NICHT im System-Temp mit festem Namen.
+    assert d.name == "uploads"
+    assert d.parent.name == "gui" and d.parent.parent.name == ".cache"
+    assert d.resolve() != (Path(tempfile.gettempdir()) / "atomic-notes-gui-uploads").resolve()
+
+
+# --- S3 (#150): Upload-Haertung (Groesse, Kollision, Reserved-Names) --------
+
+
+def test_upload_rejects_windows_reserved_name(client):
+    c, _ = client
+    r = c.post("/api/upload", files={"file": ("CON.pdf", b"%PDF-1.4", "application/pdf")})
+    assert r.status_code == 400
+
+
+def test_upload_rejects_reserved_name_case_insensitive_com1(client):
+    c, _ = client
+    r = c.post("/api/upload", files={"file": ("com1.PDF", b"%PDF-1.4", "application/pdf")})
+    assert r.status_code == 400
+
+
+def test_upload_collision_gets_suffix_no_overwrite(client):
+    c, _ = client
+    r1 = c.post("/api/upload", files={"file": ("doc.pdf", b"%PDF-1.4 first", "application/pdf")})
+    assert r1.status_code == 200
+    assert r1.json()["name"] == "doc.pdf"
+    r2 = c.post("/api/upload", files={"file": ("doc.pdf", b"%PDF-1.4 second", "application/pdf")})
+    assert r2.status_code == 200
+    assert r2.json()["name"] == "doc-2.pdf"
+    # Erste Datei bleibt unveraendert (kein stiller Overwrite).
+    assert Path(r1.json()["path"]).read_bytes() == b"%PDF-1.4 first"
+    assert Path(r2.json()["path"]).read_bytes() == b"%PDF-1.4 second"
+
+
+def test_upload_rejects_oversize_with_413(client, monkeypatch):
+    from generative.gui import app as app_module
+
+    monkeypatch.setattr(app_module, "_MAX_UPLOAD_BYTES", 8)
+    c, _ = client
+    r = c.post(
+        "/api/upload",
+        files={"file": ("big.pdf", b"%PDF-1.4 weit mehr als acht Bytes", "application/pdf")},
+    )
+    assert r.status_code == 413
+
+
 def test_run_rejected_while_active(client, monkeypatch):
     c, pdf = client
 
@@ -2230,6 +2285,39 @@ def test_settings_put_replaces_full_object_no_merge(tmp_path):
     c.put("/api/settings", json={"backend": "litellm"})
     r = c.get("/api/settings")
     assert r.json() == {"backend": "litellm"}
+
+
+# --- S4 (#150): vault_path-SSoT -- nur PUT /api/vault darf das Ziel aendern --
+
+
+def test_settings_put_ignores_vault_path_and_notes_it(tmp_path):
+    settings_path = tmp_path / "gui" / "settings.json"
+    c = TestClient(_settings_app(tmp_path, settings_path=settings_path), base_url="http://localhost")
+    before = c.get("/api/vault").json()["vault"]
+    r = c.put("/api/settings", json={"backend": "litellm", "vault_path": str(tmp_path / "evil-vault")})
+    assert r.status_code == 200
+    # Response vermerkt, dass vault_path ignoriert wurde (statt still zu schlucken).
+    assert r.json().get("ignored") == ["vault_path"]
+    # GET /api/vault unveraendert -- PUT /api/settings hat das Schreibziel NICHT gesetzt.
+    assert c.get("/api/vault").json()["vault"] == before
+    stored, _ = gui_settings.read_settings(settings_path)
+    assert stored.get("vault_path") != str(tmp_path / "evil-vault")
+
+
+def test_settings_put_preserves_vault_path_set_via_api_vault(tmp_path):
+    # Vault ausschliesslich ueber PUT /api/vault setzen; ein spaeterer
+    # Settings-Autosave (ohne vault_path) darf ihn per Full-Replace NICHT loeschen.
+    settings_path = tmp_path / "gui" / "settings.json"
+    app, _vault = _vault_app(tmp_path, settings_path=settings_path)
+    c = TestClient(app, base_url="http://localhost")
+    new_vault = tmp_path / "chosen-vault"
+    new_vault.mkdir()
+    c.put("/api/vault", json={"path": str(new_vault)})
+    c.put("/api/settings", json={"backend": "litellm", "dry_run": False})
+    assert c.get("/api/vault").json()["vault"] == str(new_vault.resolve())
+    stored, _ = gui_settings.read_settings(settings_path)
+    assert stored["vault_path"] == str(new_vault.resolve())
+    assert stored["backend"] == "litellm"
 
 
 # --- S1: Host-Header-Allowlist (DNS-Rebinding-Schutz) ----------------------

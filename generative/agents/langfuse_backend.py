@@ -10,9 +10,36 @@ Setup: .env: LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, LANGFUSE_HOST
 from __future__ import annotations
 import base64
 import json
+import logging
 import os
 import uuid
 from datetime import datetime, timedelta
+from urllib.parse import urlparse
+
+logger = logging.getLogger(__name__)
+
+# S7 (#150): nur einmal pro Prozess warnen (mehrere Backend-Instanzen sonst spammy).
+_PLAINTEXT_WARNED = False
+
+_LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
+
+
+def _warn_if_plaintext_remote(host: str) -> None:
+    """S7 (#150): Warnt einmalig, wenn LANGFUSE_HOST ein nicht-lokaler http://-Host
+    ist -- dann gehen Prompts UND Basic-Auth-Keys im Klartext ueber die Leitung."""
+    global _PLAINTEXT_WARNED
+    if _PLAINTEXT_WARNED:
+        return
+    parsed = urlparse(host)
+    hostname = (parsed.hostname or "").lower()
+    is_local = hostname in _LOCAL_HOSTS or hostname.endswith(".localhost")
+    if parsed.scheme == "http" and hostname and not is_local:
+        _PLAINTEXT_WARNED = True
+        logger.warning(
+            "LANGFUSE_HOST ist unverschluesselt (http) und nicht lokal (%s) — "
+            "Prompts und API-Keys gehen im Klartext raus. Nutze https:// oder einen lokalen Host.",
+            host,
+        )
 
 
 class LangfuseBackend:
@@ -26,6 +53,7 @@ class LangfuseBackend:
         self._public_key = os.getenv("LANGFUSE_PUBLIC_KEY", "")
         self._secret_key = os.getenv("LANGFUSE_SECRET_KEY", "")
         self._host = os.getenv("LANGFUSE_HOST", "http://localhost:3000").rstrip("/")
+        _warn_if_plaintext_remote(self._host)
         self._available = bool(self._public_key and self._secret_key)
         self._trace_id: str | None = None
         self._batch: list[dict] = []

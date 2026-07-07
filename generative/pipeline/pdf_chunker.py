@@ -14,6 +14,11 @@ from pathlib import Path
 
 from generative.config import CHUNK_WORDS, MIN_WORDS_PER_PAGE
 
+# S5 (#150): Obergrenze fuer poppler-Subprozesse (pdftotext/pdfinfo). Ein
+# defektes/boesartiges PDF darf die Pipeline nicht unbegrenzt haengen lassen —
+# gleicher Wert wie figure_alt.py:67.
+_PDF_SUBPROCESS_TIMEOUT_S = 120
+
 
 @dataclass
 class Chunk:
@@ -125,11 +130,23 @@ def pdf_to_pages(pdf_path: Path) -> list[tuple[int, str]]:
 
     try:
         result = subprocess.run(
-            ["pdftotext", str(pdf_path), "-"],
+            # S6 (#150): Pfad absolutieren -> ein relativer Name mit fuehrendem
+            # "-" kann nicht als poppler-Option fehlinterpretiert werden.
+            ["pdftotext", str(Path(pdf_path).resolve()), "-"],
             capture_output=True,
             text=True,
             encoding="utf-8",
             errors="replace",
+            timeout=_PDF_SUBPROCESS_TIMEOUT_S,
+        )
+    except subprocess.TimeoutExpired:
+        # S5 (#150): PDF haengt pdftotext -> hart mit handlungsanleitender Meldung
+        # abbrechen (analog OSError-Pfad) statt die Pipeline blockieren zu lassen.
+        sys.exit(
+            pdftotext_error_hint(
+                f"pdftotext hat nach {_PDF_SUBPROCESS_TIMEOUT_S}s nicht geantwortet — "
+                f"PDF evtl. defekt/boesartig: {pdf_path}"
+            )
         )
     except OSError as e:
         # pdftotext-Binary fehlt/nicht ausführbar → genau der Setup-Fall, der den
@@ -478,9 +495,17 @@ def pdf_metadata(pdf_path: Path) -> dict[str, str]:
     """
     try:
         result = subprocess.run(
-            ["pdfinfo", str(pdf_path)], capture_output=True, text=True, encoding="utf-8", errors="replace"
+            # S6 (#150): Pfad absolutieren (Argument-Injection-Schutz, s. pdf_to_pages).
+            ["pdfinfo", str(Path(pdf_path).resolve())],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=_PDF_SUBPROCESS_TIMEOUT_S,
         )
-    except (FileNotFoundError, OSError):
+    except (FileNotFoundError, OSError, subprocess.TimeoutExpired):
+        # S5 (#150): Timeout wie fehlendes Binary behandeln — pdfinfo ist optional
+        # (fail-soft: {}), ein haengendes PDF darf hier nichts blockieren.
         return {}
     if result.returncode != 0:
         return {}

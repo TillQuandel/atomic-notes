@@ -612,11 +612,10 @@ function currentSettingsPayload() {
     // leere Liste ist ein bewusster Wert (alle abgewaehlt), kein "unset".
     export_formats: checkedExportFormats(),
   };
-  // B2: PUT /api/settings ersetzt die Datei vollstaendig (kein Merge) -- ohne
-  // den zuletzt geladenen/uebernommenen Vault hier mitzuschicken wuerde ein
-  // spaeterer Autosave (Backend/Profil/…) den per PUT /api/vault gesetzten
-  // vault_path wieder loeschen.
-  if (currentVaultPath) payload.vault_path = currentVaultPath;
+  // S4 (#150): vault_path wird NICHT mehr mitgeschickt -- er ist ausschliesslich
+  // ueber PUT /api/vault aenderbar (SSoT). Der Server bewahrt den bereits
+  // persistierten vault_path beim Full-Replace von PUT /api/settings, also kann
+  // ein Autosave (Backend/Profil/…) ihn nicht mehr loeschen.
   return payload;
 }
 
@@ -690,14 +689,11 @@ function updateModeHint() {
 
 // --- Ziel-Vault (B2: PUT/GET /api/vault) ----------------------------------
 
-let currentVaultPath = null; // zuletzt geladener/uebernommener Vault, s. currentSettingsPayload()
-
 async function loadVault() {
   try {
     const r = await fetch("/api/vault");
     if (!r.ok) return;
     const { vault } = await r.json();
-    currentVaultPath = vault;
     $("vault-path").value = vault;
     $("vault-current").textContent = `Aktueller Vault: ${vault}`;
   } catch { }
@@ -737,7 +733,6 @@ async function applyVault(path) {
       setVaultStatus(msg, true);
       return;
     }
-    currentVaultPath = d.vault;
     $("vault-path").value = d.vault;
     $("vault-current").textContent = `Aktueller Vault: ${d.vault}`;
     setVaultStatus("Übernommen.", false);

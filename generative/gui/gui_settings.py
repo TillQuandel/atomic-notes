@@ -67,18 +67,6 @@ def _validate_bool(value, field_name: str) -> tuple[bool | None, str | None]:
     return value, None
 
 
-def validate_vault_path(value) -> tuple[str | None, str | None]:
-    """B2: `vault_path`-Wert pruefen. Anders als backend/profile bedeutet ein
-    leerer String hier KEIN "Server-Default", sondern ist ein Fehler -- ein
-    gespeicherter vault_path ist entweder gesetzt oder gar nicht im Payload.
-    Keine Existenz-/Verzeichnis-Pruefung hier (macht `PUT /api/vault`)."""
-    if value is None:
-        return None, None
-    if not isinstance(value, str) or not value.strip():
-        return None, "vault_path muss ein nicht-leerer String sein."
-    return value, None
-
-
 def validate_export_formats(value) -> tuple[list[str] | None, str | None]:
     """F4: `export_formats`-Wert pruefen (Liste der angehakten Export-Formate).
     `None` = kein Override (Server-Default `[]`, analog backend/profile).
@@ -152,11 +140,13 @@ def validate_settings(payload) -> tuple[dict, str | None]:
     if dry_run is not None:
         normalized["dry_run"] = dry_run
 
-    vault_path, error = validate_vault_path(payload.get("vault_path"))
-    if error:
-        return {}, error
-    if vault_path is not None:
-        normalized["vault_path"] = vault_path
+    # S4 (#150): `vault_path` ist NICHT ueber `PUT /api/settings` setzbar --
+    # nur `PUT /api/vault` (mit `is_dir()`-Validierung) darf das Schreibziel
+    # aendern (SSoT). Ein hier mitgeschickter `vault_path` wird ignoriert (kein
+    # Fehler, damit ein alter Client keinen 422 kassiert); der Endpunkt vermerkt
+    # das in der Response und bewahrt den bereits persistierten Wert. `vault_path`
+    # bleibt in SETTINGS_KEYS, weil read_/write_settings ihn weiterhin
+    # lesen/schreiben (Server-Start-Preload, PUT /api/vault-Persistenz).
 
     export_formats, error = validate_export_formats(payload.get("export_formats"))
     if error:
