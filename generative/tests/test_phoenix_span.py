@@ -34,7 +34,9 @@ def test_live_call_emits_llm_span_with_io(exporter, monkeypatch):
     monkeypatch.setattr(
         base,
         "_backend_call_full",
-        lambda prompt, *, model, agent: base.CallResult(text="ANTWORT", input_tokens=5, output_tokens=7),
+        lambda prompt, *, model, agent, cache_prefix=None: base.CallResult(
+            text="ANTWORT", input_tokens=5, output_tokens=7
+        ),
     )
     base.call_claude_full("PROMPT", model="m", agent="extractor", use_cache=False)
 
@@ -64,7 +66,7 @@ def test_call_span_nested_under_stage_span(exporter, monkeypatch):
     monkeypatch.setattr(
         base,
         "_backend_call_full",
-        lambda prompt, *, model, agent: base.CallResult(text="X"),
+        lambda prompt, *, model, agent, cache_prefix=None: base.CallResult(text="X"),
     )
     tracer = base._OTEL_TRACER
     with tracer.start_as_current_span("Stage") as stage:
@@ -84,7 +86,7 @@ def test_no_tracer_is_noop(monkeypatch):
     monkeypatch.setattr(
         base,
         "_backend_call_full",
-        lambda prompt, *, model, agent: base.CallResult(text="X"),
+        lambda prompt, *, model, agent, cache_prefix=None: base.CallResult(text="X"),
     )
     # Darf nicht crashen und liefert normal das Ergebnis
     assert base.call_claude_full("P", model="m", agent="a", use_cache=False).text == "X"
@@ -93,7 +95,7 @@ def test_no_tracer_is_noop(monkeypatch):
 def test_async_call_span_nested_under_stage(exporter, monkeypatch):
     """call_claude_full_async (asyncio.gather/Semaphore-Pfad) bleibt unter dem Stage-Span."""
 
-    async def _backend(prompt, *, model, agent):
+    async def _backend(prompt, *, model, agent, cache_prefix=None):
         return base.CallResult(text="ASYNC")
 
     monkeypatch.setattr(base, "_backend_call_full_async", _backend)
@@ -114,7 +116,7 @@ def test_to_thread_call_span_nested_under_stage(exporter, monkeypatch):
     monkeypatch.setattr(
         base,
         "_backend_call_full",
-        lambda prompt, *, model, agent: base.CallResult(text="THREADED"),
+        lambda prompt, *, model, agent, cache_prefix=None: base.CallResult(text="THREADED"),
     )
 
     async def _runner():
