@@ -25,6 +25,55 @@ litellm._async_success_callback = []  # undokumentierte interne Liste (Gemini-Fi
 _MAX_RETRIES = 2
 
 
+def _resolve_num_retries(timeout_retries: int | None) -> int:
+    """Mappt den Runtime-Retry-Knopf auf litellm ``num_retries`` (Parität #148).
+
+    Semantik-Unterschied der beiden Backends:
+      - Subscription: ``timeout_retries`` begrenzt NUR Timeout-Retries; transiente
+        Prozessfehler behalten fix ``_MAX_RETRIES`` Retries.
+      - litellm: am bare-``completion()``-Level gibt es genau EINEN Retry-Knopf,
+        ``num_retries``. Er deckt Timeout + APIError + APIConnectionError einheitlich
+        ab (verifiziert in litellm 1.90.0, ``utils.py``-Wrapper: retried nur bei
+        ``openai.APIError | Timeout | APIConnectionError``).
+
+    ``RetryPolicy(TimeoutErrorRetries=…)`` käme der Timeout-only-Semantik näher, würde
+    aber APIConnectionError-Retries still auf 0 senken (nicht im Policy-Mapping
+    abgedeckt → ``None`` → kein Retry) und damit die Robustheit gegen Netzfehler
+    heimlich verschlechtern. Daher: den einen Runtime-Wert direkt auf ``num_retries``
+    mappen, damit der konfigurierte Wert auf dem API-Pfad tatsächlich greift.
+    Rest-Differenz: litellm wendet ihn auf alle transienten API-Fehler an, nicht nur
+    Timeouts. ``None`` (kein Runtime-Config gesetzt) → heutiger Default ``_MAX_RETRIES``.
+    """
+    return _MAX_RETRIES if timeout_retries is None else timeout_retries
+
+
+def _build_messages(prompt: str, cache_prefix: str | None, model: str) -> list[dict]:
+    """Baut die litellm-``messages``. Opt-in Prompt-Caching (#148).
+
+    - ``cache_prefix is None`` → exakt heutiges Verhalten: ein einziger String-Content.
+    - ``cache_prefix`` gesetzt + ``anthropic/``-Modell → Content als Block-Liste; der
+      statische Prefix-Block trägt ``cache_control: {"type": "ephemeral"}``, damit die
+      Anthropic-Prompt-Cache greift. Format verifiziert in litellm 1.90.0
+      (``prompt_templates/factory.py``: text-Block mit optionalem ``cache_control``;
+      ``ChatCompletionCachedContent = {"type": "ephemeral"}``).
+    - ``cache_prefix`` gesetzt + Nicht-Anthropic-Provider → kein ``cache_control``;
+      Prefix + Rest werden konkateniert wie bisher (ein String).
+    """
+    if cache_prefix is None:
+        return [{"role": "user", "content": prompt}]
+    if model.startswith("anthropic/"):
+        return [
+            {
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": cache_prefix, "cache_control": {"type": "ephemeral"}},
+                    {"type": "text", "text": prompt},
+                ],
+            }
+        ]
+    return [{"role": "user", "content": cache_prefix + prompt}]
+
+
 def _parse_response(resp, duration_ms: float):
     from generative.agents.base import CallResult
 
@@ -51,6 +100,7 @@ def call_full(
     agent: str = "unknown",
     call_timeout_sec: int | None = None,
     timeout_retries: int | None = None,
+    cache_prefix: str | None = None,
 ):
     """Synchroner LLM-Aufruf via litellm. Cache/Trace übernimmt base.py."""
     call_timeout_sec = CALL_TIMEOUT_SEC if call_timeout_sec is None else call_timeout_sec
@@ -58,9 +108,9 @@ def call_full(
     try:
         resp = litellm.completion(
             model=model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=_build_messages(prompt, cache_prefix, model),
             request_timeout=call_timeout_sec,
-            num_retries=_MAX_RETRIES,
+            num_retries=_resolve_num_retries(timeout_retries),
         )
     except Exception as e:
         from generative.pipeline.error_hints import litellm_error_hint
@@ -76,6 +126,7 @@ async def call_full_async(
     agent: str = "unknown",
     call_timeout_sec: int | None = None,
     timeout_retries: int | None = None,
+    cache_prefix: str | None = None,
 ):
     """Asynchroner LLM-Aufruf via litellm. Cache/Trace übernimmt base.py."""
     call_timeout_sec = CALL_TIMEOUT_SEC if call_timeout_sec is None else call_timeout_sec
@@ -83,9 +134,9 @@ async def call_full_async(
     try:
         resp = await litellm.acompletion(
             model=model,
-            messages=[{"role": "user", "content": prompt}],
+            messages=_build_messages(prompt, cache_prefix, model),
             request_timeout=call_timeout_sec,
-            num_retries=_MAX_RETRIES,
+            num_retries=_resolve_num_retries(timeout_retries),
         )
     except Exception as e:
         from generative.pipeline.error_hints import litellm_error_hint

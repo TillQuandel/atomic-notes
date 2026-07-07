@@ -432,7 +432,8 @@ def test_lit_call_full_uses_runtime_timeout_arg():
 
     assert result.text == "ok"
     assert captured["request_timeout"] == 77
-    assert captured["num_retries"] == lit_backend._MAX_RETRIES
+    # Parität (#148): der konfigurierte Retry-Wert muss num_retries bestimmen.
+    assert captured["num_retries"] == 1
 
 
 @pytest.mark.asyncio
@@ -455,7 +456,8 @@ async def test_lit_call_full_async_uses_runtime_timeout_arg():
 
     assert result.text == "async ok"
     assert captured["request_timeout"] == 88
-    assert captured["num_retries"] == lit_backend._MAX_RETRIES
+    # Parität (#148): der konfigurierte Retry-Wert muss num_retries bestimmen.
+    assert captured["num_retries"] == 1
 
 
 @pytest.mark.asyncio
@@ -470,6 +472,204 @@ async def test_lit_call_full_async_returns_callresult():
 
     assert result.text == "async lit"
     assert result.input_tokens == 9
+
+
+def test_lit_num_retries_defaults_to_max_when_none():
+    """Ohne Runtime-Config (timeout_retries=None) bleibt der heutige Default erhalten."""
+    fake_resp = _make_litellm_response("ok")
+    captured = {}
+
+    def fake_completion(model, messages, **kwargs):
+        captured.update(kwargs)
+        return fake_resp
+
+    with patch("litellm.completion", side_effect=fake_completion):
+        lit_call_full("prompt", model="anthropic/claude-opus-4-7", agent="test")
+
+    assert captured["num_retries"] == lit_backend._MAX_RETRIES
+
+
+def test_lit_num_retries_zero_is_honored():
+    """timeout_retries=0 muss num_retries=0 ergeben (nicht auf Default zurückfallen)."""
+    fake_resp = _make_litellm_response("ok")
+    captured = {}
+
+    def fake_completion(model, messages, **kwargs):
+        captured.update(kwargs)
+        return fake_resp
+
+    with patch("litellm.completion", side_effect=fake_completion):
+        lit_call_full("prompt", model="anthropic/claude-opus-4-7", agent="test", timeout_retries=0)
+
+    assert captured["num_retries"] == 0
+
+
+# --- Teil B: opt-in Prompt-Cache-Prefix ---
+
+
+def test_lit_cache_prefix_none_sends_plain_string():
+    """Default (kein cache_prefix) → exakt heutiges Format: ein String-Content."""
+    fake_resp = _make_litellm_response("ok")
+    captured = {}
+
+    def fake_completion(model, messages, **kwargs):
+        captured["messages"] = messages
+        return fake_resp
+
+    with patch("litellm.completion", side_effect=fake_completion):
+        lit_call_full("body", model="anthropic/claude-opus-4-7", agent="test")
+
+    assert captured["messages"] == [{"role": "user", "content": "body"}]
+
+
+def test_lit_cache_prefix_anthropic_uses_cache_control_block():
+    """anthropic/ + cache_prefix → Block-Liste, cache_control ephemeral auf dem Prefix."""
+    fake_resp = _make_litellm_response("ok")
+    captured = {}
+
+    def fake_completion(model, messages, **kwargs):
+        captured["messages"] = messages
+        return fake_resp
+
+    with patch("litellm.completion", side_effect=fake_completion):
+        lit_call_full("body", model="anthropic/claude-opus-4-7", agent="test", cache_prefix="INSTR")
+
+    assert captured["messages"] == [
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "INSTR", "cache_control": {"type": "ephemeral"}},
+                {"type": "text", "text": "body"},
+            ],
+        }
+    ]
+
+
+def test_lit_cache_prefix_non_anthropic_concatenates():
+    """Nicht-Anthropic + cache_prefix → kein cache_control, Prefix+Rest konkateniert."""
+    fake_resp = _make_litellm_response("ok")
+    captured = {}
+
+    def fake_completion(model, messages, **kwargs):
+        captured["messages"] = messages
+        return fake_resp
+
+    with patch("litellm.completion", side_effect=fake_completion):
+        lit_call_full("body", model="openai/gpt-4o", agent="test", cache_prefix="INSTR")
+
+    assert captured["messages"] == [{"role": "user", "content": "INSTRbody"}]
+
+
+@pytest.mark.asyncio
+async def test_lit_cache_prefix_anthropic_async_block():
+    """Async-Pfad baut dieselbe cache_control-Block-Liste."""
+    fake_resp = _make_litellm_response("ok")
+    captured = {}
+
+    async def fake_acompletion(model, messages, **kwargs):
+        captured["messages"] = messages
+        return fake_resp
+
+    with patch("litellm.acompletion", side_effect=fake_acompletion):
+        await lit_call_full_async("body", model="anthropic/claude-opus-4-7", agent="test", cache_prefix="INSTR")
+
+    assert captured["messages"][0]["content"][0]["cache_control"] == {"type": "ephemeral"}
+    assert captured["messages"][0]["content"][0]["text"] == "INSTR"
+    assert captured["messages"][0]["content"][1]["text"] == "body"
+
+
+# --- Parität: gleiche RuntimeConfig → beide Backends erhalten den konfigurierten Retry-Wert ---
+
+
+def test_both_backends_receive_configured_retry_value():
+    import generative.agents.base as base_mod
+
+    rc = load_runtime_config(env={"ATOMIC_AGENT_TIMEOUT_RETRIES": "2"})
+    base_mod.set_llm_runtime_config(rc)
+    shared_kwargs = base_mod._backend_runtime_kwargs()
+    assert shared_kwargs["timeout_retries"] == 2  # gemeinsame Quelle
+
+    # litellm-Backend: konfigurierter Wert landet als num_retries im Call.
+    lit_captured = {}
+
+    def fake_completion(model, messages, **kwargs):
+        lit_captured.update(kwargs)
+        return _make_litellm_response("ok")
+
+    with patch("litellm.completion", side_effect=fake_completion):
+        lit_call_full("p", model="anthropic/claude-opus-4-7", agent="test", **shared_kwargs)
+    assert lit_captured["num_retries"] == 2
+
+    # Subscription-Backend: derselbe Wert steuert die Timeout-Retries (3 Versuche).
+    fake_response = json.dumps(
+        {
+            "result": "ok",
+            "is_error": False,
+            "duration_ms": 1,
+            "usage": {"input_tokens": 1, "output_tokens": 1},
+        }
+    )
+    mock_proc = MagicMock()
+    mock_proc.returncode = 0
+    mock_proc.stdout = fake_response
+    mock_proc.stderr = ""
+
+    with (
+        patch(
+            "subprocess.run",
+            side_effect=[
+                subprocess.TimeoutExpired(cmd=["claude"], timeout=1),
+                subprocess.TimeoutExpired(cmd=["claude"], timeout=1),
+                mock_proc,
+            ],
+        ) as run_mock,
+        patch("time.sleep"),
+    ):
+        result = sub_call_full("p", model="anthropic/claude-opus-4-7", agent="test", **shared_kwargs)
+
+    assert result.text == "ok"
+    assert run_mock.call_count == 3  # 1 Versuch + 2 konfigurierte Timeout-Retries
+
+
+# --- base.py: cache_prefix-Durchreichung + Cache-Key-Konsistenz ---
+
+
+def test_base_forwards_cache_prefix_to_backend(monkeypatch):
+    import generative.agents.base as base_mod
+
+    captured = {}
+
+    def fake_backend(prompt, **kwargs):
+        captured["prompt"] = prompt
+        captured.update(kwargs)
+        return base_mod.CallResult(text="x")
+
+    monkeypatch.setattr(base_mod, "_backend_call_full", fake_backend)
+    base_mod.call_claude_full("body", model="m", agent="a", use_cache=False, cache_prefix="INSTR")
+
+    assert captured["prompt"] == "body"
+    assert captured["cache_prefix"] == "INSTR"
+
+
+def test_base_cache_key_hashes_prefix_plus_prompt_as_whole(monkeypatch):
+    """Cache-Konsistenz: prefix+prompt muss identisch gehasht werden wie der Gesamt-Prompt."""
+    import generative.agents.base as base_mod
+
+    seen = []
+    orig = base_mod._cache_key
+
+    def spy(prompt, model, agent="", namespace=None):
+        seen.append(prompt)
+        return orig(prompt, model, agent, namespace=namespace)
+
+    monkeypatch.setattr(base_mod, "_cache_key", spy)
+    monkeypatch.setattr(base_mod, "_backend_call_full", lambda p, **kw: base_mod.CallResult(text="x"))
+
+    base_mod.call_claude_full("body", model="m", agent="a", use_cache=False, cache_prefix="INSTR")
+    base_mod.call_claude_full("INSTRbody", model="m", agent="a", use_cache=False)
+
+    assert seen[0] == "INSTRbody"  # prefix+prompt konkateniert
+    assert seen[0] == seen[1]  # identisch zum ungeteilten Gesamt-Prompt
 
 
 # --- Dispatch in base.py ---

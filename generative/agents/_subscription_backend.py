@@ -105,10 +105,15 @@ def call_full(
     agent: str = "unknown",
     call_timeout_sec: int | None = None,
     timeout_retries: int | None = None,
+    cache_prefix: str | None = None,
 ):
     """Synchroner Subprocess-Aufruf. Cache/Trace übernimmt base.py."""
     call_timeout_sec = CALL_TIMEOUT_SEC if call_timeout_sec is None else call_timeout_sec
     timeout_retries = _TIMEOUT_RETRIES if timeout_retries is None else timeout_retries
+    # Die claude-CLI cached automatisch; der opt-in cache_prefix (#148, litellm-Pfad)
+    # wird hier einfach vorangestellt — Prefix + Rest als ein Prompt.
+    if cache_prefix is not None:
+        prompt = cache_prefix + prompt
     for attempt in range(_MAX_RETRIES + 1):
         try:
             _env = os.environ.copy()
@@ -184,10 +189,15 @@ async def call_full_async(
     agent: str = "unknown",
     call_timeout_sec: int | None = None,
     timeout_retries: int | None = None,
+    cache_prefix: str | None = None,
 ):
     """Asynchroner Subprocess-Aufruf. Cache/Trace übernimmt base.py."""
     call_timeout_sec = CALL_TIMEOUT_SEC if call_timeout_sec is None else call_timeout_sec
     timeout_retries = _TIMEOUT_RETRIES if timeout_retries is None else timeout_retries
+    # Die claude-CLI cached automatisch; der opt-in cache_prefix (#148, litellm-Pfad)
+    # wird hier einfach vorangestellt — Prefix + Rest als ein Prompt.
+    if cache_prefix is not None:
+        prompt = cache_prefix + prompt
     stdout = ""
     rc = None
     for attempt in range(_MAX_RETRIES + 1):

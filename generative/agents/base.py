@@ -258,14 +258,21 @@ def call_claude_full(
     agent: str = "unknown",
     use_cache: bool = True,
     cache_namespace: str | None = None,
+    cache_prefix: str | None = None,
 ) -> CallResult:
     """Synchroner Aufruf mit vollem CallResult (text + usage).
 
     cache_namespace ueberschreibt den globalen Run-Salt (set_cache_namespace) fuer
     diesen Call: "" = run-unabhaengiger, rein content-adressierter Cache-Key.
+
+    cache_prefix (opt-in, #148): statischer Prompt-Prefix, den das Backend fuer
+    Prompt-Caching separat behandeln kann. Default None = heutiges Verhalten. Der
+    Response-Cache-Key hasht Prefix + Rest als Ganzes (identisch zum konkatenierten
+    Gesamt-Prompt), damit sich das Cache-Verhalten nicht aendert.
     """
+    cache_prompt = prompt if cache_prefix is None else cache_prefix + prompt
     with _llm_span(agent, prompt, model) as span:
-        key = _cache_key(prompt, model, agent, namespace=cache_namespace)
+        key = _cache_key(cache_prompt, model, agent, namespace=cache_namespace)
         if use_cache:
             cached = _cache_get(key)
             if cached is not None:
@@ -275,7 +282,9 @@ def call_claude_full(
                 return cached
 
         try:
-            result = _backend_call_full(prompt, model=model, agent=agent, **_backend_runtime_kwargs())
+            result = _backend_call_full(
+                prompt, model=model, agent=agent, cache_prefix=cache_prefix, **_backend_runtime_kwargs()
+            )
         except RuntimeError as e:
             result = CallResult(text="")
             _annotate_llm_span(span, result, error=str(e))
@@ -298,10 +307,16 @@ async def call_claude_async(
 
 
 async def call_claude_full_async(
-    prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown", use_cache: bool = True
+    prompt: str,
+    *,
+    model: str = MODEL_OPUS,
+    agent: str = "unknown",
+    use_cache: bool = True,
+    cache_prefix: str | None = None,
 ) -> CallResult:
+    cache_prompt = prompt if cache_prefix is None else cache_prefix + prompt
     with _llm_span(agent, prompt, model) as span:
-        key = _cache_key(prompt, model, agent)
+        key = _cache_key(cache_prompt, model, agent)
         if use_cache:
             cached = _cache_get(key)
             if cached is not None:
@@ -310,7 +325,9 @@ async def call_claude_full_async(
                 return cached
 
         try:
-            result = await _backend_call_full_async(prompt, model=model, agent=agent, **_backend_runtime_kwargs())
+            result = await _backend_call_full_async(
+                prompt, model=model, agent=agent, cache_prefix=cache_prefix, **_backend_runtime_kwargs()
+            )
         except RuntimeError as e:
             result = CallResult(text="")
             _annotate_llm_span(span, result, error=str(e))
