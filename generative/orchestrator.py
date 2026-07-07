@@ -47,9 +47,22 @@ def _span(name: str, **attrs):
         yield span
 
 
-# Windows-Terminal-Codepage ignoriert PYTHONIOENCODING für bestimmte Print-Pfade
-sys.stdout.reconfigure(encoding="utf-8")
-sys.stderr.reconfigure(encoding="utf-8")
+# Windows-Terminal-Codepage ignoriert PYTHONIOENCODING für bestimmte Print-Pfade.
+# UTF-8 verhindert UnicodeEncodeError (rc=1) bei gepipetem Output ohne
+# PYTHONIOENCODING, sobald ER-/Stage-6-Logzeilen Nicht-cp1252-Zeichen
+# (⊂, ↔, ✓, ⚠️) drucken — #146 H1.
+def _reconfigure_streams_utf8() -> None:
+    """stdout/stderr defensiv auf UTF-8 umstellen. Guard: Umgebungen ohne
+    reconfigure-fähige Streams (pythonw setzt sys.stdout=None, Test-Runner
+    ersetzen Streams) dürfen den Import nicht mit AttributeError beenden."""
+    for stream in (sys.stdout, sys.stderr):
+        try:
+            stream.reconfigure(encoding="utf-8")
+        except Exception:
+            pass
+
+
+_reconfigure_streams_utf8()
 
 from generative.agents import (
     context_builder,
