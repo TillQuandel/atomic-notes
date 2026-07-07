@@ -293,12 +293,12 @@ def llm_resolve_unknown(acronym: str, context: str) -> str | None:
     Synchron, blockierend — pro PDF typischerweise ≤5 Calls (nur globale
     Akronyme ohne lokale Auflösung). Token-Cost vernachlässigbar.
     """
-    from generative.agents.base import call_claude_sync
+    from generative.agents.base import call_claude
     from generative.config import MODEL_HAIKU
 
     prompt = _LLM_FALLBACK_PROMPT.format(acronym=acronym, context=context)
     try:
-        raw = call_claude_sync(prompt, model=MODEL_HAIKU, agent="acronym_llm")
+        raw = call_claude(prompt, model=MODEL_HAIKU, agent="acronym_llm")
     except Exception:
         return None
     if not raw:

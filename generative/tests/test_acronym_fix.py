@@ -3,12 +3,16 @@
 from __future__ import annotations
 
 
+from unittest.mock import patch
+
 from generative.pipeline.acronym_fix import (
     _short_is_valid,
     _letter_match,
     _trim_long_form,
     extract_acronym_pairs,
     expand_acronyms,
+    llm_resolve_unknown,
+    llm_fallback_resolve,
 )
 
 
@@ -185,3 +189,47 @@ def test_expand_none_whitelist():
     new, expanded = expand_acronyms(body, None)
     assert new == body
     assert expanded == []
+
+
+# ---- LLM-Fallback (ENABLE_ACRONYM_LLM_FALLBACK=1) ------------------------
+# Regression #145: llm_resolve_unknown importierte nicht-existentes
+# call_claude_sync -> ImportError bei aktiviertem Flag. Der Import liegt vor
+# dem try-Block, propagiert also aus der Funktion.
+
+
+def test_llm_resolve_unknown_returns_long_form():
+    """Aktivierter LLM-Fallback-Pfad: gültige LONG_FORM-Antwort wird geparst."""
+    with patch(
+        "generative.agents.base.call_claude",
+        return_value="LONG_FORM: Application Programming Interface",
+    ) as mock_call:
+        result = llm_resolve_unknown("API", "Kontext rund um die API im Text.")
+    assert result == "Application Programming Interface"
+    mock_call.assert_called_once()
+
+
+def test_llm_resolve_unknown_returns_none_on_unknown():
+    """LONG_FORM: UNKNOWN -> None (keine Halluzination)."""
+    with patch("generative.agents.base.call_claude", return_value="LONG_FORM: UNKNOWN"):
+        assert llm_resolve_unknown("XYZ", "Kein auflösbarer Kontext.") is None
+
+
+def test_llm_fallback_resolve_flag_on(monkeypatch):
+    """Flag=1: unaufgelöste Body-Akronyme werden per LLM ergänzt."""
+    monkeypatch.setenv("ENABLE_ACRONYM_LLM_FALLBACK", "1")
+    body = "Das Dokument nutzt CSCW an mehreren Stellen ohne Auflösung."
+    with patch(
+        "generative.agents.base.call_claude",
+        return_value="LONG_FORM: Computer-Supported Cooperative Work",
+    ):
+        extra = llm_fallback_resolve(body, {})
+    assert extra.get("CSCW") == "Computer-Supported Cooperative Work"
+
+
+def test_llm_fallback_resolve_flag_off(monkeypatch):
+    """Flag=0: kein LLM-Call, leeres Dict."""
+    monkeypatch.setenv("ENABLE_ACRONYM_LLM_FALLBACK", "0")
+    with patch("generative.agents.base.call_claude") as mock_call:
+        extra = llm_fallback_resolve("Body mit CSCW.", {})
+    assert extra == {}
+    mock_call.assert_not_called()
