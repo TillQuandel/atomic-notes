@@ -237,6 +237,36 @@ def test_run_ocr_returns_path_when_available(tmp_path, monkeypatch):
     assert result is not None
 
 
+def test_run_ocr_absolutizes_pdf_paths(monkeypatch):
+    """S6 (#150): PDF-Pfade werden absolutiert an ocrmypdf uebergeben -- ein
+    relativer Name mit fuehrendem "-" darf nicht als Option fehlinterpretiert werden."""
+    from generative.tools.pdf_enrich import run_ocr
+    import os
+    import shutil
+    import subprocess
+    from pathlib import Path
+
+    monkeypatch.setattr(shutil, "which", lambda cmd: "/usr/bin/ocrmypdf" if cmd == "ocrmypdf" else None)
+    captured = {}
+
+    def fake_run(cmd, capture_output=False, timeout=None):
+        captured["cmd"] = cmd
+
+        class R:
+            returncode = 1  # kein Output noetig -- run_ocr gibt dann None zurueck
+
+        return R()
+
+    monkeypatch.setattr(subprocess, "run", fake_run)
+    run_ocr(Path("-oconfig.pdf"))
+    # Alle Nicht-Flag-Argumente (Input+Output-Pfad) sind absolut, keiner beginnt mit "-".
+    path_args = [a for a in captured["cmd"] if a not in ("ocrmypdf", "--quiet", "--skip-text")]
+    assert path_args, "keine Pfad-Argumente gefunden"
+    # Absolute Pfade (C:\... bzw. /...) koennen nie als fuehrendes-"-"-Flag geparst werden.
+    for a in path_args:
+        assert os.path.isabs(a), a
+
+
 def test_enrich_returns_meta_for_pdf_with_doi(tmp_path, monkeypatch):
     """enrich() gibt Metadaten zurück wenn DOI im Text gefunden und CrossRef antwortet."""
     from generative.tools.pdf_enrich import enrich

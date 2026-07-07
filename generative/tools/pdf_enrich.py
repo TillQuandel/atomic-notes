@@ -491,7 +491,9 @@ def run_ocr(pdf_path: Path) -> Path | None:
     cmd = ["ocrmypdf"] if shutil.which("ocrmypdf") else [sys.executable, "-m", "ocrmypdf"]
     try:
         result = subprocess.run(
-            cmd + ["--quiet", "--skip-text", str(pdf_path), str(out_path)],
+            # S6 (#150): PDF-Pfade absolutieren -> ein relativer Name mit
+            # fuehrendem "-" kann nicht als ocrmypdf-Option fehlinterpretiert werden.
+            cmd + ["--quiet", "--skip-text", str(Path(pdf_path).resolve()), str(Path(out_path).resolve())],
             capture_output=True,
             timeout=120,
         )
