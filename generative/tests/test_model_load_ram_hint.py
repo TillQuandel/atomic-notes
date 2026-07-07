@@ -97,6 +97,36 @@ def test_helper_wraps_runtimeerror():
         embeddings.load_ml_model(_factory, "some-model")
 
 
+# ---- NLI-Pfad (cross_reference): fail-soft-Invariante ---------------------
+
+
+def test_nli_validation_fail_soft_on_model_load_error(monkeypatch, capsys):
+    """Fail-soft-Invariante: wirft der Helper den RAM-RuntimeError beim
+    CrossEncoder-Load, fängt das äußere `except Exception` ihn und
+    `_nli_validate_contradictions` gibt True zurück (Haiku-Urteil beibehalten)
+    statt die Pipeline zu crashen. Ein künftiges Verengen des except würde
+    hier brechen.
+
+    Nicht vacuous: der Assert auf die RAM-Meldung im stderr-Log beweist, dass
+    exakt der Ladefehler-Pfad durchlaufen wurde — nicht irgendein anderes
+    True (z. B. aus der Contradiction-Logik)."""
+    from generative.agents import cross_reference
+
+    def _boom(*args, **kwargs):
+        raise OSError(1455, "Die Auslagerungsdatei ist zu klein für diesen Vorgang")
+
+    fake = types.ModuleType("sentence_transformers")
+    fake.CrossEncoder = _boom
+    monkeypatch.setitem(sys.modules, "sentence_transformers", fake)
+    monkeypatch.setattr(cross_reference, "_nli_encoder", None)  # Erstlade-Pfad erzwingen
+
+    result = cross_reference._nli_validate_contradictions("Neue Note.", ["Vault-Auszug."])
+
+    assert result is True  # fail-soft, kein Raise
+    err = capsys.readouterr().err
+    assert "RAM-Druck" in err  # [nli]-Log trägt den Hinweis aus load_ml_model
+
+
 # ---- Orchestrator-Import: reconfigure-Guard -------------------------------
 
 
