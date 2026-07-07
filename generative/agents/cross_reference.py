@@ -110,8 +110,7 @@ def _nli_validate_contradictions(
     """
     global _nli_encoder
     try:
-        from sentence_transformers import CrossEncoder
-        from generative.pipeline.embeddings import embed_body, cosine as cos_sim
+        from generative.pipeline.embeddings import embed_body, cosine as cos_sim, load_ml_model
 
         if _nli_encoder is None:
             with _nli_lock:
@@ -119,7 +118,17 @@ def _nli_validate_contradictions(
                     import sys
 
                     print(f"      [nli] Lade {NLI_MODEL_NAME} (einmalig ~70MB)…", file=sys.stderr)
-                    _nli_encoder = CrossEncoder(NLI_MODEL_NAME)
+
+                    def _load_cross_encoder():
+                        # Import im try-Scope von load_ml_model: torch-DLL-Load
+                        # scheitert unter RAM-Druck mit WinError 1455 (#146 H2).
+                        from sentence_transformers import CrossEncoder
+
+                        return CrossEncoder(NLI_MODEL_NAME)
+
+                    # Fail-soft bleibt: das äußere except fängt weiterhin, aber
+                    # die Log-Zeile trägt jetzt den RAM-Hinweis statt Roh-OSError.
+                    _nli_encoder = load_ml_model(_load_cross_encoder, NLI_MODEL_NAME)
 
         note_short = note_body[:600].strip()
         for vault_exc in vault_excerpts:

@@ -16,15 +16,47 @@ import threading
 _MODEL = None
 _MODEL_LOCK = threading.Lock()
 
+_ST_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
+
+
+def load_ml_model(factory, model_name: str):
+    """Führt einen ML-Modell-Load aus und übersetzt Low-Level-Ladefehler in
+    eine actionable Fehlermeldung (#146 H2).
+
+    torch/sentence-transformers scheitern unter RAM-Druck typischerweise schon
+    beim DLL-Load (`OSError [WinError 1455]: Die Auslagerungsdatei ist zu
+    klein`) oder mit MemoryError/RuntimeError — als nackter Traceback mit rc=1
+    ist die Ursache für Nutzer nicht erkennbar. Kein fail-soft: der Lauf darf
+    weiterhin sterben (Embeddings sind funktional nötig), aber mit klarer
+    Ursache. ImportError (fehlende Dependency) propagiert unverändert —
+    das ist kein RAM-Problem.
+    """
+    try:
+        return factory()
+    except (OSError, MemoryError, RuntimeError) as exc:
+        raise RuntimeError(
+            f"ML-Modell '{model_name}' konnte nicht geladen werden "
+            f"({type(exc).__name__}: {exc}) — vermutlich RAM-Druck "
+            "(typisch: WinError 1455, Auslagerungsdatei zu klein). "
+            "Andere Programme schließen und erneut versuchen."
+        ) from exc
+
+
+def _load_sentence_transformer():
+    """Import + Konstruktion zusammen: der torch-DLL-Load beim ersten
+    `import sentence_transformers` ist genau der Schritt, der unter
+    RAM-Druck mit WinError 1455 scheitert — muss mit in den try-Scope."""
+    from sentence_transformers import SentenceTransformer
+
+    return SentenceTransformer(_ST_MODEL_NAME)
+
 
 def _model():
     global _MODEL
     if _MODEL is None:
         with _MODEL_LOCK:
             if _MODEL is None:  # Double-Checked Locking
-                from sentence_transformers import SentenceTransformer
-
-                _MODEL = SentenceTransformer("paraphrase-multilingual-MiniLM-L12-v2")
+                _MODEL = load_ml_model(_load_sentence_transformer, _ST_MODEL_NAME)
     return _MODEL
 
 
