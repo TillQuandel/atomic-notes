@@ -68,3 +68,17 @@ def test_clean_dup_targets_single_target():
 def test_clean_dup_targets_empty():
     assert cr._clean_dup_targets("") == []
     assert cr._clean_dup_targets(None) == []
+
+
+# #75: Ein einzelner Wikilink-Block, der ein Komma im Titel trägt, ist EIN Ziel —
+# der Komma-Split zerlegte ihn zuvor in Fake-Targets ('Smith' + 'John (2020)').
+def test_clean_dup_targets_single_wikilink_with_comma_not_split():
+    assert cr._clean_dup_targets("[[Smith, John (2020)]]") == ["Smith, John (2020)"]
+    assert cr._clean_dup_targets("[[Daten, Information, Wissen]]") == ["Daten, Information, Wissen"]
+
+
+# Mehrere explizite Wikilink-Blöcke bleiben getrennte Ziele (der eigentliche
+# Multi-Target-Fall, den das Komma-Signal treffen soll).
+def test_clean_dup_targets_multiple_wikilink_blocks_split():
+    assert cr._clean_dup_targets("[[A]], [[B]]") == ["A", "B"]
+    assert cr._clean_dup_targets("[[A]], [[B]], [[C]]") == ["A", "B", "C"]

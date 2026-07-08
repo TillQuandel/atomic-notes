@@ -38,20 +38,46 @@ def _clean_wikilink(s: str) -> str:
     return s
 
 
+_WIKILINK_BLOCK_RE = re.compile(r"\[\[.*?\]\]")
+
+
 def _clean_dup_targets(raw: str | None) -> list[str]:
     """Zerlegt ein `duplicate_path`-Feld in saubere Einzelziel-Stems.
 
     `duplicate_path` ist als EIN Duplikat-Ziel modelliert; das LLM liefert aber
     gelegentlich mehrere kommaseparierte Titel in einem Feld. Würde das ungeprüft
     zu `[[Titel]]` gewrappt, entstünde ein kaputter Sammel-Wikilink
-    `[[A, B, C, D]]` (Knowles-Run 2026-06-25). Splittet daher an Kommas, entfernt
-    Wikilink-Klammern/Alias-Pipe und `.md`/Pfad, droppt Leersegmente.
+    `[[A, B, C, D]]` (Knowles-Run 2026-06-25).
+
+    Der Komma-Split zerlegte zuvor aber auch legitime Titel MIT Komma in Fake-
+    Targets (`[[Smith, John (2020)]]` → `['Smith', 'John (2020)']`, #75). Das
+    Wikilink-Klammer-Signal disambiguiert Trenner-Komma vs. Titel-Komma:
+
+    - **≥2 `[[…]]`-Blöcke** (`[[A]], [[B]]`) → jeder Block ist ein Ziel; Kommas
+      innerhalb eines Blocks bleiben Teil des Titels.
+    - **Genau EIN Block, der den ganzen Rohwert umschließt** (`[[Smith, John]]`)
+      → ein einziger Titel; Kommas darin gehören zum Titel, kein Split.
+    - **Sonst** (bare Titel ohne Klammern) → kommaseparierte Liste (bestehendes
+      Verhalten für vom LLM gelieferte Roh-Listen).
+
+    Grenzfall: eine bare Liste OHNE Klammern, deren Einzeltitel selbst ein Komma
+    trägt, ist nicht auflösbar und wird weiter am Komma gesplittet — das
+    Klammer-Signal ist die bewusst gewählte, konservative Disambiguierung.
     """
-    cleaned = _clean_wikilink(raw or "")
+    s = (raw or "").strip()
+    if not s:
+        return []
+    blocks = _WIKILINK_BLOCK_RE.findall(s)
+    if len(blocks) >= 2:
+        segments = blocks
+    elif s.startswith("[[") and s.endswith("]]"):
+        segments = [s]
+    else:
+        segments = s.split(",")
     targets: list[str] = []
-    for seg in cleaned.split(","):
-        seg = seg.split("|", 1)[0].strip()
-        stem = Path(seg).stem if seg else ""
+    for seg in segments:
+        inner = _clean_wikilink(seg).split("|", 1)[0].strip()
+        stem = Path(inner).stem if inner else ""
         if stem:
             targets.append(stem)
     return targets
