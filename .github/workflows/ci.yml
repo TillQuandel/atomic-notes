@@ -72,6 +72,50 @@ jobs:
       # Kanonische Suite (LLM-frei) + decision_engine + shared. extractive-Tests
       # laufen hier bewusst nicht: brauchen den schweren GLiNER-Stack
       # ([extractive]-Extra). shared/tests deckt den path_safety-Traversal-Schutz
-      # extra-frei ab (#155).
+      # extra-frei ab (#155). Die modellfreien extractive-Tests laufen im
+      # separaten Job `extractive-unit` (nur ubuntu); die E2E-Tests wöchentlich
+      # in extractive-e2e.yml.
       - name: Tests
         run: uv run python -m pytest generative lib/decision_engine/tests shared/tests -q
+
+  # Modellfreie extractive-Tests (kein GLiNER-Download): decken u.a. den
+  # path_safety-Traversal-Schutz über den extractive-Adapter ab (#155). Nur
+  # ubuntu — der Stack ist plattformunabhängig, Dreifach-Matrix wäre Verschwendung.
+  extractive-unit:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONUTF8: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: true
+          cache-dependency-glob: "uv.lock"
+
+      # Retry-Schleife analog zum test-Job (uvs interne HTTP-Retries reichen bei
+      # längeren Index-Ausfällen nicht). --extra dev liefert pytest, --extra
+      # extractive den NLP-Stack (pdfplumber/nltk/langdetect/sumy).
+      - name: Abhängigkeiten installieren (uv, extractive + dev)
+        shell: bash
+        run: |
+          for i in 1 2 3; do
+            uv sync --extra extractive --extra dev --locked --python 3.12 && exit 0
+            echo "uv sync Versuch $i fehlgeschlagen — warte $((i * 30))s"
+            sleep $((i * 30))
+          done
+          uv sync --extra extractive --extra dev --locked --python 3.12
+
+      # sentence_extractor tokenisiert zur Laufzeit über nltk punkt/punkt_tab —
+      # kleiner Download (~18 MB gezippt), NICHT das 500-MB-GLiNER-Modell. Pro Lauf
+      # neu (klein genug; Caching lohnt hier nicht, GLiNER-Cache siehe Weekly-E2E).
+      - name: nltk-Satztokenizer laden (punkt)
+        run: uv run python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
+
+      # Nur modellfrei: test_e2e.py ausgeschlossen (zieht das reale GLiNER-Modell).
+      - name: Extractive-Unit-Tests (modellfrei)
+        run: uv run python -m pytest tests/extractive -q --ignore=tests/extractive/test_e2e.py
