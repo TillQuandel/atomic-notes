@@ -22,7 +22,7 @@ installed by default; the canonical test suite guards against its absence.
 ## Running Tests
 
 ```bash
-uv run python -m pytest generative lib/decision_engine/tests -q
+uv run python -m pytest generative lib/decision_engine/tests shared/tests -q
 ```
 
 This is the canonical, LLM-free suite (mirrors CI on ubuntu + windows + macOS). It

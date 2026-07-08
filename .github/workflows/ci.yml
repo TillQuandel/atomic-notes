@@ -69,7 +69,9 @@ jobs:
           uv run python -c "import importlib.resources as r; assert r.files('generative').joinpath('tag_registry.yml').is_file()"
           uv run atomic-notes --help
 
-      # Kanonische Suite (LLM-frei) + decision_engine. extractive-Tests laufen hier
-      # bewusst nicht: brauchen den schweren GLiNER-Stack ([extractive]-Extra).
+      # Kanonische Suite (LLM-frei) + decision_engine + shared. extractive-Tests
+      # laufen hier bewusst nicht: brauchen den schweren GLiNER-Stack
+      # ([extractive]-Extra). shared/tests deckt den path_safety-Traversal-Schutz
+      # extra-frei ab (#155).
       - name: Tests
-        run: uv run python -m pytest generative lib/decision_engine/tests -q
+        run: uv run python -m pytest generative lib/decision_engine/tests shared/tests -q
