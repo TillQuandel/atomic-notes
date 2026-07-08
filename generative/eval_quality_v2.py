@@ -281,7 +281,13 @@ def _pdf_sentences(pdf_doc: fitz.Document) -> list[tuple[str, int]]:
 def build_chunks(pdf_path: Path) -> list[Chunk]:
     with fitz.open(str(pdf_path)) as pdf_doc:
         sentences = _pdf_sentences(pdf_doc)
+    return _chunks_from_sentences(sentences)
 
+
+def _chunks_from_sentences(sentences: list[tuple[str, int]]) -> list[Chunk]:
+    """Reine Chunking-Logik (kein fitz-I/O) — aus build_chunks extrahiert, damit die
+    Stage-8-PDF-Memoisierung (#151) dieselben Chunks OHNE erneutes fitz.open bauen
+    kann. build_chunks bleibt die einzige öffentliche Chunk-Quelle (SSoT)."""
     chunks: list[Chunk] = []
     current: list[str] = []
     pages: set[int] = set()

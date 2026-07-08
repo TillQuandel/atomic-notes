@@ -357,7 +357,9 @@ def er_stage1_decision(a: set[str], b: set[str]) -> tuple[str, int]:
     return "accept", diff
 
 
-async def entity_resolution(drafts: list[AtomicNoteDraft]) -> list[AtomicNoteDraft]:
+async def entity_resolution(
+    drafts: list[AtomicNoteDraft], max_concurrent_calls: int | None = None
+) -> list[AtomicNoteDraft]:
     """4-Stage Entity-Resolution-Pipeline (Christen 2012, GraphRAG-Pattern):
 
     1. **Blocking** — paarweise Title-Token-Jaccard ≥ ER_BLOCKING_JACCARD als
@@ -497,7 +499,16 @@ async def entity_resolution(drafts: list[AtomicNoteDraft]) -> list[AtomicNoteDra
         return drafts
 
     print(f"      [er-stage4] {len(multi_clusters)} Cluster zu mergen", file=sys.stderr)
-    merge_tasks = [canonicalizer.merge_cluster([drafts[k] for k in members]) for members in multi_clusters]
+    # #151, Punkt 5: Merge-Calls unter dieselbe max_concurrent_calls-Semaphore wie der
+    # Extraktor — sonst gathern sie ungebremst am Concurrency-Limit vorbei (Opus-Merges,
+    # potenziell viele Cluster). max_concurrent_calls=None → Legacy-Fallback auf die Konstante.
+    _sem = asyncio.Semaphore(max_concurrent_calls if max_concurrent_calls is not None else MAX_CONCURRENT_CALLS)
+
+    async def _merge_with_sem(members: list[int]) -> AtomicNoteDraft:
+        async with _sem:
+            return await canonicalizer.merge_cluster([drafts[k] for k in members])
+
+    merge_tasks = [_merge_with_sem(members) for members in multi_clusters]
     merged_results = await asyncio.gather(*merge_tasks, return_exceptions=True)
 
     # Resultate zurück in die Draft-Liste einsetzen
@@ -1294,7 +1305,13 @@ def run_stage8_eval(
     evaluated_count = 0
     reused_count = 0
 
-    for note_path in note_files[:10]:
+    # #151, Punkt 5: der 10er-Cap war bisher stumm — ab der 11. Note wurde nie
+    # evaluiert, ohne Meldung. Jetzt sichtbar machen, wenn er greift.
+    _EVAL_CAP = 10
+    if len(note_files) > _EVAL_CAP:
+        print(f"[8/8] Stage 8: evaluiere {_EVAL_CAP} von {len(note_files)} Notes (Cap)…")
+
+    for note_path in note_files[:_EVAL_CAP]:
         note_hash: str | None = None
         try:
             note_text = note_path.read_text(encoding="utf-8")
@@ -2163,7 +2180,12 @@ def main(argv: list[str] | None = None):
     # Verhindert dass Title-Varianten desselben Konzepts (z.B. 'HIB' + 'HIB (Bates)')
     # als getrennte Notes überleben — Bodies werden semantisch gemergt, kein Inhaltsverlust.
     pre_er_count = len(drafts)
-    drafts = asyncio.run(entity_resolution(drafts))
+    drafts = asyncio.run(
+        entity_resolution(
+            drafts,
+            max_concurrent_calls=(runtime_config.max_concurrent_calls if runtime_config is not None else None),
+        )
+    )
     if len(drafts) < pre_er_count:
         print(f"      {len(drafts)} nach Entity-Resolution ({pre_er_count - len(drafts)} Cluster gemergt)")
 
@@ -2394,6 +2416,17 @@ def main(argv: list[str] | None = None):
     from generative.agents.tracing import flush_tracing as _flush_tracing
 
     _flush_tracing()
+
+    # Cache-Rotation (#151, Punkt 6): .cache/llm und .cache/runs anzahl-basiert stutzen,
+    # einmal pro Lauf. Nie fatal — Disk-Hygiene darf keinen Lauf abbrechen.
+    try:
+        from generative import cache_rotation as _cache_rotation
+
+        _n_llm, _n_runs = _cache_rotation.rotate_run_caches()
+        if _n_llm or _n_runs:
+            print(f"   [cache-rotation] {_n_llm} llm + {_n_runs} runs Dateien entfernt (Cap)")
+    except Exception as _rot_err:
+        print(f"   [cache-rotation] uebersprungen: {_rot_err}", file=sys.stderr)
 
     # F4 (Output-Projekt): zusätzliche Export-Formate — läuft bewusst UNABHÄNGIG
     # von args.dry_run (json/portable-md/docx/… brauchen keinen Vault-Schreib-

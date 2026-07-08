@@ -20,6 +20,14 @@ CACHE_DIR = SCRIPTS_DIR / ".cache"
 # Label-Tools (kappa.py, build_labels.py, collect.py) den Pfad importieren können,
 # ohne eval_quality_v4s Import-Zeit-sys.exit() bei fehlendem fitz/rapidfuzz zu ziehen.
 QUALITY_HISTORY = CACHE_DIR / "quality_history.jsonl"
+
+# Anzahl-basierte Cache-Rotation (#151, Punkt 6): .cache/llm (fresh-run-Namespaces
+# werden nie wieder getroffen) und .cache/runs (Trace-Dateien pro Lauf) wachsen
+# monoton. Konservative Obergrenzen; aelteste zuerst geloescht (Muster:
+# gui/run_history.prune_old_records). NUR diese beiden Dirs — quality_history.jsonl
+# (Eval-Daten) und .bak-Dateien bleiben unberuehrt.
+CACHE_LLM_MAX_FILES = 2000
+CACHE_RUNS_MAX_FILES = 600
 # Externe Quell-PDFs. Renderer baut hieraus den `file://`-Link
 # in den Quellen-Callout, damit User die PDF aus der Note öffnen kann.
 LITERATURE_DIR = Path(os.environ.get("ATOMIC_AGENT_PDF_BASE", str(Path.home() / "Documents" / "Literatur")))

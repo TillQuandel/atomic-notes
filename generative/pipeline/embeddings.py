@@ -11,12 +11,20 @@ Token-Limit 128 wird durch Sentence-Chunking + Mean-Pooling überbrückt.
 from __future__ import annotations
 import re
 import threading
+from functools import lru_cache
 
 # Singleton-Modell — Lade-Zeit ~3s, danach pro Embedding ~10ms
 _MODEL = None
 _MODEL_LOCK = threading.Lock()
 
 _ST_MODEL_NAME = "paraphrase-multilingual-MiniLM-L12-v2"
+
+# Prozess-lokaler Body-Embedding-Cache: ER, flag_redundant_siblings und das
+# CrossRef-Sibling-Ranking embedden im selben Lauf teils dieselben Bodies mehrfach
+# (Issue #151, Punkt 4). Der Cache ist content-adressiert (Key = Body-Text), begrenzt
+# und deterministisch: dasselbe encode() gibt denselben Vektor → keine Werteänderung,
+# nur weniger model.encode()-Aufrufe. Klein gehalten (256), reicht für einen Lauf.
+_EMBED_BODY_CACHE_SIZE = 256
 
 
 def load_ml_model(factory, model_name: str):
@@ -78,12 +86,19 @@ def _sentences(body: str) -> list[str]:
     return expanded
 
 
+@lru_cache(maxsize=_EMBED_BODY_CACHE_SIZE)
 def embed_body(body: str):
     """Body → 384-dim numpy-Array. Mean-Pooling über Satz-Embeddings.
 
     Bei langen Bodies (>128 Tokens) liefert Sentence-Mean-Pooling stabilere
     Cosine-Werte als naives Truncation. Pattern aus sentence-transformers-Doku
     für Long-Document-Cosine-Similarity.
+
+    Prozess-LRU (#151, Punkt 4): identische Bodies eines Laufs (ER →
+    flag_redundant_siblings → CrossRef-Sibling-Ranking) werden nur einmal encodet.
+    Ergebnis ist deterministisch → identische Werte, nur weniger encode()-Calls.
+    Rückgabe ist read-only zu behandeln (Aufrufer lesen nur, z.B. cosine()); der
+    Vektor wird zwischen Aufrufern geteilt. `embed_body.cache_clear()` für Tests.
     """
     import numpy as np
 
