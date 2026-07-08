@@ -154,7 +154,7 @@ def _page_num_from_str(page_str: str) -> int | None:
 def _semantic_score(quote: str, page_text: str) -> float:
     """Sentence-Transformers Cosine-Similarity. 0.0 wenn Modell nicht geladen."""
     try:
-        from generative.pipeline.embeddings import _model
+        from generative.embeddings import _model
 
         model = _model()
         if model is None:

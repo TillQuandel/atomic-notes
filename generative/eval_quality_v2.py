@@ -30,7 +30,7 @@ except ImportError:
 
 from generative.config import AGENT_VERSION, CACHE_DIR, MDEBERTA_NLI_MODEL
 from generative.eval_quality import _extract_page_text, _normalize, wilson_ci
-from generative.pipeline.embeddings import _model, cosine
+from generative.embeddings import _model, cosine
 
 _QUALITY_HISTORY = CACHE_DIR / "quality_history.jsonl"
 EVAL_VERSION = "2.0"

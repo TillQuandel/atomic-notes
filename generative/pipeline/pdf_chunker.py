@@ -126,7 +126,7 @@ def pdf_to_pages(pdf_path: Path) -> list[tuple[int, str]]:
     `page_num` ist die zitierfähige Druckseite aus den PDF-`/PageLabels`, falls das
     PDF welche führt (Buch: PDF-Seite 179 → Druckseite „159"); sonst die 1-basierte
     pdftotext-Position (Paper ohne Labels — unverändertes Verhalten)."""
-    from generative.pipeline.error_hints import pdftotext_error_hint
+    from generative.error_hints import pdftotext_error_hint
 
     try:
         result = subprocess.run(

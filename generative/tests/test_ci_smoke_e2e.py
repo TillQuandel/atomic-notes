@@ -25,7 +25,7 @@ from generative import orchestrator
 from generative.agents import base as agents_base
 from generative.agents import context_builder
 from generative.agents import quality as quality_agent
-from generative.pipeline import embeddings as embeddings_mod
+from generative import embeddings as embeddings_mod
 from generative.schemas.atomic_note import QualityReport
 
 pytestmark = pytest.mark.skipif(

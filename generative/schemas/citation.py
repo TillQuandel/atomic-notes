@@ -75,7 +75,7 @@ def crossref_override_blocked(quality_report, q_title: str | None) -> bool:
     Exakt die bisherige `_block_crossref_override`-Bedingung aus orchestrator.py
     (F2) — separat aufrufbar, weil main() dieselbe Bedingung für das Fail-
     Closed-Routing (`is_source_unresolved`) braucht. Analog zum bestehenden
-    Muster, `_parse_filename_fallback` deterministisch mehrfach aufzurufen statt
+    Muster, `parse_filename_fallback` deterministisch mehrfach aufzurufen statt
     das Ergebnis durchzureichen.
     """
     from generative.tools.pdf_enrich import _title_match_confident
@@ -112,10 +112,10 @@ def build_citation_meta(
     ermittelt, weil `build_citation_meta` `source_path` (die Datei) nicht kennt,
     nur `source_file` (den Namen für Anzeigezwecke).
     """
-    from generative.pipeline.vault_writer import _parse_filename_fallback
+    from generative.pipeline.vault_writer import parse_filename_fallback
 
     pdf_meta = pdf_meta or {}
-    fb = _parse_filename_fallback(source_file)
+    fb = parse_filename_fallback(source_file)
     fb_year = fb.get("Year")
 
     author = pdf_meta.get("Author")

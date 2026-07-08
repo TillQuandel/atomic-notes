@@ -12,7 +12,7 @@ from generative.agents.base import call_claude, trace_event
 from generative.agents.structured_output import parse_critic_output
 from generative import config as _config
 from generative.config import MODEL_CRITIC
-from generative.pipeline.anchor_patterns import (
+from generative.anchor_patterns import (
     SENTENCE_SPLIT_RE as _SENTENCE_SPLIT_RE,
     PAGE_ANCHOR_RE as _PAGE_ANCHOR_RE,
 )
@@ -125,7 +125,9 @@ def _sentence_anchor_coverage(body: str) -> float:
     return anchored / len(substantive)
 
 
-def _has_overview_marker(title: str) -> bool:
+def has_overview_marker(title: str) -> bool:
+    """True bei Übersichts-/Hub-Markern im Titel (Modell, Framework, MoC …).
+    Öffentlich, da schichtübergreifend von pipeline/cross_draft_hub konsumiert."""
     title_low = title.lower()
     return any(re.search(rf"\b{re.escape(m)}\b", title_low) for m in HUB_OVERVIEW_MARKERS)
 
@@ -340,7 +342,7 @@ def run(
                 # gerettet. Recherche-Anker: Wikipedia-Disambig-Templates, Cat2Type
                 # Category-Embeddings, Burt 2000 Structural-Holes-Theorie.
                 density = _sibling_cluster_density(sub, existing_concepts, concept_links) if concept_links else 0.0
-                has_marker = _has_overview_marker(draft.title)
+                has_marker = has_overview_marker(draft.title)
                 atomic_pattern = density >= HUB_SIBLING_DENSITY_THRESHOLD and not has_marker
 
                 if atomic_pattern:

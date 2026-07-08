@@ -12,7 +12,7 @@ Fix: aggregiere die parallel erzeugten Drafts als pending_concepts. Common-Prefi
 unter Drafts (z.B. „ADKAR " bei 6 Drafts) wird detektiert und der Suffix als
 impliziter Single-Token-Match-Key registriert (Body sagt „Awareness" allein, aber
 Title ist „ADKAR Awareness" → impliziter Key „awareness"). Hub-Klassifikation nur
-wenn Title `_has_overview_marker()` triggert (Modell, Framework, MoC etc.) —
+wenn Title `has_overview_marker()` triggert (Modell, Framework, MoC etc.) —
 verhindert False-Positives bei Stage-Notes die sich gegenseitig erwähnen.
 """
 
@@ -20,7 +20,7 @@ from __future__ import annotations
 import re
 
 from generative.schemas.atomic_note import AtomicNoteDraft
-from generative.agents.critic import _has_overview_marker
+from generative.agents.critic import has_overview_marker
 
 HUB_MIN_CROSS_MENTIONS = 3
 SUGGEST_MIN_CLUSTER = 5  # ab wievielen marker-losen Drafts mit gemeinsamem Token ein MoC vorgeschlagen wird (#4)
@@ -170,9 +170,7 @@ def suggest_unmarked_clusters(drafts: list[AtomicNoteDraft]) -> list[tuple[str, 
     """
     hub_member_titles = {title for d in drafts if d.action == "hub" for title in d.hub_subconcepts}
     candidates = [
-        d
-        for d in drafts
-        if d.action != "hub" and not _has_overview_marker(d.title) and d.title not in hub_member_titles
+        d for d in drafts if d.action != "hub" and not has_overview_marker(d.title) and d.title not in hub_member_titles
     ]
     token_to_titles: dict[str, list[str]] = {}
     for d in candidates:
@@ -209,7 +207,7 @@ def resolve(drafts: list[AtomicNoteDraft]) -> int:
         # Marker-Override: Hub-Klassifikation nur wenn Title-Marker (Modell/Framework/
         # MoC etc.) gesetzt ist. Verhindert dass Stage-Notes die sich gegenseitig
         # erwähnen fälschlich als Hub markiert werden.
-        if not _has_overview_marker(draft.title):
+        if not has_overview_marker(draft.title):
             continue
         mentions = _find_cross_mentions(draft, pending_idx)
         if len(mentions) < HUB_MIN_CROSS_MENTIONS:

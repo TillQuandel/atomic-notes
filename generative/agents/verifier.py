@@ -9,7 +9,7 @@ from generative.agents.base import call_claude, trace_event
 from generative.agents.structured_output import parse_verifier_output
 from generative import config as _config
 from generative.config import MODEL_VERIFIER, SEMANTIC_PREPASS_THRESHOLD
-from generative.pipeline.anchor_patterns import PAGE_MARKER_RE, PAGE_ANCHOR_NUMS_RE as _NEAR_PAGE_RE
+from generative.anchor_patterns import PAGE_MARKER_RE, PAGE_ANCHOR_NUMS_RE as _NEAR_PAGE_RE
 from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor
 
 FUZZY_THRESHOLD = 85
@@ -345,11 +345,11 @@ def _build_page_sections(chunk_text: str) -> list[tuple[str, list[str]]] | None:
     In Tests bleibt _MODEL=None → kein 3s-Download im Unit-Test.
     """
     try:
-        from generative.pipeline import embeddings as _emb_mod
+        from generative import embeddings as _emb_mod
 
         if _emb_mod._MODEL is None:
             return None  # Modell nicht geladen → Tier-3 überspringen
-        from generative.pipeline.embeddings import _sentences as _split_sents, _model
+        from generative.embeddings import _sentences as _split_sents, _model
 
         model = _model()
     except Exception:
@@ -387,7 +387,7 @@ def _semantic_find_page(
         return None
 
     try:
-        from generative.pipeline.embeddings import embed_title
+        from generative.embeddings import embed_title
 
         page_sections = cached_sections or _build_page_sections(chunk_text)
     except Exception:

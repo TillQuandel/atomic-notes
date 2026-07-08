@@ -268,10 +268,10 @@ def _clean_source_file_display(citation: CitationMeta) -> str:
     in LLM-Sekundärzitate ('zit. n. Mahmood & Punjab') — das ' und ' liest sich
     als Zwei-Autoren-Trenner. Drei­ter Geschwister-Kanal der Issue-41/PR-71-Klasse.
     Nicht-parsbare Namen bleiben unverändert."""
-    from generative.pipeline.vault_writer import _parse_filename_fallback
+    from generative.pipeline.vault_writer import parse_filename_fallback
 
     source_file = citation.source_file
-    fb = _parse_filename_fallback(source_file)
+    fb = parse_filename_fallback(source_file)
     author = fb.get("Author")
     if not author:
         return source_file

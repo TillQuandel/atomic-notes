@@ -20,7 +20,7 @@ import types
 
 import pytest
 
-from generative.pipeline import embeddings
+from generative import embeddings
 
 
 def _fake_sentence_transformers(monkeypatch, exc: BaseException) -> None:

@@ -113,7 +113,7 @@ def call_full(
             num_retries=_resolve_num_retries(timeout_retries),
         )
     except Exception as e:
-        from generative.pipeline.error_hints import litellm_error_hint
+        from generative.error_hints import litellm_error_hint
 
         raise RuntimeError(litellm_error_hint(agent, model, e)) from e
     return _parse_response(resp, (time.time() - t0) * 1000)
@@ -139,7 +139,7 @@ async def call_full_async(
             num_retries=_resolve_num_retries(timeout_retries),
         )
     except Exception as e:
-        from generative.pipeline.error_hints import litellm_error_hint
+        from generative.error_hints import litellm_error_hint
 
         raise RuntimeError(litellm_error_hint(agent, model, e)) from e
     return _parse_response(resp, (time.time() - t0) * 1000)

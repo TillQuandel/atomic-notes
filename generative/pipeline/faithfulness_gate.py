@@ -62,7 +62,7 @@ import re
 from dataclasses import dataclass
 
 from generative.config import MDEBERTA_THRESHOLD_CONFIRMED, MDEBERTA_THRESHOLD_CONTRA
-from generative.pipeline.anchor_patterns import PAGE_MARKER_LINE_RE
+from generative.anchor_patterns import PAGE_MARKER_LINE_RE
 from generative.pipeline.attribution import check_attribution
 from generative.pipeline.citation_check import _primary_surnames
 from generative.pipeline.claims import (
@@ -72,7 +72,7 @@ from generative.pipeline.claims import (
     Claim,
     decompose_claims,
 )
-from generative.pipeline.embeddings import _model, _sentences, cosine
+from generative.embeddings import _model, _sentences, cosine
 from generative.pipeline.nli import score_pairs
 from generative.pipeline.page_index import claim_source_window
 from generative.schemas.citation import CitationMeta

@@ -22,7 +22,7 @@ Konservativ:
 from __future__ import annotations
 import re
 
-from generative.pipeline.anchor_patterns import (
+from generative.anchor_patterns import (
     PAGE_ANCHOR_RE as _PAGE_ANCHOR_RE,
     SENTENCE_SPLIT_RE as _SENTENCE_SPLIT_RE,
 )

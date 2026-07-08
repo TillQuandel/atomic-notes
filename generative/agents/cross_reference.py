@@ -110,7 +110,7 @@ def _nli_validate_contradictions(
     """
     global _nli_encoder
     try:
-        from generative.pipeline.embeddings import embed_body, cosine as cos_sim, load_ml_model
+        from generative.embeddings import embed_body, cosine as cos_sim, load_ml_model
 
         if _nli_encoder is None:
             with _nli_lock:
@@ -325,7 +325,7 @@ def _rank_vault_candidates(
     # Embedding-Cosine nur wenn Modell bereits geladen (kein cold-start durch CrossRef)
     cos_scores: "np.ndarray | None" = None
     try:
-        from generative.pipeline import embeddings as _emb_mod
+        from generative import embeddings as _emb_mod
 
         if _emb_mod._MODEL is not None:
             query_emb = _emb_mod.embed_title(query_title)
@@ -435,7 +435,7 @@ def run(
     # Token-Overlap ODER Body-Embedding-Cosine ≥ Schwelle (_rank_sibling_candidates).
     sibling_candidates: list[tuple[str, AtomicNoteDraft]] = []
     if siblings:
-        from generative.pipeline import embeddings as _emb
+        from generative import embeddings as _emb
 
         _draft_emb: dict[str, object] = {}
 

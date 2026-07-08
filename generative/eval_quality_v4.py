@@ -41,7 +41,7 @@ from decision_engine.models import QualityFlag
 from generative.eval_quality import _extract_page_text, _normalize, wilson_ci
 from generative.eval_quality_v2 import TOP_K, Chunk, _detect_language_pair, _expand_context, _read_note_body
 from generative.eval_quality_v2 import _chunks_from_sentences, _pdf_sentences, extract_claims
-from generative.pipeline.embeddings import _model, cosine
+from generative.embeddings import _model, cosine
 
 _QUALITY_HISTORY = (
     QUALITY_HISTORY  # SSoT: config.QUALITY_HISTORY; Alias für bestehende Importer (run.py, adversarial.py)
