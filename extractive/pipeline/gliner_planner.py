@@ -74,14 +74,18 @@ _GENERIC_BLACKLIST = frozenset(
 
 
 def _is_specific_concept(name: str) -> bool:
-    """Prueft ob ein Konzept spezifisch genug ist (Blacklist + Subword-Proxy).
+    """Prueft ob ein Konzept spezifisch genug ist (Blacklist + Eigennamen-Regel).
 
     Regeln (in dieser Reihenfolge):
     1. Blacklist-Treffer → False
     2. Mehrwort-Begriff → True
     3. Einwort mit Grossbuchstabe (Eigenname/Akronym) → True
-    4. Einwort < 8 Zeichen (rein lowercase) → False
-    5. Sonst → True
+    4. Einwort rein lowercase → False
+
+    Zu 4: Rein-lowercase Einzelwoerter sind fast immer GLiNER-Artefakte und keine
+    Atomic-Note-Titel (die reale Note 'chemistry' handelte von Atomicity). Der
+    fruehere >=8-Zeichen-Proxy liess 'chemistry'/'knowledge'/'retrieval'/'conceptual'
+    passieren (#167a). Eigennamen ueberleben ueber den Grossbuchstaben (Regel 3).
     """
     stripped = name.strip()
     normalized = stripped.lower()
@@ -93,10 +97,8 @@ def _is_specific_concept(name: str) -> bool:
     # Einwort: Eigenname/Akronym (mind. ein Grossbuchstabe) ist spezifisch
     if any(c.isupper() for c in stripped):
         return True
-    # Kurze rein-lowercase Einzelwoerter sind zu generisch
-    if len(normalized) < 8:
-        return False
-    return True
+    # Rein-lowercase Einzelwoerter sind zu generisch
+    return False
 
 
 _GERMANIC_NON_ENGLISH = frozenset({"de", "da", "nl", "af", "sv", "no", "lb", "fy"})
@@ -129,15 +131,18 @@ def _matches_language(text: str, main_language: str) -> bool:
         return True
 
 
-@lru_cache(maxsize=1)
-def _get_model():
+@lru_cache(maxsize=2)
+def _get_model(device: str = "cpu"):
     from gliner import GLiNER
 
-    return GLiNER.from_pretrained(_MODEL_NAME)
+    # #167d: --device einloesen — gliner 0.2.27 laedt die Gewichte via map_location.
+    return GLiNER.from_pretrained(_MODEL_NAME, map_location=device)
 
 
-def extract_concepts(text: str, page: int = 1, threshold: float = 0.75, main_language: str = "en") -> list[dict]:
-    model = _get_model()
+def extract_concepts(
+    text: str, page: int = 1, threshold: float = 0.75, main_language: str = "en", device: str = "cpu"
+) -> list[dict]:
+    model = _get_model(device)
     entities = model.predict_entities(text, CONCEPT_TYPES, threshold=threshold)
     return [
         {"name": name, "type": e["label"], "page": page, "score": e["score"]}
@@ -164,6 +169,7 @@ def plan_concepts(
     min_chunk_count: int = 2,
     max_concepts: int = 20,
     main_language: str = "en",
+    device: str = "cpu",
 ) -> list[dict]:
     """Extrahiert Konzepte. Filtert Konzepte die nur in 1 Chunk vorkommen (zu spezifisch)."""
     # Sicherstellen dass max_concepts nicht kleiner als min_concepts ist
@@ -172,7 +178,7 @@ def plan_concepts(
 
     all_concepts: list[dict] = []
     for chunk in chunks:
-        all_concepts.extend(extract_concepts(chunk.text, page=chunk.page, main_language=main_language))
+        all_concepts.extend(extract_concepts(chunk.text, page=chunk.page, main_language=main_language, device=device))
 
     # Prominenz-Filter: Konzept muss in >= min_chunk_count Chunks vorkommen
     # (verhindert Einzel-Chunk-Artefakte wie "avoidance", "blunting")
@@ -181,8 +187,13 @@ def plan_concepts(
         name_counts[_strip_name(c["name"])] += 1
     prominent = [c for c in all_concepts if name_counts[_strip_name(c["name"])] >= min_chunk_count]
 
-    # Fallback auf alle wenn zu wenige prominent
-    source = prominent if len(prominent) >= min_concepts else all_concepts
+    # Fallback auf alle wenn zu wenige *distinkte* prominente Konzepte (nicht Instanzen).
+    # len(prominent) zaehlte Instanzen: 2 Konzepte in je 8/3 Chunks = 11 >= 3 blockierte
+    # den Fallback, obwohl nur 2 distinkte prominent sind. Frueher stopfte der KeyBERT-
+    # Fallback dann lowercase-Einzelwoerter nach; nach #167a surft dieser Zweig echte
+    # 1-Chunk-Mehrwortkonzepte an (bates: 2 -> 6 statt 6 Schrott-Notes).
+    n_prominent = len({_strip_name(c["name"]) for c in prominent})
+    source = prominent if n_prominent >= min_concepts else all_concepts
     result = deduplicate_concepts(source)
     if len(result) < min_concepts:
         result = _keybert_fallback(chunks, result, main_language=main_language)

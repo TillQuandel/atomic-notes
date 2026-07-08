@@ -26,6 +26,48 @@ def strip_anchors(text: str) -> str:
     return _ANCHOR_RE.sub("", text).strip()
 
 
+# #167b: langdetect-ISO-Code -> sumy-Tokenizer-Sprachname. Fallback english,
+# damit LexRank auch bei nicht abgedeckten/unklaren Sprachen laeuft.
+_SUMY_LANGUAGES = {"en": "english", "de": "german"}
+
+
+def sumy_language(code: str) -> str:
+    """Mappt den langdetect-Code auf den sumy-Tokenizer-Sprachnamen."""
+    return _SUMY_LANGUAGES.get((code or "").lower(), "english")
+
+
+_NON_MATCH_RE = re.compile(r"[^0-9a-zäöüß ]+")
+
+
+def _normalize_for_match(text: str) -> str:
+    """Vereinheitlicht Text fuer den Seitenabgleich (Silbentrennung, Kleinschreibung)."""
+    text = _HYPHEN_BREAK_RE.sub(r"\1\2", text.lower())
+    return re.sub(r"\s+", " ", _NON_MATCH_RE.sub(" ", text)).strip()
+
+
+def map_sentences_to_pages(
+    sentences: list[str], page_texts: list[str], fallback_page: int = 1, threshold: int = 85
+) -> list[int]:
+    """Ordnet jeden Satz der physischen Seite zu, deren Text ihn am besten enthaelt.
+
+    Nutzt den vorhandenen Seitenindex (`page_texts[i]` = physische Seite i+1) und
+    einen Fuzzy-Abgleich ueber ein distinktes Satzpraefix (#167c). Faellt ein Satz
+    unter `threshold`, wird `fallback_page` (i.d.R. die Chunk-Seite) genutzt.
+    """
+    norm_pages = [(i + 1, _normalize_for_match(pt)) for i, pt in enumerate(page_texts) if pt.strip()]
+    result: list[int] = []
+    for sent in sentences:
+        probe = _normalize_for_match(strip_anchors(sent))[:60]
+        best_page, best_score = fallback_page, 0.0
+        if probe:
+            for page_no, npage in norm_pages:
+                score = fuzz.partial_ratio(probe, npage)
+                if score > best_score:
+                    best_score, best_page = score, page_no
+        result.append(best_page if best_score >= threshold else fallback_page)
+    return result
+
+
 def clean_sentence(text: str) -> str:
     """Bereinigt PDF-Extraktions-Artefakte."""
     # Silbentrennung zusammenfuehren: "interac- tion" -> "interaction"

@@ -46,3 +46,51 @@ def test_extract_body_returns_empty_when_no_concept_sentences():
     text = "This sentence is about cats. Another sentence about dogs. A third about fish."
     result = extract_body_for_concept("information literacy", text)
     assert result == [], f"Expected [], got {result}"
+
+
+def test_sumy_language_maps_detected_code():
+    """Fix #167b: langdetect-ISO-Code -> sumy-Tokenizer-Sprachname, Fallback english."""
+    from extractive.pipeline.sentence_extractor import sumy_language
+
+    assert sumy_language("en") == "english"
+    assert sumy_language("de") == "german"
+    assert sumy_language("unknown") == "english"
+    assert sumy_language("") == "english"
+
+
+def test_map_sentences_to_pages_uses_physical_page():
+    """Fix #167c: ein Satz von physischer Seite 2 bekommt Seite 2 (nicht die
+    Chunk-Startseite), aufgeloest ueber den vorhandenen Seitenindex."""
+    from extractive.pipeline.sentence_extractor import map_sentences_to_pages
+
+    page_texts = [
+        "Alpha concept is introduced on the very first page of the document here.",
+        "Beta discussion continues about the alpha concept on the second page exclusively.",
+    ]
+    pages = map_sentences_to_pages(
+        ["Beta discussion continues about the alpha concept on the second page exclusively."],
+        page_texts,
+        fallback_page=1,
+    )
+    assert pages == [2]
+
+
+def test_map_sentences_to_pages_first_page_and_fallback():
+    from extractive.pipeline.sentence_extractor import map_sentences_to_pages
+
+    page_texts = [
+        "Alpha concept is introduced on the very first page of the document here.",
+        "Beta discussion continues about the alpha concept on the second page exclusively.",
+    ]
+    # Satz von Seite 1 -> Seite 1
+    assert map_sentences_to_pages(
+        ["Alpha concept is introduced on the very first page of the document here."],
+        page_texts,
+        fallback_page=2,
+    ) == [1]
+    # Satz kommt in keiner Seite vor -> Fallback
+    assert map_sentences_to_pages(
+        ["A completely unrelated statement about quantum chromodynamics and gluons."],
+        page_texts,
+        fallback_page=7,
+    ) == [7]
