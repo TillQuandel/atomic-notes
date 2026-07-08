@@ -155,10 +155,10 @@ def _page_visual_signals(pdf_path: Path, pages: list[tuple[int, str]]) -> list[P
     """Duenne PyMuPDF-Abstraktion fuer echte PDF-Signale."""
     import fitz  # PyMuPDF
     from generative.pipeline.pdf_chunker import _pdf_page_labels
+    from generative.pipeline.figure_alt import _page_text_flags
 
     # `page_number` aus pdf_to_pages ist das Druckseiten-Label (z.B. 159), NICHT
-    # der physische PyMuPDF-Index. Mapping Label→physischer Index aus /PageLabels;
-    # ohne Labels ist `page_number` die 1-basierte Position → Index = page_number-1.
+    # der physische PyMuPDF-Index. Mit /PageLabels: Mapping Label→physischer Index.
     labels = _pdf_page_labels(pdf_path)
     label_to_index: dict[str, int] = {}
     if labels:
@@ -167,8 +167,23 @@ def _page_visual_signals(pdf_path: Path, pages: list[tuple[int, str]]) -> list[P
 
     signals: list[PageVisualSignals] = []
     with fitz.open(str(pdf_path)) as doc:
+        # #78: Ohne /PageLabels verwirft pdf_to_pages textlose Seiten und nummeriert
+        # lückenlos neu → `page_number` ist die N-te textführende Seite, NICHT
+        # page_number-1 (der bei textlosen Seiten auf die falsche physische Seite
+        # zeigte). Gleiche has_text-Zählung wie figure_alt.pdf_index_to_anchor_page.
+        textpage_to_index: dict[int, int] = {}
+        if not labels:
+            has_text = _page_text_flags(pdf_path, doc.page_count)
+            running = 0
+            for idx, flag in enumerate(has_text):
+                if flag:
+                    running += 1
+                    textpage_to_index[running] = idx
+
         for page_number, page_text in pages:
-            pymupdf_index = label_to_index.get(str(page_number), page_number - 1)
+            pymupdf_index = label_to_index.get(str(page_number))
+            if pymupdf_index is None:
+                pymupdf_index = textpage_to_index.get(page_number, page_number - 1)
             if pymupdf_index < 0 or pymupdf_index >= len(doc):
                 continue
             page = doc[pymupdf_index]

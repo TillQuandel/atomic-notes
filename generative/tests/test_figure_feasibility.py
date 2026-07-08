@@ -7,11 +7,13 @@ bewertet, ohne den Orchestrator oder den Vault-Writer zu beruehren.
 
 from __future__ import annotations
 
+from pathlib import Path
 
 from generative.pipeline.pdf_chunker import Chunk
 
 from generative.eval_figure_feasibility import (
     PageVisualSignals,
+    _page_visual_signals,
     chunk_summary_rows,
     classify_page_signals,
     find_figure_captions,
@@ -148,3 +150,43 @@ def test_chunk_summary_rows_exclude_chunk_text_from_report_payload():
 
     assert rows == [{"title": "Abschnitt 1", "index": 0, "page_start": 1, "page_end": 3}]
     assert "sensitive full chunk text" not in str(rows)
+
+
+def _build_pdf_with_textless_middle_page(path: Path) -> None:
+    """PDF: physische Seite 0 (Text), Seite 1 (leer → von pdftotext verworfen),
+    Seite 2 (Text + Raster-Bild). Kein /PageLabels → Fallback-Pfad in #78."""
+    import fitz  # PyMuPDF
+
+    doc = fitz.open()
+    p0 = doc.new_page()
+    p0.insert_text((72, 72), "Seite null mit ausreichend Text fuer pdftotext hier.")
+    doc.new_page()  # physische Seite 1: absichtlich leer/textlos
+    p2 = doc.new_page()
+    p2.insert_text((72, 72), "Seite zwei mit Text und einem eingebetteten Bild.")
+    pix = fitz.Pixmap(fitz.csRGB, fitz.IRect(0, 0, 24, 24))
+    pix.set_rect(fitz.IRect(0, 0, 24, 24), (200, 40, 40))
+    p2.insert_image(fitz.Rect(200, 200, 260, 260), stream=pix.tobytes("png"))
+    doc.save(str(path))
+    doc.close()
+
+
+def test_page_visual_signals_maps_textpage_past_textless_page(tmp_path):
+    """#78: pdf_to_pages verwirft textlose Seiten und nummeriert lückenlos neu.
+
+    Das Raster-Bild liegt auf physischer Seite 2 (= text-Seite 2, weil die leere
+    physische Seite 1 verworfen wird). Der Fallback `page_number - 1` zeigte auf
+    die leere Seite → 0 Raster. Korrektes Mapping (has_text-Zählung) findet das Bild.
+    """
+    from generative.pipeline import pdf_chunker
+
+    pdf_path = tmp_path / "textless_middle.pdf"
+    _build_pdf_with_textless_middle_page(pdf_path)
+
+    pages = pdf_chunker.pdf_to_pages(pdf_path)
+    page_numbers = [n for n, _ in pages]
+    assert page_numbers == [1, 2], "Erwartet: leere Seite verworfen, lückenlos [1, 2]"
+
+    signals = _page_visual_signals(pdf_path, pages)
+    by_page = {s.page: s for s in signals}
+
+    assert by_page[2].raster_images >= 1, "Raster-Bild muss text-Seite 2 zugeordnet werden, nicht der leeren Seite"
