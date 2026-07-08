@@ -68,18 +68,19 @@ uv run atomic-notes run --source examples/zettelkasten-primer.pdf --dry-run
 > `--dry-run` skips writing to your vault, but still runs the full LLM pipeline and
 > uses your backend quota. It is a safe *preview*, not a free one.
 
-Three things to know before your first run:
+A few things to know before your first run:
 
 - **Output goes to your inbox.** Notes are written to `<vault>/00-inbox/` —
   review-first, nothing lands anywhere else in the vault.
 - **Note bodies are currently generated in German** (regardless of source
   language). Making the output language configurable is tracked in issue #157.
-- **A run has two side effects on your machine:** it starts a local metrics
-  dashboard on `http://127.0.0.1:8051`, and after pipeline-code changes —
-  including the first run of a fresh clone — it bumps `AGENT_VERSION` in
-  `generative/config.py`, so `git status` may show a modified file (issue #156).
-  The first run also downloads sentence-transformer models into your HuggingFace
+- **The first run downloads sentence-transformer models** into your HuggingFace
   cache (roughly 0.5 GB; the optional NLI gate adds ~280 MB).
+- **Two maintainer-only side effects are off by default** (issue #156): starting a
+  local metrics dashboard on `http://127.0.0.1:8051` and bumping `AGENT_VERSION` in
+  the tracked `generative/config.py` after pipeline-code changes. Both run only when
+  you set `ATOMIC_AGENT_MAINTAINER=1`, so a plain run leaves your checkout clean and
+  starts no server.
 
 Run tools through the environment with `uv run <cmd>`. Plain `pip install -e .`
 still works, but `uv` is the supported path. One-shot setup incl. preflight:
