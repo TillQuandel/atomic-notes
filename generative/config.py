@@ -139,6 +139,16 @@ CALL_TIMEOUT_SEC = int(os.getenv("ATOMIC_AGENT_CALL_TIMEOUT", "300"))
 # Pipeline-Version für agent-version Frontmatter
 AGENT_VERSION = "v0.3.140"  # RuntimeConfig bis in LLM-Backends verdrahtet
 
+
+def is_maintainer() -> bool:
+    """Maintainer-Opt-in (#156): schaltet die schreibenden Erst-Lauf-Nebeneffekte frei
+    — Auto-Version-Bump (mutiert die getrackte config.py) + Dashboard-Autostart (:8051).
+    Default aus: für Fremd-Nutzer bleibt jeder Lauf/Dry-Run seiteneffektfrei ("nothing
+    written until you say so"). Zur Laufzeit gelesen (nicht als Modul-Konstante), damit
+    GUI-Runner und Tests das Flag pro Prozess setzen können."""
+    return os.getenv("ATOMIC_AGENT_MAINTAINER", "0") not in ("0", "false", "False")
+
+
 # Background-Extractor (Stage-0.5): Trainingswissen pro Konzept vor Extractor abfragen.
 # Deaktivierbar via ENV ENABLE_BACKGROUND_EXTRACTOR=0 — z.B. für Baseline-Eval-Tests
 # bei denen Prompt-Erweiterung die Vergleichbarkeit mit v35-Baseline stört.
