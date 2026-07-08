@@ -7,14 +7,14 @@ zweiten "Autor" (`Mahmood und University of the Punjab`). Die Pipeline behandelt
 `_extract_primary_authors` verlor den echten Autor ganz (-> ['Punjab']),
 `_short_label` erzeugte falsches "et al.". Wurzel: ungereinigter Autor-String aus
 ZWEI Dateiname-Parsern (pdf_enrich._parse_filename_dynamic Kanal 1 + vault_writer.
-_parse_filename_fallback Kanal 2).
+parse_filename_fallback Kanal 2).
 """
 
 from pathlib import Path
 
 from shared.author_norm import drop_institutional_coauthors
 from generative.tools.pdf_enrich import _parse_filename_dynamic
-from generative.pipeline.vault_writer import _parse_filename_fallback
+from generative.pipeline.vault_writer import parse_filename_fallback
 
 
 # --- Kern-Helper: Person + Institution gemischt -> Institution droppen ---
@@ -90,8 +90,8 @@ def test_parse_filename_dynamic_cleans_affiliation():
     assert meta["author"] == "Mahmood"
 
 
-def test_parse_filename_fallback_cleans_affiliation():
-    fb = _parse_filename_fallback(_MAHMOOD)
+def testparse_filename_fallback_cleans_affiliation():
+    fb = parse_filename_fallback(_MAHMOOD)
     assert fb["Author"] == "Mahmood"
 
 

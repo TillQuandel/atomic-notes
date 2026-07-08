@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import numpy as np
 
-from generative.pipeline import embeddings
+from generative import embeddings
 
 
 class _FakeModel:

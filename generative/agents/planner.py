@@ -269,7 +269,7 @@ def _default_semantic_presence(title: str, full_text: str) -> float:
     der lexikalische Filter bleibt die einzige Linie). 0.0 nur bei leerem Text.
     """
     try:
-        from generative.pipeline.embeddings import embed_title, _sentences, _model
+        from generative.embeddings import embed_title, _sentences, _model
         import numpy as np
     except Exception:
         return 1.0

@@ -76,10 +76,10 @@ from generative.agents import (
     critic,
     canonicalizer,
 )
+from generative import embeddings
 from generative.pipeline import (
     pdf_chunker,
     vault_writer,
-    embeddings,
     acronym_fix,
     anchor_repair,
     boilerplate_dedup,
@@ -1539,7 +1539,7 @@ def _build_citation(
     als auch im `--load-drafts`-Pfad (Stage 1–5 dort übersprungen, `citation` muss
     trotzdem vor Stage 6 stehen). Deterministisch/idempotent — dieselbe Eingabe
     liefert dieselbe CitationMeta (Analogie zum bestehenden Muster, `q_title`/
-    `_parse_filename_fallback` bei Bedarf erneut abzuleiten statt durchzureichen).
+    `parse_filename_fallback` bei Bedarf erneut abzuleiten statt durchzureichen).
 
     `physical_pages` (#95): vom Aufrufer via `pdf_chunker.pdf_uses_physical_pages(
     source_path)` ermittelt — hier nicht selbst berechnet, weil dieser Helper nur
@@ -1580,7 +1580,7 @@ def _run_extraction_stages(
     # Das Gate warnt nur (fail-open) und bricht den Lauf nicht ab.
     text_quality = pdf_chunker.assess_text_quality(text)
     if text_quality.is_empty or text_quality.is_thin:
-        from generative.pipeline.error_hints import scanned_pdf_hint
+        from generative.error_hints import scanned_pdf_hint
 
         print(
             scanned_pdf_hint(
@@ -1658,7 +1658,7 @@ def _run_extraction_stages(
     concept_links = context_builder.build_concept_links(existing_concepts)
 
     print("[3/7] Quality-Agent: Quellen-Qualität prüfen…")
-    fb = vault_writer._parse_filename_fallback(source_path.name)
+    fb = vault_writer.parse_filename_fallback(source_path.name)
     q_title = pdf_meta.get("Title")
     if not q_title or vault_writer._TITLE_LOOKS_BAD.match(q_title or ""):
         q_title = fb.get("Title") or q_title
@@ -2289,7 +2289,7 @@ def main(argv: list[str] | None = None):
     # Resolved-Check via pure Helper (testbar). fb wird hier in main-Scope neu
     # geparst (deterministisch, idempotent — dieselbe Funktion wie in der
     # Extraction-Stage). Nur create-Notes werden markiert (extend/hub out-of-scope).
-    _fb = vault_writer._parse_filename_fallback(source_path.name)
+    _fb = vault_writer.parse_filename_fallback(source_path.name)
     _source_unresolved = routing_report.is_source_unresolved(
         citation.as_meta_dict(), _fb, crossref_override_blocked(quality_report, q_title)
     )

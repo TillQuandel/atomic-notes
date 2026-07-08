@@ -51,10 +51,11 @@ _FILENAME_PATTERN_NOYEAR = re.compile(r"^(?P<author>.+?)\s+-\s+(?P<title>.+?)$")
 _TITLE_LOOKS_BAD = re.compile(r"^[\d\s\.\-]+$|^Microsoft Word")  # Zahlenmüll oder Word-Doc-Header
 
 
-def _parse_filename_fallback(source_file: str) -> dict[str, str]:
+def parse_filename_fallback(source_file: str) -> dict[str, str]:
     """Filename-Parser für Zotero-Konvention `<Author> - <Year> - <Title>.pdf` (F4).
     Fallback wenn pdf_metadata keine brauchbaren Werte liefert.
-    Akzeptiert auch `<Author> - <Title>` (ohne Year)."""
+    Akzeptiert auch `<Author> - <Title>` (ohne Year).
+    Öffentlich, da schichtübergreifend konsumiert (agents/extractor, orchestrator, schemas/citation)."""
     stem = Path(source_file).stem
     m = _FILENAME_PATTERN_FULL.match(stem)
     if m:
@@ -161,7 +162,7 @@ def build_quellen_block(body: str, source_file: str, citation: CitationMeta | No
     # garantiert das nicht selbst — build_citation_meta übernimmt exakt die
     # bisherige CrossRef-Override-Logik und lässt einen unkorrigierten "bad"
     # Title (z.B. "Microsoft Word - ...") durch, wenn kein CrossRef-Treffer greift.
-    fallback = _parse_filename_fallback(source_file)
+    fallback = parse_filename_fallback(source_file)
     raw_title = (citation.title or "").strip()
     if not raw_title or _TITLE_LOOKS_BAD.match(raw_title):
         title = fallback.get("Title", "") or raw_title or Path(source_file).stem

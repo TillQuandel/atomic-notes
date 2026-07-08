@@ -10,7 +10,7 @@ Keine I/O, keine Abhängigkeit von orchestrator/agents.
 
 from __future__ import annotations
 
-from generative.pipeline.anchor_patterns import PAGE_MARKER_LINE_RE
+from generative.anchor_patterns import PAGE_MARKER_LINE_RE
 
 
 def build_page_index(full_text: str) -> dict[int, str]:
