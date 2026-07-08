@@ -26,7 +26,9 @@ _LOCAL_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
 
 def _warn_if_plaintext_remote(host: str) -> None:
     """S7 (#150): Warnt einmalig, wenn LANGFUSE_HOST ein nicht-lokaler http://-Host
-    ist -- dann gehen Prompts UND Basic-Auth-Keys im Klartext ueber die Leitung."""
+    ist -- dann gehen die Basic-Auth-Keys UND die gesendeten Trace-Metadaten (Titel,
+    Token-Counts, prompt_hash, Scores) im Klartext ueber die Leitung. Dieses Backend
+    schickt KEINE Roh-Prompts/Completions (nur Metadaten + Usage-Counts, s. `write`)."""
     global _PLAINTEXT_WARNED
     if _PLAINTEXT_WARNED:
         return
@@ -37,7 +39,8 @@ def _warn_if_plaintext_remote(host: str) -> None:
         _PLAINTEXT_WARNED = True
         logger.warning(
             "LANGFUSE_HOST ist unverschluesselt (http) und nicht lokal (%s) — "
-            "Prompts und API-Keys gehen im Klartext raus. Nutze https:// oder einen lokalen Host.",
+            "Auth-Keys und Trace-Metadaten (Titel, Token-Counts, Scores) gehen im Klartext "
+            "raus. Nutze https:// oder einen lokalen Host.",
             host,
         )
 

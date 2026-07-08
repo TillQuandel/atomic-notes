@@ -1,7 +1,8 @@
 """S7 (#150): Klartext-Warnung des Langfuse-Backends.
 
-Bei einem nicht-lokalen http://-LANGFUSE_HOST gehen Prompts und Basic-Auth-Keys
-im Klartext raus -> einmalige Warnung. Lokale oder https-Hosts warnen nicht.
+Bei einem nicht-lokalen http://-LANGFUSE_HOST gehen die Basic-Auth-Keys und die
+gesendeten Trace-Metadaten im Klartext raus (keine Roh-Prompts — s.
+langfuse_backend.write) -> einmalige Warnung. Lokale oder https-Hosts warnen nicht.
 """
 
 from __future__ import annotations

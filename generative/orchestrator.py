@@ -362,8 +362,8 @@ async def entity_resolution(
 ) -> list[AtomicNoteDraft]:
     """4-Stage Entity-Resolution-Pipeline (Christen 2012, GraphRAG-Pattern):
 
-    1. **Blocking** — paarweise Title-Token-Jaccard ≥ ER_BLOCKING_JACCARD als
-       Vorfilter. Spart Embedding-Calls für offensichtlich verschiedene Konzepte
+    1. **Blocking** — paarweiser Title-Token-Subset-Test (er_stage1_decision) als
+       HARD-Constraint. Spart Embedding-Calls für offensichtlich verschiedene Konzepte
        (ISP Phase X vs. Bates Five Laws → kein Body-Vergleich nötig).
     2. **Similarity** — für gefilterte Paare: Body-Embedding-Cosine via
        sentence-transformers. Cosine ≥ ER_BODY_COSINE_THRESHOLD = Cluster-Edge.
