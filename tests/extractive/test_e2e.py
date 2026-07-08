@@ -1,5 +1,13 @@
 # tests/extractive/test_e2e.py
-"""E2E-Akzeptanztests auf Bates 2017 (EN, 12 Seiten)."""
+"""E2E-Akzeptanztests auf dem generierten Corpus (EN, 10 Seiten, committet).
+
+Fixture: tests/fixtures/e2e_corpus.pdf — copyright-frei generiert via
+tests/fixtures_gen/make_e2e_corpus.py und getrackt (.gitignore-Ausnahme),
+damit die Tests auch auf CI-Runnern laufen (#155: das fruehere Fixture
+bates-2017.pdf war ein echtes Paper, untracked, und liess die E2E per
+skipif leer-gruen durchlaufen). Das skipif bleibt als Sicherheitsnetz;
+der Weekly-Workflow schlaegt bei Skips zusaetzlich hart fehl.
+"""
 
 import json
 import subprocess
@@ -10,8 +18,8 @@ from pathlib import Path
 
 import pytest
 
-BATES = Path(__file__).parent.parent / "fixtures" / "bates-2017.pdf"
-pytestmark = pytest.mark.skipif(not BATES.exists(), reason="Bates PDF fehlt in tests/fixtures/")
+CORPUS = Path(__file__).parent.parent / "fixtures" / "e2e_corpus.pdf"
+pytestmark = pytest.mark.skipif(not CORPUS.exists(), reason="e2e_corpus.pdf fehlt in tests/fixtures/")
 REPO = Path(__file__).resolve().parents[2]
 
 
@@ -27,7 +35,7 @@ def _run_pipeline(tmp_path, extra_args=None):
         sys.executable,  # gleicher Interpreter wie der Test-Runner (venv mit extractive-Install)
         str(REPO / "extractive" / "orchestrator.py"),
         "--source",
-        str(BATES),
+        str(CORPUS),
         "--out-dir",
         str(tmp_path),
         "--eval-jsonl",

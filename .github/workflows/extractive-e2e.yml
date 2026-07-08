@@ -15,6 +15,10 @@ jobs:
     timeout-minutes: 30
     env:
       PYTHONUTF8: "1"
+      # Explizit auf den gecachten Pfad gepinnt (huggingface_hub expandiert die
+      # Tilde selbst). Entspricht dem Default auf ubuntu-Runnern, macht Download-
+      # Ziel und Cache-Pfad aber auch bei kuenftig gesetztem XDG_CACHE_HOME identisch.
+      HF_HOME: ~/.cache/huggingface
     steps:
       - uses: actions/checkout@v4
 
@@ -61,5 +65,16 @@ jobs:
         run: uv run python -c "import nltk; nltk.download('punkt'); nltk.download('punkt_tab')"
 
       # Gesamte extractive-Suite inkl. E2E (test_e2e.py fährt die echte Pipeline).
+      # Leer-Grün-Guard: Der Erstlauf 2026-07 war "28 passed, 6 skipped" — das
+      # skipif in test_e2e.py griff, weil das damalige Fixture untracked war.
+      # Skips bedeuten hier immer "Pipeline lief nicht wirklich" (fehlendes
+      # Fixture oder leerer Pipeline-Output) → hart fehlschlagen statt gruen.
       - name: Extractive-Tests inkl. E2E (echtes GLiNER-Modell)
-        run: uv run python -m pytest tests/extractive -q
+        shell: bash
+        run: |
+          set -o pipefail
+          uv run python -m pytest tests/extractive -q -rs 2>&1 | tee pytest-out.txt
+          if grep -qE "[0-9]+ skipped" pytest-out.txt; then
+            echo "::error::Leer-Gruen-Guard: Es wurden Tests geskippt (Summary oben) — der Weekly-E2E-Lauf muss alle Tests wirklich fahren."
+            exit 1
+          fi
