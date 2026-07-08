@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 import re
+import unicodedata
 
 from rapidfuzz import fuzz
 
@@ -64,6 +65,16 @@ nicht gefundenes Zitat
 """
 
 
+def _norm_quote(s: str) -> str:
+    """NFKC-normalisiert einen Quote für den Vergleich.
+
+    #77-B: PDF-Extraktion liefert oft NBSP (U+00A0) statt normalem Space; NFKC
+    bildet NBSP/narrow-NBSP → U+0020 ab. Ohne Normalisierung gälte derselbe Quote
+    mit NBSP als „neu" → Duplikat-Anker in sync_anchors_from_body.
+    """
+    return unicodedata.normalize("NFKC", s)
+
+
 def sync_anchors_from_body(draft: AtomicNoteDraft) -> AtomicNoteDraft:
     """Hebel #3: Body-Anker-Sync.
 
@@ -77,7 +88,7 @@ def sync_anchors_from_body(draft: AtomicNoteDraft) -> AtomicNoteDraft:
     folgt (typische Inline-Belegform). Erste passende Seite gewinnt.
     """
     body = draft.body
-    existing_quotes = {a.quote: a for a in draft.source_anchors}
+    existing_quotes = {_norm_quote(a.quote): a for a in draft.source_anchors}
     added = 0
     filled = 0
 
@@ -93,11 +104,12 @@ def sync_anchors_from_body(draft: AtomicNoteDraft) -> AtomicNoteDraft:
         first_page = pm.group(1).split(",")[0].strip()
         page_str = f"S. {first_page}"
 
-        existing = existing_quotes.get(quote)
+        key = _norm_quote(quote)  # #77-B: NBSP-tolerant vergleichen
+        existing = existing_quotes.get(key)
         if existing is None:
             new_anchor = TextAnchor(quote=quote, page=page_str, fuzzy_page=None)
             draft.source_anchors.append(new_anchor)
-            existing_quotes[quote] = new_anchor
+            existing_quotes[key] = new_anchor
             added += 1
         elif not existing.page and not existing.fuzzy_page:
             existing.fuzzy_page = page_str
@@ -359,7 +371,18 @@ def _build_page_sections(chunk_text: str) -> list[tuple[str, list[str]]] | None:
     prev_end = 0
     prev_page: str | None = None
     for m in PAGE_MARKER_RE.finditer(chunk_text):
-        if prev_page is not None:
+        if prev_page is None:
+            # #77-A: Text VOR dem ersten Marker gehört zur Vorseite — Marker stehen
+            # an Seitenanfängen (pdf_chunker.pages_to_marked_text), und ein Chunk kann
+            # mitten auf einer Seite beginnen (split_by_chapters schneidet an Kapitel-
+            # Headings). Ohne Fallback-Seite bekämen Zitate hier keine Embeddings.
+            lead_page = int(m.group(1)) - 1
+            if lead_page >= 1:
+                sents = _split_sents(chunk_text[: m.start()])
+                if sents:
+                    embs = model.encode(sents, show_progress_bar=False, normalize_embeddings=True)
+                    result.append((str(lead_page), embs))
+        else:
             sents = _split_sents(chunk_text[prev_end : m.start()])
             if sents:
                 embs = model.encode(sents, show_progress_bar=False, normalize_embeddings=True)
@@ -415,10 +438,17 @@ def _fuzzy_find_page(quote: str, text: str, threshold: int = FUZZY_THRESHOLD) ->
     """Sucht das Quote per partial_ratio im Volltext. Bei Treffer ≥ threshold:
     finde die Position des Best-Matches und gib den letzten [S. N]-Marker davor zurück.
     """
-    if not quote or len(quote) < 15:
+    if not quote:
         return None
-    # Cleanup für robusteres Matching
-    quote_clean = quote.strip().strip('„"\'""')
+    # Cleanup für robusteres Matching. #77-C: Längen-Filter auf quote_clean messen,
+    # nicht auf den Roh-String — sonst passiert ein Quote mit viel umgebendem
+    # Whitespace/Quote-Zeichen den Roh-Filter (≥15), reduziert sich aber auf 1
+    # Realzeichen → partial_ratio=100 an beliebiger Stelle (False-Positive-Seite).
+    # Das trailing .strip() entfernt Whitespace, der erst nach dem Quote-Zeichen-
+    # Strip freigelegt wird (z.B. `"   x"` → `x`).
+    quote_clean = quote.strip().strip('„"\'""').strip()
+    if len(quote_clean) < 15:
+        return None
     # Token-Set-Score auf Wort-Ebene wäre robuster gegen Reihenfolge; für Direktzitate
     # ist partial_ratio (Substring-Match mit Edit-Distance) die richtige Wahl
     score = fuzz.partial_ratio(quote_clean, text)
