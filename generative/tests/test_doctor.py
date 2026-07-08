@@ -6,6 +6,24 @@ from __future__ import annotations
 from generative import doctor
 
 
+# --- Sprache: Runtime-UX default EN (#157) ---
+
+
+def test_doctor_hint_default_language_is_english(monkeypatch):
+    """Ohne ATOMIC_AGENT_UI_LANGUAGE ist die doctor-Ausgabe englisch (#157)."""
+    monkeypatch.delenv("ATOMIC_AGENT_UI_LANGUAGE", raising=False)
+    r = doctor.check_tool("pdftotext", which=lambda n: None)
+    assert "install poppler" in r.hint.lower()
+    assert "installieren" not in r.hint.lower()
+
+
+def test_doctor_hint_german_via_env(monkeypatch):
+    """ATOMIC_AGENT_UI_LANGUAGE=de schaltet die doctor-Ausgabe auf Deutsch (#157)."""
+    monkeypatch.setenv("ATOMIC_AGENT_UI_LANGUAGE", "de")
+    r = doctor.check_tool("pdftotext", which=lambda n: None)
+    assert "installieren" in r.hint.lower()
+
+
 # --- Poppler ---
 
 
@@ -88,6 +106,22 @@ def test_main_exit_0_wenn_alles_ok(monkeypatch, capsys):
     assert "x" in capsys.readouterr().out
 
 
+def test_main_summary_default_english(monkeypatch, capsys):
+    monkeypatch.delenv("ATOMIC_AGENT_UI_LANGUAGE", raising=False)
+    ok = doctor.CheckResult(name="x", ok=True, detail="good")
+    monkeypatch.setattr(doctor, "run_all", lambda: [ok])
+    doctor.main()
+    assert "all required checks passed" in capsys.readouterr().out
+
+
+def test_main_summary_german_via_env(monkeypatch, capsys):
+    monkeypatch.setenv("ATOMIC_AGENT_UI_LANGUAGE", "de")
+    ok = doctor.CheckResult(name="x", ok=True, detail="gut")
+    monkeypatch.setattr(doctor, "run_all", lambda: [ok])
+    doctor.main()
+    assert "alle erforderlichen Checks ok" in capsys.readouterr().out
+
+
 def test_main_exit_1_und_hint_bei_fehlschlag(monkeypatch, capsys):
     bad = doctor.CheckResult(name="pdftotext", ok=False, detail="fehlt", hint="poppler installieren")
     monkeypatch.setattr(doctor, "run_all", lambda: [bad])
@@ -121,7 +155,18 @@ def test_optionale_deps_fuehren_nicht_zu_exit_1(monkeypatch, capsys):
     assert "WARN" in out
 
 
-def test_credentials_ok_nennt_heuristik(tmp_path):
+def test_credentials_ok_nennt_heuristik(tmp_path, monkeypatch):
+    monkeypatch.delenv("ATOMIC_AGENT_UI_LANGUAGE", raising=False)
+    cred = tmp_path / ".claude" / ".credentials.json"
+    cred.parent.mkdir()
+    cred.write_text("{}", encoding="utf-8")
+    r = doctor.check_backend("subscription", which=lambda n: "/usr/bin/claude", home=tmp_path, env={})
+    # EN-Default: die Heuristik-Einschränkung wird genannt ("not live-verified").
+    assert "not live-verified" in r.detail
+
+
+def test_credentials_ok_nennt_heuristik_de(tmp_path, monkeypatch):
+    monkeypatch.setenv("ATOMIC_AGENT_UI_LANGUAGE", "de")
     cred = tmp_path / ".claude" / ".credentials.json"
     cred.parent.mkdir()
     cred.write_text("{}", encoding="utf-8")

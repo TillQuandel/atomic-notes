@@ -78,3 +78,48 @@ def test_help_mentions_backend_env_and_doctor(capsys):
     out = capsys.readouterr().out
     assert "ATOMIC_AGENT_BACKEND" in out
     assert "doctor" in out
+
+
+def test_usage_default_language_is_english(monkeypatch, capsys):
+    # #157: ohne ENV ist die Usage englisch (Doku-Sprache = Produkt-Sprache).
+    monkeypatch.delenv("ATOMIC_AGENT_UI_LANGUAGE", raising=False)
+    cli.main(["--help"])
+    out = capsys.readouterr().out
+    assert "start the pipeline" in out
+    assert "Verwendung" not in out
+
+
+def test_usage_german_via_env(monkeypatch, capsys):
+    # #157: ATOMIC_AGENT_UI_LANGUAGE=de schaltet die Usage auf Deutsch.
+    monkeypatch.setenv("ATOMIC_AGENT_UI_LANGUAGE", "de")
+    cli.main(["--help"])
+    out = capsys.readouterr().out
+    assert "Verwendung" in out
+    # ENV-Namen bleiben sprachinvariant auffindbar.
+    assert "ATOMIC_AGENT_BACKEND" in out
+
+
+def test_orchestrator_argparse_help_default_english(monkeypatch, capsys):
+    # #157: orchestrator run-Parser-Hilfen sind ohne ENV englisch.
+    import pytest
+
+    from generative import orchestrator
+
+    monkeypatch.delenv("ATOMIC_AGENT_UI_LANGUAGE", raising=False)
+    with pytest.raises(SystemExit):
+        orchestrator.main(["--help"])
+    out = capsys.readouterr().out
+    assert "Path to the PDF file" in out
+    assert "Pfad zur PDF-Datei" not in out
+
+
+def test_orchestrator_argparse_help_german_via_env(monkeypatch, capsys):
+    import pytest
+
+    from generative import orchestrator
+
+    monkeypatch.setenv("ATOMIC_AGENT_UI_LANGUAGE", "de")
+    with pytest.raises(SystemExit):
+        orchestrator.main(["--help"])
+    out = capsys.readouterr().out
+    assert "Pfad zur PDF-Datei" in out

@@ -16,11 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Mapping
 
-_POPPLER_HINT = (
-    "poppler installieren: Ubuntu/Debian `sudo apt install poppler-utils`, "
-    "Windows `choco install poppler` (oder scoop), macOS `brew install poppler` — "
-    "danach neue Shell öffnen, damit PATH greift."
-)
+from generative.ui_strings import msg
 
 # litellm liest die üblichen Provider-Keys aus der Umgebung
 _LITELLM_KEY_VARS = ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "OLLAMA_API_BASE")
@@ -40,7 +36,12 @@ def check_tool(tool: str, which: Callable[[str], str | None] = shutil.which) -> 
     path = which(tool)
     if path:
         return CheckResult(name=tool, ok=True, detail=f"{tool}: {path}")
-    return CheckResult(name=tool, ok=False, detail=f"{tool} nicht im PATH", hint=_POPPLER_HINT)
+    return CheckResult(
+        name=tool,
+        ok=False,
+        detail=msg("doctor.tool_missing_detail", tool=tool),
+        hint=msg("doctor.poppler_hint"),
+    )
 
 
 def check_backend(
@@ -61,29 +62,21 @@ def check_backend(
             return CheckResult(
                 name="backend (subscription)",
                 ok=False,
-                detail=f"claude-CLI '{CLAUDE_BIN}' nicht im PATH",
-                hint=(
-                    "Claude-Code-CLI installieren: `npm install -g @anthropic-ai/claude-code`, "
-                    "danach einmal `claude` starten und einloggen (Pro/Max-Abo). "
-                    "Alternative ohne CLI: ATOMIC_AGENT_BACKEND=litellm + API-Key."
-                ),
+                detail=msg("doctor.subscription_cli_missing_detail", bin=CLAUDE_BIN),
+                hint=msg("doctor.subscription_cli_missing_hint"),
             )
         credentials = home / ".claude" / ".credentials.json"
         if not credentials.exists():
             return CheckResult(
                 name="backend (subscription)",
                 ok=False,
-                detail=f"claude-CLI gefunden ({cli}), aber {credentials} fehlt",
-                hint=(
-                    "Vermutlich nicht eingeloggt: einmal `claude` starten und den "
-                    "Login durchlaufen. (Heuristik — falls anders authentifiziert, "
-                    "Check mit einem echten Lauf gegenprüfen.)"
-                ),
+                detail=msg("doctor.subscription_not_logged_in_detail", cli=cli, credentials=credentials),
+                hint=msg("doctor.subscription_not_logged_in_hint"),
             )
         return CheckResult(
             name="backend (subscription)",
             ok=True,
-            detail=f"claude-CLI: {cli}, Credentials-Datei vorhanden (Login nicht live verifiziert)",
+            detail=msg("doctor.subscription_ok_detail", cli=cli),
         )
 
     if backend == "litellm":
@@ -92,19 +85,20 @@ def check_backend(
             return CheckResult(
                 name="backend (litellm)",
                 ok=False,
-                detail="kein Provider-Key in der Umgebung",
-                hint=(
-                    "API-Key setzen, z. B. ANTHROPIC_API_KEY oder OPENAI_API_KEY "
-                    "(in .env oder Umgebung). Geprüft: " + ", ".join(_LITELLM_KEY_VARS)
-                ),
+                detail=msg("doctor.litellm_no_key_detail"),
+                hint=msg("doctor.litellm_no_key_hint", vars=", ".join(_LITELLM_KEY_VARS)),
             )
-        return CheckResult(name="backend (litellm)", ok=True, detail="gesetzt: " + ", ".join(set_vars))
+        return CheckResult(
+            name="backend (litellm)",
+            ok=True,
+            detail=msg("doctor.litellm_ok_detail", vars=", ".join(set_vars)),
+        )
 
     return CheckResult(
         name=f"backend ({backend})",
         ok=False,
-        detail="unbekannter Backend-Wert",
-        hint="ATOMIC_AGENT_BACKEND auf 'subscription' (Default) oder 'litellm' setzen.",
+        detail=msg("doctor.backend_unknown_detail"),
+        hint=msg("doctor.backend_unknown_hint"),
     )
 
 
@@ -140,11 +134,8 @@ def check_vault(vault: Path) -> CheckResult:
         return CheckResult(
             name="vault",
             ok=False,
-            detail=f"Vault-Pfad existiert nicht: {vault}",
-            hint=(
-                "ATOMIC_AGENT_VAULT_PATH auf den Obsidian-Vault (oder einen "
-                "beliebigen Zielordner) setzen — in .env oder Umgebung."
-            ),
+            detail=msg("doctor.vault_missing_detail", vault=vault),
+            hint=msg("doctor.vault_missing_hint"),
         )
     # Eindeutiger Name + exklusives Erstellen ("x"): niemals vorhandene Dateien anfassen
     probe = vault / f".atomic-notes-doctor-probe-{uuid.uuid4().hex}"
@@ -156,8 +147,8 @@ def check_vault(vault: Path) -> CheckResult:
         return CheckResult(
             name="vault",
             ok=False,
-            detail=f"Vault nicht beschreibbar: {vault} ({e})",
-            hint="Schreibrechte des Ordners prüfen.",
+            detail=msg("doctor.vault_not_writable_detail", vault=vault, err=e),
+            hint=msg("doctor.vault_not_writable_hint"),
         )
     return CheckResult(name="vault", ok=True, detail=str(vault))
 
@@ -165,8 +156,12 @@ def check_vault(vault: Path) -> CheckResult:
 def check_import(module: str, hint: str, required: bool = False) -> CheckResult:
     """Modul installiert? (find_spec — importiert nicht, bleibt schnell.)"""
     if importlib.util.find_spec(module) is not None:
-        return CheckResult(name=module, ok=True, detail=f"{module} installiert", required=required)
-    return CheckResult(name=module, ok=False, detail=f"{module} fehlt", hint=hint, required=required)
+        return CheckResult(
+            name=module, ok=True, detail=msg("doctor.import_installed_detail", module=module), required=required
+        )
+    return CheckResult(
+        name=module, ok=False, detail=msg("doctor.import_missing_detail", module=module), hint=hint, required=required
+    )
 
 
 def check_export() -> CheckResult:
@@ -175,7 +170,7 @@ def check_export() -> CheckResult:
     from generative.pipeline.export_convert import export_available
 
     ok, detail = export_available()
-    hint = 'pip install "atomic-notes[export]"  (Export-Formate docx/pdf/html sind optional; Kern-Pipeline läuft ohne)'
+    hint = msg("doctor.export_hint")
     return CheckResult(name="export (docx/pdf/html)", ok=ok, detail=detail, hint="" if ok else hint, required=False)
 
 
@@ -187,8 +182,8 @@ def run_all() -> list[CheckResult]:
         check_tool("pdfinfo"),
         check_backend(BACKEND),
         check_vault(VAULT),
-        check_import("pypdf", "pip install pypdf (PDF-Metadaten-Enrichment)"),
-        check_import("sentence_transformers", "pip install sentence-transformers (Embeddings/Entity-Resolution)"),
+        check_import("pypdf", msg("doctor.hint_pypdf")),
+        check_import("sentence_transformers", msg("doctor.hint_sentence_transformers")),
         check_export(),
     ]
     if BACKEND == "litellm":
@@ -200,7 +195,11 @@ def main() -> int:
     results = run_all()
     width = max(len(r.name) for r in results)
     for r in results:
-        mark = "OK " if r.ok else ("FEHLT" if r.required else "WARN")
+        mark = (
+            msg("doctor.mark_ok")
+            if r.ok
+            else (msg("doctor.mark_required_fail") if r.required else msg("doctor.mark_warn"))
+        )
         print(f"[{mark:5}] {r.name:<{width}}  {r.detail}")
         if not r.ok and r.hint:
             print(f"        -> {r.hint}")
@@ -208,10 +207,10 @@ def main() -> int:
     warned = [r for r in results if not r.ok and not r.required]
     print()
     if failed_required:
-        print(f"doctor: {len(failed_required)} von {len(results)} Checks fehlgeschlagen.")
+        print(msg("doctor.summary_failed", failed=len(failed_required), total=len(results)))
         return 1
-    suffix = f" ({len(warned)} Warnung(en) bei optionalen Checks)" if warned else ""
-    print(f"doctor: alle erforderlichen Checks ok{suffix}.")
+    suffix = msg("doctor.summary_warn_suffix", n=len(warned)) if warned else ""
+    print(msg("doctor.summary_ok", suffix=suffix))
     return 0
 
 
