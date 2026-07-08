@@ -23,6 +23,35 @@ def test_plan_concepts_respects_max_cap():
     assert len(result) <= 10
 
 
+def test_prominence_gate_counts_distinct_concepts():
+    """Fix #167a-Kalibrierung: das Prominenz-Gate darf INSTANZEN nicht mit
+    distinkten Konzepten verwechseln. Zwei prominente Konzepte (je in >= 2 Chunks)
+    duerfen den 'zu wenige prominent'-Fallback auf all_concepts nicht blockieren,
+    sonst gehen legitime 1-Chunk-Mehrwortkonzepte verloren (bates: 6 -> 2 Notes)."""
+    from extractive.pipeline.gliner_planner import plan_concepts
+
+    # 'alpha beta' + 'gamma delta' je 2x (prominent), 'epsilon zeta' 1x (nur wenn Fallback)
+    per_chunk = [
+        [
+            {"name": "alpha beta", "type": "Concept", "page": 1, "score": 0.9},
+            {"name": "gamma delta", "type": "Concept", "page": 1, "score": 0.85},
+            {"name": "epsilon zeta", "type": "Theory", "page": 1, "score": 0.8},
+        ],
+        [
+            {"name": "alpha beta", "type": "Concept", "page": 2, "score": 0.9},
+            {"name": "gamma delta", "type": "Concept", "page": 2, "score": 0.85},
+        ],
+    ]
+    chunks = [MagicMock(text="x", page=i + 1) for i in range(2)]
+    with (
+        patch("extractive.pipeline.gliner_planner.extract_concepts", side_effect=per_chunk),
+        patch("extractive.pipeline.gliner_planner._keybert_fallback", side_effect=lambda c, existing, **k: existing),
+    ):
+        result = plan_concepts(chunks, min_concepts=3, min_chunk_count=2)
+    names = {c["name"] for c in result}
+    assert "epsilon zeta" in names, names
+
+
 def test_generic_concepts_filtered():
     from extractive.pipeline.gliner_planner import _is_specific_concept
 
@@ -37,10 +66,21 @@ def test_generic_concepts_filtered():
 def test_specific_concepts_pass():
     from extractive.pipeline.gliner_planner import _is_specific_concept
 
-    assert _is_specific_concept("information literacy framework") is True
-    assert _is_specific_concept("ADKAR model") is True
-    assert _is_specific_concept("LexRank") is True
-    assert _is_specific_concept("constructivism") is True
+    assert _is_specific_concept("information literacy framework") is True  # Mehrwort
+    assert _is_specific_concept("ADKAR model") is True  # Mehrwort
+    assert _is_specific_concept("LexRank") is True  # Einwort mit Grossbuchstabe (Eigenname)
+    assert _is_specific_concept("Zettelkasten") is True  # Einwort-Eigenname (Grossbuchstabe)
+
+
+def test_lowercase_single_word_concepts_rejected():
+    """Fix #167a: rein-lowercase Einzelwoerter sind GLiNER-Artefakte und keine
+    Atomic-Note-Titel (die reale Note 'chemistry' handelte von Atomicity).
+    Statt des ehemaligen >=8-Zeichen-Proxys wird die ganze Klasse verworfen;
+    Eigennamen ueberleben ueber den Grossbuchstaben (siehe test oben)."""
+    from extractive.pipeline.gliner_planner import _is_specific_concept
+
+    for junk in ("chemistry", "knowledge", "retrieval", "conceptual"):
+        assert _is_specific_concept(junk) is False, junk
 
 
 def test_language_drift_filtered():
@@ -105,3 +145,29 @@ def test_dedup_different_concepts_kept():
     ]
     result = deduplicate_concepts(concepts)
     assert len(result) == 2
+
+
+def test_get_model_passes_device_as_map_location():
+    """Fix #167d: --device wird eingeloest — GLiNER.from_pretrained bekommt
+    map_location=<device> (gliner 0.2.27 unterstuetzt das)."""
+    from extractive.pipeline import gliner_planner
+
+    gliner_planner._get_model.cache_clear()
+    with patch("gliner.GLiNER") as mock_gliner:
+        gliner_planner._get_model("cuda")
+    mock_gliner.from_pretrained.assert_called_once()
+    _, kwargs = mock_gliner.from_pretrained.call_args
+    assert kwargs.get("map_location") == "cuda"
+    gliner_planner._get_model.cache_clear()
+
+
+def test_plan_concepts_threads_device_to_extract():
+    """device fliesst von plan_concepts bis extract_concepts durch."""
+    from extractive.pipeline.gliner_planner import plan_concepts
+
+    chunks = [MagicMock(text="Information literacy framework", page=1)]
+    with patch("extractive.pipeline.gliner_planner.extract_concepts") as mock_ec:
+        mock_ec.return_value = [{"name": "information literacy framework", "type": "Concept", "page": 1, "score": 0.9}]
+        plan_concepts(chunks, min_concepts=1, min_chunk_count=1, device="cuda")
+    _, kwargs = mock_ec.call_args
+    assert kwargs.get("device") == "cuda"

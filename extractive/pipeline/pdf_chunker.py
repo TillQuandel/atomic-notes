@@ -93,6 +93,11 @@ def _page_text_clean(pdf_path) -> list[str]:
         return [p.extract_text() or "" for p in pdf.pages]
 
 
+def extract_page_texts(pdf_path) -> list[str]:
+    """Pro-Seite sauberer Text (Index i -> physische Seite i+1). Fuer Satz->Seite-Mapping."""
+    return _page_text_clean(pdf_path)
+
+
 def extract_fulltext(pdf_path) -> str:
     """Volltext fuer Ankerpruefung (rapidfuzz)."""
     return "\n".join(_page_text_clean(pdf_path))

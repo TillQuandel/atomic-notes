@@ -3,6 +3,7 @@
 
 import json
 import subprocess
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -23,7 +24,7 @@ def out_dir():
 
 def _run_pipeline(tmp_path, extra_args=None):
     cmd = [
-        "python",
+        sys.executable,  # gleicher Interpreter wie der Test-Runner (venv mit extractive-Install)
         str(REPO / "extractive" / "orchestrator.py"),
         "--source",
         str(BATES),

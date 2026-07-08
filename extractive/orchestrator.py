@@ -17,11 +17,45 @@ from extractive.eval.extractive_eval import (
 )
 from extractive.pipeline.adapter import write_note
 from extractive.pipeline.gliner_planner import plan_concepts
-from extractive.pipeline.pdf_chunker import detect_language, extract_chunks, extract_fulltext
-from extractive.pipeline.sentence_extractor import add_page_anchors, extract_body_for_concept
+from extractive.pipeline.pdf_chunker import detect_language, extract_chunks, extract_page_texts
+from extractive.pipeline.sentence_extractor import (
+    add_page_anchors,
+    extract_body_for_concept,
+    map_sentences_to_pages,
+    sumy_language,
+)
 from shared.schemas.atomic_note_extractive import AtomicNoteExtractive
 
 EXTRACTIVE_VERSION = "extractive-v0.2.0"
+
+
+def _build_notes(
+    concepts: list[dict],
+    fulltext: str,
+    page_texts: list[str],
+    lang: str,
+    source_name: str,
+    created: str,
+) -> list[AtomicNoteExtractive]:
+    """Baut Notes: LexRank in erkannter Sprache (#167b), Satz-genaue Seitenanker (#167c)."""
+    language = sumy_language(lang)
+    notes: list[AtomicNoteExtractive] = []
+    for c in concepts:
+        sentences = extract_body_for_concept(c["name"], fulltext, language=language)
+        if not sentences:
+            continue
+        pages = map_sentences_to_pages(sentences, page_texts, fallback_page=c.get("page", 1))
+        body = add_page_anchors(sentences, pages)
+        note = AtomicNoteExtractive(
+            title=c["name"],
+            concept_type=c["type"],
+            extracted_body=body,
+            source_anchors=[{"page": pages[0], "quote": body[0][:80], "score": 1.0}],
+            source_file=source_name,
+            created=created,
+        )
+        notes.append(note)
+    return notes
 
 
 def main():
@@ -50,36 +84,21 @@ def main():
 
     print("[1] PDF extrahieren...")
     chunks = extract_chunks(source)
-    fulltext = extract_fulltext(source)
+    page_texts = extract_page_texts(source)
+    fulltext = "\n".join(page_texts)
     word_count = sum(len(c.text.split()) for c in chunks)
     print(f"    {len(chunks)} Chunks, {word_count} Woerter")
 
     lang = detect_language(fulltext[:500])
     if lang != "en":
-        print(f"    WARNUNG: Sprache erkannt = '{lang}' (v1 = Englisch only)")
+        print(f"    Sprache erkannt = '{lang}' -> LexRank-Tokenizer: {sumy_language(lang)}")
 
     print("[2] Konzepte extrahieren (GLiNER)...")
-    concepts = plan_concepts(chunks, main_language=lang)
+    concepts = plan_concepts(chunks, main_language=lang, device=args.device)
     print(f"    {len(concepts)} Konzepte")
 
     print("[3] Saetze extrahieren (LexRank)...")
-    notes = []
-    for c in concepts:
-        body = add_page_anchors(
-            extract_body_for_concept(c["name"], fulltext),
-            [c.get("page", 1)],
-        )
-        if not body:
-            continue
-        note = AtomicNoteExtractive(
-            title=c["name"],
-            concept_type=c["type"],
-            extracted_body=body,
-            source_anchors=[{"page": c.get("page", 1), "quote": body[0][:80] if body else "", "score": 1.0}],
-            source_file=source.name,
-            created=datetime.now().strftime("%Y-%m-%d"),
-        )
-        notes.append(note)
+    notes = _build_notes(concepts, fulltext, page_texts, lang, source.name, datetime.now().strftime("%Y-%m-%d"))
 
     print(f"[4] {len(notes)} Notes {'(dry-run, kein Schreiben)' if args.dry_run else f'-> {out_dir}/'}...")
     if not args.dry_run:
