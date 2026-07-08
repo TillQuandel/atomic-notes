@@ -79,6 +79,33 @@ def test_markerless_affiliation_passes_through():
     assert drop_institutional_coauthors("Mahmood und Punjab") == "Mahmood und Punjab"
 
 
+# --- #74 Bug A: Plural-Marker (Institutes/Universities/Centers/...) ---
+
+
+def test_plural_institution_marker_dropped():
+    # #74 Bug A: _INSTITUTION_RE endete jede Alternative mit \b → das Plural-`s`
+    # (Word-Char) verhinderte den Match. Plurale müssen wie Singulare greifen.
+    assert drop_institutional_coauthors("Mahmood und National Institutes of Health") == "Mahmood"
+    assert drop_institutional_coauthors("Müller und Universities UK") == "Müller"
+    assert drop_institutional_coauthors("Smith and Centers for Disease Control") == "Smith"
+
+
+# --- #74 Bug B: Komma-Affiliation an echtem und-Trenner ---
+
+
+def test_comma_affiliation_keeps_person():
+    # #74 Bug B (HIGH): 'Mahmood, University of the Punjab und Schlebbe' verlor
+    # zuvor Mahmood ganz (nur 'Schlebbe' blieb). Person-bleibt-Garantie muss auch
+    # über Komma-Grenzen gelten: die Affiliation droppen, den Autor behalten.
+    assert drop_institutional_coauthors("Mahmood, University of the Punjab und Schlebbe") == "Mahmood und Schlebbe"
+
+
+def test_lastname_firstname_comma_preserved():
+    # Regressions-Schutz: 'Lastname, Firstname' (Komma bewusst kein Trenner) darf
+    # durch die Komma-Affiliations-Bereinigung NICHT zerstört werden.
+    assert drop_institutional_coauthors("Schlebbe, Kirsten und Greifeneder") == "Schlebbe, Kirsten und Greifeneder"
+
+
 # --- Integration: beide Dateiname-Parser liefern den gereinigten Autor ---
 
 _MAHMOOD = "Mahmood und University of the Punjab - 2016 - Do People Overestimate Their Information Literacy Skills.pdf"
