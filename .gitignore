@@ -13,6 +13,8 @@ venv/
 
 # Test fixtures — large PDFs not committed
 tests/fixtures/*.pdf
+# Ausnahme: generiertes, copyright-freies E2E-Fixture (tests/fixtures_gen/make_e2e_corpus.py)
+!tests/fixtures/e2e_corpus.pdf
 
 # Cache
 extractive/.cache/
