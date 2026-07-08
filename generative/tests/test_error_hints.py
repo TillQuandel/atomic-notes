@@ -6,33 +6,53 @@ nächsten Schritt; bei Setup-Problemen den `doctor`-Verweis.
 
 
 class TestScannedPdfHint:
-    def test_names_file_and_suggests_ocr(self):
+    def test_names_file_and_suggests_ocr(self, monkeypatch):
+        monkeypatch.delenv("ATOMIC_AGENT_UI_LANGUAGE", raising=False)
         from generative.error_hints import scanned_pdf_hint
 
         msg = scanned_pdf_hint("Buch.pdf")
         assert "Buch.pdf" in msg
         assert "ocrmypdf" in msg
-        # erklärt das Problem (kein Text / gescannt)
+        # EN-Default: erklärt das Problem (no text / scanned)
+        assert "scanned" in msg.lower() or "no extractable text" in msg.lower()
+
+    def test_names_file_and_suggests_ocr_de(self, monkeypatch):
+        monkeypatch.setenv("ATOMIC_AGENT_UI_LANGUAGE", "de")
+        from generative.error_hints import scanned_pdf_hint
+
+        msg = scanned_pdf_hint("Buch.pdf")
+        assert "ocrmypdf" in msg
         assert "gescannt" in msg.lower() or "kein text" in msg.lower()
 
 
 class TestScannedHintThinVariant:
-    def test_thin_text_says_kaum_not_keinen(self):
+    def test_thin_text_says_barely_not_none_en(self, monkeypatch):
         # Dünner (nicht leerer) Text: die "enthält keinen Text"-Formulierung wäre
         # sachlich falsch (G6/#27). words_per_page wird genannt, OCR-Schritt bleibt.
+        # EN-Default: "barely" statt "no".
+        monkeypatch.delenv("ATOMIC_AGENT_UI_LANGUAGE", raising=False)
+        from generative.error_hints import scanned_pdf_hint
+
+        msg = scanned_pdf_hint("Scan.pdf", words_per_page=12.0)
+        assert "barely" in msg.lower()
+        assert "12" in msg
+        assert "ocrmypdf" in msg
+
+    def test_thin_text_says_kaum_not_keinen_de(self, monkeypatch):
+        monkeypatch.setenv("ATOMIC_AGENT_UI_LANGUAGE", "de")
         from generative.error_hints import scanned_pdf_hint
 
         msg = scanned_pdf_hint("Scan.pdf", words_per_page=12.0)
         assert "kaum" in msg.lower()
         assert "12" in msg
-        assert "ocrmypdf" in msg
 
-    def test_empty_default_unchanged(self):
-        # Ohne words_per_page bleibt die bestehende "keinen Text"-Meldung.
+    def test_empty_default_unchanged(self, monkeypatch):
+        # Ohne words_per_page bleibt die "keinen Text"-Meldung (EN-Default).
+        monkeypatch.delenv("ATOMIC_AGENT_UI_LANGUAGE", raising=False)
         from generative.error_hints import scanned_pdf_hint
 
         msg = scanned_pdf_hint("Scan.pdf")
-        assert "keinen extrahierbaren text" in msg.lower()
+        assert "no extractable text" in msg.lower()
 
 
 class TestPdftotextErrorHint:

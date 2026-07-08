@@ -15,21 +15,7 @@ from __future__ import annotations
 
 import sys
 
-_USAGE = """\
-atomic-notes — PDF → geprüfte Atomic Notes für Obsidian
-
-Verwendung:
-  atomic-notes run --source <pdf> [Orchestrator-Flags]   Pipeline starten
-  atomic-notes run --help                                alle Pipeline-Flags
-  atomic-notes doctor                                    Preflight-Checks
-  atomic-notes gui [--port N] [--no-browser]             lokale Web-GUI
-
-Umgebung:
-  ATOMIC_AGENT_BACKEND   LLM-Backend: 'subscription' (Default, Claude-Code-CLI,
-                         kein API-Key) oder 'litellm' (Anthropic/OpenAI per
-                         API-Key; lokales Ollama via OLLAMA_API_BASE).
-                         Setup prüfen mit: atomic-notes doctor
-"""
+from generative.ui_strings import msg
 
 
 def _parse_gui_args(rest: list[str]) -> tuple[int, bool]:
@@ -39,14 +25,14 @@ def _parse_gui_args(rest: list[str]) -> tuple[int, bool]:
     if "--port" in rest:
         idx = rest.index("--port")
         if idx + 1 >= len(rest):
-            raise ValueError("--port erwartet eine Portnummer")
+            raise ValueError(msg("cli.port_expects_portnumber"))
         raw = rest[idx + 1]
         try:
             port = int(raw)
         except ValueError:
-            raise ValueError(f"--port erwartet eine Zahl, nicht '{raw}'")
+            raise ValueError(msg("cli.port_expects_number", raw=raw))
         if not (1 <= port <= 65535):
-            raise ValueError(f"--port außerhalb 1–65535: {port}")
+            raise ValueError(msg("cli.port_out_of_range", port=port))
     return port, open_browser
 
 
@@ -54,10 +40,10 @@ def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
 
     if not args:
-        print(_USAGE)
+        print(msg("cli.usage"))
         return 2
     if args[0] in ("-h", "--help"):
-        print(_USAGE)
+        print(msg("cli.usage"))
         return 0
 
     cmd, rest = args[0], args[1:]
@@ -73,18 +59,18 @@ def main(argv: list[str] | None = None) -> int:
         try:
             port, open_browser = _parse_gui_args(rest)
         except ValueError as exc:
-            print(f"Ungültiges Argument: {exc}", file=sys.stderr)
+            print(msg("cli.invalid_argument", exc=exc), file=sys.stderr)
             return 2
         try:
             from generative.gui.app import serve
         except ImportError:
-            print("GUI-Dependencies fehlen. Installation: pip install -e '.[gui]'", file=sys.stderr)
+            print(msg("cli.gui_deps_missing"), file=sys.stderr)
             return 1
         serve(port=port, open_browser=open_browser)
         return 0
 
-    print(_USAGE)
-    print(f"Unbekanntes Kommando: {cmd}", file=sys.stderr)
+    print(msg("cli.usage"))
+    print(msg("cli.unknown_command", cmd=cmd), file=sys.stderr)
     return 2
 
 

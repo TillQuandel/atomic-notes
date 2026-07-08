@@ -1935,78 +1935,30 @@ def _load_draft_state(path: str):
 
 
 def main(argv: list[str] | None = None):
-    ap = argparse.ArgumentParser(description="Atomic Note Multi-Agent Pipeline")
-    ap.add_argument("--source", default=None, help="Pfad zur PDF-Datei")
-    ap.add_argument("--doi", default=None, help="DOI für Qualitäts-Check (optional)")
-    ap.add_argument("--dry-run", action="store_true", help="Kein Schreiben in Vault")
-    ap.add_argument(
-        "--by-chapter", action="store_true", help="Planner und Extractor kapitelweise ausführen (für große Bücher)"
-    )
-    ap.add_argument(
-        "--no-llm",
-        action="store_true",
-        help="Stage-6-Agents (Verifier/CrossRef/Critic) ohne LLM — "
-        "FOSS-Alternativen (BM25, Embeddings, Regex). "
-        "Extractor + Planner laufen weiterhin mit LLM.",
-    )
-    ap.add_argument(
-        "--target-tag",
-        default=None,
-        help="Tag-Hint für Auto-Note-Mover-Routing aus 00-inbox/. "
-        "Wird allen Notes zusätzlich zu inferierten Tags angehängt. "
-        "Mapping in CLAUDE.md (z.B. 'job', 'bike', 'private/fitness', "
-        "'bachelorarbeit'). Ohne --target-tag bleiben Notes in Inbox "
-        "wenn Tag-Inferenz keinen Routing-Tag liefert.",
-    )
-    ap.add_argument(
-        "--llm-fallback", action="store_true", help="LLM (Haiku) für PDF-Enrichment nutzen wenn CrossRef nichts findet"
-    )
-    ap.add_argument(
-        "--fresh-run",
-        action="store_true",
-        help="LLM-Cache-Namespace auf aktuelle Run-ID setzen — "
-        "kein Cache-Hit aus früheren Runs. Nötig für Modell-Vergleiche "
-        "und echte Qualitäts-Messungen. Retries innerhalb des Runs "
-        "bleiben gecacht.",
-    )
-    ap.add_argument(
-        "--save-drafts",
-        default=None,
-        metavar="PATH",
-        help="Drafts nach Stage 5 (Extractor) als JSON speichern — für A/B-Vergleich LLM vs. no-LLM in Stage 6.",
-    )
-    ap.add_argument(
-        "--load-drafts",
-        default=None,
-        metavar="PATH",
-        help="Drafts aus --save-drafts laden und Stage 1–5 überspringen. "
-        "--source wird dann ignoriert (Quelle steht im State).",
-    )
-    ap.add_argument(
-        "--inbox-dir",
-        default=None,
-        metavar="PATH",
-        help="Zielordner statt 00-inbox/ (wird erstellt falls nicht vorhanden). "
-        "Nützlich für A/B-Vergleiche: --inbox-dir 00-inbox/ab-llm/",
-    )
+    from generative.ui_strings import msg
+
+    ap = argparse.ArgumentParser(description=msg("orch.description"))
+    ap.add_argument("--source", default=None, help=msg("orch.arg.source"))
+    ap.add_argument("--doi", default=None, help=msg("orch.arg.doi"))
+    ap.add_argument("--dry-run", action="store_true", help=msg("orch.arg.dry_run"))
+    ap.add_argument("--by-chapter", action="store_true", help=msg("orch.arg.by_chapter"))
+    ap.add_argument("--no-llm", action="store_true", help=msg("orch.arg.no_llm"))
+    ap.add_argument("--target-tag", default=None, help=msg("orch.arg.target_tag"))
+    ap.add_argument("--llm-fallback", action="store_true", help=msg("orch.arg.llm_fallback"))
+    ap.add_argument("--fresh-run", action="store_true", help=msg("orch.arg.fresh_run"))
+    ap.add_argument("--save-drafts", default=None, metavar="PATH", help=msg("orch.arg.save_drafts"))
+    ap.add_argument("--load-drafts", default=None, metavar="PATH", help=msg("orch.arg.load_drafts"))
+    ap.add_argument("--inbox-dir", default=None, metavar="PATH", help=msg("orch.arg.inbox_dir"))
     ap.add_argument(
         "--export-format",
         default=None,
         metavar="FMT[,FMT...]",
-        help="Kommaliste zusätzlicher Export-Formate (Output-Projekt F4): Kern-Set "
-        "json, obsidian-md, portable-md, docx, pdf, html — odt/epub zuschaltbar. "
-        f"Geplante, noch nicht aktivierbare Formate: {', '.join(export_runner.FUTURE_FORMATS)}. "
-        "Ohne dieses Flag kein zusätzlicher Export (unverändertes Verhalten).",
+        help=msg("orch.arg.export_format", future=", ".join(export_runner.FUTURE_FORMATS)),
     )
-    ap.add_argument(
-        "--export-dir",
-        default=None,
-        metavar="PATH",
-        help="Zielordner für --export-format (Default: generative/.cache/exports/<pdf-stem>/).",
-    )
+    ap.add_argument("--export-dir", default=None, metavar="PATH", help=msg("orch.arg.export_dir"))
     args = ap.parse_args(argv)
     if not args.source and not args.load_drafts:
-        ap.error("--source ist erforderlich (außer mit --load-drafts)")
+        ap.error(msg("orch.error.source_required"))
 
     # Fail-fast (F4): Format-Fehler VOR jeder teuren/mutierenden Pipeline-Stufe
     # melden, nicht erst nach Stunden LLM-Arbeit im [7/7]-Block. Ergebnis wird
