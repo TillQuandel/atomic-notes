@@ -56,7 +56,6 @@ MODEL_EXTRACTOR = MODEL_OPUS
 MODEL_EXTENDER = MODEL_OPUS  # Backlog v1.1
 MODEL_VERIFIER = MODEL_HAIKU
 MODEL_CROSS_REF = MODEL_HAIKU
-MODEL_CONFIDENCE = MODEL_HAIKU
 MODEL_CRITIC = MODEL_HAIKU
 MODEL_SUMMARY = MODEL_HAIKU  # Map-Reduce-Summary für lange PDFs (Backlog)
 
@@ -124,7 +123,7 @@ MIN_WORDS_PER_PAGE = 50
 MAX_CHUNKS_SHORT_DOC = 10
 MAX_PAGES_SHORT_DOC = 50
 
-# Token-Budget pro Pipeline-Lauf (Hard-Cap, Fail-Fast bei Überschreitung)
+# Backlog: nicht verdrahtet — Einlösung = Kosten-Cap-Feature, Maintainer-Entscheid
 MAX_TOKENS_PER_RUN = 500_000
 
 # Concurrency-Cap für parallele Claude-Calls
@@ -149,6 +148,8 @@ ENABLE_BACKGROUND_EXTRACTOR = os.getenv("ENABLE_BACKGROUND_EXTRACTOR", "0") not 
 # "prose"  = aktueller Modus (Fließtext mit Inline-Ankern)
 # "table"  = Claim-Tabelle → Prose-Agent konvertiert (hohe Precision, niedrigerer Recall)
 # "hybrid" = Claim-Tabelle (Kernfakten) + freier Synthese-Absatz (Mittelweg)
+# Backlog (#103-Fund): nicht verdrahtet — kein Consumer liest EXTRACTION_MODE; der
+# Extractor läuft fest im prose-Modus, "table"/"hybrid" wurden nie angeschlossen.
 EXTRACTION_MODE = os.getenv("ATOMIC_AGENT_EXTRACTION_MODE", "prose")
 
 # no-LLM-Modus: Stage-6-Agents (Verifier, CrossRef, Critic) überspringen LLM-Calls
@@ -175,10 +176,9 @@ ER_BODY_COSINE_THRESHOLD = 0.985
 # dominante Titel ("Kompetenzbereich X") erzeugten bei 0.88 false-positive
 # Stage-2.5-Paare. 0.93 hält DE-EN-Übersetzungs-Match (>0.95) weiterhin sicher.
 ER_TITLE_COSINE_THRESHOLD = 0.93
-# Blocking: Title-Token-Subset als HARD-Constraint (siehe entity_resolution).
-# Jaccard-Konstante ist deprecated (vorher als Vorfilter genutzt) — Subset-Test
-# ist strukturell präziser und verhindert ISP-Phase-Kollaps.
-ER_BLOCKING_JACCARD = 0.3  # noch importiert für Backward-Compat, nicht mehr verwendet
+# Blocking nutzt einen Title-Token-Subset-Test als HARD-Constraint (er_stage1_decision
+# in entity_resolution / orchestrator), keinen Jaccard-Vorfilter. Die frühere
+# ER_BLOCKING_JACCARD-Konstante war deprecated und ohne Konsument (#103) — entfernt.
 # Feature-Flag — bei False: ER-Stage übersprungen, Drafts unverändert weitergereicht.
 # Default True (Pipeline-Default), per ENV `ENABLE_ENTITY_RESOLUTION=0` deaktivierbar.
 ENABLE_ENTITY_RESOLUTION = os.getenv("ENABLE_ENTITY_RESOLUTION", "1") not in ("0", "false", "False")
@@ -236,12 +236,6 @@ MODEL_CONFIG = {
 # nutzt paraphrase-multilingual-MiniLM-L12-v2 (bereits geladen für ER-Embeddings).
 # Schwelle 0.75 nach FOSS-NLP-Recherche 2026-05-12 für Paraphrase-Detection.
 SEMANTIC_PREPASS_THRESHOLD = float(os.getenv("SEMANTIC_PREPASS_THRESHOLD", "0.75"))
-
-# Eval-Quality v4: Adaptive TOP_K Thresholds für Retrieval-Kontext.
-# Gemini-Review 2026-05-18: Thresholds modell-spezifisch (paraphrase-multilingual-MiniLM-L12-v2).
-# Bei Modellwechsel neu kalibrieren — stummes Kaputtgehen ohne diese Konstanten nicht möglich.
-EVAL_ADAPTIVE_K_HIGH = float(os.getenv("EVAL_ADAPTIVE_K_HIGH", "0.85"))  # → TOP_K=2
-EVAL_ADAPTIVE_K_MID = float(os.getenv("EVAL_ADAPTIVE_K_MID", "0.65"))  # → TOP_K=3
 
 # NLI-Validation: AND-Kombination mit Haiku für CrossRef-Widerspruchserkennung.
 # Haiku identifiziert Widersprüche, DeBERTa bestätigt — nur bei Übereinstimmung
