@@ -116,6 +116,9 @@ For an API-based backend (Anthropic, OpenAI, Ollama, …) set
 > Regardless of backend, the quality agent and PDF enrichment send bibliographic
 > **metadata only** (title, DOI, ISBN — never source text) to public lookup
 > services: Crossref, OpenAlex, arXiv, PubMed, Open Library, and Google Books.
+>
+> For the full threat model, data-flow table, and a note on local artifacts
+> (crash reports and traces can contain PDF text), see [SECURITY.md](SECURITY.md).
 
 </details>
 
