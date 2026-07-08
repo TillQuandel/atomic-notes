@@ -40,7 +40,7 @@ from decision_engine.aggregation import aggregate as aggregate_decisions
 from decision_engine.models import QualityFlag
 from generative.eval_quality import _extract_page_text, _normalize, wilson_ci
 from generative.eval_quality_v2 import TOP_K, Chunk, _detect_language_pair, _expand_context, _read_note_body
-from generative.eval_quality_v2 import build_chunks, extract_claims
+from generative.eval_quality_v2 import _chunks_from_sentences, _pdf_sentences, extract_claims
 from generative.pipeline.embeddings import _model, cosine
 
 _QUALITY_HISTORY = (
@@ -90,6 +90,87 @@ MAX_PROMPT_WORDS = 12000
 SOURCE_PRESENCE_COSINE = float(os.getenv("ATOMIC_AGENT_SOURCE_PRESENCE_COSINE", "0.75"))
 
 
+# --- Stage-8-PDF-Memoisierung (#151, Punkt 1+2) ----------------------------
+# eval_note oeffnete dieselbe Quell-PDF bis 3x pro Note (build_chunks,
+# _verification_text, _build_presence_scorer) und re-encodete alle Chunk-
+# Embeddings pro Note. Bei 10 Notes derselben PDF: bis 30 Volltextextraktionen +
+# 10x identisches Chunk-Encoding. Der Prozess-Cache oeffnet die PDF genau EINMAL
+# pro (Pfad, mtime_ns, Groesse) und teilt Volltext, Chunks, Saetze und Chunk-
+# Embeddings ueber alle Notes. Deterministisch → identische Eval-Werte, nur weniger
+# I/O/CPU. mtime_ns+Groesse im Key invalidiert automatisch, falls die PDF ersetzt
+# wird. Reset zwischen Tests via _reset_pdf_caches().
+
+
+@dataclass
+class _PdfArtifacts:
+    chunks: list[Chunk]
+    full_text: str
+    sentences: list[str]
+
+
+_PDF_ARTIFACTS_CACHE: dict[tuple[str, int, int], _PdfArtifacts] = {}
+_CHUNK_EMB_CACHE: dict[tuple[str, int, int], Any] = {}
+_EVIDENCE_CORPUS_CACHE: dict[tuple[str, int, int], str] = {}
+
+
+def _pdf_cache_key(pdf_path: Path) -> tuple[str, int, int]:
+    st = pdf_path.stat()
+    return (str(pdf_path.resolve()), st.st_mtime_ns, st.st_size)
+
+
+def _pdf_artifacts(pdf_path: Path) -> _PdfArtifacts:
+    """Oeffnet die PDF genau einmal pro Prozess+Version und liefert Volltext,
+    Chunks und Saetze aus dem Cache. build_chunks/_verification_text/
+    _build_presence_scorer lesen alle hierueber — kein erneutes fitz.open."""
+    key = _pdf_cache_key(pdf_path)
+    cached = _PDF_ARTIFACTS_CACHE.get(key)
+    if cached is not None:
+        return cached
+    with fitz.open(str(pdf_path)) as doc:
+        sentence_pairs = _pdf_sentences(doc)
+        full_text = " ".join(_extract_page_text(doc, page) for page in range(1, len(doc) + 1))
+    artifacts = _PdfArtifacts(
+        chunks=_chunks_from_sentences(sentence_pairs),
+        full_text=full_text,
+        sentences=[sentence for sentence, _ in sentence_pairs],
+    )
+    _PDF_ARTIFACTS_CACHE[key] = artifacts
+    return artifacts
+
+
+def _chunk_embeddings(pdf_path: Path, chunks: list[Chunk]):
+    """Chunk-Embeddings einer PDF — einmal pro Prozess encodet, dann geteilt.
+    Deterministisch (dasselbe Modell, dieselben Chunk-Texte) → identische Vektoren."""
+    key = _pdf_cache_key(pdf_path)
+    cached = _CHUNK_EMB_CACHE.get(key)
+    if cached is not None:
+        return cached
+    model = _model()
+    embs = model.encode([chunk.text for chunk in chunks], show_progress_bar=False, normalize_embeddings=True)
+    _CHUNK_EMB_CACHE[key] = embs
+    return embs
+
+
+def _evidence_corpus(pdf_path: Path, pdf_text: str) -> str:
+    """Normalisierter Volltext fuer die Evidence-Verifikation — einmal pro (PDF, Lauf)
+    statt pro Claim (#151, Punkt 2: _verify_evidence normalisierte den GESAMTEN
+    Volltext per Regex fuer jeden Claim neu)."""
+    key = _pdf_cache_key(pdf_path)
+    cached = _EVIDENCE_CORPUS_CACHE.get(key)
+    if cached is not None:
+        return cached
+    corpus = _normalize_for_evidence(pdf_text)
+    _EVIDENCE_CORPUS_CACHE[key] = corpus
+    return corpus
+
+
+def _reset_pdf_caches() -> None:
+    """Prozess-Caches leeren (Test-Isolation)."""
+    _PDF_ARTIFACTS_CACHE.clear()
+    _CHUNK_EMB_CACHE.clear()
+    _EVIDENCE_CORPUS_CACHE.clear()
+
+
 def apply_source_presence_fallback(
     claim_scores: list[dict[str, Any]],
     presence_score,
@@ -119,10 +200,7 @@ def _build_presence_scorer(pdf_path: Path, claim_scores: list[dict[str, Any]]):
     überhaupt not_in_context-Claims gibt (Satz-Encoding ist teuer)."""
     if not any(s.get("label") == NOT_IN_CONTEXT for s in claim_scores):
         return lambda claim: None
-    from generative.eval_quality_v2 import _pdf_sentences
-
-    with fitz.open(str(pdf_path)) as doc:
-        sentences = [s for s, _ in _pdf_sentences(doc)]
+    sentences = _pdf_artifacts(pdf_path).sentences
     if not sentences:
         return lambda claim: None
     model = _model()
@@ -152,13 +230,14 @@ def _note_title(note_path: Path, note_body: str) -> str:
     return match.group(1).strip() if match else note_path.stem
 
 
-def _retrieve_claim_contexts(claims: list[str], chunks: list[Chunk]) -> list[RetrievedContext]:
+def _retrieve_claim_contexts(claims: list[str], chunks: list[Chunk], chunk_embs=None) -> list[RetrievedContext]:
     if not claims or not chunks:
         return []
 
     model = _model()
-    chunk_texts = [chunk.text for chunk in chunks]
-    chunk_embs = model.encode(chunk_texts, show_progress_bar=False, normalize_embeddings=True)
+    if chunk_embs is None:
+        chunk_texts = [chunk.text for chunk in chunks]
+        chunk_embs = model.encode(chunk_texts, show_progress_bar=False, normalize_embeddings=True)
     claim_embs = model.encode(claims, show_progress_bar=False, normalize_embeddings=True)
 
     retrieved: list[RetrievedContext] = []
@@ -468,9 +547,7 @@ def _call_judge(
 
 
 def _verification_text(pdf_path: Path) -> str:
-    with fitz.open(str(pdf_path)) as pdf_doc:
-        pages = [_extract_page_text(pdf_doc, page) for page in range(1, len(pdf_doc) + 1)]
-    return " ".join(pages)
+    return _pdf_artifacts(pdf_path).full_text
 
 
 def _normalize_for_evidence(text: str) -> str:
@@ -482,10 +559,15 @@ def _normalize_for_evidence(text: str) -> str:
 
 
 def _verify_evidence(evidence: str | None, pdf_text: str) -> tuple[bool | None, float | None]:
+    return _verify_evidence_normalized(evidence, _normalize_for_evidence(pdf_text))
+
+
+def _verify_evidence_normalized(evidence: str | None, corpus: str) -> tuple[bool | None, float | None]:
+    """Wie _verify_evidence, aber mit bereits normalisiertem Corpus (#151, Punkt 2:
+    der Volltext wird einmal pro (PDF, Lauf) normalisiert, nicht pro Claim)."""
     if not evidence:
         return None, None
     ev = _normalize_for_evidence(evidence)
-    corpus = _normalize_for_evidence(pdf_text)
     if not ev or not corpus:
         return False, 0.0
     score = fuzz.token_set_ratio(ev, corpus) / 100.0
@@ -526,13 +608,17 @@ def _claim_scores_from_judge(
     judge_rows: list[dict[str, Any]],
     pdf_text: str,
     audit_rows: list[dict[str, Any]] | None = None,
+    corpus_normalized: str | None = None,
 ) -> list[dict[str, Any]]:
+    # #151, Punkt 2: Volltext EINMAL normalisieren, nicht pro Claim. corpus_normalized
+    # kann der Aufrufer durchreichen (einmal pro PDF+Lauf gecacht); sonst Fallback hier.
+    corpus = corpus_normalized if corpus_normalized is not None else _normalize_for_evidence(pdf_text)
     retrieved_by_idx = {item.claim_idx: item for item in retrieved}
     audit_by_idx = {row["claim_idx"]: row for row in audit_rows or []}
     scores: list[dict[str, Any]] = []
     for row in judge_rows:
         item = retrieved_by_idx[row["claim_idx"]]
-        verified, verification_score = _verify_evidence(row["evidence"], pdf_text)
+        verified, verification_score = _verify_evidence_normalized(row["evidence"], corpus)
         audit = audit_by_idx.get(row["claim_idx"])
         audit_label = Label(audit["label"]) if audit else None
         # CODEX-PATTERN: v4 converts Judge rows into a domain-agnostic ClaimInput and lets
@@ -763,7 +849,11 @@ def eval_note(
             note_path, pdf_path, pipeline_version, timestamp, "no_claims_found", content_hash=content_hash
         )
 
-    chunks = build_chunks(pdf_path)
+    # #151, Punkt 1: PDF genau EINMAL pro Prozess oeffnen — Volltext, Chunks, Saetze
+    # und Chunk-Embeddings kommen aus dem Prozess-Cache (build_chunks/_verification_text/
+    # _build_presence_scorer lesen alle daraus, kein erneutes fitz.open pro Note).
+    artifacts = _pdf_artifacts(pdf_path)
+    chunks = artifacts.chunks
     if not chunks:
         result = _empty_result(
             note_path,
@@ -777,13 +867,16 @@ def eval_note(
         result["claim_scores"] = []
         return result
 
-    retrieved = _retrieve_claim_contexts(claims, chunks)
-    pdf_text = _verification_text(pdf_path)
+    retrieved = _retrieve_claim_contexts(claims, chunks, chunk_embs=_chunk_embeddings(pdf_path, chunks))
+    pdf_text = artifacts.full_text
+    corpus_normalized = _evidence_corpus(pdf_path, pdf_text)
     language_pair = _detect_language_pair(note_body, chunks[0].text if chunks else "")
     note_title = _note_title(note_path, note_body)
 
     judge_rows, llm_meta = _call_judge(note_title, retrieved, variant="primary", use_cache=use_cache)
-    claim_scores = _claim_scores_from_judge(claims, retrieved, judge_rows, pdf_text)
+    claim_scores = _claim_scores_from_judge(
+        claims, retrieved, judge_rows, pdf_text, corpus_normalized=corpus_normalized
+    )
 
     audit_indices = _audit_indices(claim_scores, note_title)
     if audit_indices:
@@ -791,7 +884,9 @@ def eval_note(
         # damit Audit und Primaerbewertung keine parallelen Parser/Schema-Implementierungen driften lassen.
         audit_items = [item for item in retrieved if item.claim_idx in audit_indices]
         audit_rows, audit_meta = _call_judge(note_title, audit_items, variant="audit", use_cache=use_cache)
-        claim_scores = _claim_scores_from_judge(claims, retrieved, judge_rows, pdf_text, audit_rows)
+        claim_scores = _claim_scores_from_judge(
+            claims, retrieved, judge_rows, pdf_text, audit_rows, corpus_normalized=corpus_normalized
+        )
         llm_meta["calls"] += audit_meta.get("calls", 0)
         llm_meta["input_tokens"] += audit_meta.get("input_tokens", 0)
         llm_meta["output_tokens"] += audit_meta.get("output_tokens", 0)
