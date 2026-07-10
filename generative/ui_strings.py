@@ -138,17 +138,17 @@ STRINGS: dict[str, dict[str, str]] = {
     },
     "orch.arg.target_tag": {
         "en": (
-            "Tag hint for auto-note-mover routing out of 00-inbox/. "
-            "Appended to every note in addition to inferred tags. "
-            "Mapping in CLAUDE.md (e.g. 'job', 'bike', 'private/fitness', "
-            "'bachelorarbeit'). Without --target-tag notes stay in the inbox "
-            "when tag inference yields no routing tag."
+            "Tag hint appended to every note in addition to inferred tags, for "
+            "routing out of 00-inbox/. Folder routing itself is your vault's "
+            "concern, e.g. via a tag-based auto-filing plugin. Without "
+            "--target-tag notes stay in the inbox when tag inference yields no "
+            "routing tag."
         ),
         "de": (
-            "Tag-Hint für Auto-Note-Mover-Routing aus 00-inbox/. "
-            "Wird allen Notes zusätzlich zu inferierten Tags angehängt. "
-            "Mapping in CLAUDE.md (z.B. 'job', 'bike', 'private/fitness', "
-            "'bachelorarbeit'). Ohne --target-tag bleiben Notes in Inbox "
+            "Tag-Hint, der jeder Note zusätzlich zu inferierten Tags angehängt "
+            "wird, fürs Routing aus 00-inbox/ heraus. Das Ordner-Routing selbst "
+            "ist Sache deines Vaults, z.B. über ein tag-basiertes "
+            "Auto-Filing-Plugin. Ohne --target-tag bleiben Notes in der Inbox "
             "wenn Tag-Inferenz keinen Routing-Tag liefert."
         ),
     },

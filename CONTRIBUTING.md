@@ -26,7 +26,9 @@ uv run python -m pytest generative lib/decision_engine/tests shared/tests -q
 ```
 
 This is the canonical, LLM-free suite (mirrors CI on ubuntu + windows + macOS). It
-runs in a couple of minutes locally. Format check:
+runs in a couple of minutes locally. `pytest.ini` sets these same three paths as
+`testpaths`, so a bare `uv run python -m pytest -q` (no path args, from the repo
+root) collects the identical suite. Format check:
 
 ```bash
 uv run ruff format --check .       # CI gate; `uv run ruff format .` to apply

@@ -942,8 +942,8 @@ def write_note(
     existing_concepts: dict[str, str] | None = None,
     inbox_dir: Path | None = None,
 ) -> Path:
-    """Schreibt Note immer nach 00-inbox/. Auto-Note-Mover-Plugin (Obsidian) routet
-    basierend auf Tags zu Zielordner (siehe CLAUDE.md Auto-Note-Mover-Mapping).
+    """Schreibt Note immer nach 00-inbox/. Das Weiterrouten zu einem Zielordner
+    (z.B. per tag-basiertem Auto-Filing-Plugin) ist Sache des jeweiligen Vaults.
 
     v27 MVP-Verhalten bei Konflikten:
     - Vault-Match (Title/Alias in `04-wissen/`, `01-studium/` etc.) → merge-stub
