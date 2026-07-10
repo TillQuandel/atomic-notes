@@ -160,6 +160,21 @@ def test_bind_multiple_matches_is_ambiguous_skip():
     assert "x" not in d1.body and "x" not in d2.body
 
 
+def test_bind_no_diagnostic_when_only_ambiguous_skips(capsys):
+    # Codex-Review-Fund: ambiguous-Skips HATTEN Anker-Matches (nur keine
+    # eindeutige Bindung) — die "0 Anker-Matches"-Namespace-Warnung waere
+    # dann irrefuehrend und darf nicht feuern.
+    fig = TaggedFigure(anchor_page=3, alt_text="x", label=None)
+    d1 = _draft("A", ["S. 3"])
+    d2 = _draft("B", ["S. 3"])
+
+    report = bind_figures_to_drafts([fig], [d1, d2])
+
+    assert report.bound == []
+    assert report.skipped[0].reason == "ambiguous"
+    assert "figure_alt:" not in capsys.readouterr().err
+
+
 def test_bind_ignores_non_create_drafts():
     fig = TaggedFigure(anchor_page=3, alt_text="x", label=None)
     draft = _draft("Suche", ["S. 3"], action="extend")

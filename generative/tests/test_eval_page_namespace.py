@@ -153,3 +153,55 @@ def test_eval_note_v1_regression_no_labels_stays_physical_index(tmp_path, monkey
 
     assert calls == [1, 2, 3]
     assert result["anchors_confirmed"] == 1
+
+
+def _make_gap_labeled_pdf(tmp_path: Path, pages_text: list[str], name: str = "gap_labeled.pdf") -> Path:
+    """PDF mit NICHT-kontiguen (aber monotonen -> usable) Druckseiten-Labels:
+    Seiten 1-2 tragen 159,160; Seiten 3-4 springen auf 200,201 (Faltseiten-/
+    Errata-Fall aus dem physisch+1-Kommentar in eval_quality.eval_note)."""
+    raw = _build_text_pdf(pages_text)
+    labeled = _with_page_labels(
+        raw,
+        [
+            dict(page_index_from=0, page_index_to=1, style="/D", start=159),
+            dict(page_index_from=2, page_index_to=len(pages_text) - 1, style="/D", start=200),
+        ],
+    )
+    out_path = tmp_path / name
+    out_path.write_bytes(labeled)
+    return out_path
+
+
+def test_gap_labels_follow_page_is_physical_not_label_plus_one(tmp_path, monkeypatch):
+    """Codex-Review-Wunsch: Beweis der physisch+1-Entscheidung an springenden
+    Labels (159,160,200,201). Anker 'S. 160' = physische Seite 2; die Folgeseite
+    ist physisch 3 (= Label 200) -- Label+1 (161) existiert gar nicht. calls muss
+    [1, 2, 3] sein, und das Mapping muss die Luecke exakt abbilden."""
+    from generative import eval_quality as eq1
+    from generative.pipeline.pdf_chunker import anchor_page_numbers, physical_pages_by_anchor
+
+    pdf_path = _make_gap_labeled_pdf(tmp_path, _SENTENCES)
+
+    assert anchor_page_numbers(pdf_path, len(_SENTENCES)) == [159, 160, 200, 201]
+    assert physical_pages_by_anchor(pdf_path, len(_SENTENCES)) == {159: 1, 160: 2, 200: 3, 201: 4}
+
+    note_path = tmp_path / "note.md"
+    note_path.write_text(
+        "# Test\n\nDas ISP Modell von Kuhlthau umfasst sechs aufeinanderfolgende Phasen genau[^1].\n\n"
+        "[^1]: quelle.pdf, S. 160.\n",
+        encoding="utf-8",
+    )
+
+    calls: list[int] = []
+    real_extract = eq1._extract_page_text
+
+    def spy(pdf_doc, page_num):
+        calls.append(page_num)
+        return real_extract(pdf_doc, page_num)
+
+    monkeypatch.setattr(eq1, "_extract_page_text", spy)
+
+    result = eq1.eval_note(note_path, pdf_path, "v-test")
+
+    assert calls == [1, 2, 3]
+    assert result["anchors_confirmed"] == 1

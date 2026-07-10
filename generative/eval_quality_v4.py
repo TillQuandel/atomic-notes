@@ -931,7 +931,14 @@ _EVAL_CACHE_INDEX: dict[Path, dict[tuple[str, str, str], dict]] = {}
 
 def _cached_eval_index(path: Path) -> dict[tuple[str, str, str], dict]:
     """Liefert den (ggf. neu gebauten) Index fuer `path`. Scannt die Datei nur beim
-    ersten Aufruf fuer diesen Pfad in diesem Prozess."""
+    ersten Aufruf fuer diesen Pfad in diesem Prozess.
+
+    Konsistenz-Annahmen (Codex-Review): quality_history.jsonl ist append-only und
+    wird im laufenden Prozess NUR ueber `save_result` geschrieben (haelt den Index
+    nach). Externe Writer/Zweitprozesse nach dem Erst-Scan bleiben unsichtbar —
+    akzeptiert, weil Stage 8 sequenziell laeuft und parallele Laeufe auch den
+    alten Linearscan schon racy machten. Bei Stage-8-Parallelisierung (#151,
+    offen) Locking/Invalidation mitdenken."""
     idx = _EVAL_CACHE_INDEX.get(path)
     if idx is not None:
         return idx

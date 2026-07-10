@@ -136,7 +136,9 @@ def render_note_md(idx: int, sample: dict, result: dict, *, blind: bool, total: 
         lines.append(f"> {claim_text}")
         lines.append("")
         if page is not None:
-            lines.append(f"**PDF-Seite (Pipeline-Top-Match, nur als PDF-Navigation)**: {page}")
+            lines.append(
+                f"**PDF-Seite (Pipeline-Top-Match; Druckseiten-Label bei gelabelten PDFs, nur als PDF-Navigation)**: {page}"
+            )
             lines.append("")
         else:
             lines.append("**PDF-Seite**: _nicht zugewiesen_")

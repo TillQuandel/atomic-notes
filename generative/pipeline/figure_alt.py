@@ -139,12 +139,13 @@ def bind_figures_to_drafts(figures: list[TaggedFigure], drafts: list[AtomicNoteD
         else:
             report.skipped.append(SkippedFigure(fig, "ambiguous"))
 
-    # #80 Fund 2: Kandidaten vorhanden, aber 0 Anker-Matches gebunden -> bisher
+    # #80 Fund 2: Kandidaten vorhanden, aber KEIN einziger Anker-Match -> bisher
     # still. Typischer Fall bei versions-gemischtem --load-drafts, wenn Drafts aus
     # einer aelteren Pipeline-Version geladen werden und ihr Anker-Namespace vom
-    # aktuellen Label-Namespace abweicht (#79). Kein Verhaltens-Change, nur
-    # Sichtbarkeit.
-    if figures and not report.bound:
+    # aktuellen Label-Namespace abweicht (#79). Nur wenn ALLE Skips no_match sind —
+    # ambiguous-Skips HATTEN Matches, dann waere der Namespace-Verdacht irrefuehrend.
+    # Kein Verhaltens-Change, nur Sichtbarkeit.
+    if figures and not report.bound and all(s.reason == "no_match" for s in report.skipped):
         print(
             f"figure_alt: {len(figures)} Kandidaten, 0 Anker-Matches — bei --load-drafts aus "
             "älterer Pipeline-Version können Anker- und Label-Namespace divergieren",
