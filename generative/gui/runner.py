@@ -157,28 +157,46 @@ def terminate_process_tree(proc: subprocess.Popen, timeout: float = 5.0) -> None
 
     Hinweis: `taskkill /T` findet nur die noch lebende Parent-Kette -- bereits
     verwaiste Enkel (deren direkter Parent schon tot ist) erwischt es nicht.
-    Fuer den Cancel-Fall (der komplette Baum lebt noch) reicht das. Bewusst
-    kein Job-Object-Ansatz (keine neue Dependency fuer diesen Edge-Case).
+    Auf POSIX faengt der `killpg`-Pfad auch diesen Fall (die Gruppe ueberlebt
+    ihren Leader). Bewusst kein Job-Object-Ansatz (keine neue Dependency).
+
+    Voraussetzung: NUR fuer Popen-Handles aus `iter_run_events` gedacht --
+    der POSIX-Pfad verlaesst sich auf `start_new_session=True` (pgid == pid);
+    ein fremdes Popen ohne eigene Gruppe wuerde die Gruppe des Aufrufers
+    (GUI-Server, pytest) mitsignalisieren.
     """
-    if proc.poll() is not None:
-        return  # bereits beendet
     if sys.platform == "win32":
-        subprocess.run(["taskkill", "/PID", str(proc.pid), "/T", "/F"], capture_output=True)
+        if proc.poll() is not None:
+            return  # bereits beendet; verwaiste Enkel sind hier nicht auffindbar
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            pass  # haengendes taskkill darf den Cancel-Thread nicht blocken
         try:
             proc.wait(timeout=timeout)
         except subprocess.TimeoutExpired:
             proc.kill()
             proc.wait()
         return
+    # POSIX: KEIN Early-Return bei totem Leader -- die Prozessgruppe kann ihn
+    # ueberleben (Orchestrator crasht, `claude -p`-Kinder laufen weiter).
+    # `start_new_session=True` garantiert pgid == proc.pid, also direkt die
+    # pid als Gruppen-Id nutzen statt getpgid() (wirft nach Reap des Leaders).
     try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        os.killpg(proc.pid, signal.SIGTERM)
     except ProcessLookupError:
-        pass  # Prozess(gruppe) schon weg
+        pass  # Gruppe komplett weg
+    if proc.poll() is not None:
+        return  # Leader war schon gereapt; SIGTERM an Restgruppe war best-effort
     try:
         proc.wait(timeout=timeout)
     except subprocess.TimeoutExpired:
         try:
-            os.killpg(os.getpgid(proc.pid), signal.SIGKILL)
+            os.killpg(proc.pid, signal.SIGKILL)
         except ProcessLookupError:
             pass
         proc.wait()

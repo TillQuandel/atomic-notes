@@ -14,6 +14,8 @@ import sys
 import threading
 import time
 
+import pytest
+
 from generative.gui.runner import build_argv, build_run_spec, iter_run_events, terminate_process_tree
 
 
@@ -334,7 +336,58 @@ def test_terminate_process_tree_kills_parent_and_child():
 
 
 def test_terminate_process_tree_noop_when_already_dead():
-    """Bereits beendeter Prozess: kein Fehler, kein taskkill/killpg-Aufruf noetig."""
+    """Bereits beendeter Prozess: darf nicht werfen. (Auf POSIX geht dabei ein
+    ProcessLookupError-tolerantes `killpg` an die nicht mehr existente Gruppe --
+    Absicherung der Leader-tot-Kinder-leben-Race, siehe Test unten.)"""
     proc = subprocess.Popen([sys.executable, "-c", "pass"])
     proc.wait()
     terminate_process_tree(proc)  # darf nicht werfen
+
+
+# Parent-Skript fuer die Leader-tot-Race: spawnt ein Kind, druckt dessen PID
+# und exitet SOFORT -- das Kind laeuft (in derselben Prozessgruppe) weiter.
+_EXITING_PARENT_SCRIPT = (
+    "import subprocess, sys\n"
+    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
+    "print(child.pid, flush=True)\n"
+)
+
+
+@pytest.mark.skipif(
+    sys.platform == "win32",
+    reason="dokumentierte taskkill-/T-Grenze: tote Parent-Kette ist nicht mehr traversierbar",
+)
+def test_terminate_process_tree_kills_orphans_after_leader_exit():
+    """#61-Race (Codex-Review-Fund): Orchestrator crasht/exitet, seine Kinder
+    leben noch. Auf POSIX ueberlebt die Prozessgruppe ihren Leader --
+    `terminate_process_tree` darf deshalb NICHT early-returnen, sondern muss
+    die Gruppe (pgid == pid dank start_new_session) trotzdem signalisieren."""
+    proc = subprocess.Popen(
+        [sys.executable, "-c", _EXITING_PARENT_SCRIPT],
+        stdout=subprocess.PIPE,
+        text=True,
+        start_new_session=True,
+    )
+    child_pid: int | None = None
+    try:
+        line = _read_line_with_timeout(proc.stdout, timeout=10.0)
+        assert line, "Parent-Skript hat keine Kind-PID gedruckt (Timeout)"
+        child_pid = int(line.strip())
+        proc.wait(timeout=10.0)  # Leader ist jetzt sicher tot, Kind lebt
+        assert _pid_alive(child_pid)
+
+        terminate_process_tree(proc)
+
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline and _pid_alive(child_pid):
+            time.sleep(0.2)
+        assert not _pid_alive(child_pid)  # Waise trotz toten Leaders erwischt
+    finally:
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        if child_pid is not None and _pid_alive(child_pid):
+            try:
+                os.kill(child_pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
