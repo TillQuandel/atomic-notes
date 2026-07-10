@@ -15,10 +15,14 @@ from generative.config import MODEL_EXTRACTOR
 from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor, ConceptPlan
 from generative.schemas.citation import CitationMeta
 
-_PROMPT = """Du extrahierst eine Atomic Note aus dem unten stehenden Textabschnitt — schemakonform für einen Obsidian-Vault.
-
-## Quellen-Metadaten (NUR diese verwenden — niemals andere Autorennamen erfinden)
-{source_meta}
+## Prefix-Cache-Layout (#147): Alle call-variablen Blöcke (Whitelist-Sortierung,
+## Konzepte, existing, Task-Hints, Chunk) stehen am ENDE des Templates, der
+## statische Instruktions-Kern vorn. Anthropic-Prompt-Caching matcht token-
+## präfix-basiert — ein variabler Block vorn beendet den cachebaren Präfix und
+## macht die statischen Regeln bei jedem Fan-out-Call zur teuren Cache-Neuanlage
+## (gemessen: 41 % der Input-Seite). Neue Blöcke: Statisches vor die Quellen-
+## Metadaten, Variables dahinter. test_extractor_prompt_layout.py wacht darüber.
+_PROMPT = """Du extrahierst eine Atomic Note aus dem unten stehenden Textabschnitt — schemakonform für einen Obsidian-Vault. Quellen-Metadaten, Ziel-Konzepte und der Textabschnitt folgen nach den Regeln.
 
 ## Wichtigste Regel — Quellenbindung
 JEDE inhaltliche Aussage muss aus dem Text unten stammen. Erfinde NICHTS aus deinem Gedächtnis.
@@ -83,11 +87,9 @@ Beim ersten Vorkommen von `{author_short}` im Body kurz einordnen (1 Beisatz, NI
 Nur bei der ersten Erwähnung. Danach reicht der Nachname.
 
 ## Tags (F10 — STRIKT aus Whitelist für `tags`, NIE erfinden)
-Wähle 1–3 `tags` AUSSCHLIESSLICH aus der untenstehenden Whitelist. Diese Tags steuern Auto-Note-Mover-Routing und sind autoritativ — Erfindung ist verboten.
+Wähle 1–3 `tags` AUSSCHLIESSLICH aus der Whitelist (Abschnitt „Tag-Whitelist" weiter unten). Diese Tags steuern Auto-Note-Mover-Routing und sind autoritativ — Erfindung ist verboten.
 
-{tag_whitelist}
-
-Faustregel: Domain-passende Tags aus dem **Quellnah**-Block bevorzugen wenn vorhanden, **Übrige**-Block nur wenn dort ein wirklich passender Tag steht. KEINEN `uni/ibi/konzept` oder `bachelorarbeit` als Default — nur wenn die Quelle tatsächlich aus einem IBI-/BA-Kontext stammt. Lieber 1 thematisch korrekter Tag als 2–3 mit fehlpassendem Domain-Tag. Wenn nichts in der Whitelist wirklich passt: `tags:` leer lassen.
+Faustregel: Domain-passende Tags aus dem **Quellnah**-Block der Whitelist bevorzugen wenn vorhanden, **Übrige**-Block nur wenn dort ein wirklich passender Tag steht. KEINEN `uni/ibi/konzept` oder `bachelorarbeit` als Default — nur wenn die Quelle tatsächlich aus einem IBI-/BA-Kontext stammt. Lieber 1 thematisch korrekter Tag als 2–3 mit fehlpassendem Domain-Tag. Wenn nichts in der Whitelist wirklich passt: `tags:` leer lassen.
 
 ## Proposed-Tags (Bootstrap für neue Domains)
 Wenn KEIN passender Tag in der Whitelist existiert UND die Quelle klar eine neue Domain markiert (z.B. Change-Management ohne `change-management`-Tag im Vault), darfst du in `proposed-tags` 1–2 Vorschläge machen. Strikte Konvention:
@@ -97,13 +99,7 @@ Wenn KEIN passender Tag in der Whitelist existiert UND die Quelle klar eine neue
 - **Kein Routing** — Proposed-Tags lösen kein Auto-Note-Mover aus. User reviewed beim Inbox-Triage.
 - Wenn Whitelist-Tags ausreichen: `proposed-tags:` leer lassen.
 
-## Ziel-Konzepte (vom Planner)
-{concepts}
-
-## Bereits existierende Notes (nicht duplizieren — bei starker Überschneidung action="extend" mit extend_path)
-{existing}
-
-{background_block}{related_mentions_block}## Output — NUR dieses Format, kein erklärender Text, KEINE JSON-Codeblöcke:
+## Output — NUR dieses Format, kein erklärender Text, KEINE JSON-Codeblöcke:
 
 <!--NOTE-->
 title: Konzeptname (knapp, EINE Idee)
@@ -137,7 +133,19 @@ wörtliches Zitat oder Paraphrase wie im Body
 
 Wenn ein Konzept aus der Liste nicht im Text vorkommt: keinen <!--NOTE-->-Block ausgeben. Direkt zum nächsten Konzept oder zum finalen <!--END-->. Kein Kommentar, keine Erklärung, keine Abwesenheits-Notiz — stummes Weglassen.
 
-## Textabschnitt: {chunk_title}
+## Quellen-Metadaten (NUR diese verwenden — niemals andere Autorennamen erfinden)
+{source_meta}
+
+## Tag-Whitelist (für `tags` — Regeln siehe Abschnitt „Tags" oben)
+{tag_whitelist}
+
+## Ziel-Konzepte (vom Planner)
+{concepts}
+
+## Bereits existierende Notes (nicht duplizieren — bei starker Überschneidung action="extend" mit extend_path)
+{existing}
+
+{background_block}{related_mentions_block}{task_hints}## Textabschnitt: {chunk_title}
 {chunk_text}
 """
 
@@ -390,19 +398,20 @@ async def run_per_concept(
             "Adressiere diesen Punkt direkt in der neuen Version.\n\n"
         )
 
-    prompt = (
-        refine_block
-        + _PROMPT.format(
-            source_meta=_format_source_meta(citation),
-            author_short=_short_author(citation),
-            concepts=concepts_str,
-            existing=existing_str or "(noch keine)",
-            background_block=_format_background_block(background_context),
-            related_mentions_block=_format_related_mentions(related_mentions),
-            tag_whitelist=_format_tag_whitelist(tag_whitelist, source_text=concept_text),
-            chunk_title=concept.title,
-            chunk_text=concept_text,  # pdf_chunker.concept_text_window liefert bereits gerankte Top-Fenster (Option D, max_chars=8000)
-        )
+    # #147: refine_block wird als task_hints ans variable Prompt-ENDE gereicht
+    # (direkt vor den Textabschnitt — hohe Salienz), nicht mehr vorangestellt:
+    # ein Präfix-Block würde den Prompt-Cache-Präfix aller Fan-out-Calls brechen.
+    prompt = _PROMPT.format(
+        source_meta=_format_source_meta(citation),
+        author_short=_short_author(citation),
+        concepts=concepts_str,
+        existing=existing_str or "(noch keine)",
+        background_block=_format_background_block(background_context),
+        related_mentions_block=_format_related_mentions(related_mentions),
+        tag_whitelist=_format_tag_whitelist(tag_whitelist, source_text=concept_text),
+        task_hints=refine_block,
+        chunk_title=concept.title,
+        chunk_text=concept_text,  # pdf_chunker.concept_text_window liefert bereits gerankte Top-Fenster (Option D, max_chars=8000)
     )
 
     raw = await call_claude_async(prompt, model=MODEL_EXTRACTOR, agent="extractor")
@@ -440,7 +449,9 @@ async def run_per_concept(
             "Sätze vollständig mit Satzendzeichen. Empirie-Phase auf 1–2 Sätze "
             "kürzen wenn Platzdruck. Definition + Substanz haben Vorrang."
         )
-        retry_prompt = (f"## Trunkierungs-Hinweis (höchste Priorität)\n{trunc_hint}\n\n") + _PROMPT.format(
+        # #147: Hinweis als task_hints ans variable Ende — der Retry teilt sich so
+        # den statischen Prompt-Präfix mit dem Erst-Call (Cache-Read statt -Neuanlage).
+        retry_prompt = _PROMPT.format(
             source_meta=_format_source_meta(citation),
             author_short=_short_author(citation),
             concepts=concepts_str,
@@ -448,6 +459,7 @@ async def run_per_concept(
             background_block=_format_background_block(background_context),
             related_mentions_block=_format_related_mentions(related_mentions),
             tag_whitelist=_format_tag_whitelist(tag_whitelist, source_text=concept_text),
+            task_hints=f"## Trunkierungs-Hinweis (höchste Priorität)\n{trunc_hint}\n\n",
             chunk_title=concept.title,
             chunk_text=concept_text[:8000],
         )
@@ -510,6 +522,7 @@ async def run(
         background_block="",  # run() hat kein background_context — legacy-Pfad
         related_mentions_block="",  # run() hat kein related_mentions — legacy-Pfad
         tag_whitelist=_format_tag_whitelist(tag_whitelist, source_text=chunk_text),
+        task_hints="",  # run() kennt weder Self-Refine noch Trunkierungs-Retry
         chunk_title=chunk_title,
         chunk_text=chunk_text[:8000],
     )
