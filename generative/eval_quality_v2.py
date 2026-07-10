@@ -31,6 +31,7 @@ except ImportError:
 from generative.config import AGENT_VERSION, CACHE_DIR, MDEBERTA_NLI_MODEL
 from generative.eval_quality import _extract_page_text, _normalize, wilson_ci
 from generative.embeddings import _model, cosine
+from generative.pipeline.pdf_chunker import anchor_page_numbers
 
 _QUALITY_HISTORY = CACHE_DIR / "quality_history.jsonl"
 EVAL_VERSION = "2.0"
@@ -262,14 +263,20 @@ def _filter_boilerplate_pages(pages: list[list[str]]) -> list[list[str]]:
     return filtered_pages
 
 
-def _pdf_sentences(pdf_doc: fitz.Document) -> list[tuple[str, int]]:
+def _pdf_sentences(pdf_doc: fitz.Document, page_numbers: list[int] | None = None) -> list[tuple[str, int]]:
+    """Extrahiert (Satz, Seitenzahl)-Paare. `page_numbers` (#80 Fund 1): Anker-
+    Seitenzahl je physischem 0-basiertem Index (aus `pdf_chunker.anchor_page_numbers`)
+    — Druckseiten-Label statt physischem Index, falls das PDF `/PageLabels` fuehrt.
+    `None` (Default) erhaelt das alte i+1-Verhalten fuer rueckwaertskompatible
+    Aufrufer."""
     raw_pages = [_raw_page_lines(pdf_doc, page) for page in range(1, len(pdf_doc) + 1)]
     if not any(raw_pages):
         raw_pages = [[_extract_page_text(pdf_doc, page)] for page in range(1, len(pdf_doc) + 1)]
     pages = _filter_boilerplate_pages(raw_pages)
 
     sentences: list[tuple[str, int]] = []
-    for page_num, lines in enumerate(pages, start=1):
+    for i, lines in enumerate(pages):
+        page_num = page_numbers[i] if page_numbers is not None else i + 1
         text = _normalize(" ".join(lines))
         for sentence in _split_sentences(text):
             sentence = sentence.strip()
@@ -280,7 +287,8 @@ def _pdf_sentences(pdf_doc: fitz.Document) -> list[tuple[str, int]]:
 
 def build_chunks(pdf_path: Path) -> list[Chunk]:
     with fitz.open(str(pdf_path)) as pdf_doc:
-        sentences = _pdf_sentences(pdf_doc)
+        page_numbers = anchor_page_numbers(pdf_path, len(pdf_doc))
+        sentences = _pdf_sentences(pdf_doc, page_numbers)
     return _chunks_from_sentences(sentences)
 
 

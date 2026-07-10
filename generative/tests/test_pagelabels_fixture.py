@@ -27,7 +27,12 @@ from pathlib import Path
 
 import pytest
 
-from generative.pipeline.pdf_chunker import _pdf_page_labels, pdf_to_pages
+from generative.pipeline.pdf_chunker import (
+    _pdf_page_labels,
+    anchor_page_numbers,
+    physical_pages_by_anchor,
+    pdf_to_pages,
+)
 
 FIXTURES = Path(__file__).resolve().parent / "fixtures"
 ARABIC = FIXTURES / "pagelabels_arabic.pdf"
@@ -90,6 +95,29 @@ def test_pdf_to_pages_falls_back_to_index_on_mixed_labels():
     page3_num, page3_text = pages[2]
     assert page3_num == 3
     assert "CONTENT-159" in page3_text  # Inhalt ist Druckseite 159, Position ist 3
+
+
+# ---- (d) anchor_page_numbers / physical_pages_by_anchor gegen die echte Fixture
+#          (#80 Fund 1: gemeinsames Mapping fuer eval_quality.py/_v2.py/_v4.py) --
+
+
+def test_anchor_page_numbers_matches_real_arabic_labels():
+    """Kein pypdf-Mock: echter Trailer-Roundtrip liefert 159..162 je physischem
+    0-basiertem Index — derselbe Namespace wie pdf_to_pages (a)."""
+    assert anchor_page_numbers(ARABIC, 4) == [159, 160, 161, 162]
+
+
+def test_anchor_page_numbers_falls_back_on_mixed_roman_arabic():
+    """Gate-Fall: gemischte Labels -> _pdf_page_labels liefert None -> i+1 fuer
+    ALLE Seiten, konsistent mit pdf_to_pages' Fallback (c)."""
+    assert anchor_page_numbers(ROMAN_ARABIC, 6) == [1, 2, 3, 4, 5, 6]
+
+
+def test_physical_pages_by_anchor_reverses_real_arabic_labels():
+    """Umkehrung: Druckseiten-Label -> physischer 1-basierter Index, fuer den
+    v1-Eval-Pfad (eval_quality.py), der Anker-Seiten vor dem pdf_doc-Zugriff
+    zurueckuebersetzen muss."""
+    assert physical_pages_by_anchor(ARABIC, 4) == {159: 1, 160: 2, 161: 3, 162: 4}
 
 
 if __name__ == "__main__":

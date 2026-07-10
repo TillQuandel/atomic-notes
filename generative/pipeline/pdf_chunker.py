@@ -120,6 +120,28 @@ def _resolve_page_numbers(pages_raw: list[str], labels: list | None) -> list[tup
     return out
 
 
+def anchor_page_numbers(pdf_path: Path, n_pages: int) -> list[int]:
+    """Anker-Seitenzahl je physischem 0-basiertem Index (0..n_pages-1) — derselbe
+    Namespace wie `pdf_to_pages`/`source_anchors`: das numerische Druckseiten-
+    Label aus `/PageLabels`, falls das PDF welche fuehrt, sonst i+1 (#80 Fund 1).
+
+    Gemeinsames Mapping fuer eval_quality.py/_v2.py/_v4.py, die bis PR #79 den
+    physischen PDF-Index lasen, obwohl source_anchors seither Druckseiten tragen.
+    Wiederverwendet `_resolve_page_numbers` (keine zweite Label-Parsing-
+    Implementierung, gleiche Semantik wie `figure_alt.pdf_index_to_anchor_page`
+    fuer Einzelindizes)."""
+    labels = _pdf_page_labels(pdf_path)
+    numbered = _resolve_page_numbers([""] * n_pages, labels)
+    return [n for n, _ in numbered]
+
+
+def physical_pages_by_anchor(pdf_path: Path, n_pages: int) -> dict[int, int]:
+    """Kehrt `anchor_page_numbers` um: {Anker-Seitenzahl: physischer 1-basierter
+    Index}. Mit `/PageLabels` bijektiv (`_usable_page_labels` erzwingt Eindeutig-
+    keit + Monotonie); ohne Labels die Identitaet (n -> n)."""
+    return {num: i + 1 for i, num in enumerate(anchor_page_numbers(pdf_path, n_pages))}
+
+
 def pdf_to_pages(pdf_path: Path) -> list[tuple[int, str]]:
     """Liefert [(page_num, page_text), ...] via pdftotext + \\f-Split.
 

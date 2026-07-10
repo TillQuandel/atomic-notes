@@ -116,6 +116,38 @@ def test_bind_no_matching_page_is_skipped():
     assert "Ein Balkendiagramm" not in draft.body
 
 
+def test_bind_zero_matches_with_candidates_prints_diagnostic(capsys):
+    # #80 Fund 2: Kandidaten vorhanden, aber 0 Anker-Matches — typischer Fall bei
+    # versions-gemischtem --load-drafts (Anker-/Label-Namespace divergiert).
+    # Bisher still; jetzt sichtbar statt eines stillen Totalverlusts.
+    fig = TaggedFigure(anchor_page=5, alt_text="x", label=None)
+    draft = _draft("Suche", ["S. 3"])
+
+    report = bind_figures_to_drafts([fig], [draft])
+
+    assert report.bound == []
+    err = capsys.readouterr().err
+    assert "figure_alt:" in err
+    assert "1 Kandidaten" in err
+    assert "0 Anker-Matches" in err
+
+
+def test_bind_no_diagnostic_when_no_candidates(capsys):
+    report = bind_figures_to_drafts([], [_draft("Suche", ["S. 3"])])
+    assert report.bound == []
+    assert capsys.readouterr().err == ""
+
+
+def test_bind_no_diagnostic_when_at_least_one_match(capsys):
+    fig = TaggedFigure(anchor_page=3, alt_text="x", label=None)
+    draft = _draft("Suche", ["S. 3"])
+
+    report = bind_figures_to_drafts([fig], [draft])
+
+    assert report.bound  # Kontrolle: dieser Fall bindet tatsaechlich
+    assert "figure_alt:" not in capsys.readouterr().err
+
+
 def test_bind_multiple_matches_is_ambiguous_skip():
     fig = TaggedFigure(anchor_page=3, alt_text="x", label=None)
     d1 = _draft("A", ["S. 3"])
@@ -126,6 +158,21 @@ def test_bind_multiple_matches_is_ambiguous_skip():
     assert report.bound == []
     assert report.skipped[0].reason == "ambiguous"
     assert "x" not in d1.body and "x" not in d2.body
+
+
+def test_bind_no_diagnostic_when_only_ambiguous_skips(capsys):
+    # Codex-Review-Fund: ambiguous-Skips HATTEN Anker-Matches (nur keine
+    # eindeutige Bindung) — die "0 Anker-Matches"-Namespace-Warnung waere
+    # dann irrefuehrend und darf nicht feuern.
+    fig = TaggedFigure(anchor_page=3, alt_text="x", label=None)
+    d1 = _draft("A", ["S. 3"])
+    d2 = _draft("B", ["S. 3"])
+
+    report = bind_figures_to_drafts([fig], [d1, d2])
+
+    assert report.bound == []
+    assert report.skipped[0].reason == "ambiguous"
+    assert "figure_alt:" not in capsys.readouterr().err
 
 
 def test_bind_ignores_non_create_drafts():
