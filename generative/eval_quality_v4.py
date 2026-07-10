@@ -38,9 +38,19 @@ from generative.config import AGENT_VERSION, MODEL_OPUS, MODEL_CONFIG, QUALITY_H
 from decision_engine import ClaimDecision, ClaimInput, DEFAULT_CONFIG, Label, determine_decision
 from decision_engine.aggregation import aggregate as aggregate_decisions
 from decision_engine.models import QualityFlag
-from generative.eval_quality import _extract_page_text, _normalize, wilson_ci
-from generative.eval_quality_v2 import TOP_K, Chunk, _detect_language_pair, _expand_context, _read_note_body
-from generative.eval_quality_v2 import _chunks_from_sentences, _pdf_sentences, extract_claims
+from generative.eval_common import (
+    TOP_K,
+    Chunk,
+    _chunks_from_sentences,
+    _detect_language_pair,
+    _expand_context,
+    _extract_page_text,
+    _normalize,
+    _pdf_sentences,
+    _read_note_body,
+    extract_claims,
+    wilson_ci,
+)
 from generative.embeddings import _model, cosine
 from generative.pipeline.pdf_chunker import anchor_page_numbers
 
