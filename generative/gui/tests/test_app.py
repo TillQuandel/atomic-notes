@@ -308,23 +308,41 @@ def test_run_rejected_while_active(client, monkeypatch):
     gate.set()
 
 
-def test_cancel_terminates_active_run(tmp_path):
+def test_cancel_terminates_active_run(tmp_path, monkeypatch):
     import threading
+
+    from generative.gui import app as app_module
 
     gate = threading.Event()
     terminated = {"v": False}
+    calls: list = []
 
     class FakeProc:
+        """Steht fuer den echten Popen-Handle -- `pid`/`poll` genuegen, da
+        `terminate_process_tree` (das eigentliche Kill-Kommando, #61) unten
+        gefaked wird und den Proc nie selbst anfasst."""
+
+        def __init__(self):
+            self.pid = 12345
+
         def poll(self):
             return 1 if terminated["v"] else None
 
-        def terminate(self):
-            terminated["v"] = True
-            gate.set()  # entsperrt den Lauf, simuliert Subprocess-Tod
+    def fake_terminate_process_tree(proc, timeout=5.0):
+        calls.append(proc)
+        terminated["v"] = True
+        gate.set()  # entsperrt den Lauf, simuliert Prozessbaum-Tod
+
+    # RunSession.cancel() ruft `runner.terminate_process_tree(proc)` (#61: muss
+    # den gesamten Prozessbaum treffen, nicht nur `proc.terminate()`) --
+    # `app_module.runner` ist dasselbe Modulobjekt wie `generative.gui.runner`.
+    monkeypatch.setattr(app_module.runner, "terminate_process_tree", fake_terminate_process_tree)
+
+    fake_proc = FakeProc()
 
     def slow_run(pdf, dry_run, register=None, options=None):
         if register:
-            register(FakeProc())
+            register(fake_proc)
         yield {"type": "started", "argv": ["slow"]}
         gate.wait(timeout=5)
         yield {"type": "exited", "returncode": 1}
@@ -342,7 +360,8 @@ def test_cancel_terminates_active_run(tmp_path):
     assert cc.post("/api/run", json={"pdf": str(pdf), "dry_run": True}).status_code == 200
     r = cc.post("/api/cancel")
     assert r.status_code == 200
-    assert terminated["v"] is True  # Subprocess wurde terminiert
+    assert terminated["v"] is True  # Lauf wurde beendet (Prozessbaum-Kill)
+    assert calls == [fake_proc]  # terminate_process_tree wurde mit dem registrierten Proc aufgerufen
 
 
 def test_cancel_without_active_run_409(client):

@@ -5,9 +5,16 @@ orchestrator-typische Marker-Zeilen, der Runner muss daraus die geparsten
 Events streamen.
 """
 
+import ctypes
+import os
+import queue
+import signal
+import subprocess
 import sys
+import threading
+import time
 
-from generative.gui.runner import build_argv, build_run_spec, iter_run_events
+from generative.gui.runner import build_argv, build_run_spec, iter_run_events, terminate_process_tree
 
 
 def test_build_argv_dry_run_default():
@@ -208,3 +215,126 @@ def test_build_run_spec_export_formats_works_in_dry_run():
     assert "--dry-run" in argv
     assert "--export-format" in argv
     assert argv[argv.index("--export-format") + 1] == "json"
+
+
+# --- terminate_process_tree (#61: Cancel muss den ganzen Prozessbaum killen) --
+
+# Windows-API-Konstanten fuer den Alive-Check unten (kein `os.kill(pid, 0)` --
+# das ist unter Windows KEIN Existenz-Check, sondern killt die PID aktiv).
+_WIN_PROCESS_QUERY_LIMITED_INFORMATION = 0x1000
+_WIN_STILL_ACTIVE = 259
+
+# Parent-Skript: spawnt selbst ein Kind, druckt dessen PID, schlaeft dann lang
+# genug, um von `terminate_process_tree` waehrend des Schlafs erwischt zu werden.
+_PARENT_SCRIPT = (
+    "import subprocess, sys, time\n"
+    "child = subprocess.Popen([sys.executable, '-c', 'import time; time.sleep(120)'])\n"
+    "print(child.pid, flush=True)\n"
+    "time.sleep(120)\n"
+)
+
+
+def _pid_alive(pid: int) -> bool:
+    """Test-Helper: existiert der Prozess mit `pid` noch?
+
+    POSIX: `os.kill(pid, 0)` sendet kein Signal, wirft aber `ProcessLookupError`,
+    wenn die PID nicht mehr existiert -- das IST dort ein reiner Existenz-Check.
+    Windows: `os.kill(pid, 0)` ist dagegen KEIN Existenz-Check, sondern ein
+    duenner Wrapper um `TerminateProcess` (killt aktiv!) -- deshalb dort ueber
+    die WinAPI (`OpenProcess` + `GetExitCodeProcess`).
+    """
+    if sys.platform == "win32":
+        kernel32 = ctypes.windll.kernel32
+        handle = kernel32.OpenProcess(_WIN_PROCESS_QUERY_LIMITED_INFORMATION, False, pid)
+        if not handle:
+            return False
+        try:
+            exit_code = ctypes.c_ulong()
+            if not kernel32.GetExitCodeProcess(handle, ctypes.byref(exit_code)):
+                return False
+            return exit_code.value == _WIN_STILL_ACTIVE
+        finally:
+            kernel32.CloseHandle(handle)
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    return True
+
+
+def _read_line_with_timeout(stream, timeout: float) -> str | None:
+    """Liest eine Zeile aus `stream` mit Timeout -- verhindert einen CI-Haenger,
+    falls das Parent-Skript aus irgendeinem Grund nie druckt. `select`
+    funktioniert unter Windows nicht auf Pipes, deshalb der Read in einem
+    Hilfsthread, Rueckgabe ueber eine Queue."""
+    result: queue.Queue = queue.Queue(maxsize=1)
+
+    def _reader() -> None:
+        try:
+            result.put(stream.readline())
+        except Exception:
+            result.put(None)
+
+    threading.Thread(target=_reader, daemon=True).start()
+    try:
+        return result.get(timeout=timeout)
+    except queue.Empty:
+        return None
+
+
+def test_terminate_process_tree_kills_parent_and_child():
+    """#61: Ein GUI-Cancel muss den KOMPLETTEN Prozessbaum beenden, nicht nur
+    den direkten Orchestrator-Subprocess -- sonst laufen vom Orchestrator
+    gespawnte Kinder (z.B. `claude -p`) als Waisen weiter. Echter Prozessbaum
+    (kein Mock): ein Parent-Subprocess spawnt selbst ein Kind; nach
+    `terminate_process_tree` muessen beide tot sein."""
+    popen_kwargs: dict = {}
+    if sys.platform != "win32":
+        # Eigene Prozessgruppe, analog `iter_run_events` -- sonst wuerde
+        # `killpg()` weiter unten die GESAMTE Pytest-Prozessgruppe treffen.
+        popen_kwargs["start_new_session"] = True
+    proc = subprocess.Popen(
+        [sys.executable, "-c", _PARENT_SCRIPT],
+        stdout=subprocess.PIPE,
+        text=True,
+        **popen_kwargs,
+    )
+    child_pid: int | None = None
+    try:
+        line = _read_line_with_timeout(proc.stdout, timeout=10.0)
+        assert line, "Parent-Skript hat keine Kind-PID gedruckt (Timeout)"
+        child_pid = int(line.strip())
+        assert _pid_alive(child_pid)
+
+        terminate_process_tree(proc)
+
+        assert proc.poll() is not None  # Parent beendet
+
+        # Das Kind kann wenige ms nach dem Kill-Kommando noch leben -- pollen
+        # statt sofort zu assertieren.
+        deadline = time.monotonic() + 10.0
+        while time.monotonic() < deadline and _pid_alive(child_pid):
+            time.sleep(0.2)
+        assert not _pid_alive(child_pid)  # Kind ebenfalls beendet, kein Waise
+    finally:
+        # Kein Test-Leak: falls Parent/Kind noch leben, hart aufraeumen.
+        if proc.poll() is None:
+            proc.kill()
+            proc.wait()
+        if child_pid is not None and _pid_alive(child_pid):
+            if sys.platform == "win32":
+                subprocess.run(["taskkill", "/PID", str(child_pid), "/F"], capture_output=True)
+            else:
+                try:
+                    os.kill(child_pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+
+
+def test_terminate_process_tree_noop_when_already_dead():
+    """Bereits beendeter Prozess: kein Fehler, kein taskkill/killpg-Aufruf noetig."""
+    proc = subprocess.Popen([sys.executable, "-c", "pass"])
+    proc.wait()
+    terminate_process_tree(proc)  # darf nicht werfen

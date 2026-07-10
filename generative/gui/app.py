@@ -413,12 +413,17 @@ class RunSession:
         self._thread.start()
 
     def cancel(self) -> None:
-        """Laufenden Subprocess beenden (Stop-Button / Tab-Close). Best-effort."""
+        """Laufenden Subprocess-BAUM beenden (Stop-Button / Tab-Close). Best-effort.
+
+        #61: `runner.terminate_process_tree` statt `proc.terminate()` -- sonst
+        liefen vom Orchestrator gespawnte Kinder (`claude -p`) auf Windows als
+        Waisen weiter (`TerminateProcess` kennt keinen Prozessbaum).
+        """
         self.cancelled = True
         proc = self._proc
-        if proc is not None and proc.poll() is None:
+        if proc is not None:
             try:
-                proc.terminate()
+                runner.terminate_process_tree(proc)
             except Exception:  # pragma: no cover - Prozess schon weg
                 pass
 
