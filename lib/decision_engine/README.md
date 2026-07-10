@@ -42,5 +42,5 @@ Run from this directory:
 python -m pytest tests/ -v
 ```
 
-Tests use Hypothesis when installed. In minimal environments they fall back to deterministic
-ADT combination coverage.
+Tests use deterministic exhaustive combination coverage over the discretised
+input space (no Hypothesis dependency — decision #149).
