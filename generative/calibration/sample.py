@@ -18,7 +18,7 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 
-from generative.eval_quality_v2 import _detect_language_pair, _read_note_body  # noqa: E402
+from generative.eval_common import _detect_language_pair, _read_note_body  # noqa: E402
 from generative.pipeline.pdf_chunker import pdf_to_text  # noqa: E402
 
 BASELINE = ROOT / ".cache" / "eval" / "baseline"

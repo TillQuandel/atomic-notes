@@ -8,6 +8,18 @@ Liest:
 Schreibt: .cache/eval/dashboard.html  ->  oeffnet im Browser.
 
 Usage: python eval_dashboard.py
+
+STATUS (#98): Die Daten-/Aggregations-Funktionen hier (_calc_kpis, _build_log_data,
+_chart_*, _PDF_META/_PDF_LABELS/THRESH_* etc.) sind weiterhin die maßgebliche
+Quelle -- eval_dashboard_server.py importiert sie per `from generative import
+eval_dashboard as D` fuer den Live-Server (Port 8051). NUR der Render-Pfad ganz
+unten (_build_html + main(), Abschnitt "HTML zusammenbauen") ist Legacy: der
+maßgebliche Render-Pfad ist eval_dashboard_server.py + internal/dashboard/
+eval_dashboard.html. Der Legacy-Pfad hier hat 2026-06-19 eine Fehldiagnose
+produziert (Dashboard-Filter-Refactor, "36 P1"-Regressionsverdacht kam vom Blick
+auf dieses statische HTML statt auf den Live-Server). Direktaufruf `python
+eval_dashboard.py` erzeugt weiterhin dieses (veraltete) statische Dashboard --
+fuer den aktuellen Stand `eval_dashboard_server.py` starten.
 """
 
 from __future__ import annotations
@@ -854,8 +866,14 @@ def _render_pdf_table(rows: list[dict]) -> str:
 
 
 # ---------------------------------------------------------------------------
-# HTML zusammenbauen
+# HTML zusammenbauen -- LEGACY-RENDERPFAD (#98)
 # ---------------------------------------------------------------------------
+# Ab hier: statischer Einmal-Render fuer `python eval_dashboard.py`. Der
+# maßgebliche Render-Pfad ist eval_dashboard_server.py (Live-Server, Port 8051)
+# + internal/dashboard/eval_dashboard.html -- NICHT dieser hier. Dieser Pfad hat
+# 2026-06-19 eine Fehldiagnose produziert (Regressionsverdacht "36 P1" kam vom
+# Blick auf dieses veraltete statische HTML). Nicht loeschen ohne die
+# main()-CLI-Nutzung (`python eval_dashboard.py`) vorher abzuloesen.
 
 _CHARTJS_CDN = "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"
 _FONT_URL = "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Inter+Tight:wght@500;600;700;800&display=swap"
@@ -872,6 +890,12 @@ def _build_html(
     quality_data: dict,
     generated_at: str,
 ) -> str:
+    """LEGACY (#98): baut das statische Einmal-Dashboard fuer `python eval_dashboard.py`.
+
+    Maßgeblich ist eval_dashboard_server.py + internal/dashboard/eval_dashboard.html,
+    NICHT dieser Renderpfad -- siehe Modul-Docstring. Hat 2026-06-19 eine
+    Fehldiagnose produziert.
+    """
     accept_json = json.dumps(accept_chart, ensure_ascii=False)
     scatter_json = json.dumps(scatter_chart, ensure_ascii=False)
     long_json = json.dumps(long_chart, ensure_ascii=False)

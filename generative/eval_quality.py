@@ -4,6 +4,14 @@
 Misst wie viele source_anchors einer Note tatsächlich in der Quell-PDF stehen —
 ohne LLM-Beteiligung. Alle Scores sind deterministisch und reproduzierbar.
 
+STATUS (#98): historischer Runner — sieht aus wie eine ablösbare Alt-Version
+(Naming-Parallele zu v2/v3), ist aber aktiv: eval_note() hier ist der einzige
+Konsument von ENABLE_MDEBERTA_NLI (mDeBERTa-Cross-Language-Anker-Prüfpfad via
+score_anchor → _nli_score/_nli_best_window/_nli_label). NICHT löschen. Geteilte
+Utilities (_extract_page_text, _normalize, wilson_ci), die auch v2/v4 nutzen,
+leben seit #98 in eval_common.py — hier nur re-exportiert, damit dieser Runner
+und bestehende Tests (test_eval_page_namespace.py u.a.) unverändert weiterlaufen.
+
 Design-Entscheidungen (Gemini + Nemotron Review 2026-05-14):
 - get_text("blocks") statt "text" → saubere Lesereihenfolge bei Spalten-PDFs
 - Normalisierung vor Match → Silbentrennung, Ligaturen, Sonderzeichen
@@ -22,7 +30,6 @@ Usage:
 from __future__ import annotations
 import argparse
 import json
-import math
 import re
 import sys
 from datetime import datetime
@@ -49,6 +56,12 @@ from generative.config import (
     MDEBERTA_THRESHOLD_CONTRA,
 )
 from generative.pipeline.pdf_chunker import physical_pages_by_anchor
+
+# #98: geteilte Utilities nach eval_common verschoben, hier re-exportiert (v2/v4
+# importieren sie inzwischen direkt aus eval_common; dieser Re-Export haelt nur
+# den Runner-internen Gebrauch unten + bestehende Tests (eq1._extract_page_text
+# via monkeypatch) unveraendert am Laufen).
+from generative.eval_common import _extract_page_text, _normalize, wilson_ci
 
 _QUALITY_HISTORY = CACHE_DIR / "quality_history.jsonl"
 
@@ -97,46 +110,6 @@ THRESHOLD_UNCERTAIN_CROSS = 0.50
 # Gemini+DeepSeek Cross-Review 2026-05-14 → EVAL_VERSION 1.2
 WEIGHT_FUZZY = 0.8
 WEIGHT_SEMANTIC = 0.2
-
-
-# ---------------------------------------------------------------------------
-# Text-Extraktion + Normalisierung
-# ---------------------------------------------------------------------------
-
-
-def _extract_page_text(pdf_doc: fitz.Document, page_num: int) -> str:
-    """Extrahiert Seiten-Text via blocks für korrekte Lesereihenfolge.
-
-    Normalisierung (Gemini-Finding): Silbentrennung, Ligaturen, Whitespace.
-    Gibt "" zurück wenn Seite nicht existiert oder leer (OCR-PDF).
-    """
-    try:
-        page = pdf_doc[page_num - 1]  # 1-basiert → 0-basiert
-    except IndexError:
-        return ""
-    # get_text("blocks") → [(x0,y0,x1,y1,text,block_no,block_type), ...]
-    # Nur Text-Blöcke (block_type=0), nach Y-Position sortiert
-    blocks = page.get_text("blocks")
-    text_parts = [b[4] for b in sorted(blocks, key=lambda b: b[1]) if b[6] == 0]
-    raw = " ".join(text_parts)
-    return _normalize(raw)
-
-
-def _normalize(text: str) -> str:
-    """Normalisiert PDF-Text für robustes Matching.
-
-    - Silbentrennung: 'Infor-\nmations-' → 'Informations'
-    - Ligaturen: fi, fl → fi, fl (PyMuPDF normalisiert meist, aber sicher ist sicher)
-    - Whitespace kollabieren
-    - Sonderzeichen die Fuzzy stören
-    """
-    # Silbentrennung am Zeilenende
-    text = re.sub(r"-\s*\n\s*", "", text)
-    # Normales Newline → Leerzeichen
-    text = re.sub(r"\s+", " ", text)
-    # Anführungszeichen normalisieren
-    text = text.replace("„", '"').replace("“", '"').replace("’", "'")
-    return text.strip()
 
 
 def _page_num_from_str(page_str: str) -> int | None:
@@ -380,22 +353,6 @@ def score_anchor(quote: str, page_text: str, is_original_lang: bool = False) -> 
             result["label_source"] = "cosine"
 
     return result
-
-
-# ---------------------------------------------------------------------------
-# Wilson-Konfidenzintervall
-# ---------------------------------------------------------------------------
-
-
-def wilson_ci(successes: int, total: int, z: float = 1.96) -> tuple[float, float]:
-    """Wilson-Score-Konfidenzintervall für Binomial-Rate. z=1.96 → 95% CI."""
-    if total == 0:
-        return 0.0, 0.0
-    p = successes / total
-    denom = 1 + z**2 / total
-    center = (p + z**2 / (2 * total)) / denom
-    margin = (z * math.sqrt(p * (1 - p) / total + z**2 / (4 * total**2))) / denom
-    return max(0.0, round(center - margin, 3)), min(1.0, round(center + margin, 3))
 
 
 # ---------------------------------------------------------------------------
