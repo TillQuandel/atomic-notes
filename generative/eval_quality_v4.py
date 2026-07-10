@@ -42,6 +42,7 @@ from generative.eval_quality import _extract_page_text, _normalize, wilson_ci
 from generative.eval_quality_v2 import TOP_K, Chunk, _detect_language_pair, _expand_context, _read_note_body
 from generative.eval_quality_v2 import _chunks_from_sentences, _pdf_sentences, extract_claims
 from generative.embeddings import _model, cosine
+from generative.pipeline.pdf_chunker import anchor_page_numbers
 
 _QUALITY_HISTORY = (
     QUALITY_HISTORY  # SSoT: config.QUALITY_HISTORY; Alias für bestehende Importer (run.py, adversarial.py)
@@ -127,7 +128,12 @@ def _pdf_artifacts(pdf_path: Path) -> _PdfArtifacts:
     if cached is not None:
         return cached
     with fitz.open(str(pdf_path)) as doc:
-        sentence_pairs = _pdf_sentences(doc)
+        # #80 Fund 1: Anker-Seitenzahl (Druckseiten-Label statt physischem Index)
+        # durchreichen, damit Chunk.pages/best_page denselben Namespace tragen wie
+        # source_anchors (pdf_chunker.pdf_to_pages) — sonst prueft der Judge-Pool-
+        # Header ("[K1] Seiten {pages}") bzw. best_page die falsche Seite.
+        page_numbers = anchor_page_numbers(pdf_path, len(doc))
+        sentence_pairs = _pdf_sentences(doc, page_numbers)
         full_text = " ".join(_extract_page_text(doc, page) for page in range(1, len(doc) + 1))
     artifacts = _PdfArtifacts(
         chunks=_chunks_from_sentences(sentence_pairs),
@@ -912,6 +918,39 @@ def eval_note(
     )
 
 
+# --- Prozessweiter Index ueber quality_history.jsonl (#151, Punkt 3) ------
+# find_cached_eval las die (bis zu 24 MB grosse) Datei bis zu 10x pro Lauf
+# komplett linear neu. Der Index wird beim ersten Aufruf EINMAL pro Pfad gescannt
+# ({(content_hash, eval_version, version): letzter Record}, "last wins" wie
+# bisher); save_result traegt neue Records direkt nach, damit Folge-Finds im
+# selben Prozess konsistent bleiben, ohne die Datei erneut zu lesen. Kein neues
+# Datenformat, keine Datei-Aenderung — reiner In-Memory-Cache, pro Pfad gekeyt
+# (Tests nutzen tmp-Pfade nebeneinander).
+_EVAL_CACHE_INDEX: dict[Path, dict[tuple[str, str, str], dict]] = {}
+
+
+def _cached_eval_index(path: Path) -> dict[tuple[str, str, str], dict]:
+    """Liefert den (ggf. neu gebauten) Index fuer `path`. Scannt die Datei nur beim
+    ersten Aufruf fuer diesen Pfad in diesem Prozess."""
+    idx = _EVAL_CACHE_INDEX.get(path)
+    if idx is not None:
+        return idx
+    idx = {}
+    if path.exists():
+        with path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                try:
+                    entry = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                content_hash = entry.get("content_hash")
+                if not content_hash:
+                    continue  # Alt-Records ohne content_hash matchen nie (s.u.)
+                idx[(content_hash, entry.get("eval_version"), entry.get("version"))] = entry
+    _EVAL_CACHE_INDEX[path] = idx
+    return idx
+
+
 def find_cached_eval(
     content_hash: str | None,
     eval_version: str,
@@ -932,27 +971,15 @@ def find_cached_eval(
     und EVAL_VERSION bleiben unberuehrt (siehe Modul-Docstring-Kontext).
 
     Gibt den zuletzt gespeicherten Treffer zurueck (juengster Stand gewinnt) oder
-    None, wenn kein Treffer moeglich ist — dann laeuft der Judge normal.
+    None, wenn kein Treffer moeglich ist — dann laeuft der Judge normal. Liest die
+    Datei nur beim ersten Aufruf pro Pfad (#151, Punkt 3: Prozess-Index statt
+    linearem Rescan bei jedem Aufruf, siehe `_cached_eval_index`).
     """
     if not content_hash:
         return None
     path = history_path if history_path is not None else _QUALITY_HISTORY
-    if not path.exists():
-        return None
-    match: dict | None = None
-    with path.open("r", encoding="utf-8") as fh:
-        for line in fh:
-            try:
-                entry = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if (
-                entry.get("content_hash") == content_hash
-                and entry.get("eval_version") == eval_version
-                and entry.get("version") == pipeline_version
-            ):
-                match = entry
-    return match
+    idx = _cached_eval_index(path)
+    return idx.get((content_hash, eval_version, pipeline_version))
 
 
 def save_result(result: dict) -> None:
@@ -960,6 +987,14 @@ def save_result(result: dict) -> None:
     _QUALITY_HISTORY.parent.mkdir(parents=True, exist_ok=True)
     with _QUALITY_HISTORY.open("a", encoding="utf-8") as f:
         f.write(json.dumps(result, ensure_ascii=False) + "\n")
+
+    # #151, Punkt 3: neuen Record auch im Prozess-Index nachtragen, damit ein
+    # find_cached_eval im selben Prozess/Pfad ihn sofort sieht, statt veraltet zu
+    # bleiben bis der Index (der die Datei sonst nicht erneut liest) invalidiert wird.
+    content_hash = result.get("content_hash")
+    if content_hash:
+        idx = _cached_eval_index(_QUALITY_HISTORY)
+        idx[(content_hash, result.get("eval_version"), result.get("version"))] = result
 
     # DB: note_eval persistieren
     try:

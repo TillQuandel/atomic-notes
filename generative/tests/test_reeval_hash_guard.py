@@ -18,6 +18,7 @@ import contextlib
 import json
 from pathlib import Path
 
+from generative import db as eq_db
 from generative import eval_quality_v4 as eq
 from generative import orchestrator
 from generative.pipeline import vault_writer
@@ -130,6 +131,80 @@ class TestFindCachedEval:
         result = eq.find_cached_eval(NOTE_HASH, eq.EVAL_VERSION, orchestrator.AGENT_VERSION, history_path=history)
 
         assert result["hallucination_rate"] == 0.22
+
+
+class TestFindCachedEvalIndexPerformance:
+    """#151, Punkt 3: find_cached_eval las quality_history.jsonl (bis 24 MB) komplett
+    linear, bis zu 10x pro Lauf. Ein prozessweiter Index scannt die Datei einmalig
+    pro Pfad ("last wins" wie bisher); save_result haelt ihn synchron nach, damit
+    Folge-Finds im selben Prozess konsistent bleiben."""
+
+    def test_file_opened_once_across_repeated_calls(self, tmp_path, monkeypatch):
+        history = tmp_path / "quality_history.jsonl"
+        _write_history(
+            history,
+            _base_entry(hallucination_rate=0.10),
+            _base_entry(hallucination_rate=0.20),  # gleicher Schluessel -> last wins
+            _base_entry(content_hash="andere-note", hallucination_rate=0.30),
+        )
+
+        calls = {"open": 0}
+        real_open = Path.open
+
+        def counting_open(self_path, *a, **k):
+            calls["open"] += 1
+            return real_open(self_path, *a, **k)
+
+        monkeypatch.setattr(Path, "open", counting_open)
+
+        for _ in range(3):
+            result = eq.find_cached_eval(NOTE_HASH, eq.EVAL_VERSION, orchestrator.AGENT_VERSION, history_path=history)
+            assert result is not None
+            assert result["hallucination_rate"] == 0.20  # last-wins bleibt erhalten
+
+        assert calls["open"] == 1  # RED (Alt-Code): 3 — eine komplette Datei-Lesung je Aufruf
+
+    def test_different_history_paths_do_not_share_index(self, tmp_path):
+        # history_path-Parameter respektieren: Index wird pro Pfad gekeyt, sonst
+        # wuerde Note A ihren Eintrag versehentlich fuer Note B liefern.
+        history_a = tmp_path / "a" / "quality_history.jsonl"
+        history_b = tmp_path / "b" / "quality_history.jsonl"
+        _write_history(history_a, _base_entry(hallucination_rate=0.11))
+        _write_history(history_b, _base_entry(content_hash="andere-note"))
+
+        result_a = eq.find_cached_eval(NOTE_HASH, eq.EVAL_VERSION, orchestrator.AGENT_VERSION, history_path=history_a)
+        result_b = eq.find_cached_eval(NOTE_HASH, eq.EVAL_VERSION, orchestrator.AGENT_VERSION, history_path=history_b)
+
+        assert result_a is not None and result_a["hallucination_rate"] == 0.11
+        assert result_b is None
+
+    def test_save_result_record_found_by_next_find_cached_eval(self, tmp_path, monkeypatch):
+        history = tmp_path / "quality_history.jsonl"
+        monkeypatch.setattr(eq, "_QUALITY_HISTORY", history)
+        monkeypatch.setattr(eq_db, "get_db", _fake_get_db)
+
+        # Historie existiert noch nicht -> Index wird leer gebaut, kein Treffer.
+        assert eq.find_cached_eval(NOTE_HASH, eq.EVAL_VERSION, orchestrator.AGENT_VERSION) is None
+
+        eq.save_result(_base_entry(hallucination_rate=0.42))
+
+        result = eq.find_cached_eval(NOTE_HASH, eq.EVAL_VERSION, orchestrator.AGENT_VERSION)
+        assert result is not None
+        assert result["hallucination_rate"] == 0.42
+
+    def test_none_cases_unchanged_by_index(self, tmp_path):
+        # Regression: kein content_hash bzw. fehlende Datei liefern weiter None,
+        # auch wenn der Index diese Faelle jetzt cacht statt live neu zu pruefen.
+        history = tmp_path / "quality_history.jsonl"
+        _write_history(history, _base_entry())
+
+        assert eq.find_cached_eval(None, eq.EVAL_VERSION, orchestrator.AGENT_VERSION, history_path=history) is None
+        assert (
+            eq.find_cached_eval(
+                NOTE_HASH, eq.EVAL_VERSION, orchestrator.AGENT_VERSION, history_path=tmp_path / "missing.jsonl"
+            )
+            is None
+        )
 
 
 class TestEvalNoteThreadsContentHash:

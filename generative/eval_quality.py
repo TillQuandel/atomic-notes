@@ -48,6 +48,7 @@ from generative.config import (
     MDEBERTA_THRESHOLD_CONFIRMED,
     MDEBERTA_THRESHOLD_CONTRA,
 )
+from generative.pipeline.pdf_chunker import physical_pages_by_anchor
 
 _QUALITY_HISTORY = CACHE_DIR / "quality_history.jsonl"
 
@@ -522,15 +523,29 @@ def eval_note(note_path: Path, pdf_path: Path, pipeline_version: str) -> dict:
     sample_page = _extract_page_text(pdf_doc, 1)
     language_pair = _detect_language_pair(note_text, sample_page)
 
+    # #80 Fund 1: source_anchors tragen seit PR #79 den Druckseiten-Label-Namespace
+    # (pdf_chunker.pdf_to_pages), nicht mehr den physischen PDF-Index. Vor jedem
+    # pdf_doc-Zugriff auf den physischen 1-basierten Index zurueckuebersetzen —
+    # sonst prueft der Fuzzy-/NLI-Pfad bei gelabelten Buechern die falsche Seite.
+    # Ohne /PageLabels liefert physical_pages_by_anchor die Identitaet (n -> n),
+    # also unveraendertes Verhalten.
+    anchor_to_physical = physical_pages_by_anchor(pdf_path, total_pages)
+
     results = []
     not_parseable = 0
 
     for anc in anchors:
         page = anc["page"]
-        # Seitenübergreifend: S.N + S.N+1 zusammen prüfen (Gemini-Finding)
-        page_text = _extract_page_text(pdf_doc, page)
-        if page < total_pages:
-            page_text += " " + _extract_page_text(pdf_doc, page + 1)
+        # Physischer Index fuer den pdf_doc-Zugriff; eine Anker-Seite ohne Treffer
+        # im Mapping (z.B. eine erfundene Seitenzahl) faellt auf den alten
+        # Direktversuch zurueck (fail-open, IndexError in _extract_page_text -> "").
+        physical_page = anchor_to_physical.get(page, page)
+        # Seitenübergreifend: physische Seite N + N+1 zusammen prüfen (Gemini-
+        # Finding). physisch+1, NICHT Label+1 — Druckseiten-Labels können springen
+        # (Faltseiten/Errata), physische Positionen sind immer lückenlos +1.
+        page_text = _extract_page_text(pdf_doc, physical_page)
+        if physical_page < total_pages:
+            page_text += " " + _extract_page_text(pdf_doc, physical_page + 1)
         page_text = page_text.strip()
 
         # OCR-Detect: leere Seite → not_parseable (Nemotron-Finding)

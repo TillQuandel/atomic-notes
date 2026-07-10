@@ -337,6 +337,54 @@ def test_resolve_page_numbers_strips_whitespace_and_coerces_nonstr():
     assert _resolve_page_numbers(["a", "b"], [" 159 ", 160]) == [(159, "a"), (160, "b")]
 
 
+# ---- anchor_page_numbers / physical_pages_by_anchor (#80 Fund 1) -----------
+# eval_quality.py/eval_quality_v2.py lasen bis PR #79 den physischen PDF-Index;
+# seit PR #79 tragen source_anchors das Druckseiten-Label aus /PageLabels, falls
+# vorhanden. Diese zwei kleinen Helfer sind das gemeinsame Mapping fuer beide
+# Richtungen — keine zweite Label-Parsing-Implementierung pro Konsument.
+
+
+def test_anchor_page_numbers_uses_labels_when_present(monkeypatch):
+    from generative.pipeline import pdf_chunker as _pc
+
+    monkeypatch.setattr(_pc, "_pdf_page_labels", lambda path: ["159", "160", "161", "162"])
+    assert _pc.anchor_page_numbers("x.pdf", 4) == [159, 160, 161, 162]
+
+
+def test_anchor_page_numbers_no_labels_is_i_plus_1(monkeypatch):
+    from generative.pipeline import pdf_chunker as _pc
+
+    monkeypatch.setattr(_pc, "_pdf_page_labels", lambda path: None)
+    assert _pc.anchor_page_numbers("x.pdf", 3) == [1, 2, 3]
+
+
+def test_anchor_page_numbers_partial_labels_falls_back_per_page():
+    from generative.pipeline import pdf_chunker as _pc
+
+    # laengen-Mismatch (analog _resolve_page_numbers-Verhalten): ueberzaehlige
+    # Seite faellt sauber auf i+1 zurueck statt zu crashen.
+    orig = _pc._pdf_page_labels
+    _pc._pdf_page_labels = lambda path: ["159", "160"]
+    try:
+        assert _pc.anchor_page_numbers("x.pdf", 3) == [159, 160, 3]
+    finally:
+        _pc._pdf_page_labels = orig
+
+
+def test_physical_pages_by_anchor_is_reverse_mapping(monkeypatch):
+    from generative.pipeline import pdf_chunker as _pc
+
+    monkeypatch.setattr(_pc, "_pdf_page_labels", lambda path: ["159", "160", "161", "162"])
+    assert _pc.physical_pages_by_anchor("x.pdf", 4) == {159: 1, 160: 2, 161: 3, 162: 4}
+
+
+def test_physical_pages_by_anchor_no_labels_is_identity(monkeypatch):
+    from generative.pipeline import pdf_chunker as _pc
+
+    monkeypatch.setattr(_pc, "_pdf_page_labels", lambda path: None)
+    assert _pc.physical_pages_by_anchor("x.pdf", 3) == {1: 1, 2: 2, 3: 3}
+
+
 def test_usable_page_labels_gate_requires_numeric_and_unique():
     """Label-Modus nur bei vollständig numerischen UND eindeutigen Labels — sonst
     None. Verhindert Namespace-Kollision römisch↔arabisch (False-Bind in figure_alt)
