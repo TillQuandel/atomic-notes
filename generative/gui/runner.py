@@ -10,6 +10,7 @@ beides unkritisch in einem eigenen Prozess.
 from __future__ import annotations
 
 import os
+import signal
 import subprocess
 import sys
 from collections.abc import Iterator
@@ -104,6 +105,12 @@ def iter_run_events(
     # schreibenden Auto-Aktionen (Version-Bump in config.py, Eval-Dashboard-Spawn
     # auf :8051). Ein Vorschau-Lauf darf weder Quellcode mutieren noch Prozesse leaken.
     run_env["ATOMIC_AGENT_GUI"] = "1"
+    popen_kwargs: dict = {}
+    if sys.platform != "win32":
+        # Eigene Prozessgruppe (#61): `terminate_process_tree` killt auf POSIX
+        # per `killpg` -- ohne eigene Gruppe wuerde das den GUI-Server-Prozess
+        # (Elternteil dieses Popen) mittreffen, nicht nur diesen einen Lauf.
+        popen_kwargs["start_new_session"] = True
     proc = subprocess.Popen(
         argv,
         stdout=subprocess.PIPE,
@@ -114,6 +121,7 @@ def iter_run_events(
         bufsize=1,
         env=run_env,
         cwd=cwd,
+        **popen_kwargs,
     )
     if on_proc is not None:
         on_proc(proc)
@@ -132,11 +140,63 @@ def iter_run_events(
         yield {"type": "exited", "returncode": rc}
     finally:
         # Generator vorzeitig geschlossen (SSE-Client trennt, Lauf abgebrochen):
-        # Child nicht verwaisen lassen.
-        if proc.poll() is None:
-            proc.terminate()
-            try:
-                proc.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait()
+        # Child (UND dessen eigene Kind-Prozesse, #61) nicht verwaisen lassen.
+        terminate_process_tree(proc)
+
+
+def terminate_process_tree(proc: subprocess.Popen, timeout: float = 5.0) -> None:
+    """Beendet `proc` UND dessen Kind-Prozesse (best-effort).
+
+    #61: Ein simples `proc.terminate()` beendet auf Windows nur den direkten
+    Subprocess (`TerminateProcess` kennt keinen Prozessbaum) -- vom
+    Orchestrator per asyncio gespawnte Kinder (`claude -p`) liefen als Waisen
+    weiter. Windows: `taskkill /T /F` killt den kompletten PID-Baum. POSIX:
+    `iter_run_events` startet `proc` mit `start_new_session=True` (eigene
+    Prozessgruppe), `killpg` trifft daher nur diesen Lauf, nie den
+    GUI-Server-Prozess selbst.
+
+    Hinweis: `taskkill /T` findet nur die noch lebende Parent-Kette -- bereits
+    verwaiste Enkel (deren direkter Parent schon tot ist) erwischt es nicht.
+    Auf POSIX faengt der `killpg`-Pfad auch diesen Fall (die Gruppe ueberlebt
+    ihren Leader). Bewusst kein Job-Object-Ansatz (keine neue Dependency).
+
+    Voraussetzung: NUR fuer Popen-Handles aus `iter_run_events` gedacht --
+    der POSIX-Pfad verlaesst sich auf `start_new_session=True` (pgid == pid);
+    ein fremdes Popen ohne eigene Gruppe wuerde die Gruppe des Aufrufers
+    (GUI-Server, pytest) mitsignalisieren.
+    """
+    if sys.platform == "win32":
+        if proc.poll() is not None:
+            return  # bereits beendet; verwaiste Enkel sind hier nicht auffindbar
+        try:
+            subprocess.run(
+                ["taskkill", "/PID", str(proc.pid), "/T", "/F"],
+                capture_output=True,
+                timeout=timeout,
+            )
+        except subprocess.TimeoutExpired:
+            pass  # haengendes taskkill darf den Cancel-Thread nicht blocken
+        try:
+            proc.wait(timeout=timeout)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait()
+        return
+    # POSIX: KEIN Early-Return bei totem Leader -- die Prozessgruppe kann ihn
+    # ueberleben (Orchestrator crasht, `claude -p`-Kinder laufen weiter).
+    # `start_new_session=True` garantiert pgid == proc.pid, also direkt die
+    # pid als Gruppen-Id nutzen statt getpgid() (wirft nach Reap des Leaders).
+    try:
+        os.killpg(proc.pid, signal.SIGTERM)
+    except ProcessLookupError:
+        pass  # Gruppe komplett weg
+    if proc.poll() is not None:
+        return  # Leader war schon gereapt; SIGTERM an Restgruppe war best-effort
+    try:
+        proc.wait(timeout=timeout)
+    except subprocess.TimeoutExpired:
+        try:
+            os.killpg(proc.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+        proc.wait()
