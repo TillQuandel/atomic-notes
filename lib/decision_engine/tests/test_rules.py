@@ -4,13 +4,6 @@ from dataclasses import FrozenInstanceError
 
 import pytest
 
-try:
-    import hypothesis.strategies as st
-    from hypothesis import given
-except ImportError:  # pragma: no cover - exercised only when dependency is absent
-    given = None
-    st = None
-
 from decision_engine import ClaimInput, Label, determine_decision
 from decision_engine.rules import DEFAULT_CONFIG
 from decision_engine.models import ClaimDecision, QualityFlag, SYSTEM_LABELS
@@ -30,18 +23,13 @@ def property_cases():
                     yield primary, audit, cosine, evidence
 
 
-def hypothesis_or_cases(fn):
-    if given is not None:
-        return given(
-            st.sampled_from(LABELS),
-            st.one_of(st.none(), st.sampled_from(LABELS)),
-            st.floats(min_value=0.0, max_value=1.0, allow_nan=False, allow_infinity=False),
-            st.one_of(st.none(), st.booleans()),
-        )(fn)
-    return pytest.mark.parametrize("primary,audit,cosine,evidence", list(property_cases()))(fn)
+# Kanonische Parametrisierung (Entscheid #149): deterministisches Cross-Produkt
+# über den diskretisierten Eingaberaum statt hypothesis — reproduzierbare
+# Item-Zahl, keine optionale Dependency; COSINES deckt die Schwellen exakt ab.
+exhaustive_claim_cases = pytest.mark.parametrize("primary,audit,cosine,evidence", list(property_cases()))
 
 
-@hypothesis_or_cases
+@exhaustive_claim_cases
 def test_parse_error_terminal(primary, audit, cosine, evidence):
     # CLAUDE-PATTERN: parse_failed=True erfordert evidence_verified=None
     # (logische Konsistenz, von ClaimInput.__post_init__ erzwungen).
@@ -54,7 +42,7 @@ def test_parse_error_terminal(primary, audit, cosine, evidence):
     assert QualityFlag.PARSE_ERROR in decision.flags
 
 
-@hypothesis_or_cases
+@exhaustive_claim_cases
 def test_low_cosine_always_uncertain(primary, audit, cosine, evidence):
     if cosine >= DEFAULT_CONFIG.retrieval_low_cosine_threshold:
         return
@@ -65,7 +53,7 @@ def test_low_cosine_always_uncertain(primary, audit, cosine, evidence):
     assert QualityFlag.RETRIEVAL_LOW_COSINE in decision.flags
 
 
-@hypothesis_or_cases
+@exhaustive_claim_cases
 def test_above_threshold_non_system_inputs_do_not_emit_system_labels(primary, audit, cosine, evidence):
     if cosine < DEFAULT_CONFIG.retrieval_low_cosine_threshold:
         return
@@ -143,7 +131,7 @@ def test_audit_system_label_never_overrides_primary(audit):
     assert QualityFlag.AUDIT_DISAGREES_WITH_SYSTEM in decision.flags
 
 
-@hypothesis_or_cases
+@exhaustive_claim_cases
 def test_determine_decision_total_function(primary, audit, cosine, evidence):
     inp = ClaimInput(primary, audit, cosine, evidence, parse_failed=False)
     assert isinstance(determine_decision(inp), ClaimDecision)
