@@ -10,6 +10,7 @@ from pathlib import Path
 import yaml
 
 from generative.config import VAULT, SCRIPTS_DIR  # BA_DIR-Import entfernt (v31)
+from generative.ui_strings import msg
 
 # Vault-Ordner die NICHT als existing_concepts zählen
 SKIP_DIRS = {"00-inbox", "98-system", "99-archive", "08-dashboards", ".obsidian", ".trash"}
@@ -80,6 +81,20 @@ def resolve_vault_relpath(ref: str, existing_concepts: dict[str, str] | None) ->
     return None
 
 
+def _default_scan_dirs() -> list[Path]:
+    """Top-Level-Vault-Ordner (ohne SKIP_DIRS) — Default für den ``scan_dirs``-Parameter.
+
+    #158: bricht mit klarer, handlungsanleitender Meldung ab (statt eines rohen
+    ``FileNotFoundError`` aus ``VAULT.iterdir()``) wenn VAULT nicht existiert —
+    z.B. weil der stille Default-Fallback in ``config.py`` griff und der Nutzer
+    ``ATOMIC_AGENT_VAULT_PATH`` nie gesetzt hat. Selbe Katalog-Meldung wie
+    ``atomic-notes doctor`` (Single Source of Truth für diesen Fehlertext).
+    """
+    if not VAULT.exists():
+        raise SystemExit(f"{msg('doctor.vault_missing_detail', vault=VAULT)}\n{msg('doctor.vault_missing_hint')}")
+    return [d for d in VAULT.iterdir() if d.is_dir() and d.name not in SKIP_DIRS and not d.name.startswith(".")]
+
+
 def build_existing_concepts(scan_dirs: list[Path] | None = None) -> dict[str, str]:
     """Gibt {concept_title: file_path} für alle Notes im Vault zurück (ohne SKIP_DIRS).
 
@@ -97,10 +112,7 @@ def build_existing_concepts(scan_dirs: list[Path] | None = None) -> dict[str, st
             return json.loads(p.read_text(encoding="utf-8"))
 
     if scan_dirs is None:
-        # Top-Level-Vault scannen, SKIP_DIRS auslassen
-        scan_dirs = [
-            d for d in VAULT.iterdir() if d.is_dir() and d.name not in SKIP_DIRS and not d.name.startswith(".")
-        ]
+        scan_dirs = _default_scan_dirs()
     concepts: dict[str, str] = {}
     # Gemini-Finding G3 (2026-05-10): Root-Vault-MD-Files (z.B. CLAUDE.md, Home.md)
     # wurden vom Subdir-Scan ignoriert. Explizit mitnehmen — System-Files wie
@@ -222,9 +234,7 @@ def build_tag_whitelist(scan_dirs: list[Path] | None = None, min_count: int = 2)
     from collections import Counter
 
     if scan_dirs is None:
-        scan_dirs = [
-            d for d in VAULT.iterdir() if d.is_dir() and d.name not in SKIP_DIRS and not d.name.startswith(".")
-        ]
+        scan_dirs = _default_scan_dirs()
     # CLAUDE.md-Konvention: lowercase kebab-case, hierarchisch via '/'.
     valid_tag = re.compile(r"^[a-z0-9][a-z0-9\-/]*$")
     counter: Counter = Counter()

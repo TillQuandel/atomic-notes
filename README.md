@@ -75,7 +75,9 @@ A few things to know before your first run:
 - **Note bodies are currently generated in German** (regardless of source
   language). Making the output language configurable is tracked in issue #157.
 - **The first run downloads sentence-transformer models** into your HuggingFace
-  cache (roughly 0.5 GB; the optional NLI gate adds ~280 MB).
+  cache (roughly 0.5 GB; the optional NLI gate adds ~280 MB). The pipeline is
+  CPU-only (no GPU needed); the `torch`/`sentence-transformers` install itself
+  is roughly another 0.5 GB on disk.
 - **Two maintainer-only side effects are off by default** (issue #156): starting a
   local metrics dashboard on `http://127.0.0.1:8051` and bumping `AGENT_VERSION` in
   the tracked `generative/config.py` after pipeline-code changes. Both run only when
@@ -237,10 +239,12 @@ uv run python extractive/orchestrator.py --source <pdf> --output obsidian --out-
 ### Output direction
 
 The output contract is a structured atomic note: title, body, source anchors,
-source metadata, quality status, optional links/tags. Obsidian Markdown is the
-primary renderer; per run, `--export-format` additionally renders each note (plus
-a combined document) to JSON, portable Markdown, or pandoc/typst-based formats
-(`docx`/`pdf`/`html`/`odt`/`epub`) — see
+source metadata, quality status, optional links/tags. Notes are always written
+into `<vault>/00-inbox/` for review; routing them onward into vault folders from
+there is your vault's concern (e.g. a tag-based auto-filing plugin), not the
+pipeline's. Obsidian Markdown is the primary renderer; per run, `--export-format`
+additionally renders each note (plus a combined document) to JSON, portable
+Markdown, or pandoc/typst-based formats (`docx`/`pdf`/`html`/`odt`/`epub`) — see
 [generative/README.md](generative/README.md#export-formats). Other PKM formats
 remain renderer concerns.
 

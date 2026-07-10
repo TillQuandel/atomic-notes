@@ -43,8 +43,11 @@ generative/calibration/labels-active-blind/
 # Legacy local runtime leftovers after agent/ -> generative/ rename
 agent/
 
-# Superpowers-Skill-Arbeitsdokumente (Plans/Specs) - lokal, nicht veroeffentlichen
-docs/superpowers/
+# Superpowers-Skill-Arbeitsdokumente (Plans/Specs) - lokal, nicht veroeffentlichen.
+# **/-Praefix (statt root-verankert): traf bisher nur docs/superpowers/ im Root,
+# nicht generative/docs/superpowers/ + generative/docs/plans/ (#158).
+**/docs/superpowers/
+**/docs/plans/
 
 # Claude-Code-Worktrees (Subagenten-Isolation)
 .claude/

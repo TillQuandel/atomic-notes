@@ -8,6 +8,7 @@ Konservative Variante (Codex-Empfehlung + Literatur-Konvergenz):
 
 from __future__ import annotations
 
+import pytest
 
 from generative.agents.context_builder import score_tags_for_source
 from generative.agents.extractor import _validate_proposed_tags, _format_tag_whitelist
@@ -356,3 +357,35 @@ def test_registry_loader_missing_file_returns_empty():
         assert context_builder._load_registry_tags() == set()
     finally:
         context_builder.TAG_REGISTRY_PATH = orig
+
+
+# ---- #158: fehlender Vault-Pfad bricht klar ab statt rohem FileNotFoundError ----
+
+
+def test_build_existing_concepts_missing_vault_raises_clear_error(tmp_path):
+    from generative.agents import context_builder
+
+    missing = tmp_path / "does-not-exist"
+    orig = context_builder.VAULT
+    try:
+        context_builder.VAULT = missing
+        with pytest.raises(SystemExit) as exc_info:
+            context_builder.build_existing_concepts()
+        assert str(missing) in str(exc_info.value)
+        assert "ATOMIC_AGENT_VAULT_PATH" in str(exc_info.value)
+    finally:
+        context_builder.VAULT = orig
+
+
+def test_build_tag_whitelist_missing_vault_raises_clear_error(tmp_path):
+    from generative.agents import context_builder
+
+    missing = tmp_path / "does-not-exist"
+    orig = context_builder.VAULT
+    try:
+        context_builder.VAULT = missing
+        with pytest.raises(SystemExit) as exc_info:
+            context_builder.build_tag_whitelist()
+        assert str(missing) in str(exc_info.value)
+    finally:
+        context_builder.VAULT = orig
