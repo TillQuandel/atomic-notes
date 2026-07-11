@@ -330,11 +330,12 @@ body.collapsed .theme-toggle { padding: 6px; }
 .spark-row-head .spark-delta .dpos { color: var(--mint); font-weight: 600; }
 .spark-row-head .spark-delta .dneg { color: var(--coral); font-weight: 600; }
 .spark-chart-wrap { width: 100%; }
-/* SVG Hover-Tooltip auf Datenpunkten */
+/* SVG Hover-Tooltip auf Datenpunkten — Tooltip liegt als eigene Ebene über
+   allen Punkten (Paarung via data-i, Klasse .on schaltet JS beim Hovern) */
 .spark-pt { cursor: crosshair; }
-.spark-pt .tip { opacity: 0; pointer-events: none; transition: opacity .12s; }
-.spark-pt:hover .tip { opacity: 1; }
 .spark-pt:hover circle { r: 5; }
+.spark-tipg { opacity: 0; pointer-events: none; transition: opacity .12s; }
+.spark-tipg.on { opacity: 1; }
 
 /* ── Panels ─────────────────────────────────────────────────────── */
 .row { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
@@ -1145,12 +1146,23 @@ function renderKpis(kpis, thresh, kpiTrend) {
       ? `Δ vs. ${prevVer}: <span class="${dClass}">${sign}${dval} ${kd.u}</span>${vd.reliable ? '' : ' (n&lt;20)'}`
       : `${vers.length} Pipeline-Versionen`;
     const inner = document.getElementById('spark-inner');
-    if (inner) inner.innerHTML = `
+    if (inner) {
+      inner.innerHTML = `
       <div class="spark-row-head">
         <strong>${kd.label} — Versions-Trend</strong>
         <div class="spark-delta">${deltaHtml}</div>
       </div>
       <div class="spark-chart-wrap">${sparkSvg}</div>`;
+      // Tooltip-Sichtbarkeit: Punkt (spark-pt) und Tooltip (spark-tipg) sind
+      // getrennte Ebenen (Tooltips liegen über allen Punkten) — Paarung über
+      // data-i. Details am Ebenen-Aufbau in _trendChart.
+      inner.querySelectorAll('.spark-pt').forEach(g => {
+        const tip = inner.querySelector(`.spark-tipg[data-i="${g.dataset.i}"]`);
+        if (!tip) return;
+        g.addEventListener('mouseenter', () => tip.classList.add('on'));
+        g.addEventListener('mouseleave', () => tip.classList.remove('on'));
+      });
+    }
   }
 }
 
@@ -1196,9 +1208,15 @@ function _trendChart(points, versions, color, unit) {
   });
   const da = `${d} L${xs[n-1]},${padT+ih} L${xs[0]},${padT+ih} Z`;
 
-  // Datenpunkte mit Hover-Tooltip — Position dynamisch je nach Rand
-  const dotGroups = points.map((v, i) => {
-    if (v == null) return '';
+  // Datenpunkte + Hover-Tooltips in ZWEI Ebenen: erst alle Punkte, dann alle
+  // Tooltips. SVG kennt kein z-index (Zeichenreihenfolge = Stapelreihenfolge) —
+  // lagen die Tooltips im Punkt-Group, übermalten später gezeichnete Nachbar-
+  // Punkte den Kasten (User-Fund 2026-07-11). Sichtbarkeit schaltet JS über
+  // data-i-Paarung (siehe Wiring nach dem innerHTML-Einbau), kein DOM-Umbau
+  // beim Hovern — appendChild-Tricks brechen :hover bei stehender Maus.
+  const dots = [], tips = [];
+  points.forEach((v, i) => {
+    if (v == null) return;
     const cx = parseFloat(xs[i].toFixed(1));
     const cy = parseFloat(ys[i].toFixed(1));
     const isLast = i === n-1;
@@ -1211,24 +1229,24 @@ function _trendChart(points, versions, color, unit) {
     // User-Fund 2026-07-11: „am rechten Rand verziehen sich die Zahlen").
     const margin = tipW / 2 + 4;
     const tipTx = Math.max(margin - cx, Math.min(0, w - margin - cx));
-    const tipAnchor = 'middle';
     // Vertikal: über dem Punkt, aber nicht über die SVG-Oberkante
     const tipTy = cy > padT + 22 ? -20 : 14;
-    return `<g class="spark-pt">
+    dots.push(`<g class="spark-pt" data-i="${i}">
       <circle cx="${cx}" cy="${cy}" r="${isLast?4.5:3.5}"
         fill="${isLast?color:card}" stroke="${color}" stroke-width="1.8"
         style="transition:r .12s"/>
-      <g class="tip" transform="translate(${cx},${cy})">
+    </g>`);
+    tips.push(`<g class="spark-tipg" data-i="${i}" transform="translate(${cx},${cy})">
         <rect
           x="${tipTx - tipW/2}"
           y="${tipTy - tipH + 4}" width="${tipW}" height="${tipH}"
           rx="3" fill="${bg}" stroke="${color}" stroke-width="1" opacity=".97"/>
         <text x="${tipTx}" y="${tipTy - 3}"
           fill="${color}" font-size="11" font-weight="600"
-          text-anchor="${tipAnchor}" font-family="JetBrains Mono">${label}</text>
-      </g>
-    </g>`;
-  }).join('');
+          text-anchor="middle" font-family="JetBrains Mono">${label}</text>
+      </g>`);
+  });
+  const dotGroups = dots.join('') + tips.join('');
 
   // Version-Labels auf X-Achse
   // Nur Endpunkte labeln — bei vielen Versionen ueberlappen Einzel-Labels (User-Feedback)
