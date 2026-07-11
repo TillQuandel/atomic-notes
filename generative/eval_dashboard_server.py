@@ -112,6 +112,17 @@ def _current_db_version(db_runs: list[dict], current: str | None = None) -> str 
     return max(gen_runs, key=lambda r: r.get("timestamp") or "")["pipeline_version"]
 
 
+def _cache_pct_prompt_based(input_tokens: int, cache_r: int, cache_c: int) -> float:
+    """Cache-Hit-Quote prompt-basiert: cache_r / (input + cache_r + cache_c).
+
+    Die frühere Formel hatte Output im Nenner (gehört nicht zum Prompt) und
+    ließ cache_creation weg — Planner zeigte 75,8 % statt 51,1 % (#196 P3,
+    Audit-Fund). Anschluss an tools/cache_report.py / #147.
+    """
+    total = input_tokens + cache_r + cache_c
+    return round(cache_r / total * 100, 1) if total else 0
+
+
 def _read_agent_stats(allowed_run_ids: set | None = None) -> dict:
     """Aggregiert Token- und Dauer-Statistiken je Agent aus runs/*.jsonl.
     Nur Runs der aktuellen Pipeline-Version werden berücksichtigt
@@ -190,19 +201,18 @@ def _read_agent_stats(allowed_run_ids: set | None = None) -> dict:
     agents += [a for a in sorted(stats) if a not in _AGENT_ORDER]
     labels = [_AGENT_LABELS.get(a, a) for a in agents]
 
-    def _cache_pct(a):
-        total = stats[a]["input"] + stats[a]["output"] + stats[a]["cache_r"]
-        return round(stats[a]["cache_r"] / total * 100, 1) if total else 0
-
     return {
         "agents": agents,
         "labels": labels,
         "output": [stats[a]["output"] for a in agents],
         "input": [stats[a]["input"] for a in agents],
         "cache_r": [stats[a]["cache_r"] for a in agents],
+        "cache_c": [stats[a]["cache_c"] for a in agents],
         "dur_s": [round(stats[a]["dur_ms"] / 1000, 1) for a in agents],
         "calls": [stats[a]["calls"] for a in agents],
-        "cache_pct": [_cache_pct(a) for a in agents],
+        "cache_pct": [
+            _cache_pct_prompt_based(stats[a]["input"], stats[a]["cache_r"], stats[a]["cache_c"]) for a in agents
+        ],
         "errors": [stats[a]["errors"] for a in agents],
         "cost_usd": [round(stats[a]["cost_usd"], 4) for a in agents],
     }
@@ -343,12 +353,16 @@ def build_data(
     from generative import db as _db
 
     # Qualitaets-Daten aus SQLite (primaer) mit Fallback auf JSONL
+    _jsonl_fallback = False
     try:
         all_quality_rows = _db.query_note_evals()
         if not all_quality_rows:
             raise ValueError("DB leer")
     except Exception:
+        # JSONL deckt nur einen Teil der DB-Historie ab (~32 %) — das Banner
+        # im Client macht die Silent-Staleness sichtbar (#196 P1).
         all_quality_rows = D._read_quality_history()
+        _jsonl_fallback = True
 
     available_versions = _available_eval_versions(all_quality_rows)
 
@@ -704,15 +718,40 @@ def build_data(
             round(sum(cost_by_ver.get(v, [])), 4) if cost_by_ver.get(v) else None for v in sorted_pipeline_versions
         ],
     }
+    # Kosten pro akzeptierter Note je Version (#196 P2): nur für API-Runs mit
+    # Pricing aussagekräftig — subscription-Läufe kosten 0 (compute_cost_per_call)
+    # und ergeben None statt eines falschen 0-$-Werts; ebenso n_vault=0.
+    _vault_by_ver = {ver: sum(v for v, _ in pairs) for ver, pairs in accept_pairs_by_ver.items()}
+    kpi_trend["cost_per_note"] = [
+        round(sum(cost_by_ver[v]) / _vault_by_ver[v], 4) if cost_by_ver.get(v) and _vault_by_ver.get(v) else None
+        for v in sorted_pipeline_versions
+    ]
+
     # Delta neueste-vs-Vorversion pro KPI (mit N-Guard, #36 P4)
     kpi_trend["deltas"] = {
         m: D.version_delta(kpi_trend, m) for m in ("hall", "cov", "n", "accept", "dur", "tokens", "cost")
+    }
+
+    # ── Warnungen (#196 P1): Waisen-Versionen + JSONL-Fallback ──────
+    try:
+        from generative import config as _cfg
+
+        _cur_ver = _cfg.AGENT_VERSION
+    except Exception:
+        _cur_ver = None
+    _all_seen_versions = {r.get("version") or r.get("pipeline_version") for r in all_quality_rows}
+    _all_seen_versions |= {tr.get("ver") for tr in token_runs}
+    warnings = {
+        "orphan_versions": D.orphan_versions(_all_seen_versions, _cur_ver),
+        "jsonl_fallback": _jsonl_fallback,
+        "current_version": _cur_ver or "",
     }
 
     return {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "eval_version": eval_version,
         "available_eval_versions": available_versions,
+        "warnings": warnings,
         "kpis": D._calc_kpis(log_data, all_log_runs, quality_rows, token_runs),
         "pdf_table": D._calc_pdf_table(log_data, all_log_runs, quality_rows),
         "accept": D._chart_acceptance(log_data),

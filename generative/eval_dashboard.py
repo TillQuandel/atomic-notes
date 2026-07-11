@@ -236,6 +236,21 @@ def _top_versions(counts: dict, limit: int = 15, min_n: int = 3) -> list[str]:
     return keep[:limit]
 
 
+def orphan_versions(versions, current: str | None) -> list[str]:
+    """Generative Pipeline-Versionen numerisch ÜBER `config.AGENT_VERSION` (#196 P1).
+
+    Das ist die #191-Fehlerklasse (verwaiste WIP-Branch-Läufe kaperten die
+    Anzeige) — sie meldet sich damit im Dashboard selbst. Hinweis-Charakter:
+    bewusste Re-Evals/Branch-Läufe sind legitim. foss-/extractive-Versionen
+    haben eine eigene Nummernwelt und bleiben außen vor.
+    """
+    if not current:
+        return []
+    cur_key = _ver_sort_key(current)
+    out = {v for v in versions if v and not is_foss_version(v) and _ver_sort_key(v) > cur_key}
+    return sorted(out, key=_ver_sort_key, reverse=True)
+
+
 def _pdf_filter_key(raw: str) -> str:
     """„Bates - 2017" aus „Bates - 2017 - Information Behavior.pdf".
 
