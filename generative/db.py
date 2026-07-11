@@ -198,6 +198,20 @@ def query_pipeline_runs(path: Path = DB_PATH) -> list[dict]:
         return [dict(r) for r in rows]
 
 
+def query_archived_pipeline_versions(path: Path = DB_PATH) -> list[str]:
+    """Versionen archivierter WIP-Läufe (`pipeline_runs_archive`, #193).
+
+    Nur für den Kollisionsschutz des Auto-Version-Bumps gelesen — archivierte
+    Versionsnummern bleiben „verbrannt", auch wenn die Läufe aus den
+    Dashboard-Quellen ausgelagert sind. Fehlende Tabelle ist kein Fehler."""
+    with get_db(path) as conn:
+        try:
+            rows = conn.execute("SELECT DISTINCT pipeline_version FROM pipeline_runs_archive").fetchall()
+        except sqlite3.OperationalError:
+            return []
+        return [r[0] for r in rows if r[0]]
+
+
 def query_note_evals(
     path: Path = DB_PATH, eval_version: str | None = None, pipeline_version: str | None = None
 ) -> list[dict]:

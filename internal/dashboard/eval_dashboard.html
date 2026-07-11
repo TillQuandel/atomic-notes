@@ -1135,7 +1135,11 @@ function renderKpis(kpis, thresh, kpiTrend) {
     const vd = kpiTrend?.deltas?.[kd.key] || null;
     const dval = (vd && vd.delta != null) ? vd.delta.toFixed(1) : null;
     const prevVer = vers.length >= 2 ? vers[vers.length-2] : null;
-    const dClass = (dval!=null && vd.reliable && parseFloat(dval)!==0) ? (parseFloat(dval)>0 ? (kd.key==='hall'?'dneg':'dpos') : (kd.key==='hall'?'dpos':'dneg')) : '';  // 0.0 = neutral, keine Farbe
+    // Vorzeichen-Semantik pro Metrik (#193): bei hall/dur/tokens/cost ist ein
+    // Anstieg schlecht — vorher wurde nur 'hall' invertiert und z. B. mehr
+    // Laufzeit/Tokens grün eingefärbt (maskiert durch den n<20-Guard).
+    const lowerIsBetter = ['hall','dur','tokens','cost'].includes(kd.key);
+    const dClass = (dval!=null && vd.reliable && parseFloat(dval)!==0) ? ((parseFloat(dval)>0) === lowerIsBetter ? 'dneg' : 'dpos') : '';  // 0.0 = neutral, keine Farbe
     const sign = dval!=null && parseFloat(dval)>0 ? '+' : '';
     const deltaHtml = dval!=null
       ? `Δ vs. ${prevVer}: <span class="${dClass}">${sign}${dval} ${kd.u}</span>${vd.reliable ? '' : ' (n&lt;20)'}`

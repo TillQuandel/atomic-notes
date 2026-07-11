@@ -106,3 +106,34 @@ def test_db_version_ignores_extractive():
 
 def test_db_version_empty_is_none():
     assert _current_db_version([], current="v0.3.140") is None
+
+
+# ── accept_ver-Fallback (#193): kein Nummern-Max über Log-Runs ──────────────
+
+
+def _log_run(ver: str, n_total: int, n_vault: int) -> dict:
+    return {"key": "k", "ver": ver, "n_total": n_total, "n_vault": n_vault, "n_merge": 0, "words": 0, "pages": 0}
+
+
+def test_accept_ver_ignores_orphan_versions_above_config():
+    # Leere quality_rows (Filterkombi) + Log-Runs inkl. verwaister WIP-Version:
+    # die Akzeptanz-Kachel darf nicht auf die Orphan-Version kippen (Audit-Repro
+    # pdf+language: kpi_accept_ver=v0.3.141 mit 100 %).
+    runs = [_log_run("v0.3.139", 4, 2), _log_run("v0.3.140", 10, 8), _log_run("v0.3.141", 4, 4)]
+    kpis = _calc_kpis({}, runs, [], [], current_version="v0.3.140")
+    assert kpis["kpi_accept_ver"] == "v0.3.140"
+    assert kpis["avg_accept"] == 80.0
+
+
+def test_accept_ver_none_when_only_orphans():
+    runs = [_log_run("v0.3.141", 4, 4), _log_run("v0.3.142", 6, 6)]
+    kpis = _calc_kpis({}, runs, [], [], current_version="v0.3.140")
+    assert kpis["kpi_accept_ver"] is None
+    assert kpis["avg_accept"] is None
+
+
+def test_accept_ver_falls_back_to_latest_at_or_below_config():
+    # Keine Runs zur Code-Version → jüngste ältere Version, nicht Nummern-Max.
+    runs = [_log_run("v0.1.0", 10, 5), _log_run("v0.3.135", 7, 5)]
+    kpis = _calc_kpis({}, runs, [], [], current_version="v0.3.140")
+    assert kpis["kpi_accept_ver"] == "v0.3.135"

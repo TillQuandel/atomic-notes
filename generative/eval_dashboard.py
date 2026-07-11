@@ -162,6 +162,23 @@ def _current_version(quality_rows: list[dict], current: str | None = None) -> st
     return _ver(max(gen_rows, key=lambda r: r.get("timestamp") or ""))
 
 
+def _capped_latest_version(versions: list[str], current: str | None) -> str | None:
+    """Jüngste Log-Version, die nicht NEUER als die installierte Code-Version ist (#193).
+
+    Fallback für `accept_ver`, wenn keine Eval-Zeilen die KPI-Version bestimmen.
+    Reines Nummern-Max wählte verwaiste WIP-Branch-Versionen (#191-Muster):
+    Versionen oberhalb der Code-Version sind per Definition nicht der Stand
+    dieses Checkouts. `versions` muss per `_ver_sort_key` sortiert sein.
+    Ohne bestimmbare Code-Version: unverändert Nummern-Max."""
+    if not versions:
+        return None
+    if current:
+        cur_key = _ver_sort_key(current)
+        capped = [v for v in versions if _ver_sort_key(v) <= cur_key]
+        return capped[-1] if capped else None
+    return versions[-1]
+
+
 def _median(lst: list[float]) -> float:
     # statistics.median (interpoliert) — muss zur kpi_trend-Berechnung im
     # Server passen, sonst zeigen KPI-Karte und Sparkline verschiedene Werte.
@@ -424,7 +441,13 @@ def _calc_kpis(
     current_version: str | None = None,
 ) -> dict:
     # KPIs = aktuelle Pipeline-Version (config-verankert, #191), nicht höchste
-    # Nummer und nicht Durchschnitt aller Versionen
+    # Nummer und nicht Durchschnitt aller Versionen. Einmal auflösen — auch
+    # der accept_ver-Fallback unten braucht denselben Anker (#193).
+    if current_version is None:
+        try:
+            from generative.config import AGENT_VERSION as current_version
+        except Exception:
+            current_version = None
     latest_pver = _current_version(quality_rows, current=current_version)
     latest_qrows = (
         [r for r in quality_rows if (r.get("version") or r.get("pipeline_version")) == latest_pver]
@@ -438,7 +461,10 @@ def _calc_kpis(
     # (neueste Pipeline-Version, gepoolt) — vorher mischte der Mittelwert
     # über die jeweils letzte Version JEDES PDFs alte und neue Versionen
     # unter der Überschrift "Qualität — <neueste Version>".
-    accept_ver = latest_pver or (all_versions[-1] if all_versions else None)
+    # Kein nacktes Nummern-Max als Fallback: bei leeren quality_rows (z. B.
+    # Filterkombination ohne Eval-Zeilen) kaperte sonst eine verwaiste
+    # WIP-Version aus den Log-Runs die Akzeptanz-Kachel (#193, Audit-Fund).
+    accept_ver = latest_pver or _capped_latest_version(all_versions, current_version)
     accept_runs = [r for r in all_log_runs if r.get("ver") == accept_ver]
     accept_generated = sum(r["n_total"] for r in accept_runs)
     # Vault-Notes der KPI-Version (nicht alle Vault-Notes) — Basis fuer den

@@ -106,5 +106,14 @@ def test_raw_version_collector_reads_real_artifacts(monkeypatch, tmp_path):
 
     monkeypatch.setattr(_cfg, "QUALITY_HISTORY", history)
     monkeypatch.setattr(_db, "query_pipeline_runs", lambda: [{"pipeline_version": "v0.3.130"}])
+    # Archivierte WIP-Läufe (#193) bleiben verbrannt, auch wenn sie aus den
+    # aktiven Dashboard-Quellen ausgelagert sind.
+    monkeypatch.setattr(_db, "query_archived_pipeline_versions", lambda: ["v0.3.141"])
 
-    assert orchestrator._known_pipeline_versions() == {"v0.3.140", "v0.3.142", "v0.3.99", "v0.3.130"}
+    assert orchestrator._known_pipeline_versions() == {
+        "v0.3.140",
+        "v0.3.141",
+        "v0.3.142",
+        "v0.3.99",
+        "v0.3.130",
+    }

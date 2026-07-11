@@ -1353,6 +1353,8 @@ def _iter_raw_version_strings():
 
         for r in _db.query_pipeline_runs():
             yield str(r.get("pipeline_version") or "")
+        # Archivierte WIP-Läufe (#193): Nummern bleiben verbrannt.
+        yield from _db.query_archived_pipeline_versions()
     except Exception:
         pass
     try:
