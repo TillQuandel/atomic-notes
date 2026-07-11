@@ -14,8 +14,9 @@ Lokale Web-GUI. Eigenständiges Tool, **lokal-first** — kein Hosted-Dienst in 
 
 ## Für wen
 
-- **Primär:** Studierende in der Abschlussarbeit (Bachelor bis PhD), 50–200
-  PDFs in ~3 Monaten, Atomic-Notes-Workflow bekannt oder gewünscht.
+- **Primär:** Studierende in der Abschlussarbeit (Bachelor bis PhD) mit einem
+  Quellen-Stapel von Dutzenden bis wenigen hundert PDFs über die
+  Projektlaufzeit, Atomic-Notes-Workflow bekannt oder gewünscht.
 - **Sekundär:** Postdocs/Forschende mit Lit-Review-Last; PKM-Power-User mit
   Lesestapel.
 - **Bewusst nicht (v1):** B2B/Unternehmens-Wissenskataloge.
