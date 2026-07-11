@@ -560,15 +560,18 @@ def build_data(
         all_log_runs = [r for r in all_log_runs if (r.get("label") or r.get("key", "")).lower().startswith(pdf.lower())]
         log_data = D._build_log_data(all_log_runs)
     if language:
-        # pdf_label → sprache aus token_runs (nach language-Filter bereits korrekt gefiltert)
+        # pdf_label → sprache aus token_runs (nach language-Filter bereits korrekt gefiltert).
+        # KEIN `if _lang_pdfs:`-Guard: eine leere Match-Menge heißt „keine Runs in
+        # dieser Sprache" → alles ausfiltern. Der frühere Guard übersprang die
+        # Filterung komplett und ließ ungefilterte (inkl. verwaister) Log-Runs
+        # durch (#193, Audit-Repro pdf+language).
         _lang_pdfs = {tr.get("pdf_label", "").lower() for tr in token_runs if tr.get("pdf_label")}
-        if _lang_pdfs:
-            all_log_runs = [
-                r
-                for r in all_log_runs
-                if (r.get("label", "")).lower() in _lang_pdfs or (r.get("key", "")).lower() in _lang_pdfs
-            ]
-            log_data = D._build_log_data(all_log_runs)
+        all_log_runs = [
+            r
+            for r in all_log_runs
+            if (r.get("label", "")).lower() in _lang_pdfs or (r.get("key", "")).lower() in _lang_pdfs
+        ]
+        log_data = D._build_log_data(all_log_runs)
 
     # foss-Pipeline (gliner/extractive) nicht mit generativer mischen:
     # im ungefilterten Default-View foss ausschliessen — ueber Modell-/Versions-
