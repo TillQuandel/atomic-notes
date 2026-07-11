@@ -364,6 +364,22 @@ body.collapsed .theme-toggle { padding: 6px; }
 /* overflow-x:auto statt hidden: bei schmalen Viewports waren rechte Spalten
    sonst komplett unzugänglich (#203) */
 .table-wrap { border: 1px solid var(--hair); border-radius: 4px; background: var(--bg-card); overflow-x: auto; overflow-y: hidden; }
+/* #203 P3: oberhalb des 1200px-Breakpoints passen alle Spalten ohne
+   Horizontal-Scroll — dort overflow freigeben (ein overflow-Container wird
+   sonst zum sticky-Containing-Block und entkoppelt den thead vom
+   Seiten-Scroll) und die Tabellenköpfe unter der Filterleiste festpinnen.
+   Darunter bleibt overflow-x:auto (#203 P2); beides zugleich kann ein
+   thead nicht. */
+@media (min-width: 1201px) {
+  .table-wrap { overflow-x: visible; overflow-y: visible; }
+  table.cmp thead th {
+    position: sticky; top: 49px; /* .filterbar min-height 48px + 1px border */
+    z-index: 5; background: var(--bg-card);
+    /* border-collapse lässt Borders sticky-gepinnter th mitscrollen —
+       Trennlinie stattdessen als Schatten */
+    border-bottom: 0; box-shadow: 0 1px 0 var(--hair);
+  }
+}
 table.cmp { width: 100%; border-collapse: collapse; }
 table.cmp th, table.cmp td { padding: 14px 18px; text-align: left; }
 table.cmp thead th { font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); text-transform: uppercase; letter-spacing: .12em; font-weight: 500; border-bottom: 1px solid var(--hair); }
