@@ -283,6 +283,19 @@ body.collapsed .theme-toggle { padding: 6px; }
 .kpi.warn .tgt { background: var(--tint-amber); color: var(--amber); }
 .kpi.info .tgt { background: rgba(91,191,191,.12); color: var(--teal); }
 .kpi.neutral .tgt { background: var(--hair); color: var(--ink-3); }
+/* #204 P2: Ziel-Erreichung direkt am Wert + linke Akzent-Kante (Ampel nur an
+   Threshold-Kacheln — info/neutral bleiben ungefärbt) */
+.kpi.good .v { color: var(--mint); }
+.kpi.warn .v { color: var(--amber); }
+.kpi.bad  .v { color: var(--coral); }
+.kpi.good { box-shadow: inset 3px 0 0 var(--mint); }
+.kpi.warn { box-shadow: inset 3px 0 0 var(--amber); }
+.kpi.bad  { box-shadow: inset 3px 0 0 var(--coral); }
+/* #204 P3: Delta-Chip vs. Vorversion an den Qualitäts-Kacheln */
+.kpi-delta { font-family: var(--f-mono); font-size: 10px; padding: 1px 5px; border-radius: 3px; background: var(--hair); color: var(--ink-3); white-space: nowrap; }
+.kpi-delta.good { background: var(--tint-mint); color: var(--mint); }
+.kpi-delta.bad  { background: var(--tint-coral); color: var(--coral); }
+.kpi-delta.dim  { opacity: .55; }
 .kpi .accent { display: none; }
 
 /* KPI spark row — außerhalb des kpis-Grid, animiert */
@@ -1098,22 +1111,22 @@ function renderKpis(kpis, thresh, kpiTrend) {
   const toneColor = (tone) => tone==='good'?t.mint:tone==='bad'?t.coral:tone==='warn'?t.amber:tone==='info'?t.teal:t.ink4;
 
   const kpiDefs = [
-    { id:'kpi-accept', key:'accept', label:'Automatisch akzeptiert', val:kpis.avg_accept, u:'%',
+    { id:'kpi-accept', key:'accept', label:'Automatisch akzeptiert', val:kpis.avg_accept, u:'%', digits:1,
       tone: kpis.avg_accept!=null?(kpis.avg_accept>=T.accept[0]?'good':kpis.avg_accept<=T.accept[1]?'bad':'warn'):'neutral',
       tgt: kpis.avg_accept!=null?(kpis.avg_accept>=T.accept[0]?'Ziel erreicht':`Ziel ≥ ${T.accept[0]} %`):'–' },
-    { id:'kpi-hall', key:'hall', label:'Fehlerquote', val:kpis.avg_hall, u:'%',
+    { id:'kpi-hall', key:'hall', label:'Fehlerquote', val:kpis.avg_hall, u:'%', digits:1,
       tone: kpis.avg_hall!=null?(kpis.avg_hall<=T.hall[0]?'good':kpis.avg_hall>=T.hall[1]?'bad':'warn'):'neutral',
       tgt: `Ziel ≤ ${T.hall[0]} %` },
-    { id:'kpi-cov', key:'cov', label:'Belegrate', val:kpis.avg_cov, u:'%',
+    { id:'kpi-cov', key:'cov', label:'Belegrate', val:kpis.avg_cov, u:'%', digits:1,
       tone: kpis.avg_cov!=null?(kpis.avg_cov>=T.cov[0]?'good':kpis.avg_cov<=T.cov[1]?'bad':'warn'):'neutral',
       tgt: kpis.avg_cov!=null?(kpis.avg_cov>=T.cov[0]?'Ziel erreicht':`Ziel ≥ ${T.cov[0]} %`):'–' },
-    { id:'kpi-n', key:'n', label:'Evaluierte Notes', val:kpis.n_notes, u:'',
-      tone:'info', tgt: kpis.total_generated ? `${(100*kpis.n_notes/kpis.total_generated).toFixed(1)} % der Notes` : '–' },
-    { id:'kpi-dur',    key:'dur',    label:'Laufzeit',       val:kpis.cur_dur_h??kpis.total_dur_h,   u:'h', tone:'neutral', tgt:'' },
-    { id:'kpi-tokens', key:'tokens', label:'Pipeline-Tokens', val:(kpis.cur_tokens??kpis.total_tokens)?Math.round((kpis.cur_tokens??kpis.total_tokens)/1e6*100)/100:null, u:'M', tone:'neutral', tgt:'' },
+    { id:'kpi-n', key:'n', label:'Evaluierte Notes', val:kpis.n_notes, u:'', digits:0,
+      tone:'info', tgt: kpis.total_generated ? `${_fmtDE(100*kpis.n_notes/kpis.total_generated)} % der Notes` : '–' },
+    { id:'kpi-dur',    key:'dur',    label:'Laufzeit',       val:kpis.cur_dur_h??kpis.total_dur_h,   u:'h', digits:1, tone:'neutral', tgt:'' },
+    { id:'kpi-tokens', key:'tokens', label:'Pipeline-Tokens', val:(kpis.cur_tokens??kpis.total_tokens)?Math.round((kpis.cur_tokens??kpis.total_tokens)/1e6*100)/100:null, u:'M', digits:2, tone:'neutral', tgt:'' },
     { id:'kpi-cost', key:'cost', label:'API-Kosten',
       val: (kpis.cur_cost_usd > 0) ? kpis.cur_cost_usd : null,
-      u:'$', tone:'neutral',
+      u:'$', digits: (kpis.cur_cost_usd >= 1 ? 2 : 4), tone:'neutral',
       tgt: (kpis.cur_cost_usd > 0) ? '' : 'Subscription' },
   ];
 
@@ -1127,10 +1140,23 @@ function renderKpis(kpis, thresh, kpiTrend) {
     const nTag = showN
       ? `<span class="kpi-n${nWarn?' warn-n':''}" title="${nWarn?'n<20 — Ziel-Marker ausgeblendet':''}">(n=${nBase})</span>`
       : '';
+    // #204 P3: Delta-Chip vs. Vorversion an den Qualitäts-Kacheln — Semantik
+    // wie das Spark-Delta (server-berechnet, N-Guard); bei n<20 ausgegraut
+    // statt gefärbt (Rausch-Schutz).
+    const vd = ['accept','hall','cov'].includes(kd.key) ? kpiTrend?.deltas?.[kd.key] : null;
+    let chip = '';
+    if (vd && vd.delta != null) {
+      const dnum = Math.round(vd.delta * 10) / 10;
+      const lowerIsBetter = kd.key === 'hall';
+      const arrow = dnum > 0 ? '↑' : dnum < 0 ? '↓' : '·';
+      const cls = !vd.reliable ? 'dim' : dnum === 0 ? '' : ((dnum > 0) === lowerIsBetter ? 'bad' : 'good');
+      const chipTitle = `Δ vs. Vorversion${vd.reliable ? '' : ' — n<20, nicht belastbar'}`;
+      chip = `<span class="kpi-delta ${cls}" title="${chipTitle}">${arrow} ${_fmtDE(Math.abs(dnum))}</span>`;
+    }
     return `<button type="button" class="kpi ${kd.tone}${_openKpiIdx===i?' open':''}" id="${kd.id}" onclick="_openKpiSpark(${i})" title="Klick: Versions-Trend">
-      <div class="top"><span class="lbl">${kd.label}</span></div>
+      <div class="top"><span class="lbl">${kd.label}</span>${chip}</div>
       <div class="value-row">
-        <span class="v">${kd.val != null ? kd.val : '–'}</span>
+        <span class="v">${kd.val != null ? _fmtDE(kd.val, kd.digits ?? 1) : '–'}</span>
         ${kd.u ? `<span class="u">${kd.u}</span>` : ''}
       </div>
       ${nTag}
@@ -1151,16 +1177,18 @@ function renderKpis(kpis, thresh, kpiTrend) {
     // neueste-vs-erste. Ohne reliable (n<20 in einer der beiden Versionen) kein
     // Besser/Schlechter-Farbcode — nur neutrale Anzeige (Rausch-Schutz).
     const vd = kpiTrend?.deltas?.[kd.key] || null;
-    const dval = (vd && vd.delta != null) ? vd.delta.toFixed(1) : null;
+    // Auf 1 Dezimale gerundet rechnen UND anzeigen — sonst färbt ein Delta von
+    // 0,04 die als „0,0" angezeigte Zahl (#204 P1: Anzeige via _fmtDE, DE-Locale)
+    const dnum = (vd && vd.delta != null) ? Math.round(vd.delta * 10) / 10 : null;
     const prevVer = vers.length >= 2 ? vers[vers.length-2] : null;
     // Vorzeichen-Semantik pro Metrik (#193): bei hall/dur/tokens/cost ist ein
     // Anstieg schlecht — vorher wurde nur 'hall' invertiert und z. B. mehr
     // Laufzeit/Tokens grün eingefärbt (maskiert durch den n<20-Guard).
     const lowerIsBetter = ['hall','dur','tokens','cost'].includes(kd.key);
-    const dClass = (dval!=null && vd.reliable && parseFloat(dval)!==0) ? ((parseFloat(dval)>0) === lowerIsBetter ? 'dneg' : 'dpos') : '';  // 0.0 = neutral, keine Farbe
-    const sign = dval!=null && parseFloat(dval)>0 ? '+' : '';
-    const deltaHtml = dval!=null
-      ? `Δ vs. ${prevVer}: <span class="${dClass}">${sign}${dval} ${kd.u}</span>${vd.reliable ? '' : ' (n&lt;20)'}`
+    const dClass = (dnum!=null && vd.reliable && dnum!==0) ? ((dnum>0) === lowerIsBetter ? 'dneg' : 'dpos') : '';  // 0.0 = neutral, keine Farbe
+    const sign = dnum!=null && dnum>0 ? '+' : '';
+    const deltaHtml = dnum!=null
+      ? `Δ vs. ${prevVer}: <span class="${dClass}">${sign}${_fmtDE(dnum)} ${kd.u}</span>${vd.reliable ? '' : ' (n&lt;20)'}`
       : `${vers.length} Pipeline-Versionen`;
     const inner = document.getElementById('spark-inner');
     if (inner) {
@@ -1187,15 +1215,15 @@ function _autoUnit(values, unit) {
   // Wählt sinnvolle Einheit + Formatierung dynamisch nach Wertebereich
   const max = Math.max(...values.filter(v=>v!=null));
   // Explizit übergebene Einheiten: behalte sie, formatiere nur den Wert
-  if (unit === '%')  return { u: '%',   fmt: v => v.toFixed(1) };
-  if (unit === 'h')  return { u: 'h',   fmt: v => v < 1 ? `${Math.round(v*60)} min` : v.toFixed(1)+' h' };
-  if (unit === 'M')  return { u: 'M',   fmt: v => v < 0.1 ? `${Math.round(v*1000)} k` : v.toFixed(2)+' M' };
-  if (unit === 'k')  return { u: 'k',   fmt: v => v >= 1000 ? `${(v/1000).toFixed(1)} M` : Math.round(v)+' k' };
+  if (unit === '%')  return { u: '%',   fmt: v => _fmtDE(v) };
+  if (unit === 'h')  return { u: 'h',   fmt: v => v < 1 ? `${Math.round(v*60)} min` : _fmtDE(v)+' h' };
+  if (unit === 'M')  return { u: 'M',   fmt: v => v < 0.1 ? `${Math.round(v*1000)} k` : _fmtDE(v, 2)+' M' };
+  if (unit === 'k')  return { u: 'k',   fmt: v => v >= 1000 ? `${_fmtDE(v/1000)} M` : Math.round(v)+' k' };
   // Kein unit: auto-scale nach Größenordnung
-  if (max >= 1e6)    return { u: 'M',   fmt: v => (v/1e6).toFixed(2)+' M' };
-  if (max >= 1000)   return { u: 'k',   fmt: v => (v/1000).toFixed(1)+' k' };
-  if (max < 10)      return { u: unit||'', fmt: v => v.toFixed(2)+(unit||'') };
-  return               { u: unit||'', fmt: v => v.toFixed(1)+(unit||'') };
+  if (max >= 1e6)    return { u: 'M',   fmt: v => _fmtDE(v/1e6, 2)+' M' };
+  if (max >= 1000)   return { u: 'k',   fmt: v => _fmtDE(v/1000)+' k' };
+  if (max < 10)      return { u: unit||'', fmt: v => _fmtDE(v, 2)+(unit||'') };
+  return               { u: unit||'', fmt: v => _fmtDE(v)+(unit||'') };
 }
 
 function _trendChart(points, versions, color, unit) {
@@ -1275,7 +1303,7 @@ function _trendChart(points, versions, color, unit) {
   // 3 Hilfslinien mit Wert-Beschriftung — mehr Kontext
   const hairLines = [0, 0.5, 1].map(t => {
     const y = (padT + ih - t*ih).toFixed(1);
-    const val = (min + t*span).toFixed(1);
+    const val = _fmtDE(min + t*span);
     return `<line x1="${padL}" x2="${w-padR}" y1="${y}" y2="${y}" stroke="${hair}"/>
       <text x="${parseFloat(padL)+4}" y="${parseFloat(y)-3}"
         fill="${ink4}" font-size="9" font-family="JetBrains Mono"
@@ -1342,8 +1370,8 @@ window.closeKpiSpark = function() {
 
 /* ── Strip ────────────────────────────────────────────────────── */
 function renderStrip(kpis) {
-  const tok = kpis.total_tokens ? (kpis.total_tokens/1e6).toFixed(2)+'M' : '–';
-  const pct = kpis.total_generated ? (100*kpis.total_accepted/kpis.total_generated).toFixed(1) : '–';
+  const tok = kpis.total_tokens ? _fmtDE(kpis.total_tokens/1e6, 2)+'M' : '–';
+  const pct = kpis.total_generated ? _fmtDE(100*kpis.total_accepted/kpis.total_generated) : '–';
   const cell = (k,v,u,sub) => `<div class="cell"><div class="lbl">${k}</div><div class="val">${v}${u?`<span class="u">${u}</span>`:''}</div>${sub?`<div class="sub">${sub}</div>`:''}</div>`;
   const _sl = document.getElementById('strip-label');
   const _sm = document.getElementById('strip-meta');
@@ -1382,9 +1410,9 @@ function renderTable(rows, thresh) {
       <td><span class="v-tag${r.version===latest?' cur':''}">${r.version||'–'}</span></td>
       <td class="num dim">${w}</td>
       <td class="num dim">${r.pages||'—'}</td>
-      <td>${ac?`<span class="acc-bar"><span class="track"><span class="fill" style="width:${r.accept}%;background:${accColor(r.accept)}"></span></span><span class="pct" style="color:${accColor(r.accept)}">${r.accept.toFixed(1)}%</span></span>`:'—'}</td>
-      <td class="${r.hall!=null?(r.hall<=T.hall[0]?'good-t':r.hall>=T.hall[1]?'bad-t':'warn-t'):''}">${r.hall!=null?r.hall.toFixed(1)+'%':'—'}</td>
-      <td class="${r.cov!=null?(r.cov>=T.cov[0]?'good-t':r.cov<=T.cov[1]?'bad-t':'warn-t'):''}">${r.cov!=null?r.cov.toFixed(1)+'%':'—'}</td>
+      <td>${ac?`<span class="acc-bar"><span class="track"><span class="fill" style="width:${r.accept}%;background:${accColor(r.accept)}"></span></span><span class="pct" style="color:${accColor(r.accept)}">${_fmtDE(r.accept)}%</span></span>`:'—'}</td>
+      <td class="${r.hall!=null?(r.hall<=T.hall[0]?'good-t':r.hall>=T.hall[1]?'bad-t':'warn-t'):''}">${r.hall!=null?_fmtDE(r.hall)+'%':'—'}</td>
+      <td class="${r.cov!=null?(r.cov>=T.cov[0]?'good-t':r.cov<=T.cov[1]?'bad-t':'warn-t'):''}">${r.cov!=null?_fmtDE(r.cov)+'%':'—'}</td>
       <td class="num dim">${r.n_notes||'—'}</td>
     </tr>`;
   }).join('');
@@ -1418,14 +1446,14 @@ function renderCharts(d) {
       },
       options:{indexAxis:'y',maintainAspectRatio:false,responsive:true,animation:{duration:500,easing:'easeOutQuart'},
         layout:{padding:{right:52}},
-        plugins:{tooltip:{callbacks:{label:ctx=>`${ctx.parsed.x.toFixed(1)} % akzeptiert`}}},
+        plugins:{tooltip:{callbacks:{label:ctx=>`${_fmtDE(ctx.parsed.x)} % akzeptiert`}}},
         scales:{x:axisCfg({beginAtZero:true,max:100,ticks:{callback:v=>v+' %',stepSize:25}}),
           y:axisCfg({grid:{display:false},ticks:{color:t.ink3,font:{size:10.5},autoSkip:false}})}},
       plugins:[{id:'vals',afterDatasetsDraw(chart){
         const {ctx}=chart; ctx.save(); ctx.font='600 10.5px "IBM Plex Sans"'; ctx.textAlign='left'; ctx.textBaseline='middle';
         chart.getDatasetMeta(0).data.forEach((bar,i)=>{
           const val=rawPairs[i]?.v??0; const col=val>=T.accept[0]?t.mint:val>=T.accept[1]?t.amber:t.coral;
-          ctx.fillStyle=col; ctx.fillText(val.toFixed(1)+' %', bar.x+6, bar.y);
+          ctx.fillStyle=col; ctx.fillText(_fmtDE(val)+' %', bar.x+6, bar.y);
         }); ctx.restore();
       }}]
     });
@@ -1551,7 +1579,7 @@ function renderCharts(d) {
     getOrCreate('ch7',{type:'bar',data:{labels:agLabelsN,datasets:[{data:ag.output,backgroundColor:bgC,borderWidth:0,borderRadius:2,barPercentage:.65}]},
       options:{indexAxis:'y',maintainAspectRatio:false,responsive:true,animation:{duration:500},
         plugins:{legend:{display:false},tooltip:{callbacks:{
-          label:ctx=>{const i=ctx.dataIndex;const costStr=(ag.cost_usd?.[i]>0)?` · $${ag.cost_usd[i].toFixed(4)}`:'';return `${(ctx.raw/1000).toFixed(0)}k tokens · Cache ${ag.cache_pct?.[i]} %${costStr}`;},
+          label:ctx=>{const i=ctx.dataIndex;const costStr=(ag.cost_usd?.[i]>0)?` · ${_fmtDE(ag.cost_usd[i], 4)} $`:'';return `${(ctx.raw/1000).toFixed(0)}k tokens · Cache ${ag.cache_pct?.[i]!=null?_fmtDE(ag.cache_pct[i]):'–'} %${costStr}`;},
           afterLabel:ctx=>{
             if(!(ag.labels?.[ctx.dataIndex]||'').toLowerCase().startsWith('verifier')) return;
             return ctx.raw===0
@@ -1561,7 +1589,7 @@ function renderCharts(d) {
         scales:{x:axisCfg({ticks:{callback:v=>v>=1000?(v/1000).toFixed(0)+'k':v}}),y:axisCfg({grid:{display:false},ticks:{color:t.ink2,font:{size:12}}})}}});
     getOrCreate('ch8',{type:'bar',data:{labels:agLabelsN,datasets:[{data:ag.dur_s,backgroundColor:bgC,borderWidth:0,borderRadius:2,barPercentage:.65}]},
       options:{indexAxis:'y',maintainAspectRatio:false,responsive:true,animation:{duration:500},
-        plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const s=ctx.raw;return s>=60?`${(s/60).toFixed(1)} min`:`${s} s`;}}}},
+        plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const s=ctx.raw;return s>=60?`${_fmtDE(s/60)} min`:`${s} s`;}}}},
         scales:{x:axisCfg({ticks:{callback:(v,i,ts)=>{
           // Einheit für ALLE Ticks einheitlich wählen (vorher „0s" neben „33min", #204)
           const mx = ts?.length ? ts[ts.length-1].value : v;
@@ -1592,7 +1620,7 @@ function _renderNoteDrawer(p, stale) {
       <button type="button" class="nd-close" onclick="_closeNoteDrawer()" aria-label="Drawer schließen">schließen</button>
     </div>
     ${stale ? `<div class="nd-stale">Note ist nicht mehr im aktuellen Filter/Datensatz — Werte vom letzten Stand.</div>` : ''}
-    <div class="nd-kv">Fehlerquote <strong>${p.x} %</strong> · Belegrate <strong>${p.y} %</strong></div>
+    <div class="nd-kv">Fehlerquote <strong>${_fmtDE(p.x)} %</strong> · Belegrate <strong>${_fmtDE(p.y)} %</strong></div>
     <div class="nd-kv">PDF <strong>${_escHTML(p.pdf_label||p.pdf||'–')}</strong> · Pipeline <strong>${_escHTML(p.version||'–')}</strong> · Eval <strong>${_escHTML(p.eval_version||'–')}</strong></div>
     ${p.run_id ? `<div class="nd-kv">Run <strong>${_escHTML(p.run_id)}</strong></div>` : ''}
     <div class="nd-kv"><a href="${obsUrl}">In Obsidian öffnen</a> · <span title="Dateiname zum Suchen/Kopieren">${_escHTML(fileName)}</span></div>`;
@@ -1669,7 +1697,7 @@ function renderScatter(scat, T) {
         // Rest als Fußzeile — vorher stapelten 5–7 Einträge und verdeckten bis zur
         // Hälfte des Charts inkl. IDEAL-Zone (#204 Punkt 6)
         filter:(item,i,arr)=>{ _ch2TipTotal = arr.length; return i < 3; },
-        callbacks:{label:ctx=>{const p=ctx.raw;return [p.label||'',`${p.pdf_label||''} · v: ${p.version}`,`Fehler: ${p.x} % · Belegrate: ${p.y} %`];},
+        callbacks:{label:ctx=>{const p=ctx.raw;return [p.label||'',`${p.pdf_label||''} · v: ${p.version}`,`Fehler: ${_fmtDE(p.x)} % · Belegrate: ${_fmtDE(p.y)} %`];},
           footer:()=>_ch2TipTotal>3?`… +${_ch2TipTotal-3} weitere — Klick auf Punkt für Details`:''}},
         // Threshold-Linie Fehlerquote 15 % (Schwelle „schlecht") — semantische
         // Farbe nur an Threshold-Stelle (chartjs-plugin-annotation)
@@ -1705,7 +1733,7 @@ function renderCalibration(calib) {
   // Strip
   if (el('calib-n-eval'))    el('calib-n-eval').textContent    = calib.n_eval ?? '–';
   if (el('calib-n-labeled')) el('calib-n-labeled').textContent = calib.n_labeled ?? '–';
-  if (el('calib-agree'))     el('calib-agree').textContent     = calib.avg_agree != null ? calib.avg_agree + ' %' : '–';
+  if (el('calib-agree'))     el('calib-agree').textContent     = calib.avg_agree != null ? _fmtDE(calib.avg_agree) + ' %' : '–';
   if (el('calib-status')) {
     // n_labeled defensiv cappen (historische Labels ohne aktuelle Eval-Zeile)
     const nLab = Math.min(calib.n_labeled ?? 0, calib.n_eval ?? 0);
@@ -1725,10 +1753,10 @@ function renderCalibration(calib) {
   }
 
   const fmtHall = (v) => v != null
-    ? `<span class="${v <= 5 ? 'good-t' : v >= 20 ? 'bad-t' : 'warn-t'}">${v} %</span>`
+    ? `<span class="${v <= 5 ? 'good-t' : v >= 20 ? 'bad-t' : 'warn-t'}">${_fmtDE(v)} %</span>`
     : '<span class="dash">–</span>';
   const fmtAgree = (v) => v != null
-    ? `<span class="${v >= 80 ? 'good-t' : v >= 60 ? 'warn-t' : 'bad-t'}">${v} %</span>`
+    ? `<span class="${v >= 80 ? 'good-t' : v >= 60 ? 'warn-t' : 'bad-t'}">${_fmtDE(v)} %</span>`
     : '<span class="dash">–</span>';
   // Server sortiert als Arbeitsliste (ungelabelt zuerst, hall desc) —
   // die ersten 3 ungelabelten sind die naechsten Label-Kandidaten.
@@ -1772,6 +1800,9 @@ function _setInsight(id, html) {
   const el = document.getElementById(id);
   if (el) el.innerHTML = html || '';
 }
+/* Zentrale Zahlen-Formatierung, EINE Locale fürs ganze Dashboard (#204 P1).
+   Sichtbare Zahlen laufen hier durch — kein rohes toFixed()/Template-Literal
+   mit Dezimalwerten mehr (DE/EN-Mix: Banner „7,4 %" über Kachel „7.4"). */
 function _fmtDE(v, digits=1) {
   return v != null ? Number(v).toLocaleString('de-DE', {minimumFractionDigits:digits, maximumFractionDigits:digits}) : '–';
 }
