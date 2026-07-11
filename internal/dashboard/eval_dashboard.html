@@ -167,7 +167,9 @@ body.collapsed .theme-toggle { padding: 6px; }
 /* ── Filter bar ────────────────────────────────────────────────── */
 .filterbar {
   position: sticky; top: 0; z-index: 10;
-  display: flex; align-items: center; gap: 0;
+  /* wrap statt nowrap: zwischen ~900 und ~1200px schob die einzeilige Leiste
+     den Zeitstempel unsichtbar aus dem geclippten Container (#203) */
+  display: flex; align-items: center; gap: 0; flex-wrap: wrap; row-gap: 4px;
   background: var(--bg); border-bottom: 1px solid var(--hair);
   min-height: 48px; padding: 0 20px;
 }
@@ -359,7 +361,9 @@ body.collapsed .theme-toggle { padding: 6px; }
 .legend .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; }
 
 /* ── Compare table ─────────────────────────────────────────────── */
-.table-wrap { border: 1px solid var(--hair); border-radius: 4px; background: var(--bg-card); overflow: hidden; }
+/* overflow-x:auto statt hidden: bei schmalen Viewports waren rechte Spalten
+   sonst komplett unzugänglich (#203) */
+.table-wrap { border: 1px solid var(--hair); border-radius: 4px; background: var(--bg-card); overflow-x: auto; overflow-y: hidden; }
 table.cmp { width: 100%; border-collapse: collapse; }
 table.cmp th, table.cmp td { padding: 14px 18px; text-align: left; }
 table.cmp thead th { font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); text-transform: uppercase; letter-spacing: .12em; font-weight: 500; border-bottom: 1px solid var(--hair); }
@@ -696,7 +700,7 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
       <div class="panel">
         <div class="p-head">
           <div><div class="p-title">Laufzeit je Agent</div><div class="p-sub">Wo ist der Flaschenhals?</div></div>
-          <div class="p-meta">sekunden kumuliert</div>
+          <div class="p-meta">kumuliert</div>
         </div>
         <div class="chart-body"><canvas id="ch8"></canvas></div>
       </div>
@@ -783,7 +787,8 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
   <section class="section" id="s-compare">
     <div class="sec-head">
       <span class="sec-name">Vergleich nach Quell-PDF</span>
-      <span class="sec-right">↑ aufklappen für Details</span>
+<!-- Hinweis „aufklappen für Details" entfernt: toggleRow() ist nicht verdrahtet,
+     der Text versprach eine Funktion, die nichts tut (#204 Punkt 7) -->
     </div>
     <p class="insight" id="ins-compare"></p>
     <div class="table-wrap">
@@ -949,14 +954,32 @@ applyTheme();
 
 /* ── Globale Filter ───────────────────────────────────────────── */
 let _globalFilters = { pver: '__all__', pdf: '__all__', lang: '__all__', model: '__all__' };
+// Gesamtzahl der Items im Scatter-Tooltip VOR dem Filter — für die „+n weitere"-Fußzeile (#204)
+let _ch2TipTotal = 0;
+
+function _rebuildFilterSelect(sel, key, optionsHtml, filterKey) {
+  // Gemeinsamer Options-Rebuild für die vier Filter-Selects (#201): innerHTML
+  // setzt die native Auswahl auf die erste Option („Alle") zurück, während der
+  // Filter in _globalFilters aktiv bleibt — Dropdown und Badge/Daten wider-
+  // sprachen sich sichtbar. Nach dem Rebuild die Auswahl wiederherstellen;
+  // existiert die Option nicht mehr, den Zustand ehrlich auf „Alle" syncen.
+  if (sel.dataset.loaded === key) return;
+  sel.dataset.loaded = key;
+  sel.innerHTML = optionsHtml;
+  const want = _globalFilters[filterKey] || '__all__';
+  sel.value = want;
+  if (sel.value !== want) {
+    sel.value = '__all__';
+    _globalFilters[filterKey] = '__all__';
+    _renderFilterBadges();
+  }
+}
 
 function _initGlobalLangFilter(langs) {
   const sel = document.getElementById('global-lang'); if (!sel) return;
-  const key = langs.join(',');
-  if (sel.dataset.loaded === key) return;
-  sel.dataset.loaded = key;
-  sel.innerHTML = `<option value="__all__">Alle</option>` +
-    langs.map(l => `<option value="${l}">${l}</option>`).join('');
+  _rebuildFilterSelect(sel, langs.join(','),
+    `<option value="__all__">Alle</option>` + langs.map(l => `<option value="${l}">${l}</option>`).join(''),
+    'lang');
 }
 function _modelLabel(m) {
   if (!m) return m;
@@ -967,11 +990,9 @@ function _modelLabel(m) {
 
 function _initGlobalModelFilter(models) {
   const sel = document.getElementById('global-model'); if (!sel) return;
-  const key = models.join(',');
-  if (sel.dataset.loaded === key) return;
-  sel.dataset.loaded = key;
-  sel.innerHTML = `<option value="__all__">Alle</option>` +
-    models.map(m => `<option value="${m}">${_modelLabel(m)}</option>`).join('');
+  _rebuildFilterSelect(sel, models.join(','),
+    `<option value="__all__">Alle</option>` + models.map(m => `<option value="${m}">${_modelLabel(m)}</option>`).join(''),
+    'model');
 }
 
 function _escHTML(s) {
@@ -1023,20 +1044,16 @@ function onGlobalFilterChange() {
 
 function _initGlobalPverFilter(versions) {
   const sel = document.getElementById('global-pver'); if (!sel) return;
-  const key = versions.join(',');
-  if (sel.dataset.loaded === key) return;
-  sel.dataset.loaded = key;
-  sel.innerHTML = `<option value="__all__">Alle</option>` +
-    versions.map(v => `<option value="${v}">${v}</option>`).join('');
+  _rebuildFilterSelect(sel, versions.join(','),
+    `<option value="__all__">Alle</option>` + versions.map(v => `<option value="${v}">${v}</option>`).join(''),
+    'pver');
 }
 
 function _initGlobalPdfFilter(pdfs) {
   const sel = document.getElementById('global-pdf'); if (!sel) return;
-  const key = pdfs.join(',');
-  if (sel.dataset.loaded === key) return;
-  sel.dataset.loaded = key;
-  sel.innerHTML = `<option value="__all__">Alle</option>` +
-    pdfs.map(p => `<option value="${p.toLowerCase()}">${p}</option>`).join('');
+  _rebuildFilterSelect(sel, pdfs.join(','),
+    `<option value="__all__">Alle</option>` + pdfs.map(p => `<option value="${p.toLowerCase()}">${p}</option>`).join(''),
+    'pdf');
 }
 
 /* ── Eval-Version ─────────────────────────────────────────────── */
@@ -1545,7 +1562,11 @@ function renderCharts(d) {
     getOrCreate('ch8',{type:'bar',data:{labels:agLabelsN,datasets:[{data:ag.dur_s,backgroundColor:bgC,borderWidth:0,borderRadius:2,barPercentage:.65}]},
       options:{indexAxis:'y',maintainAspectRatio:false,responsive:true,animation:{duration:500},
         plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const s=ctx.raw;return s>=60?`${(s/60).toFixed(1)} min`:`${s} s`;}}}},
-        scales:{x:axisCfg({ticks:{callback:v=>v>=60?(v/60).toFixed(0)+'min':v+'s'}}),y:axisCfg({grid:{display:false},ticks:{color:t.ink2,font:{size:12}}})}}});
+        scales:{x:axisCfg({ticks:{callback:(v,i,ts)=>{
+          // Einheit für ALLE Ticks einheitlich wählen (vorher „0s" neben „33min", #204)
+          const mx = ts?.length ? ts[ts.length-1].value : v;
+          return mx >= 60 ? `${(v/60).toFixed(0)}min` : `${v}s`;
+        }}}),y:axisCfg({grid:{display:false},ticks:{color:t.ink2,font:{size:12}}})}}});
   } else {
     setChartEmpty('ch7'); setChartEmpty('ch8');
   }
@@ -1643,7 +1664,13 @@ function renderScatter(scat, T) {
         const p = chart.data.datasets[el.datasetIndex]?.data[el.index];
         if (p) _openNoteDrawer(p);
       },
-      plugins:{legend:legendCfg(),tooltip:{callbacks:{label:ctx=>{const p=ctx.raw;return [p.label||'',`${p.pdf_label||''} · v: ${p.version}`,`Fehler: ${p.x} % · Belegrate: ${p.y} %`];}}},
+      plugins:{legend:legendCfg(),tooltip:{
+        // Dichte Cluster (viele Notes auf fast identischer Position): max. 3 Einträge,
+        // Rest als Fußzeile — vorher stapelten 5–7 Einträge und verdeckten bis zur
+        // Hälfte des Charts inkl. IDEAL-Zone (#204 Punkt 6)
+        filter:(item,i,arr)=>{ _ch2TipTotal = arr.length; return i < 3; },
+        callbacks:{label:ctx=>{const p=ctx.raw;return [p.label||'',`${p.pdf_label||''} · v: ${p.version}`,`Fehler: ${p.x} % · Belegrate: ${p.y} %`];},
+          footer:()=>_ch2TipTotal>3?`… +${_ch2TipTotal-3} weitere — Klick auf Punkt für Details`:''}},
         // Threshold-Linie Fehlerquote 15 % (Schwelle „schlecht") — semantische
         // Farbe nur an Threshold-Stelle (chartjs-plugin-annotation)
         annotation:{annotations:{hallBad:{
