@@ -393,6 +393,17 @@ table.cmp td.dim { color: var(--ink-3); }
 }
 .calib-more:hover { color: var(--ink-1); border-color: var(--amber); }
 
+/* ── Hinweis-Banner (#196 P1: Waisen-Versionen, JSONL-Fallback) ── */
+.warn-banner[hidden] { display: none; }
+.warn-banner {
+  margin: 0 0 14px; padding: 8px 12px;
+  font-family: var(--f-mono); font-size: 11.5px; color: var(--amber);
+  background: var(--tint-amber); border-radius: 3px;
+  border: 1px solid rgba(232,181,59,.25);
+  display: flex; flex-direction: column; gap: 4px;
+}
+.warn-banner strong { font-weight: 600; }
+
 /* ── Eval-Coverage-Gap unter den KPIs ──────────────────────────── */
 .kpi-gap[hidden] { display: none; }
 .kpi-gap {
@@ -609,6 +620,8 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
       <span class="sec-name">Übersicht</span>
     </div>
     <p class="insight" id="ins-overview"></p>
+    <!-- #196 P1: Hinweis-Banner — Waisen-Versionen (#191-Fehlerklasse) + JSONL-Fallback -->
+    <div id="warn-banner" class="warn-banner" hidden></div>
 
     <!-- Gesamt: alle Versionen + Runs -->
     <div class="sub-head">
@@ -1551,7 +1564,14 @@ function renderCharts(d) {
     getOrCreate('ch7',{type:'bar',data:{labels:agLabelsN,datasets:[{data:ag.output,backgroundColor:bgC,borderWidth:0,borderRadius:2,barPercentage:.65}]},
       options:{indexAxis:'y',maintainAspectRatio:false,responsive:true,animation:{duration:500},
         plugins:{legend:{display:false},tooltip:{callbacks:{
-          label:ctx=>{const i=ctx.dataIndex;const costStr=(ag.cost_usd?.[i]>0)?` · $${ag.cost_usd[i].toFixed(4)}`:'';return `${(ctx.raw/1000).toFixed(0)}k tokens · Cache ${ag.cache_pct?.[i]} %${costStr}`;},
+          // #196 P3: Cache-Hit prompt-basiert (read/(input+read+creation)) +
+          // Cache-Neuanlage sichtbar — cache_c war serverseitig aggregiert,
+          // wurde aber nie ausgegeben.
+          label:ctx=>{const i=ctx.dataIndex;const costStr=(ag.cost_usd?.[i]>0)?` · $${ag.cost_usd[i].toFixed(4)}`:'';
+            const lines=[`${(ctx.raw/1000).toFixed(0)}k tokens${costStr}`,
+              `Cache-Hit ${ag.cache_pct?.[i] ?? '–'} % vom Prompt (read/(input+read+creation))`];
+            if (ag.cache_c?.[i] > 0) lines.push(`Cache-Neuanlage ${(ag.cache_c[i]/1000).toFixed(0)} k tokens`);
+            return lines;},
           afterLabel:ctx=>{
             if(!(ag.labels?.[ctx.dataIndex]||'').toLowerCase().startsWith('verifier')) return;
             return ctx.raw===0
@@ -1826,9 +1846,19 @@ function renderInsights(d) {
   if ((tok.labels||[]).length) {
     const totalTok = (tok.tokens_in||[]).reduce((a,b)=>a+(b||0),0) + (tok.tokens_out||[]).reduce((a,b)=>a+(b||0),0);
     const medDur = _median((tok.duration_min||[]).filter(v=>v>0).sort((a,b)=>a-b));
+    // #196 P2: Kosten pro akzeptierter Note — neueste Version mit API-Kosten
+    // (subscription-Läufe liefern None und tauchen hier bewusst nicht auf).
+    const kt = d.kpi_trend || {};
+    let cpnTxt = '';
+    for (let i = (kt.versions||[]).length - 1; i >= 0; i--) {
+      if (kt.cost_per_note?.[i] != null) {
+        cpnTxt = ` <strong>${esc(kt.versions[i])}</strong> (letzter API-Lauf): <strong>${_fmtDE(kt.cost_per_note[i], 4)} $</strong> pro akzeptierter Note.`;
+        break;
+      }
+    }
     _setInsight('ins-cost',
       `<strong>${tok.labels.length}</strong> Versionen verbrauchten <strong>${_fmtDE(totalTok/1e6, 2)} M</strong> Tokens` +
-      (medDur != null ? `, Median-Laufzeit <strong>${_fmtDE(medDur, 0)} min</strong> pro Version.` : '.'));
+      (medDur != null ? `, Median-Laufzeit <strong>${_fmtDE(medDur, 0)} min</strong> pro Version.` : '.') + cpnTxt);
   } else { _setInsight('ins-cost', ''); }
 
   // Agenten: größter Output-Token-Verursacher
@@ -1912,6 +1942,26 @@ function _renderWithData(d) {
   renderCharts(d);
   renderCalibration(d.calibration);
   renderInsights(d);
+  renderWarnings(d.warnings);
+}
+
+/* #196 P1: Hinweis-Banner — Waisen-Versionen melden die #191-Fehlerklasse
+   selbst (Hinweis, kein Fehler: bewusste Re-Evals/Branch-Läufe sind legitim);
+   JSONL-Fallback heißt SQLite nicht erreichbar → Zahlen unvollständig. */
+function renderWarnings(w) {
+  const el = document.getElementById('warn-banner');
+  if (!el) return;
+  const parts = [];
+  if (w?.orphan_versions?.length) {
+    parts.push(`Eval-Daten mit Version über der Code-Version <strong>${_escHTML(w.current_version||'?')}</strong>: ` +
+      w.orphan_versions.map(_escHTML).join(', ') +
+      ` — verwaiste/Branch-Läufe? (#191-Fehlerklasse; legitim bei bewussten Re-Evals)`);
+  }
+  if (w?.jsonl_fallback) {
+    parts.push(`Eval-DB nicht nutzbar (nicht erreichbar oder leer) — <strong>JSONL-Fallback aktiv</strong>: deckt nur einen Teil der Historie ab, Kennzahlen unvollständig.`);
+  }
+  el.innerHTML = parts.map(p => `<div>⚠ ${p}</div>`).join('');
+  el.hidden = parts.length === 0;
 }
 
 window.resetAllFilters = function() {
