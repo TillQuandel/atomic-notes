@@ -251,24 +251,58 @@ def _pdf_filter_key(raw: str) -> str:
     return parts[0]
 
 
+def _pdf_slug(raw: str | None) -> str:
+    """Kanonischer Vergleichsschlüssel für PDF-Bezeichner über alle Namensräume.
+
+    Dieselbe Quelle liegt je nach Pipeline-Version als Volltitel
+    („Bates - 2017 - Information Behavior.pdf", note_evals.pdf), Kurzlabel
+    („Bates", pipeline_runs.pdf_label), Kebab-Key („bates-2017") oder
+    Triple-Dash-Log-Key („bates---2017---information-behavior") vor (#202).
+    Slug: lowercase, jeder Nicht-Alphanumerik-Lauf → ein „-".
+    """
+    if not raw:
+        return ""
+    name = str(raw).lower().removesuffix(".pdf")
+    return re.sub(r"[^a-z0-9]+", "-", name).strip("-")
+
+
+def _pdf_matches(filter_value: str | None, *candidates: str | None) -> bool:
+    """True, wenn ein Kandidat dieselbe Quelle wie der Filter-Wert bezeichnet.
+
+    Präfix-Vergleich auf Slug-Ebene, nur an Segment-Grenzen („bates" matcht
+    „bates-2017-…", nicht „batesworth-2020"). Richtungsoffen, weil mal der
+    Filter (Volltitel aus note_evals), mal der Kandidat (Kurzlabel aus
+    pipeline_runs) der längere Bezeichner ist (#202).
+    """
+    f = _pdf_slug(filter_value)
+    if not f:
+        return True
+    for cand in candidates:
+        c = _pdf_slug(cand)
+        if c and (c == f or c.startswith(f + "-") or f.startswith(c + "-")):
+            return True
+    return False
+
+
 def _dedupe_pdf_options(labels) -> list[str]:
     """PDF-Dropdown-Optionen: Volltitel („Autor - Jahr - Titel") behalten, aber
-    pro Quelle (Autor-Jahr) nur einmal — den vollständigsten Eintrag. Eine reine
-    Autor-Variante wird verworfen, wenn sie Präfix genau einer Autor-Jahr-Quelle
-    ist (z. B. das verirrte „Bates" neben „Bates - 2017 - Information Behavior").
-    Der Volltitel bleibt startswith-Präfix des DB-`pdf`-Felds → Filter matcht
-    unverändert.
+    pro Quelle nur einmal — den vollständigsten Eintrag. Gruppiert wird auf
+    Slug-Ebene, damit Kebab-Varianten („bates-2017") mit dem Volltitel
+    zusammenfallen; eine reine Autor-Variante wird verworfen, wenn sie
+    Segment-Präfix einer Autor-Jahr-Quelle ist (das verirrte „Bates" neben
+    „Bates - 2017 - Information Behavior"). Der Filter matcht alle Varianten
+    der Quelle über `_pdf_matches`.
     """
     by_key: dict[str, str] = {}
     for raw in labels:
         clean = raw.replace(".pdf", "").strip()
         if not clean:
             continue
-        k = _pdf_filter_key(clean)
+        k = _pdf_slug(_pdf_filter_key(clean))
         if k not in by_key or len(clean) > len(by_key[k]):
             by_key[k] = clean
     keys = sorted(by_key)
-    drop = {k for k in keys if any(o != k and o.startswith(k + " - ") for o in keys)}
+    drop = {k for k in keys if any(o != k and o.startswith(k + "-") for o in keys)}
     return [by_key[k] for k in keys if k not in drop]
 
 

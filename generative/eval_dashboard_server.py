@@ -367,8 +367,9 @@ def build_data(
     # Merken: all_langs bleibt unverändert (alle Sprachen, nicht nur die gefilterte)
     if pdf:
         # pdf-Wert aus Dropdown ist lowercase Label (z.B. "afzal")
-        # quality_rows.pdf kann voller Dateiname sein ("Afzal - 2017 - ....pdf") → startswith-Match
-        quality_rows = [r for r in quality_rows if (r.get("pdf") or "").lower().startswith(pdf.lower())]
+        # quality_rows.pdf driftet über Namensräume (Volltitel/Kebab-Key, #202)
+        # → Slug-Matching statt rohem startswith
+        quality_rows = [r for r in quality_rows if D._pdf_matches(pdf, r.get("pdf"))]
 
     all_log_runs = D._read_all_log_runs()
     token_runs = D._read_token_runs()
@@ -466,7 +467,9 @@ def build_data(
     if language:
         token_runs = [tr for tr in token_runs if tr.get("language") == language]
     if pdf:
-        token_runs = [tr for tr in token_runs if (tr.get("pdf_label", "")).lower().startswith(pdf.lower())]
+        # pdf_label driftet über Pipeline-Versionen (Volltitel → "Bates" →
+        # "bates-2017", #202): rohes startswith matchte nur die Alt-Versionen.
+        token_runs = [tr for tr in token_runs if D._pdf_matches(pdf, tr.get("pdf_label"))]
 
     # run_ids der gefilterten token_runs → quality_rows auf selbe Runs einschränken
     # Wenn Filter aktiv aber keine run_ids matchen → quality_rows leeren (nicht überspringen)
@@ -534,7 +537,7 @@ def build_data(
     if language:
         _pver_rows = [r for r in _pver_rows if r.get("language") == language]
     if pdf:
-        _pver_rows = [r for r in _pver_rows if (r.get("pdf") or "").lower().startswith(pdf.lower())]
+        _pver_rows = [r for r in _pver_rows if D._pdf_matches(pdf, r.get("pdf"))]
     _pver_counts: dict[str, int] = {}
     for r in _pver_rows:
         pv = r.get("version") or r.get("pipeline_version")
@@ -557,7 +560,9 @@ def build_data(
         all_log_runs = [r for r in all_log_runs if r.get("ver") == pipeline_version]
         log_data = D._build_log_data(all_log_runs)
     if pdf:
-        all_log_runs = [r for r in all_log_runs if (r.get("label") or r.get("key", "")).lower().startswith(pdf.lower())]
+        # label UND key prüfen — Log-Keys ("bates---2017---…") und Labels
+        # driften unabhängig voneinander (#202).
+        all_log_runs = [r for r in all_log_runs if D._pdf_matches(pdf, r.get("label"), r.get("key"))]
         log_data = D._build_log_data(all_log_runs)
     if language:
         # pdf_label → sprache aus token_runs (nach language-Filter bereits korrekt gefiltert).
