@@ -687,7 +687,7 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     <div class="row">
       <div class="panel">
         <div class="p-head">
-          <div><div class="p-title">Output-Tokens je Agent</div><div class="p-sub">Output-Tokens dominieren die Kosten. Cache-Hit-Rate in Klammern.</div></div>
+          <div><div class="p-title">Output-Tokens je Agent</div><div class="p-sub">Output-Tokens dominieren die Kosten. Anzahl LLM-Calls in Klammern.</div></div>
           <div class="p-meta" id="ax7">kumuliert</div>
         </div>
         <div class="chart-body"><canvas id="ch7"></canvas></div>
@@ -1205,12 +1205,13 @@ function _trendChart(points, versions, color, unit) {
     const label = au.fmt(v);
     const tipW = label.length * 7 + 16;
     const tipH = 18;
-    // Horizontal: zentriert, aber an Rändern anpassen
+    // Horizontal: Text bleibt IMMER mittig im Kasten — an den Rändern wird die
+    // Kasten-Mitte geklemmt statt der Text-Anchor gewechselt. Vorher klebte die
+    // Zahl an der Boxkante (anchor start/end setzte Text bündig auf den Rand,
+    // User-Fund 2026-07-11: „am rechten Rand verziehen sich die Zahlen").
     const margin = tipW / 2 + 4;
-    let tipAnchor = 'middle';
-    let tipTx = 0;
-    if (cx < margin) { tipAnchor = 'start'; tipTx = -cx + 4; }
-    else if (cx > w - margin) { tipAnchor = 'end'; tipTx = w - cx - 4; }
+    const tipTx = Math.max(margin - cx, Math.min(0, w - margin - cx));
+    const tipAnchor = 'middle';
     // Vertikal: über dem Punkt, aber nicht über die SVG-Oberkante
     const tipTy = cy > padT + 22 ? -20 : 14;
     return `<g class="spark-pt">
@@ -1219,7 +1220,7 @@ function _trendChart(points, versions, color, unit) {
         style="transition:r .12s"/>
       <g class="tip" transform="translate(${cx},${cy})">
         <rect
-          x="${tipTx - (tipAnchor==='middle'?tipW/2:tipAnchor==='start'?0:tipW)}"
+          x="${tipTx - tipW/2}"
           y="${tipTy - tipH + 4}" width="${tipW}" height="${tipH}"
           rx="3" fill="${bg}" stroke="${color}" stroke-width="1" opacity=".97"/>
         <text x="${tipTx}" y="${tipTy - 3}"
@@ -1815,9 +1816,11 @@ function renderInsights(d) {
       (open > 0 ? ` <span class="caveat">Tabelle ist nach LLM-Fehlerquote sortiert — oben labeln lohnt zuerst (generative/calibration/collect.py).</span>` : ''));
   } else { _setInsight('ins-calib', ''); }
 
-  // Vergleich: PDF mit niedrigster Akzeptanz als Bottleneck
+  // Vergleich: PDF mit niedrigster Akzeptanz als Bottleneck.
+  // n_notes-Guard: Zeilen ohne einzige evaluierte Note (z. B. Totholz-Keys
+  // alter Versionen, #194) taugen nicht als Bottleneck-Headline.
   const tbl = d.pdf_table || [];
-  const withAcc = tbl.filter(r=>r.accept!=null);
+  const withAcc = tbl.filter(r=>r.accept!=null && (r.n_notes||0) > 0);
   if (withAcc.length >= 2) {
     const worst = withAcc.reduce((a,b)=>a.accept<=b.accept?a:b);
     _setInsight('ins-compare',
