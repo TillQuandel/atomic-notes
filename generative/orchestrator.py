@@ -1342,26 +1342,75 @@ def run_stage8_eval(
     return eval_results, evaluated_count, reused_count
 
 
-def _auto_version_bump() -> None:
-    """Erhöht AGENT_VERSION Patch wenn sich Pipeline-Code seit letztem Run geändert hat."""
+def _iter_raw_version_strings():
+    """Roh-Versions-Strings aller bekannten Stempel-Senken (#191): pipeline_runs-DB,
+    quality_history*.jsonl (inkl. Archiv-Dateien) und Baseline-Log-Dateinamen.
+    Jede Quelle fail-safe — eine fehlende/kaputte Senke darf den Bump nicht stoppen."""
+    import re as _re
+
+    try:
+        from generative import db as _db
+
+        for r in _db.query_pipeline_runs():
+            yield str(r.get("pipeline_version") or "")
+    except Exception:
+        pass
+    try:
+        from generative.config import QUALITY_HISTORY
+
+        for f in QUALITY_HISTORY.parent.glob("quality_history*.jsonl"):
+            text = f.read_text(encoding="utf-8", errors="replace")
+            yield from _re.findall(r'"(?:pipeline_)?version":\s*"([^"]+)"', text)
+        for f in (QUALITY_HISTORY.parent / "eval" / "baseline").glob("*.log"):
+            m = _re.search(r"_(v[\d.]+)(?:_run\d+)?\.log$", f.name)
+            if m:
+                yield m.group(1)
+    except Exception:
+        pass
+
+
+def _known_pipeline_versions() -> set[str]:
+    """Alle je gestempelten generativen Pipeline-Versionen — Basis für den
+    kollisionssicheren Bump. Filtert extraktive Versionen und Nicht-Versions-Junk."""
+    import re as _re
+
+    return {v for v in _iter_raw_version_strings() if _re.fullmatch(r"v\d+\.\d+\.\d+", v)}
+
+
+def _auto_version_bump(base_dir: Path | None = None) -> None:
+    """Erhöht AGENT_VERSION wenn sich Pipeline-Code seit letztem Run geändert hat.
+
+    Neue Version = Patch+1 der MAXIMAL bekannten Version (config, State,
+    DB/History/Logs via `_known_pipeline_versions`) statt config+1 — verwaiste
+    WIP-Branch-Stempel (v0.3.141/142-Vorfall, #191) werden nie wiederverwendet.
+    `base_dir` nur für Tests; Default ist das echte Paket-Verzeichnis.
+    """
     import hashlib
     import json as _json
     import re as _re
 
-    state_file = Path(__file__).parent / ".cache" / "pipeline_state.json"
+    global AGENT_VERSION
+
+    if base_dir is None:
+        base_dir = Path(__file__).parent
+    state_file = base_dir / ".cache" / "pipeline_state.json"
     state_file.parent.mkdir(parents=True, exist_ok=True)
 
     # Hash aller relevanten Python-Dateien
-    tracked_dirs = [
-        Path(__file__).parent / "agents",
-        Path(__file__).parent / "pipeline",
-        Path(__file__),  # orchestrator.py selbst
-        Path(__file__).parent / "config.py",
+    tracked = [
+        base_dir / "agents",
+        base_dir / "pipeline",
+        base_dir / "orchestrator.py",
+        base_dir / "config.py",
     ]
-    h = hashlib.md5()
-    for p in sorted(f for d in tracked_dirs for f in ([d] if d.is_file() else d.rglob("*.py")) if f.is_file()):
-        h.update(p.read_bytes())
-    current_hash = h.hexdigest()
+
+    def _tracked_hash() -> str:
+        h = hashlib.md5()
+        for p in sorted(f for d in tracked for f in ([d] if d.is_file() else d.rglob("*.py")) if f.is_file()):
+            h.update(p.read_bytes())
+        return h.hexdigest()
+
+    current_hash = _tracked_hash()
 
     state = {}
     if state_file.exists():
@@ -1373,22 +1422,31 @@ def _auto_version_bump() -> None:
     if state.get("code_hash") == current_hash:
         return  # Kein Bump nötig
 
-    # Patch-Version erhöhen
-    cfg_path = Path(__file__).parent / "config.py"
+    cfg_path = base_dir / "config.py"
     cfg_text = cfg_path.read_text(encoding="utf-8")
     m = _re.search(r'AGENT_VERSION\s*=\s*"v(\d+)\.(\d+)\.(\d+)"', cfg_text)
     if m:
-        major, minor, patch = int(m.group(1)), int(m.group(2)), int(m.group(3))
-        new_ver = f"v{major}.{minor}.{patch + 1}"
+        candidates = {f"v{m.group(1)}.{m.group(2)}.{m.group(3)}", str(state.get("last_version") or "")}
+        candidates |= _known_pipeline_versions()
+        candidates = {v for v in candidates if _re.fullmatch(r"v\d+\.\d+\.\d+", v)}
+        base = max(candidates, key=lambda v: tuple(int(x) for x in v[1:].split(".")))
+        bmaj, bmin, bpatch = (int(x) for x in base[1:].split("."))
+        new_ver = f"v{bmaj}.{bmin}.{bpatch + 1}"
         cfg_path.write_text(
             cfg_text.replace(m.group(0), f'AGENT_VERSION = "{new_ver}"'),
             encoding="utf-8",
         )
-        # AGENT_VERSION im laufenden Prozess aktualisieren
+        # AGENT_VERSION im laufenden Prozess aktualisieren — config-Attribut UND
+        # das from-Import-Global dieses Moduls, sonst stempelt der laufende Run
+        # (DB, Stage-8-Eval, quality_history) weiter die alte Version (#191).
         from generative import config as _cfg
 
         _cfg.AGENT_VERSION = new_ver
+        AGENT_VERSION = new_ver
         print(f"  [version] Code geändert → {new_ver}")
+        # Post-Bump-Hash speichern: der Bump selbst ändert config.py — mit dem
+        # Prä-Bump-Hash würde JEDER folgende Lauf erneut bumpen.
+        current_hash = _tracked_hash()
     else:
         new_ver = AGENT_VERSION
 

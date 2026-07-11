@@ -135,6 +135,33 @@ def _latest_version(ver_map: dict) -> str:
     return sorted(ver_map.keys(), key=_ver_sort_key)[-1]
 
 
+def _current_version(quality_rows: list[dict], current: str | None = None) -> str | None:
+    """„Aktuelle" Pipeline-Version für die KPI-Kacheln (#191).
+
+    Anker ist die installierte Code-Version (config.AGENT_VERSION). Höchste
+    Nummer und jüngster Timestamp taugen beide nicht als Kriterium: verwaiste
+    WIP-Branch-Zeilen im geteilten `.cache` tragen höhere Nummern als master
+    (v0.3.141/142-Vorfall), Re-Evals alter Notes schreiben alte Versionen mit
+    frischem Timestamp. Fallback, wenn zur Code-Version (noch) keine Zeilen
+    existieren (frisch gebumpt): zeitlich jüngste generative Version mit Daten.
+    """
+    if current is None:
+        try:
+            from generative.config import AGENT_VERSION as current
+        except Exception:
+            current = None
+
+    def _ver(r: dict) -> str:
+        return r.get("version") or r.get("pipeline_version") or ""
+
+    gen_rows = [r for r in quality_rows if _ver(r) and not is_foss_version(_ver(r))]
+    if not gen_rows:
+        return None
+    if current and any(_ver(r) == current for r in gen_rows):
+        return current
+    return _ver(max(gen_rows, key=lambda r: r.get("timestamp") or ""))
+
+
 def _median(lst: list[float]) -> float:
     # statistics.median (interpoliert) — muss zur kpi_trend-Berechnung im
     # Server passen, sonst zeigen KPI-Karte und Sparkline verschiedene Werte.
@@ -394,17 +421,11 @@ def _calc_kpis(
     all_log_runs: list[dict],
     quality_rows: list[dict],
     token_runs: list[dict],
+    current_version: str | None = None,
 ) -> dict:
-    # KPIs = neueste Pipeline-Version, nicht Durchschnitt aller Versionen
-    all_pvers = sorted(
-        {
-            r.get("version") or r.get("pipeline_version") or ""
-            for r in quality_rows
-            if r.get("version") or r.get("pipeline_version")
-        },
-        key=_ver_sort_key,
-    )
-    latest_pver = all_pvers[-1] if all_pvers else None
+    # KPIs = aktuelle Pipeline-Version (config-verankert, #191), nicht höchste
+    # Nummer und nicht Durchschnitt aller Versionen
+    latest_pver = _current_version(quality_rows, current=current_version)
     latest_qrows = (
         [r for r in quality_rows if (r.get("version") or r.get("pipeline_version")) == latest_pver]
         if latest_pver
