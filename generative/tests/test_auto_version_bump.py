@@ -87,3 +87,24 @@ def test_known_versions_filters_junk(monkeypatch):
         lambda: iter(["v0.3.142", "extractive-v0.2.0", "", "unfug", "v0.3.140"]),
     )
     assert orchestrator._known_pipeline_versions() == {"v0.3.142", "v0.3.140"}
+
+
+def test_raw_version_collector_reads_real_artifacts(monkeypatch, tmp_path):
+    # Integrationstest (Codex-Fund PR-192-Review): der Sammler liest DB,
+    # quality_history*.jsonl (inkl. Archiv) und Baseline-Log-Namen wirklich.
+    from generative import config as _cfg
+    from generative import db as _db
+
+    history = tmp_path / "quality_history.jsonl"
+    history.write_text('{"version": "v0.3.140", "note": "a"}\n', encoding="utf-8")
+    (tmp_path / "quality_history_archive.jsonl").write_text(
+        '{"pipeline_version": "v0.3.142", "note": "b"}\n', encoding="utf-8"
+    )
+    log_dir = tmp_path / "eval" / "baseline"
+    log_dir.mkdir(parents=True)
+    (log_dir / "bates_v0.3.99_run2.log").write_text("", encoding="utf-8")
+
+    monkeypatch.setattr(_cfg, "QUALITY_HISTORY", history)
+    monkeypatch.setattr(_db, "query_pipeline_runs", lambda: [{"pipeline_version": "v0.3.130"}])
+
+    assert orchestrator._known_pipeline_versions() == {"v0.3.140", "v0.3.142", "v0.3.99", "v0.3.130"}

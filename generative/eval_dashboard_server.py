@@ -722,8 +722,12 @@ def build_data(
         "all_pvers": _all_pvers_opts,
         "all_pdfs": _all_pdfs_opts,
         "agent_stats": _read_agent_stats(
+            # pipeline_version gehört in die Bedingung (Codex-Fund, #191/PR-192-Review):
+            # token_runs sind oben auf die gewählte Version gefiltert — ohne sie hier
+            # zeigte das Agent-Panel bei explizitem Versions-Filter weiter die
+            # config-aktuelle Version.
             allowed_run_ids={tr.get("run_id") for tr in token_runs if tr.get("run_id")}
-            if (pdf or model or language)
+            if (pdf or model or language or pipeline_version)
             else None
         ),
         "calibration": _read_calibration_data(
