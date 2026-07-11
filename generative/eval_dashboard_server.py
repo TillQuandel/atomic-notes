@@ -94,9 +94,28 @@ def _is_llm_call_record(r: dict) -> bool:
     return "model" in r
 
 
+def _current_db_version(db_runs: list[dict], current: str | None = None) -> str | None:
+    """„Aktuelle" Pipeline-Version für die Agent-Stats (#191) — DB-Pendant zu
+    `eval_dashboard._current_version`: config-verankert statt höchster Nummer
+    (verwaiste WIP-Branch-Runs kaperten sonst die Anzeige), Zeit-Fallback wenn
+    zur Code-Version (noch) keine Runs existieren."""
+    if current is None:
+        try:
+            from generative.config import AGENT_VERSION as current
+        except Exception:
+            current = None
+    gen_runs = [r for r in db_runs if r.get("pipeline_version") and not D.is_foss_version(r["pipeline_version"])]
+    if not gen_runs:
+        return None
+    if current and any(r["pipeline_version"] == current for r in gen_runs):
+        return current
+    return max(gen_runs, key=lambda r: r.get("timestamp") or "")["pipeline_version"]
+
+
 def _read_agent_stats(allowed_run_ids: set | None = None) -> dict:
     """Aggregiert Token- und Dauer-Statistiken je Agent aus runs/*.jsonl.
-    Nur Runs der aktuellen (höchsten) Pipeline-Version werden berücksichtigt.
+    Nur Runs der aktuellen Pipeline-Version werden berücksichtigt
+    (config-verankert, #191).
     """
     from collections import defaultdict
 
@@ -120,17 +139,8 @@ def _read_agent_stats(allowed_run_ids: set | None = None) -> dict:
         from generative import db as _db_ag
 
         db_runs = _db_ag.query_pipeline_runs()
-        if db_runs:
-            import re as _re
-
-            latest_ver = sorted(
-                {
-                    r["pipeline_version"]
-                    for r in db_runs
-                    if r.get("pipeline_version") and not r["pipeline_version"].startswith("extractive-")
-                },
-                key=lambda v: [int(x) for x in _re.findall(r"\d+", v)],
-            )[-1]
+        latest_ver = _current_db_version(db_runs)
+        if latest_ver:
             allowed_ids = {r["run_id"] for r in db_runs if r.get("pipeline_version") == latest_ver}
         else:
             allowed_ids = None
@@ -712,8 +722,12 @@ def build_data(
         "all_pvers": _all_pvers_opts,
         "all_pdfs": _all_pdfs_opts,
         "agent_stats": _read_agent_stats(
+            # pipeline_version gehört in die Bedingung (Codex-Fund, #191/PR-192-Review):
+            # token_runs sind oben auf die gewählte Version gefiltert — ohne sie hier
+            # zeigte das Agent-Panel bei explizitem Versions-Filter weiter die
+            # config-aktuelle Version.
             allowed_run_ids={tr.get("run_id") for tr in token_runs if tr.get("run_id")}
-            if (pdf or model or language)
+            if (pdf or model or language or pipeline_version)
             else None
         ),
         "calibration": _read_calibration_data(

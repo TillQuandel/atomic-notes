@@ -57,12 +57,14 @@ def test_pooled_mixed_rows_fall_back_to_mean():
 
 
 def test_avg_hall_pooled_on_latest_version():
+    # current_version explizit: seit #191 ist die KPI-Version config-verankert,
+    # nicht mehr höchste Nummer — der Test prüft weiterhin nur das Pooling.
     rows = [
-        _qrow("v0.3.140", 0.5, 2, 1),  # alte Version, darf nicht einfließen
+        _qrow("v0.3.140", 0.5, 2, 1),  # andere Version, darf nicht einfließen
         _qrow("v0.3.141", 0.0, 17, 0),
         _qrow("v0.3.141", 0.083, 12, 1),
     ]
-    kpis = _calc_kpis({}, [], rows, [])
+    kpis = _calc_kpis({}, [], rows, [], current_version="v0.3.141")
     # nur v0.3.141: gepoolt = 1/29 = 3.4 %
     assert kpis["avg_hall"] == 3.4
 
@@ -70,7 +72,7 @@ def test_avg_hall_pooled_on_latest_version():
 def test_avg_hall_not_zero_on_zero_inflated_fallback():
     # Regressions-Wächter für den Original-Bug: Median wäre 0, darf es nicht sein.
     rows = [_qrow("v0.3.141", x) for x in (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.083)]
-    kpis = _calc_kpis({}, [], rows, [])
+    kpis = _calc_kpis({}, [], rows, [], current_version="v0.3.141")
     assert kpis["avg_hall"] == 1.2
 
 
@@ -80,7 +82,7 @@ def test_avg_hall_ignores_sentinel_negative_in_fallback():
         _qrow("v0.3.141", 0.10),
         _qrow("v0.3.141", 0.0),
     ]
-    kpis = _calc_kpis({}, [], rows, [])
+    kpis = _calc_kpis({}, [], rows, [], current_version="v0.3.141")
     assert kpis["avg_hall"] == 5.0
 
 
