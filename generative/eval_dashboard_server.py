@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import webbrowser
 from datetime import datetime
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -110,6 +111,41 @@ def _current_db_version(db_runs: list[dict], current: str | None = None) -> str 
     if current and any(r["pipeline_version"] == current for r in gen_runs):
         return current
     return max(gen_runs, key=lambda r: r.get("timestamp") or "")["pipeline_version"]
+
+
+def _run_options(db_runs: list[dict], limit: int = 15) -> list[dict]:
+    """Dropdown-Optionen für den Lauf-Filter (#211): jüngste Runs zuerst.
+
+    Label: „TT.MM. HH:MM · <PDF> · <Version>" — der oberste Eintrag ist der
+    letzte Durchlauf. Runs ohne run_id (Alt-Daten) sind nicht filterbar und
+    fallen raus.
+    """
+    runs = sorted(
+        (r for r in db_runs if r.get("run_id")),
+        key=lambda r: r.get("timestamp") or "",
+        reverse=True,
+    )[:limit]
+    opts = []
+    for r in runs:
+        # Zeit bevorzugt aus der run_id (lokale STARTzeit, Format
+        # YYYYMMDD-HHMMSS — konsistent mit Trace-Dateinamen); der
+        # DB-timestamp ist UTC vom Lauf-Ende und würde verwirren.
+        rid = str(r["run_id"])
+        if re.fullmatch(r"\d{8}-\d{6}", rid):
+            ts_label = f"{rid[6:8]}.{rid[4:6]}. {rid[9:11]}:{rid[11:13]}"
+        else:
+            ts = str(r.get("timestamp") or "")
+            ts_label = f"{ts[8:10]}.{ts[5:7]}. {ts[11:16]}" if len(ts) >= 16 else ts
+        pdf = str(r.get("pdf_label") or r.get("pdf_source") or "?").removesuffix(".pdf")
+        if len(pdf) > 30:
+            pdf = pdf[:28] + "…"
+        opts.append(
+            {
+                "id": r["run_id"],
+                "label": f"{ts_label} · {pdf} · {r.get('pipeline_version') or '?'}",
+            }
+        )
+    return opts
 
 
 def _cache_pct_prompt_based(input_tokens: int, cache_r: int, cache_c: int) -> float:
@@ -344,11 +380,13 @@ def build_data(
     language: str | None = None,
     model: str | None = None,
     pdf: str | None = None,
+    run: str | None = None,
 ) -> dict:
     """Baut alle Chart-Daten aus SQLite (note_evals) + Log-Files (runs).
 
     eval_version:      wenn None → neueste verfuegbare Version
     pipeline_version:  wenn None → alle Versionen
+    run:               run_id — nur diesen Pipeline-Lauf zeigen (#211)
     """
     from generative import db as _db
 
@@ -384,6 +422,8 @@ def build_data(
         # quality_rows.pdf driftet über Namensräume (Volltitel/Kebab-Key, #202)
         # → Slug-Matching statt rohem startswith
         quality_rows = [r for r in quality_rows if D._pdf_matches(pdf, r.get("pdf"))]
+    if run:
+        quality_rows = [r for r in quality_rows if r.get("run_id") == run]
 
     all_log_runs = D._read_all_log_runs()
     token_runs = D._read_token_runs()
@@ -484,6 +524,8 @@ def build_data(
         # pdf_label driftet über Pipeline-Versionen (Volltitel → "Bates" →
         # "bates-2017", #202): rohes startswith matchte nur die Alt-Versionen.
         token_runs = [tr for tr in token_runs if D._pdf_matches(pdf, tr.get("pdf_label"))]
+    if run:
+        token_runs = [tr for tr in token_runs if tr.get("run_id") == run]
 
     # run_ids der gefilterten token_runs → quality_rows auf selbe Runs einschränken
     # Wenn Filter aktiv aber keine run_ids matchen → quality_rows leeren (nicht überspringen)
@@ -530,7 +572,7 @@ def build_data(
     # foss nur im ungefilterten Default-View ausblenden — sobald ein Modell-/
     # Versions-Filter aktiv ist, bleibt foss einsehbar (#36, gleiche Bedingung
     # wie der foss-Ausschluss aus quality_rows/all_log_runs unten).
-    _exclude_foss = not (model or pipeline_version)
+    _exclude_foss = not (model or pipeline_version or run)
 
     # PDF-Dropdown: aus den Eval-Daten der aktiven eval_version statt aus
     # all_log_runs — so erscheinen nur PDFs mit echten Daten im View (sonst
@@ -552,6 +594,8 @@ def build_data(
         _pver_rows = [r for r in _pver_rows if r.get("language") == language]
     if pdf:
         _pver_rows = [r for r in _pver_rows if D._pdf_matches(pdf, r.get("pdf"))]
+    if run:
+        _pver_rows = [r for r in _pver_rows if r.get("run_id") == run]
     _pver_counts: dict[str, int] = {}
     for r in _pver_rows:
         pv = r.get("version") or r.get("pipeline_version")
@@ -577,6 +621,11 @@ def build_data(
         # label UND key prüfen — Log-Keys ("bates---2017---…") und Labels
         # driften unabhängig voneinander (#202).
         all_log_runs = [r for r in all_log_runs if D._pdf_matches(pdf, r.get("label"), r.get("key"))]
+        log_data = D._build_log_data(all_log_runs)
+    if run:
+        # Log-Runs ohne run_id (reine .log-Altbestände) sind einem Lauf nicht
+        # zuordenbar und fallen beim Lauf-Filter ehrlich raus (#211).
+        all_log_runs = [r for r in all_log_runs if r.get("run_id") == run]
         log_data = D._build_log_data(all_log_runs)
     if language:
         # pdf_label → sprache aus token_runs (nach language-Filter bereits korrekt gefiltert).
@@ -732,6 +781,14 @@ def build_data(
         m: D.version_delta(kpi_trend, m) for m in ("hall", "cov", "n", "accept", "dur", "tokens", "cost")
     }
 
+    # ── Lauf-Dropdown-Optionen (#211): immer ungefiltert, jüngste zuerst ──
+    try:
+        from generative import db as _db_runs
+
+        _all_runs_opts = _run_options(_db_runs.query_pipeline_runs())
+    except Exception:
+        _all_runs_opts = []
+
     # ── Warnungen (#196 P1): Waisen-Versionen + JSONL-Fallback ──────
     try:
         from generative import config as _cfg
@@ -768,18 +825,19 @@ def build_data(
         "all_models": _all_models_opts,
         "all_pvers": _all_pvers_opts,
         "all_pdfs": _all_pdfs_opts,
+        "all_runs": _all_runs_opts,
         "agent_stats": _read_agent_stats(
             # pipeline_version gehört in die Bedingung (Codex-Fund, #191/PR-192-Review):
             # token_runs sind oben auf die gewählte Version gefiltert — ohne sie hier
             # zeigte das Agent-Panel bei explizitem Versions-Filter weiter die
             # config-aktuelle Version.
             allowed_run_ids={tr.get("run_id") for tr in token_runs if tr.get("run_id")}
-            if (pdf or model or language or pipeline_version)
+            if (pdf or model or language or pipeline_version or run)
             else None
         ),
         "calibration": _read_calibration_data(
             allowed_note_paths={r.get("note_path") or r.get("note") for r in quality_rows}
-            if (pdf or language or model or pipeline_version)
+            if (pdf or language or model or pipeline_version or run)
             else None,
             eval_version=eval_version or "4.1",
         ),
@@ -1129,8 +1187,11 @@ class Handler(BaseHTTPRequestHandler):
             lang = params.get("language", [None])[0]
             mdl = params.get("model", [None])[0]
             pdf_f = params.get("pdf", [None])[0]
+            run_f = params.get("run", [None])[0]
             try:
-                data = build_data(eval_version=eval_ver, pipeline_version=pver, language=lang, model=mdl, pdf=pdf_f)
+                data = build_data(
+                    eval_version=eval_ver, pipeline_version=pver, language=lang, model=mdl, pdf=pdf_f, run=run_f
+                )
                 body = json.dumps(data, ensure_ascii=False).encode("utf-8")
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json; charset=utf-8")

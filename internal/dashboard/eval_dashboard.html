@@ -614,6 +614,12 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
       </select>
     </div>
     <div class="filter-group">
+      <span class="filter-label">Lauf</span>
+      <select class="fselect" id="global-run" onchange="onGlobalFilterChange()" title="Einzelnen Pipeline-Lauf isolieren — oberster Eintrag = letzter Durchlauf">
+        <option value="__all__">Alle</option>
+      </select>
+    </div>
+    <div class="filter-group">
       <span class="filter-label">PDF</span>
       <select class="fselect" id="global-pdf" onchange="onGlobalFilterChange()">
         <option value="__all__">Alle</option>
@@ -995,7 +1001,7 @@ _mqlDark.addEventListener('change', () => { if (_themeMode === 'system') applyTh
 applyTheme();
 
 /* ── Globale Filter ───────────────────────────────────────────── */
-let _globalFilters = { pver: '__all__', pdf: '__all__', lang: '__all__', model: '__all__' };
+let _globalFilters = { pver: '__all__', pdf: '__all__', lang: '__all__', model: '__all__', run: '__all__' };
 // Gesamtzahl der Items im Scatter-Tooltip VOR dem Filter — für die „+n weitere"-Fußzeile (#204)
 let _ch2TipTotal = 0;
 
@@ -1037,6 +1043,15 @@ function _initGlobalModelFilter(models) {
     'model');
 }
 
+function _initGlobalRunFilter(runs) {
+  // #211: Lauf-Dropdown — jüngster Run oben („letzter Durchlauf").
+  const sel = document.getElementById('global-run'); if (!sel) return;
+  _rebuildFilterSelect(sel, runs.map(r => r.id).join(','),
+    `<option value="__all__">Alle</option>` + runs.map(r =>
+      `<option value="${_escHTML(r.id)}">${_escHTML(r.label)}</option>`).join(''),
+    'run');
+}
+
 function _escHTML(s) {
   return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
 }
@@ -1044,7 +1059,7 @@ function _escHTML(s) {
 function _renderFilterBadges() {
   const container = document.getElementById('filter-badges');
   if (!container) return;
-  const labels = { pver: 'Version', pdf: 'PDF', lang: 'Sprache', model: 'Modell' };
+  const labels = { pver: 'Version', pdf: 'PDF', lang: 'Sprache', model: 'Modell', run: 'Lauf' };
   const active = Object.entries(_globalFilters)
     .filter(([k, v]) => v && v !== '__all__' && labels[k]);
   container.innerHTML = active.map(([k, v]) =>
@@ -1060,7 +1075,7 @@ function _renderFilterBadges() {
 
 window._clearFilter = function(key) {
   _globalFilters[key] = '__all__';
-  const idMap = { pver: 'global-pver', pdf: 'global-pdf', lang: 'global-lang', model: 'global-model' };
+  const idMap = { pver: 'global-pver', pdf: 'global-pdf', lang: 'global-lang', model: 'global-model', run: 'global-run' };
   const sel = document.getElementById(idMap[key]);
   if (sel) sel.value = '__all__';
   _calibShowAll = false;
@@ -1073,10 +1088,12 @@ function onGlobalFilterChange() {
   const selPdf  = document.getElementById('global-pdf');
   const selLang  = document.getElementById('global-lang');
   const selModel = document.getElementById('global-model');
+  const selRun   = document.getElementById('global-run');
   _globalFilters.pver  = selPver  ? selPver.value  : '__all__';
   _globalFilters.pdf   = selPdf   ? selPdf.value   : '__all__';
   _globalFilters.lang  = selLang  ? selLang.value  : '__all__';
   _globalFilters.model = selModel ? selModel.value : '__all__';
+  _globalFilters.run   = selRun   ? selRun.value   : '__all__';
   // Tabellen-Toggle nur bei Filter-AKTIONEN zurücksetzen (nicht beim
   // 15s-Refresh-Render — der würde die Nutzer-Wahl alle 15s verwerfen)
   _calibShowAll = false;
@@ -1960,6 +1977,7 @@ function _renderWithData(d) {
   if (d.all_pdfs?.length)    _initGlobalPdfFilter(d.all_pdfs);
   if (d.all_langs?.length)   _initGlobalLangFilter(d.all_langs);
   if (d.all_models?.length)  _initGlobalModelFilter(d.all_models);
+  if (d.all_runs?.length)    _initGlobalRunFilter(d.all_runs);
   const sfTime=document.getElementById('sf-time'); if(sfTime) sfTime.textContent=d.generated_at||'–';
   const footTime=document.getElementById('foot-time'); if(footTime) footTime.textContent=d.generated_at||'–';
   const updated=document.getElementById('updated-at'); if(updated) updated.textContent='aktualisiert '+(d.generated_at||'–').slice(11);
@@ -2012,8 +2030,8 @@ function renderWarnings(w) {
 }
 
 window.resetAllFilters = function() {
-  _globalFilters = { pver: '__all__', pdf: '__all__', lang: '__all__', model: '__all__' };
-  ['global-pver','global-pdf','global-lang','global-model'].forEach(id => {
+  _globalFilters = { pver: '__all__', pdf: '__all__', lang: '__all__', model: '__all__', run: '__all__' };
+  ['global-pver','global-pdf','global-lang','global-model','global-run'].forEach(id => {
     const sel = document.getElementById(id); if (sel) sel.value = '__all__';
   });
   _calibShowAll = false;
@@ -2031,6 +2049,7 @@ async function loadAndRender() {
     if (_globalFilters.model && _globalFilters.model !== '__all__') p.set('model',             _globalFilters.model);
     if (_globalFilters.pdf   && _globalFilters.pdf   !== '__all__') p.set('pdf',               _globalFilters.pdf);
     if (_globalFilters.pver  && _globalFilters.pver  !== '__all__') p.set('pipeline_version',  _globalFilters.pver);
+    if (_globalFilters.run   && _globalFilters.run   !== '__all__') p.set('run',               _globalFilters.run);
     const url = '/data.json' + (p.toString() ? '?' + p.toString() : '');
     const data = await fetch(url).then(r=>r.json());
     // Antwort eines inzwischen überholten Requests nicht mehr rendern
