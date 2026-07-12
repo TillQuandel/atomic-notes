@@ -299,6 +299,21 @@ def _pdf_matches(filter_value: str | None, *candidates: str | None) -> bool:
     return False
 
 
+def _pdf_group_key(raw: str | None) -> str:
+    """Kanonischer Gruppen-Schlüssel für eine PDF-Quelle (SSoT mit dem PDF-Filter/
+    -Dropdown, #202/#194).
+
+    Autor-Jahr-Slug: `_pdf_slug(_pdf_filter_key(...))`. Kollabiert Volltitel
+    („Bates - 2017 - Information Behavior.pdf") und Kebab-Variante („bates-2017")
+    derselben Quelle auf denselben Schlüssel „bates-2017", hält aber verschiedene
+    Jahre getrennt (Beutelspacher 2014 vs. 2022) — anders als der reine
+    Segment-Präfix-Vergleich (`_pdf_matches`), der eine Autor-Variante
+    transitiv über zwei Jahrgänge brücken würde. Kebab-Keys ohne „ - "-Struktur
+    (Log-Namensraum, z. B. „test-short") bleiben vollständig erhalten.
+    """
+    return _pdf_slug(_pdf_filter_key(str(raw or "").replace(".pdf", "").strip()))
+
+
 def _dedupe_pdf_options(labels) -> list[str]:
     """PDF-Dropdown-Optionen: Volltitel („Autor - Jahr - Titel") behalten, aber
     pro Quelle nur einmal — den vollständigsten Eintrag. Gruppiert wird auf
@@ -313,7 +328,7 @@ def _dedupe_pdf_options(labels) -> list[str]:
         clean = raw.replace(".pdf", "").strip()
         if not clean:
             continue
-        k = _pdf_slug(_pdf_filter_key(clean))
+        k = _pdf_group_key(clean)
         if k not in by_key or len(clean) > len(by_key[k]):
             by_key[k] = clean
     keys = sorted(by_key)
@@ -541,6 +556,18 @@ def _calc_kpis(
     cur_dur_h = round(sum(r["duration_min"] for r in latest_truns) / 60, 1)
     cur_cost_usd = round(sum(r.get("cost_usd", 0.0) or 0.0 for r in latest_truns), 4)
 
+    # PDF-Zahl: distinct kanonische Quellen (SSoT mit der per-PDF-Tabelle, #194).
+    # `len(log_data)` zählte pdf_key-Varianten mehrfach (bates/bates-2017/
+    # bates---2017 = 3) UND verpasste Quellen, die nur in quality_rows stehen
+    # (Hertzum/Kaletski). Union aus Eval- und Routing-only-Quellen.
+    _eval_gk = {_pdf_group_key(r["pdf"]) for r in quality_rows if r.get("pdf")}
+    _log_gk = {
+        _pdf_group_key(lr.get("label") or lr.get("key"))
+        for lr in all_log_runs
+        if not any(_pdf_matches(gk, lr.get("label"), lr.get("key")) for gk in _eval_gk)
+    }
+    n_canonical_pdfs = len(_eval_gk | _log_gk)
+
     return {
         "avg_accept": avg_accept,
         "avg_hall": avg_hall,
@@ -551,9 +578,13 @@ def _calc_kpis(
         # abweichen, wenn (noch) keine Eval-Rows zur neuesten Version existieren
         "kpi_accept_ver": accept_ver,
         "kpi_version": latest_pver,
-        "n_notes": len(latest_qrows),
+        # distinct Notes, nicht Eval-Instanzen (#194 #4): Re-Evals derselben Note
+        # blähten die Zahl auf (50 Instanzen / 39 Notes) und gewichteten die
+        # Poolung implizit nach Testlauf-Häufigkeit. Fehlt ein Note-Identifier
+        # (synthetische Rows), zählt der Laufindex jede Zeile einzeln.
+        "n_notes": len({r.get("note_path") or r.get("note") or i for i, r in enumerate(latest_qrows)}),
         "total_runs": len(all_log_runs),
-        "n_pdfs": len(log_data),
+        "n_pdfs": n_canonical_pdfs,
         "n_versions": len(all_versions),
         "versions_range": f"{all_versions[0]}–{all_versions[-1]}"
         if len(all_versions) > 1
@@ -570,59 +601,155 @@ def _calc_kpis(
     }
 
 
+def _row_version(r: dict) -> str:
+    return r.get("version") or r.get("pipeline_version") or ""
+
+
+def _newest_capped_version(versions: list[str], current: str | None) -> str | None:
+    """Neueste Version, die nicht NEUER als die Config-Version ist (#191);
+    fällt auf die neueste vorhandene zurück, wenn ALLE Versionen Orphans sind
+    (statt None wie `_capped_latest_version` — die Zeile soll sichtbar bleiben).
+    `versions` muss per `_ver_sort_key` sortiert sein."""
+    return _capped_latest_version(versions, current) or (versions[-1] if versions else None)
+
+
+def _accept_from_runs(runs: list[dict], prefer_ver: str | None, current: str | None) -> tuple:
+    """Akzeptanz (gepoolt Σvault/Σtotal) aus den Routing-Runs einer Quelle.
+
+    `accept` stammt aus pipeline_runs/log — einer ANDEREN Quelle als hall/cov
+    (note_evals trägt keine acceptance_status). Bevorzugt die Eval-Version der
+    Zeile (`prefer_ver`), damit alle Kennzahlen auf derselben Version stehen;
+    fehlt sie in den Runs, die neueste (gekappte) Routing-Version. Gibt
+    (accept, accept_ver, accept_n) zurück; accept_ver kann von der Eval-Version
+    abweichen und wird darum getrennt ausgewiesen.
+    """
+    if not runs:
+        return None, None, 0
+    vers = sorted({r["ver"] for r in runs if r.get("ver")}, key=_ver_sort_key)
+    av = prefer_ver if (prefer_ver and prefer_ver in vers) else _newest_capped_version(vers, current)
+    at = [r for r in runs if r.get("ver") == av]
+    tot = sum(r.get("n_total", 0) or 0 for r in at)
+    vault = sum(r.get("n_vault", 0) or 0 for r in at)
+    accept = round(vault / tot * 100, 1) if tot else None
+    return accept, av, len(at)
+
+
 def _calc_pdf_table(
     log_data: dict[str, dict[str, list[float]]],
     all_log_runs: list[dict],
     quality_rows: list[dict],
+    current_version: str | None = None,
 ) -> list[dict]:
+    """Eine Zeile je kanonischer Quell-PDF, EINE Datengrundlage (#194).
+
+    Zuvor mischte jede Zeile drei Quellen: version/accept aus den Routing-Logs,
+    hall/cov über ALLE Versionen gepoolt (Substring-Match), n_notes =
+    Eval-Instanzen. Ergebnis: Bates-Dreifachzeilen (pdf_key-Drift), fehlende
+    PDFs (nur in quality_rows) und version-gemischte Kennzahlen.
+
+    Jetzt: kanonische Gruppierung (`_pdf_group_key`, SSoT mit dem PDF-Filter),
+    Iteration über die Union aus Eval- und Routing-Quelle, hall/cov/n_notes aus
+    GENAU der neuesten Eval-Version der Quelle (gekappt gegen die Config-Version,
+    #191), n_notes = distinct Notes. accept kommt weiterhin aus dem Routing
+    (getrennt via accept_ver/accept_n ausgewiesen).
+    """
+    if current_version is None:
+        try:
+            from generative.config import AGENT_VERSION as current_version
+        except Exception:
+            current_version = None
+
+    # ── Eval-Gruppen (Primärquelle) ──
+    eval_groups: dict[str, list[dict]] = {}
+    for r in quality_rows:
+        if r.get("pdf"):
+            eval_groups.setdefault(_pdf_group_key(r["pdf"]), []).append(r)
+    group_keys = list(eval_groups)
+
+    # ── Routing-Runs an Eval-Gruppen anhängen (für accept); Rest = Routing-only ──
+    # Jeder Run genau EINER Gruppe zuordnen (längster, also spezifischster Match),
+    # damit ein Autor-Kurzkey nicht in zwei Jahrgangs-Gruppen doppelt zählt.
+    log_by_group: dict[str, list[dict]] = {}
+    log_only: dict[str, list[dict]] = {}
+    for lr in all_log_runs:
+        matched = [gk for gk in group_keys if _pdf_matches(gk, lr.get("label"), lr.get("key"))]
+        if matched:
+            log_by_group.setdefault(max(matched, key=len), []).append(lr)
+        else:
+            log_only.setdefault(_pdf_group_key(lr.get("label") or lr.get("key")), []).append(lr)
+
+    def _label_for(group_key: str, qrows: list[dict], fallback: str) -> str:
+        if group_key in _PDF_LABELS:
+            return _PDF_LABELS[group_key]
+        pdfs = [r.get("pdf") for r in qrows if r.get("pdf")]
+        return _pdf_short_name(max(pdfs, key=len)) if pdfs else _PDF_LABELS.get(fallback, fallback)
+
+    def _words_for(runs: list[dict]) -> int | None:
+        vals = [r["words"] for r in runs if r.get("words")]
+        return int(_median(vals)) if vals else None
+
     rows = []
-    for key in sorted(log_data):
-        ver_map = log_data[key]
-        if not ver_map:
-            continue
-        latest = _latest_version(ver_map)
-        accept = _median(ver_map[latest])
-        label = _PDF_LABELS.get(key, key)
-        pdf_runs = [r for r in all_log_runs if r["key"] == key]
-        words_list = [r["words"] for r in pdf_runs if r["words"]]
-        pages_list = [r["pages"] for r in pdf_runs if r["pages"]]
-        words = _median(words_list) if words_list else None
-        pages = _median(pages_list) if pages_list else None
-        pdf_qrows = [r for r in quality_rows if key.lower() in (r.get("pdf") or "").lower()]
-        _hall_vals = [
-            r["hallucination_rate"]
-            for r in pdf_qrows
-            if r.get("hallucination_rate") is not None and r["hallucination_rate"] >= 0
-        ]
-        hall = round(statistics.mean(_hall_vals) * 100, 1) if _hall_vals else None
-        _cov_vals = [v for r in pdf_qrows if (v := r.get("coverage_factual") or r.get("coverage_rate", -1)) >= 0]
-        cov = round(statistics.mean(_cov_vals) * 100, 1) if _cov_vals else None
+    # 1) Gruppen mit Eval-Daten
+    for gk in sorted(eval_groups):
+        qrows = eval_groups[gk]
+        vers = sorted({_row_version(r) for r in qrows if _row_version(r)}, key=_ver_sort_key)
+        ver = _newest_capped_version(vers, current_version)
+        at = [r for r in qrows if _row_version(r) == ver]
+        n_notes = len({r.get("note_path") or r.get("note") or i for i, r in enumerate(at)})
+        hall = _pooled_hall_pct(at)
+        cov_vals = [v for r in at if (v := r.get("coverage_factual") or r.get("coverage_rate")) is not None and v >= 0]
+        cov = round(_median(cov_vals) * 100, 1) if cov_vals else None
+        runs = log_by_group.get(gk, [])
+        accept, accept_ver, accept_n = _accept_from_runs(runs, ver, current_version)
         rows.append(
             {
-                "key": key,
-                "label": label,
-                "version": latest,
+                "key": gk,
+                "label": _label_for(gk, qrows, gk),
+                "version": ver,
                 "accept": accept,
+                "accept_ver": accept_ver,
+                "accept_n": accept_n,
                 "hall": hall,
                 "cov": cov,
-                "n_notes": len(pdf_qrows),
-                "words": int(words) if words else None,
-                "pages": int(pages) if pages else None,
+                "n_notes": n_notes,
+                "words": _words_for(runs),
+            }
+        )
+    # 2) Routing-only-Quellen (Union): Akzeptanz vorhanden, keine Eval-Daten
+    for gk in sorted(log_only):
+        runs = log_only[gk]
+        accept, accept_ver, accept_n = _accept_from_runs(runs, None, current_version)
+        label = _PDF_LABELS.get(gk) or next((r.get("label") for r in runs if r.get("label")), gk)
+        rows.append(
+            {
+                "key": gk,
+                "label": label,
+                "version": accept_ver,
+                "accept": accept,
+                "accept_ver": accept_ver,
+                "accept_n": accept_n,
+                "hall": None,
+                "cov": None,
+                "n_notes": 0,
+                "words": _words_for(runs),
             }
         )
     return rows
 
 
-def _chart_acceptance(log_data: dict) -> dict:
-    labels, values, colors = [], [], []
-    for key in sorted(log_data):
-        vm = log_data[key]
-        if not vm:
+def _chart_acceptance(pdf_rows: list[dict]) -> dict:
+    """Akzeptanz-Balken aus den kanonischen per-PDF-Zeilen (SSoT mit der Tabelle,
+    #194). Trägt `n` (distinct Eval-Notes je Balken), damit der ins-quality-
+    Streifen „0 % von n Notes" von „0 Notes" unterscheiden kann."""
+    labels, values, colors, n = [], [], [], []
+    for r in pdf_rows:
+        if r.get("accept") is None:
             continue
-        labels.append(_PDF_LABELS.get(key, key))
-        values.append(_median(vm[_latest_version(vm)]))
-        colors.append(_pdf_color(key))
-    return {"labels": labels, "values": values, "colors": colors}
+        labels.append(r.get("label") or r.get("key"))
+        values.append(r["accept"])
+        colors.append(_pdf_color(r.get("key", "")))
+        n.append(r.get("n_notes", 0) or 0)
+    return {"labels": labels, "values": values, "colors": colors, "n": n}
 
 
 def _chart_scatter(quality_rows: list[dict]) -> dict:
@@ -2265,7 +2392,7 @@ def main() -> None:
 
     kpis = _calc_kpis(log_data, all_log_runs, quality_rows, token_runs)
     pdf_table_rows = _calc_pdf_table(log_data, all_log_runs, quality_rows)
-    accept_chart = _chart_acceptance(log_data)
+    accept_chart = _chart_acceptance(pdf_table_rows)
     scatter_chart = _chart_scatter(quality_rows)
     long_chart = _chart_longitudinal(log_data)
     token_chart = _chart_tokens(token_runs)

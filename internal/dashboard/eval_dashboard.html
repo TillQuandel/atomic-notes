@@ -837,12 +837,12 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
       <table class="cmp" id="cmp-table">
         <thead><tr>
           <th style="width:28px"></th>
-          <th>Quell-PDF</th><th>Version</th>
-          <th class="num">Wörter</th><th class="num">Seiten</th>
-          <th>Akzeptiert</th><th>Fehlerquote</th>
+          <th>Quell-PDF</th><th>Version (Eval)</th>
+          <th class="num">Wörter</th>
+          <th>Akzeptiert (Routing)</th><th>Fehlerquote</th>
           <th>Belegrate</th><th class="num">Notes</th>
         </tr></thead>
-        <tbody id="cmp-body"><tr><td colspan="9" style="padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Wird geladen…</td></tr></tbody>
+        <tbody id="cmp-body"><tr><td colspan="8" style="padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Wird geladen…</td></tr></tbody>
       </table>
     </div>
   </section>
@@ -1433,13 +1433,15 @@ function renderTable(rows, thresh) {
   document.getElementById('cmp-body').innerHTML = rows.map(r => {
     const w = r.words ? Number(r.words).toLocaleString('de-DE') : '—';
     const ac = r.accept != null;
+    // Akzeptanz stammt aus dem Routing (pipeline_runs), NICHT aus note_evals —
+    // n der Läufe ausweisen; abweichende Routing-Version getrennt zeigen (#194).
+    const accN = ac ? ` <span class="dim" style="font-size:10px">n=${r.accept_n||0}${(r.accept_ver&&r.accept_ver!==r.version)?' · '+r.accept_ver:''}</span>` : '';
     return `<tr>
       <td style="width:28px"></td>
       <td class="pdf">${r.label||r.key}</td>
-      <td><span class="v-tag${r.version===latest?' cur':''}">${r.version||'–'}</span></td>
+      <td><span class="v-tag${r.version===latest?' cur':''}" title="Neueste Pipeline-Version mit Eval-Daten für dieses PDF">${r.version||'–'}</span></td>
       <td class="num dim">${w}</td>
-      <td class="num dim">${r.pages||'—'}</td>
-      <td>${ac?`<span class="acc-bar"><span class="track"><span class="fill" style="width:${r.accept}%;background:${accColor(r.accept)}"></span></span><span class="pct" style="color:${accColor(r.accept)}">${_fmtDE(r.accept)}%</span></span>`:'—'}</td>
+      <td title="Akzeptanzrate aus dem Routing (pipeline_runs) — andere Datenquelle als Fehlerquote/Belegrate (note_evals). Gepoolt über n Läufe.">${ac?`<span class="acc-bar"><span class="track"><span class="fill" style="width:${r.accept}%;background:${accColor(r.accept)}"></span></span><span class="pct" style="color:${accColor(r.accept)}">${_fmtDE(r.accept)}%</span></span>${accN}`:'—'}</td>
       <td class="${r.hall!=null?(r.hall<=T.hall[0]?'good-t':r.hall>=T.hall[1]?'bad-t':'warn-t'):''}">${r.hall!=null?_fmtDE(r.hall)+'%':'—'}</td>
       <td class="${r.cov!=null?(r.cov>=T.cov[0]?'good-t':r.cov<=T.cov[1]?'bad-t':'warn-t'):''}">${r.cov!=null?_fmtDE(r.cov)+'%':'—'}</td>
       <td class="num dim">${r.n_notes||'—'}</td>
@@ -1878,7 +1880,10 @@ function renderInsights(d) {
   // Qualität: Spannweite der Akzeptanz über PDFs
   const acc = d.accept || {};
   if ((acc.labels||[]).length >= 2) {
-    const pairs = acc.labels.map((l,i)=>({l, v:acc.values[i]})).filter(p=>p.v!=null);
+    // Nur PDFs mit ≥1 evaluierter Note: „0 % von n Notes" ist im Datensatz
+    // sonst nicht von „0 Notes" (Routing-only-Key) unterscheidbar (#194).
+    const pairs = acc.labels.map((l,i)=>({l, v:acc.values[i], n:(acc.n||[])[i]||0}))
+      .filter(p=>p.v!=null && p.n > 0);
     if (pairs.length >= 2) {
       const lo = pairs.reduce((a,b)=>a.v<=b.v?a:b), hi = pairs.reduce((a,b)=>a.v>=b.v?a:b);
       _setInsight('ins-quality',
