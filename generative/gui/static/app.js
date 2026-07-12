@@ -55,9 +55,16 @@ function buildRunSummaryText(stageCount, summary) {
 // und GUI dieselbe Ursache gleich benennen. `count=null` (Log-Zeile aus
 // irgendeinem Grund nicht angekommen/geparst) faellt auf eine Zahl-freie
 // Formulierung zurueck statt eine falsche Zahl zu erfinden (Prinzip 1).
-function buildExtractorLossText(count) {
+// Runde-2-Fund (Opus-Review): rc=3 kann auch mit 0 geschriebenen Notes
+// auftreten (orchestrator.py Early-Return `if not drafts:` bei nicht-leeren
+// extractor_failures -- alle Konzepte verloren). "Notes trotzdem geschrieben"
+// waere dann falsch. `writtenCount` kommt aus der echten /api/outputs-Antwort
+// (loadOutputs(), nicht aus dem geparsten Log) -- 0 dort ist die robusteste
+// verfuegbare Evidenz, ob wirklich nichts geschrieben wurde.
+function buildExtractorLossText(count, writtenCount) {
   const detail = count !== null ? `${count} Konzept(en)` : "einzelne Konzepte";
-  return `Teilverlust: ${detail} beim Extrahieren verloren (Timeout/CLI-Fehler, auch nach Retry) — Notes trotzdem geschrieben.`;
+  const suffix = writtenCount === 0 ? "keine Notes geschrieben" : "Notes trotzdem geschrieben";
+  return `Teilverlust: ${detail} beim Extrahieren verloren (Timeout/CLI-Fehler, auch nach Retry) — ${suffix}.`;
 }
 
 function renderStepper() {
@@ -306,10 +313,13 @@ function addExportCard(item) {
   $("exports-list").appendChild(li);
 }
 
+// Rueckgabe: Anzahl geladener Output-Items, oder `null` wenn der Abruf
+// scheiterte (kein verlaesslicher Schriftbeleg -- Aufrufer soll dann nicht
+// von 0 geschriebenen Notes ausgehen, s. buildExtractorLossText).
 async function loadOutputs() {
   try {
     const r = await fetch("/api/outputs");
-    if (!r.ok) return;
+    if (!r.ok) return null;
     const { items, dry_run, exports } = await r.json();
     $("results-h").textContent = dry_run ? "Vorschau-Ergebnisse (nichts im Vault geschrieben)" : "Ergebnisse";
     $("results-section").hidden = false;
@@ -322,7 +332,8 @@ async function loadOutputs() {
     $("exports-section").hidden = !hasExports;
     $("exports-list").innerHTML = "";
     for (const item of exports || []) addExportCard(item);
-  } catch { }
+    return items.length;
+  } catch { return null; }
 }
 
 // --- Verlauf (P4: GET /api/runs, read-only Ergebnis-Sektion) --------------
@@ -377,7 +388,7 @@ function addHistoryEntry(record) {
   // im Verlauf denselben Namen wie im Live-Log statt der generischen
   // "Fehlercode N"-Formulierung -- war schon vorher `warn` (nicht `bad`)
   // eingefaerbt, nur der Text nannte den Grund nicht (Fable-Review-Fund).
-  const rcLabel = !rcKnown ? "abgebrochen/Fehler" : rcOk ? "erfolgreich" : record.rc === 3 ? "Teilverlust (Timeout)" : `Fehlercode ${record.rc}`;
+  const rcLabel = !rcKnown ? "abgebrochen/Fehler" : rcOk ? "erfolgreich" : record.rc === 3 ? "Teilverlust (Timeout/CLI-Fehler)" : `Fehlercode ${record.rc}`;
   const notesCount = (record.notes || []).length;
   // P5: Zeit/Tokens nur zeigen, wenn der Lauf ein run_summary-Event hatte
   // (kein Erfinden bei aelteren/gecrashten Records ohne diese Felder, L5).
@@ -486,17 +497,23 @@ function startStream() {
       // (Fable-Kontrollreview-Fund, Design-Maxime 1: erkennen -> klar melden,
       // kein Fehlalarm).
       setStage(99); renderRunSummaryLine();
-      if (rc === 3) {
-        const msg = buildExtractorLossText(extractorLossCount);
-        logLine(`⚠ ${msg}`);
-        showBanner(msg);
-      } else {
-        logLine("● Lauf beendet.");
-      }
       // P8: Fokus-Sprung erst NACH dem Laden/Sichtbarwerden der Ergebnis-
       // Sektion, und bei erfolgreichem ODER teilerfolgreichem (rc=3) Lauf --
       // ein harter Fehler (anderer rc) kommuniziert weiterhin nur Banner/Stepper.
-      loadOutputs().then(() => $("results-h").focus());
+      if (rc === 3) {
+        // Runde-2-Fund: Banner-Wortlaut erst NACH loadOutputs() entscheiden --
+        // der geschriebene Notes-Count (nicht der geparste Verlust-Count) ist
+        // die einzige verlaessliche Evidenz, ob "trotzdem geschrieben" stimmt.
+        loadOutputs().then((writtenCount) => {
+          const msg = buildExtractorLossText(extractorLossCount, writtenCount);
+          logLine(`⚠ ${msg}`);
+          showBanner(msg);
+          $("results-h").focus();
+        });
+      } else {
+        logLine("● Lauf beendet.");
+        loadOutputs().then(() => $("results-h").focus());
+      }
     }
     else { markStageError(activeStage); logLine(`✗ Lauf mit Fehlercode ${rc} beendet.`); }
     loadHistory();
