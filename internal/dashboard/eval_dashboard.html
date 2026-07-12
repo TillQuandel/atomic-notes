@@ -19,9 +19,13 @@
   --ink-4: #7e92a6; --ink-5: #3d4f60;
   --amber: #e8b53b; --coral: #e07a5f; --mint: #6dbf8c;
   --teal: #5bbfbf; --violet: #8a86c8;
-  /* Encoding-Ramp: 3 Akzent-Hues (Coral/Teal/Amber) + gedeckte Varianten */
-  --enc-1: #e07a5f; --enc-2: #5bbfbf; --enc-3: #e8b53b;
-  --enc-4: #ad8275; --enc-5: #6f9b9b; --enc-6: #b39a64;
+  /* Encoding-Ramp: 3 Akzent-Hues (Violet/Teal/Amber) + gedeckte Varianten.
+     Coral raus (#204 P4): Coral == Ampel-Bad-Farbe, dieselbe Kachel-Farbe
+     lief nebenan gleichzeitig als 1. PDF-Serienfarbe (Scatter) UND 1.
+     Agent-Farbe (Balken) — "Rot dreifach belegt". Violet ersetzt Coral 1:1
+     in der kategorialen Ramp, Ampel-Coral bleibt unveraendert semantisch. */
+  --enc-1: #8a86c8; --enc-2: #5bbfbf; --enc-3: #e8b53b;
+  --enc-4: #8a89a7; --enc-5: #6f9b9b; --enc-6: #b39a64;
   --hair: rgba(255,255,255,.06); --hair-strong: rgba(255,255,255,.10);
   --tint-mint: rgba(109,191,140,.10); --tint-coral: rgba(224,122,95,.10);
   --tint-amber: rgba(232,181,59,.12);
@@ -36,8 +40,9 @@ body.light {
   --ink-4: #6b6b6b; --ink-5: #cccccc;
   --amber: #855900; --coral: #a8391e; --mint: #1e7a45;
   --teal: #2e7575; --violet: #5a55a3;
-  --enc-1: #a8391e; --enc-2: #2e7575; --enc-3: #855900;
-  --enc-4: #7c5347; --enc-5: #4f7373; --enc-6: #6f5d34;
+  /* siehe :root — Encoding-Ramp ohne Ampel-Coral, Violet statt Coral (#204 P4) */
+  --enc-1: #5a55a3; --enc-2: #2e7575; --enc-3: #855900;
+  --enc-4: #6d6b89; --enc-5: #4f7373; --enc-6: #6f5d34;
   --hair: rgba(0,0,0,.08); --hair-strong: rgba(0,0,0,.16);
   --tint-mint: rgba(30,122,69,.10); --tint-coral: rgba(168,57,30,.08);
   --tint-amber: rgba(133,89,0,.10);
@@ -186,6 +191,11 @@ body.collapsed .theme-toggle { padding: 6px; }
   font-family: var(--f-mono); font-size: 12px; color: var(--ink-1);
   cursor: pointer; transition: border-color .15s; appearance: none;
   min-width: 60px; max-width: 200px;
+  /* #204 P8h: lange PDF-Titel wurden im geschlossenen nativen Select hart
+     abgeschnitten, ohne Ellipsis-Hinweis dass Text fehlt. CSS-Fix soweit
+     mit nativem <select> moeglich (Custom-Dropdown waere Overkill fuer
+     dieses Low-Prio-Detail) — Browser-Support siehe PR-Body. */
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6'><path fill='none' stroke='%23566779' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round' d='M1 1l4 4 4-4'/></svg>");
   background-repeat: no-repeat;
   background-position: right 8px center;
@@ -263,6 +273,10 @@ body.collapsed .theme-toggle { padding: 6px; }
 .kpi:hover { background: var(--bg-elev); }
 .kpi:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
 .kpi.open { background: var(--bg-elev); }
+/* #204 P8g: Kachel ohne eigene Klick-Sparkline (Duplikat entfernt) soll nicht
+   wie ein Button aussehen, der etwas oeffnet. */
+.kpi.no-spark { cursor: default; }
+.kpi.no-spark:hover { background: none; }
 .kpi .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .kpi .lbl { font-family: var(--f-mono); font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .12em; }
 .kpi .value-row { display: flex; align-items: baseline; gap: 4px; margin-top: 2px; }
@@ -490,6 +504,12 @@ table.cmp td.dim { color: var(--ink-3); }
   animation: shimmer 1.4s linear infinite;
 }
 
+/* #204 P8a: dezentes Feedback bei Filterwechsel/Refresh — der volle
+   Shimmer-Skeleton (.loading, oben) ist fuer den Erst-Load gedacht (Chart
+   existiert noch nicht); hier bleibt der ALTE Inhalt sichtbar, nur gedimmt,
+   damit ein Fetch nicht wie ein leerer Blackout wirkt. */
+.main.refreshing { opacity: .55; transition: opacity .15s ease; pointer-events: none; }
+
 /* ── Leer-Zustände ─────────────────────────────────────────────── */
 .chart-empty {
   position: absolute; inset: 0; display: flex; flex-direction: column;
@@ -675,7 +695,10 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
   <section class="section" id="s-quality">
     <div class="sec-head">
       <span class="sec-name">Qualität</span>
-      <span class="sec-right">Fehlerquote + Belegrate nach Version</span>
+      <!-- #204 P8f: Untertitel nannte "nach Version" — keiner der beiden
+           Charts dieser Sektion ist ein Versions-Chart (ch1 = je PDF,
+           ch2 = je einzelner Note); Text korrigiert. -->
+      <span class="sec-right">Akzeptanzrate je PDF + Fehlerquote/Belegrate je Note</span>
     </div>
     <p class="insight" id="ins-quality"></p>
     <div class="row">
@@ -708,7 +731,9 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     <div class="row">
       <div class="panel">
         <div class="p-head">
-          <div><div class="p-title">Token-Verbrauch pro Run</div><div class="p-sub">Input / Output / Cache gestapelt.</div></div>
+          <!-- #204 P5: Titel war "... pro Run", Achse zeigt aber Pipeline-Versionen
+               (Summe je Version) — Scope korrigiert, keine Struktur-Aenderung. -->
+          <div><div class="p-title">Token-Verbrauch je Version</div><div class="p-sub">Input / Output / Cache gestapelt, summiert je Pipeline-Version.</div></div>
           <div class="p-meta" id="ax5">chronologisch</div>
         </div>
         <div class="chart-body"><canvas id="ch5"></canvas></div>
@@ -716,7 +741,9 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
       </div>
       <div class="panel">
         <div class="p-head">
-          <div><div class="p-title">Laufzeit pro Run</div><div class="p-sub">Trend zeigt Pipeline-Effizienz über Versionen.</div></div>
+          <!-- #204 P5: dito — Achse zeigt Versionen, Wert ist der Median je
+               Version (nicht Einzel-Run-Werte); Titel entsprechend korrigiert. -->
+          <div><div class="p-title">Laufzeit je Version (Median)</div><div class="p-sub">Trend zeigt Pipeline-Effizienz über Versionen.</div></div>
           <div class="p-meta">Minuten</div>
         </div>
         <div class="chart-body"><canvas id="ch6"></canvas></div>
@@ -759,7 +786,10 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     <div class="row">
       <div class="panel">
         <div class="p-head">
-          <div><div class="p-title">Skaliert die Pipeline mit der PDF-Länge?</div><div class="p-sub">Lange Papers erzeugen <strong>nicht</strong> linear mehr Notes. Ältere Versionen <span style="opacity:.4">gedimmt</span>.</div></div>
+          <!-- #204 P8b: Punktgroesse war unerklaert (kleiner = aeltere Version,
+               dasselbe Signal wie die Dimmung) — Text ergaenzt, Struktur/Titel
+               unveraendert (Titel traegt bereits den #219-Hint). -->
+          <div><div class="p-title">Skaliert die Pipeline mit der PDF-Länge?</div><div class="p-sub">Lange Papers erzeugen <strong>nicht</strong> linear mehr Notes. Ältere Versionen kleiner &amp; <span style="opacity:.4">gedimmt</span> dargestellt.</div></div>
           <div class="p-meta">Notes vs. Wörter</div>
         </div>
         <div class="chart-body"><canvas id="ch3"></canvas></div>
@@ -812,8 +842,11 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
           <th>Note</th>
           <th>PDF</th>
           <th class="num">LLM-Fehlerquote</th>
-          <th class="num">Human-Fehlerquote</th>
-          <th class="num">Agreement</th>
+          <!-- #204 P8d: solange 0 Notes human-gelabelt sind, stehen hier nur
+               "–"-Platzhalter; ohne min-width kollabiert die Auto-Tabellen-
+               spalte auf Dash-Breite. -->
+          <th class="num" style="min-width:130px">Human-Fehlerquote</th>
+          <th class="num" style="min-width:100px">Agreement</th>
           <th>Status</th>
         </tr></thead>
         <tbody id="calib-body">
@@ -829,20 +862,22 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
   <section class="section" id="s-compare">
     <div class="sec-head">
       <span class="sec-name">Vergleich nach Quell-PDF</span>
-<!-- Hinweis „aufklappen für Details" entfernt: toggleRow() ist nicht verdrahtet,
-     der Text versprach eine Funktion, die nichts tut (#204 Punkt 7) -->
+<!-- Hinweis „aufklappen für Details" bereits entfernt (Sweep-Fix #205):
+     toggleRow() war nie verdrahtet. Die Funktion selbst + die dafuer
+     reservierte leere Gutter-Spalte (width:28px) sind jetzt ebenfalls
+     entfernt — kein Markup/Caller hat je existiert, halbfertiges Feature
+     ohne erkennbaren Fertigstellungs-Pfad (#204 Punkt 7). -->
     </div>
     <p class="insight" id="ins-compare"></p>
     <div class="table-wrap">
       <table class="cmp" id="cmp-table">
         <thead><tr>
-          <th style="width:28px"></th>
           <th>Quell-PDF</th><th>Version</th>
           <th class="num">Wörter</th><th class="num">Seiten</th>
           <th>Akzeptiert</th><th>Fehlerquote</th>
           <th>Belegrate</th><th class="num">Notes</th>
         </tr></thead>
-        <tbody id="cmp-body"><tr><td colspan="9" style="padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Wird geladen…</td></tr></tbody>
+        <tbody id="cmp-body"><tr><td colspan="8" style="padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Wird geladen…</td></tr></tbody>
       </table>
     </div>
   </section>
@@ -865,7 +900,9 @@ const C = () => ({
   ink1: cssv('--ink-1'), ink2: cssv('--ink-2'), ink3: cssv('--ink-3'),
   ink4: cssv('--ink-4'), ink5: cssv('--ink-5'),
   hair: cssv('--hair'), bg: cssv('--bg'), card: cssv('--bg-card'),
-  // Encoding-Ramp: max. 3 Hues (Coral/Teal/Amber) + gedeckte Varianten
+  // Encoding-Ramp: max. 3 Hues (Violet/Teal/Amber) + gedeckte Varianten —
+  // kein Coral (== Ampel-Bad), sonst kategoriale PDF-/Agent-Farbe dreifach
+  // belegt mit Ampel-Semantik (#204 P4).
   enc: [cssv('--enc-1'), cssv('--enc-2'), cssv('--enc-3'),
         cssv('--enc-4'), cssv('--enc-5'), cssv('--enc-6')],
 });
@@ -1140,7 +1177,11 @@ function renderKpis(kpis, thresh, kpiTrend) {
   const toneColor = (tone) => tone==='good'?t.mint:tone==='bad'?t.coral:tone==='warn'?t.amber:tone==='info'?t.teal:t.ink4;
 
   const kpiDefs = [
-    { id:'kpi-accept', key:'accept', label:'Automatisch akzeptiert', val:kpis.avg_accept, u:'%', digits:1,
+    // #204 P8g: kein onclick-Sparkline mehr — "Automatisch akzeptiert" hat
+    // bereits einen eigenen Versions-Trend-Chart (ch4 "Akzeptanzrate je
+    // Version" in der Trade-off-Sektion); die Klick-Sparkline duplizierte
+    // dieselbe Aussage in einer zweiten, kleineren Darstellung.
+    { id:'kpi-accept', key:'accept', label:'Automatisch akzeptiert', val:kpis.avg_accept, u:'%', digits:1, sparkless:true,
       tone: kpis.avg_accept!=null?(kpis.avg_accept>=T.accept[0]?'good':kpis.avg_accept<=T.accept[1]?'bad':'warn'):'neutral',
       tgt: kpis.avg_accept!=null?(kpis.avg_accept>=T.accept[0]?'Ziel erreicht':`Ziel ≥ ${T.accept[0]} %`):'–' },
     { id:'kpi-hall', key:'hall', label:'Fehlerquote', val:kpis.avg_hall, u:'%', digits:1,
@@ -1151,7 +1192,11 @@ function renderKpis(kpis, thresh, kpiTrend) {
       tgt: kpis.avg_cov!=null?(kpis.avg_cov>=T.cov[0]?'Ziel erreicht':`Ziel ≥ ${T.cov[0]} %`):'–' },
     { id:'kpi-n', key:'n', label:'Evaluierte Notes', val:kpis.n_notes, u:'', digits:0,
       tone:'info', tgt: kpis.total_generated ? `${_fmtDE(100*kpis.n_notes/kpis.total_generated)} % der Notes` : '–' },
-    { id:'kpi-dur',    key:'dur',    label:'Laufzeit',       val:kpis.cur_dur_h??kpis.total_dur_h,   u:'h', digits:1, tone:'neutral', tgt:'' },
+    // #204 P5: "Laufzeit" ohne Scope war eine von vier unterscheidbaren
+    // Kennzahlen gleichen Namens (Kachel = aktuelle Version kumuliert, Strip-
+    // Zelle = Lifetime, Kosten-Chart = Median je Version, Agenten-Chart =
+    // kumuliert je Agent) — Kachel-Label pruezisiert.
+    { id:'kpi-dur',    key:'dur',    label:'Laufzeit (aktuell)', val:kpis.cur_dur_h??kpis.total_dur_h,   u:'h', digits:1, tone:'neutral', tgt:'' },
     { id:'kpi-tokens', key:'tokens', label:'Pipeline-Tokens', val:(kpis.cur_tokens??kpis.total_tokens)?Math.round((kpis.cur_tokens??kpis.total_tokens)/1e6*100)/100:null, u:'M', digits:2, tone:'neutral', tgt:'' },
     { id:'kpi-cost', key:'cost', label:'API-Kosten',
       val: (kpis.cur_cost_usd > 0) ? kpis.cur_cost_usd : null,
@@ -1166,8 +1211,16 @@ function renderKpis(kpis, thresh, kpiTrend) {
     const nBase = kd.key === 'accept' ? (kpis?.kpi_accept_n ?? null) : nNotes;
     const showN = nBase != null && ['hall','cov','accept'].includes(kd.key);
     const nWarn = showN && nBase < 20;
+    // #204 P8e: Akzeptanz-n kommt aus Log-Runs (generierte Notes), Fehlerquote/
+    // Belegrate-n aus evaluierten Notes — beide n stehen nebeneinander in
+    // derselben Kachelreihe und koennen sich unterscheiden (z. B. n=64 vs
+    // n=52), ohne dass das ohne Kennzeichnung als Fehler wirkt.
+    const nDiffers = kd.key === 'accept' && nNotes != null && nBase != null && nBase !== nNotes;
+    const nTitle = nWarn
+      ? 'n<20 — Ziel-Marker ausgeblendet'
+      : (nDiffers ? `Andere Stichprobenbasis als Fehlerquote/Belegrate (dort n=${nNotes}) — Akzeptanz zaehlt generierte Notes, die anderen nur evaluierte.` : '');
     const nTag = showN
-      ? `<span class="kpi-n${nWarn?' warn-n':''}" title="${nWarn?'n<20 — Ziel-Marker ausgeblendet':''}">(n=${nBase})</span>`
+      ? `<span class="kpi-n${nWarn?' warn-n':''}" title="${nTitle}">(n=${nBase}${nDiffers?'*':''})</span>`
       : '';
     // #204 P3: Delta-Chip vs. Vorversion an den Qualitäts-Kacheln — Semantik
     // wie das Spark-Delta (server-berechnet, N-Guard); bei n<20 ausgegraut
@@ -1182,7 +1235,8 @@ function renderKpis(kpis, thresh, kpiTrend) {
       const chipTitle = `Δ vs. Vorversion${vd.reliable ? '' : ' — n<20, nicht belastbar'}`;
       chip = `<span class="kpi-delta ${cls}" title="${chipTitle}">${arrow} ${_fmtDE(Math.abs(dnum))}</span>`;
     }
-    return `<button type="button" class="kpi ${kd.tone}${_openKpiIdx===i?' open':''}" id="${kd.id}" onclick="_openKpiSpark(${i})" title="Klick: Versions-Trend">
+    const clickAttrs = kd.sparkless ? '' : ` onclick="_openKpiSpark(${i})" title="Klick: Versions-Trend"`;
+    return `<button type="button" class="kpi ${kd.tone}${_openKpiIdx===i?' open':''}${kd.sparkless?' no-spark':''}" id="${kd.id}"${clickAttrs}>
       <div class="top"><span class="lbl">${kd.label}</span>${chip}</div>
       <div class="value-row">
         <span class="v">${kd.val != null ? _fmtDE(kd.val, kd.digits ?? 1) : '–'}</span>
@@ -1357,6 +1411,10 @@ const _toneColor = (tone) => {
 };
 
 window._openKpiSpark = function(idx) {
+  // #204 P8g: defensiver Guard — Kacheln ohne Klick-Affordanz (sparkless)
+  // haben zwar kein onclick mehr, aber falls doch aufgerufen (z. B. stale
+  // Handler), keine Sparkline fuer sie oeffnen.
+  if (_kpiData?._defs?.[idx]?.sparkless) return;
   const row = document.getElementById('spark-row');
   const inner = document.getElementById('spark-inner');
   const wasOpen = _openKpiIdx != null;
@@ -1414,18 +1472,17 @@ function renderStrip(kpis) {
     cell('Direkt Vault', kpis.total_accepted||'–', '', `/ ${pct} %`) +
     cell('Merge-Stubs', kpis.total_merged||0) +
     cell('Dropped', kpis.total_dropped||0) +
-    cell('Tokens', tok, '', kpis.total_dur_h ? kpis.total_dur_h+'h Laufzeit' : '');
+    // #204 P5: "Laufzeit" hier ist Lifetime (alle Versionen) — Scope-Suffix
+    // gegen die Kachel "Laufzeit (aktuell)" oben; Zahl war zudem mit Punkt
+    // statt Komma formatiert (Locale-Fund an derselben Stelle mitgefixt).
+    cell('Tokens', tok, '', kpis.total_dur_h ? `${_fmtDE(kpis.total_dur_h)}h Laufzeit (gesamt)` : '');
 }
 
 /* ── Table ────────────────────────────────────────────────────── */
 let PDF_META = {};
-function toggleRow(btn) {
-  const detail = btn.closest('tr').nextElementSibling;
-  if (!detail || !detail.classList.contains('detail-row')) return;
-  const open = detail.style.display !== 'none';
-  detail.style.display = open ? 'none' : 'table-row';
-  btn.classList.toggle('open', !open);
-}
+// #204 P7: toggleRow() entfernt — nie verdrahtet (kein Caller, kein
+// .detail-row-Markup), halbfertiges Feature ohne Fortsetzungspfad. Die
+// zugehoerige leere Gutter-Spalte (Header + hier) ist ebenfalls raus.
 function renderTable(rows, thresh) {
   const T = thresh;
   const latest = rows.length ? rows[rows.length-1].version : '';
@@ -1434,7 +1491,6 @@ function renderTable(rows, thresh) {
     const w = r.words ? Number(r.words).toLocaleString('de-DE') : '—';
     const ac = r.accept != null;
     return `<tr>
-      <td style="width:28px"></td>
       <td class="pdf">${r.label||r.key}</td>
       <td><span class="v-tag${r.version===latest?' cur':''}">${r.version||'–'}</span></td>
       <td class="num dim">${w}</td>
@@ -1507,22 +1563,41 @@ function renderCharts(d) {
   // ch3 — Scaling
   if (d.scaling?.points?.length) {
     const keys = d.scaling.keys||[];
+    const keyLabel = (k) => (d.scaling.points.find(p=>p.key===k)||{}).label||k;
+    // #204 P8b: bei ~20 PDFs sind 6 Encoding-Farben mehrfach vergeben und
+    // damit nicht mehr unterscheidbar — Top-N nach Punktzahl + graue
+    // "Weitere"-Sammelserie, gleiches Muster wie im Scatter (ch2, PR 38).
+    const MAX_COLORED_SCALING = 5;
+    let coloredKeys = keys, restKeys = [];
+    if (keys.length > MAX_COLORED_SCALING) {
+      const counts = {};
+      d.scaling.points.forEach(p => counts[p.key] = (counts[p.key]||0)+1);
+      const sorted = [...keys].sort((a,b)=>(counts[b]||0)-(counts[a]||0));
+      coloredKeys = sorted.slice(0, MAX_COLORED_SCALING);
+      restKeys = sorted.slice(MAX_COLORED_SCALING);
+    }
+    const restSet = new Set(restKeys);
+    const swatches = coloredKeys.map((k,i)=>t.enc[i%t.enc.length]);
+    const mkDs = (col, label, pts) => ({
+      label, data: pts.map(p=>({x:p.x,y:p.y,_p:p})),
+      backgroundColor:ctx=>ctx.raw?._p?.recent===false?col+'33':col+'b0',
+      borderColor:ctx=>ctx.raw?._p?.recent===false?col+'55':col,
+      borderWidth:1,pointRadius:ctx=>ctx.raw?._p?.recent===false?3:6,pointHoverRadius:9,
+    });
+    const datasets = coloredKeys.map((k,i)=>mkDs(swatches[i], keyLabel(k), d.scaling.points.filter(p=>p.key===k)));
+    if (restKeys.length) {
+      datasets.push(mkDs(t.ink4, `Weitere (${restKeys.length} PDFs)`, d.scaling.points.filter(p=>restSet.has(p.key))));
+    }
     getOrCreate('ch3',{type:'scatter',
-      data:{datasets:keys.map(k=>{
-        const col=t.enc[keys.indexOf(k)%t.enc.length];
-        return{label:(d.scaling.points.find(p=>p.key===k)||{}).label||k,
-          data:d.scaling.points.filter(p=>p.key===k).map(p=>({x:p.x,y:p.y,_p:p})),
-          backgroundColor:ctx=>ctx.raw?._p?.recent===false?col+'33':col+'b0',
-          borderColor:ctx=>ctx.raw?._p?.recent===false?col+'55':col,
-          borderWidth:1,pointRadius:ctx=>ctx.raw?._p?.recent===false?3:6,pointHoverRadius:9};
-      })},
+      data:{datasets},
       options:{maintainAspectRatio:false,responsive:true,animation:{duration:500},
         plugins:{legend:legendCfg(),tooltip:{callbacks:{label:ctx=>{const p=ctx.raw._p||{};return [`${p.label} ${p.ver}`,`${(p.x||0).toLocaleString('de-DE')} Wörter · ${p.y} Notes`];}}}},
         scales:{x:axisCfg({min:0,title:{display:true,text:'PDF-Länge (Wörter)',color:t.ink2,font:{size:11}},ticks:{callback:v=>(v/1000).toFixed(0)+'k'}}),
           y:axisCfg({min:0,title:{display:true,text:'Notes pro Run',color:t.ink2,font:{size:11}},ticks:{stepSize:2}})}}
     });
     const l3=document.getElementById('leg3');
-    if(l3) l3.innerHTML=keys.map((k,i)=>{const c=t.enc[i%t.enc.length];const lbl=(d.scaling.points.find(p=>p.key===k)||{}).label||k;return `<span><span class="dot" style="background:${c}"></span>${lbl}</span>`;}).join('');
+    if(l3) l3.innerHTML=coloredKeys.map((k,i)=>`<span><span class="dot" style="background:${swatches[i]}"></span>${keyLabel(k)}</span>`).join('')
+      + (restKeys.length ? `<span><span class="dot" style="background:${t.ink4}"></span>Weitere (${restKeys.length} PDFs)</span>` : '');
   } else {
     setChartEmpty('ch3');
     const l3=document.getElementById('leg3'); if(l3) l3.innerHTML='';
@@ -1555,7 +1630,11 @@ function renderCharts(d) {
         ? t2.enc[_KNOWN.indexOf(ds.color.toLowerCase())] : t2.enc[i % t2.enc.length];
       datasets = d.long.datasets.map((ds,i)=>{
         const col=_encFor(ds,i);
-        return{label:ds.label,data:ds.data,borderColor:col,backgroundColor:col,
+        // #204 P8c: n=1-Punkte (nur ein Run in dieser Version) sind duenn —
+        // ein einzelner 0%-Run sieht sonst wie ein echter Einbruch aus.
+        // Serverseitig jetzt mitgeliefert (_chart_longitudinal), hier ins
+        // Tooltip durchgereicht statt versteckt.
+        return{label:ds.label,data:ds.data,_n:ds.n,_nKind:'run',borderColor:col,backgroundColor:col,
           pointBackgroundColor:t2.card,pointBorderColor:col,pointBorderWidth:2,
           pointRadius:4,pointHoverRadius:7,borderWidth:2,tension:.35,spanGaps:true};
       });
@@ -1566,7 +1645,11 @@ function renderCharts(d) {
       options:{maintainAspectRatio:false,responsive:true,animation:{duration:300},
         plugins:{legend:legendCfg(),tooltip:{callbacks:{label:ctx=>{
           const n=ctx.dataset._n?.[ctx.dataIndex];
-          return `${ctx.dataset.label}: ${ctx.raw} %${n?` · ${n} PDFs`:''}`;}}}},
+          if (!n) return `${ctx.dataset.label}: ${ctx.raw} %`;
+          const suffix = ctx.dataset._nKind === 'run'
+            ? (n===1 ? ' · n=1 Run — duenne Basis' : ` · n=${n} Runs`)
+            : ` · ${n} PDFs`;
+          return `${ctx.dataset.label}: ${ctx.raw} %${suffix}`;}}}},
         scales:{x:axisCfg({ticks:{maxRotation:45,autoSkip:true,maxTicksLimit:20}}),
           y:axisCfg({beginAtZero:true,max:100,ticks:{callback:v=>v+' %',stepSize:25}})}}});
     const l4=document.getElementById('leg4');
@@ -1623,14 +1706,17 @@ function renderCharts(d) {
               : ['','Hybrid: token-freie lokale Pre-Pässe + LLM-Fallback nur','für Anker, die beide Pre-Pässe verfehlen.'];
           }}}},
         scales:{x:axisCfg({ticks:{callback:v=>v>=1000?(v/1000).toFixed(0)+'k':v}}),y:axisCfg({grid:{display:false},ticks:{color:t.ink2,font:{size:12}}})}}});
-    getOrCreate('ch8',{type:'bar',data:{labels:agLabelsN,datasets:[{data:ag.dur_s,backgroundColor:bgC,borderWidth:0,borderRadius:2,barPercentage:.65}]},
+    // #204 P5: Achse nativ in Minuten aufbauen statt in Sekunden mit Anzeige-
+    // Umrechnung — Chart.js waehlt "schoene" Tick-Schritte in der Einheit der
+    // ZUGRUNDELIEGENDEN Daten (vorher Sekunden: 2000er-Schritte, schoen in s,
+    // aber 0/33/67/100min krumm nach der min-Umrechnung). Datenwerte in Minuten
+    // → Chart.js rundet direkt in Minuten (vgl. ch6, das ebenfalls minutennativ
+    // ist und dadurch sauber 20-min-Schritte erzeugt).
+    const agDurMin = (ag.dur_s||[]).map(s=>s/60);
+    getOrCreate('ch8',{type:'bar',data:{labels:agLabelsN,datasets:[{data:agDurMin,backgroundColor:bgC,borderWidth:0,borderRadius:2,barPercentage:.65}]},
       options:{indexAxis:'y',maintainAspectRatio:false,responsive:true,animation:{duration:500},
-        plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const s=ctx.raw;return s>=60?`${_fmtDE(s/60)} min`:`${s} s`;}}}},
-        scales:{x:axisCfg({ticks:{callback:(v,i,ts)=>{
-          // Einheit für ALLE Ticks einheitlich wählen (vorher „0s" neben „33min", #204)
-          const mx = ts?.length ? ts[ts.length-1].value : v;
-          return mx >= 60 ? `${(v/60).toFixed(0)}min` : `${v}s`;
-        }}}),y:axisCfg({grid:{display:false},ticks:{color:t.ink2,font:{size:12}}})}}});
+        plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const m=ctx.raw;return m>=1?`${_fmtDE(m)} min`:`${Math.round(m*60)} s`;}}}},
+        scales:{x:axisCfg({ticks:{callback:v=>v+' min'}}),y:axisCfg({grid:{display:false},ticks:{color:t.ink2,font:{size:12}}})}}});
   } else {
     setChartEmpty('ch7'); setChartEmpty('ch8');
   }
@@ -1788,12 +1874,15 @@ function renderCalibration(calib) {
     return;
   }
 
-  const fmtHall = (v) => v != null
+  // #204 P8d: leere Spalten (Human-Fehlerquote/Agreement) vor dem ersten
+  // Labeln zeigten nur einen nackten Strich, ununterscheidbar von "keine
+  // Daten" wegen Fehler. title erklaert den Grund beim Hover.
+  const fmtHall = (v, emptyTitle) => v != null
     ? `<span class="${v <= 5 ? 'good-t' : v >= 20 ? 'bad-t' : 'warn-t'}">${_fmtDE(v)} %</span>`
-    : '<span class="dash">–</span>';
-  const fmtAgree = (v) => v != null
+    : `<span class="dash"${emptyTitle?` title="${emptyTitle}"`:''}>–</span>`;
+  const fmtAgree = (v, emptyTitle) => v != null
     ? `<span class="${v >= 80 ? 'good-t' : v >= 60 ? 'warn-t' : 'bad-t'}">${_fmtDE(v)} %</span>`
-    : '<span class="dash">–</span>';
+    : `<span class="dash"${emptyTitle?` title="${emptyTitle}"`:''}>–</span>`;
   // Server sortiert als Arbeitsliste (ungelabelt zuerst, hall desc) —
   // die ersten 3 ungelabelten sind die naechsten Label-Kandidaten.
   let nextBadges = 3;
@@ -1817,8 +1906,8 @@ function renderCalibration(calib) {
     <td style="font-family:var(--f-mono);font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_escHTML(r.note)}">${_escHTML(r.note)}</td>
     <td class="dim" style="font-size:12px">${_escHTML((r.pdf||'').split(' - ')[0]||r.pdf||'–')}</td>
     <td class="num">${fmtHall(r.llm_hall)}</td>
-    <td class="num">${fmtHall(r.human_hall)}</td>
-    <td class="num">${fmtAgree(r.agreement)}</td>
+    <td class="num">${fmtHall(r.human_hall, 'Noch nicht human-gelabelt')}</td>
+    <td class="num">${fmtAgree(r.agreement, 'Noch nicht human-gelabelt')}</td>
     <td>${fmtStatus(r.status)}</td>
   </tr>`).join('') + (calib.rows.length > LIMIT ? `<tr><td colspan="6" style="padding:10px;text-align:center">
     <button type="button" class="calib-more" onclick="_toggleCalibRows()">${_calibShowAll ? `Nur Top ${LIMIT} zeigen` : `Alle ${calib.rows.length} anzeigen (${hidden} weitere)`}</button>
@@ -1965,6 +2054,8 @@ function _renderWithData(d) {
   const updated=document.getElementById('updated-at'); if(updated) updated.textContent='aktualisiert '+(d.generated_at||'–').slice(11);
   // Loading-Skeletons entfernen
   document.querySelectorAll('.chart-body.loading').forEach(el=>el.classList.remove('loading'));
+  // #204 P8a: Refresh-Dimmung (Filterwechsel/15s-Poll) wieder aufheben
+  document.querySelector('.main')?.classList.remove('refreshing');
   // Globaler Leer-Hinweis: Filter-Kombination ohne evaluierte Notes
   const banner = document.getElementById('empty-banner');
   const filtersActive = Object.values(_globalFilters).some(v=>v && v!=='__all__');
@@ -2024,6 +2115,11 @@ window.resetAllFilters = function() {
 let _loadSeq = 0;
 async function loadAndRender() {
   const seq = ++_loadSeq;
+  // #204 P8a: Filterwechsel/15s-Poll gaben bisher keinerlei Lade-Feedback —
+  // nur der allererste Boot-Load zeigte den Shimmer-Skeleton (renderSkeleton()
+  // laeuft davor separat). Ab dem 2. Load bestehenden Inhalt dimmen statt
+  // stillschweigend zu warten; _renderWithData hebt das wieder auf.
+  if (window._lastData) document.querySelector('.main')?.classList.add('refreshing');
   try {
     // Eval-Version-Filter entfernt: nie aus URL/State setzen → Server nutzt default (neueste)
     const p = new URLSearchParams();
@@ -2035,7 +2131,10 @@ async function loadAndRender() {
     const data = await fetch(url).then(r=>r.json());
     // Antwort eines inzwischen überholten Requests nicht mehr rendern
     if (seq === _loadSeq) _renderWithData(data);
-  } catch(e) { console.warn('Ladefehler:',e); }
+  } catch(e) {
+    console.warn('Ladefehler:',e);
+    document.querySelector('.main')?.classList.remove('refreshing');
+  }
 }
 
 /* ── Boot (Async-Chart-Init-Pattern) ──────────────────────────── */

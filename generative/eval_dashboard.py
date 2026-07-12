@@ -660,10 +660,15 @@ def _chart_longitudinal(log_data: dict) -> dict:
     for key in sorted(log_data):
         vm = log_data[key]
         data_pts = [_median(vm[v]) if vm.get(v) else None for v in versions]
+        # Anzahl Runs je Punkt (#204 P8c): ein Punkt aus n=1 Run ist duenn —
+        # ein einzelner 0%-Run kann eine ganze Version wie einen Einbruch
+        # aussehen lassen. Client zeigt das im Tooltip statt es zu verstecken.
+        n_pts = [len(vm[v]) if vm.get(v) else 0 for v in versions]
         datasets.append(
             {
                 "label": _PDF_LABELS.get(key, key),
                 "data": data_pts,
+                "n": n_pts,
                 "color": _pdf_color(key),
             }
         )
