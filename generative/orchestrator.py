@@ -240,6 +240,11 @@ async def run_extractors_per_concept(
         ctext = concept_text_window(full_text, search_terms, window_words=400)
         if not ctext.strip():
             print(f"      [skip] '{c.title}' nicht im Volltext gefunden (Halluzinations-Schutz)", file=sys.stderr)
+            # #197 Nachbesserung: bisher stummer Pre-Call-Drop (Konzept nicht im
+            # Volltext) → Funnel-Event. Konfliktfrei zu #216 (das diesen Block nicht anfasst).
+            _trace_stage_outcome(
+                c.title, "extractor", "dropped", drop_reason="empty_extraction", detail="not in fulltext"
+            )
             continue
         tasks.append(_run_with_sem(c, ctext))
         concept_for_idx.append(c.title)
@@ -252,9 +257,17 @@ async def run_extractors_per_concept(
     for i, r in enumerate(results):
         if isinstance(r, Exception):
             print(f"  [WARN] Extractor '{concept_for_idx[i]}' fehlgeschlagen: {r}", file=sys.stderr)
+            # #197 Nachbesserung: harter Call-Ausfall → Funnel-Event. ACHTUNG:
+            # #216 fügt in genau diesem Zweig `failures.append(...)` hinzu — beim
+            # Merge beide Zeilen behalten (semantisch unabhängig).
+            _trace_stage_outcome(
+                concept_for_idx[i], "extractor", "dropped", drop_reason="call_failed", detail=str(r)[:120]
+            )
             failures.append((concept_for_idx[i], str(r)))
         elif r is None:
-            pass  # bereits von run_per_concept als [extractor-empty] geloggt
+            # #197 Nachbesserung: leere Extraktion → Funnel-Event (vorher nur
+            # von run_per_concept als [extractor-empty] auf stderr geloggt).
+            _trace_stage_outcome(concept_for_idx[i], "extractor", "dropped", drop_reason="empty_extraction")
         else:
             r.refine_key = contexts[i][0].title  # plan title als stabiler Fallback-Key (Bug #5)
             drafts.append(r)
@@ -562,6 +575,12 @@ async def entity_resolution(
         merged.refine_key = drafts[members[0]].refine_key  # plan title für concept_map-Lookup erhalten (Bug #5)
         cluster_idx_to_merged[members[0]] = merged
         consumed.update(members[1:])  # nicht-Repräsentanten verwerfen
+        # #197 Nachbesserung: strukturell derselbe Vorgang wie resolve_sibling_dups
+        # (ein Draft verschwindet in einen Survivor) — bekam bisher kein Event.
+        for _k in members[1:]:
+            _trace_stage_outcome(
+                drafts[_k].title, "dedup", "dropped", drop_reason="entity_resolution_merge", detail=merged.title
+            )
         print(f"      [er-stage4] '{merged.title}' ← {[drafts[k].title for k in members]}", file=sys.stderr)
 
     for i, d in enumerate(drafts):
@@ -572,6 +591,43 @@ async def entity_resolution(
         else:
             result.append(d)
     return result
+
+
+# --- #197 Schritt 1: Stage-Outcome-Events an den Gate-Punkten ---------------
+# EIN konsistentes Trace-Event pro Note, das ihren Weg durch die Gates
+# maschinenlesbar macht (Grundlage für den Gate-Funnel, #197 Schritt 3).
+# Ergänzt das bestehende Event-Vokabular (note_outcome/score_result/
+# anchor_stats/plan_stats) um genau eine Klasse — kein zweites Tracing-System,
+# derselbe trace_event()-Pfad. Verifier und Critic tragen ihr per-Note-Urteil
+# bereits via anchor_stats bzw. score_result; dieses Event füllt die bisher
+# stummen Gates: Faithfulness (kein Event) und alle Drop-Klassen (Artifact,
+# Stage-6-Crash, Exact-/Sibling-Dedup), die vorher nur als aggregierte Zähler
+# oder stderr-Prints existierten und aus dem Trace nicht rekonstruierbar waren.
+def _trace_stage_outcome(
+    title: str,
+    stage: str,
+    outcome: str,
+    drop_reason: str | None = None,
+    detail: str | None = None,
+) -> None:
+    """Schreibt ein `stage_outcome`-Event.
+
+    stage: verifier|critic|faithfulness|dedup|artifact|stage6|…
+    outcome: passed|downgraded|dropped|skipped
+    drop_reason: maschinenlesbarer Code (None bei outcome=passed)
+    detail: optionaler menschenlesbarer Zusatz (z.B. Survivor-Titel, step/phase)
+
+    Lazy Import wie die übrigen orchestrator-Trace-Aufrufe; trace_event greift
+    zur Laufzeit auf das aktive Backend zu (tests biegen es auf tmp um).
+    """
+    from generative.agents.base import trace_event as _te
+
+    payload: dict = {"title": title, "stage": stage, "outcome": outcome}
+    if drop_reason is not None:
+        payload["drop_reason"] = drop_reason
+    if detail is not None:
+        payload["detail"] = detail
+    _te("orchestrator", "stage_outcome", payload)
 
 
 # --- Stage-6-Crash-Handling (Issue #17) ------------------------------------
@@ -633,9 +689,34 @@ def _collect_stage6_results(results, failed_dir: Path):
         if isinstance(res, _Stage6Failure):
             write_crash_report(failed_dir, res.payload)
             crashes.append(res)
+            _trace_stage_outcome(
+                res.payload.get("title", "?"),
+                "stage6",
+                "dropped",
+                drop_reason="stage6_crash",
+                detail=f"{res.payload.get('step', '?')}/{res.payload.get('phase', '?')}",
+            )
         elif isinstance(res, BaseException):
-            # Crash außerhalb des guarded Wrappers — defensiv, ohne Payload.
-            print(f"  [WARN] Stage-6 unerwartet fehlgeschlagen (kein Crash-Report): {res}", file=sys.stderr)
+            # Crash außerhalb des guarded Wrappers — defensiv, ohne per-Note-Payload.
+            # #197 Nachbesserung: konsistent zum _Stage6Failure-Zweig instrumentieren —
+            # Crash-Report (statt nur einer stderr-Zeile, damit der Drop diagnostizierbar
+            # bleibt) + stage_outcome-Event (sonst verschwindet die Note lautlos aus dem
+            # Funnel). Ohne Payload bleibt der Titel unbekannt ("?").
+            print(
+                f"  [WARN] Stage-6 unerwartet fehlgeschlagen (BaseException {type(res).__name__}): {res}",
+                file=sys.stderr,
+            )
+            write_crash_report(
+                failed_dir,
+                {
+                    "title": "?",
+                    "step": "stage6",
+                    "phase": _current_phase(),
+                    "exception": f"{type(res).__name__}: {res}",
+                    "traceback": "".join(traceback.format_exception(type(res), res, res.__traceback__)),
+                },
+            )
+            _trace_stage_outcome("?", "stage6", "dropped", drop_reason="stage6_crash", detail=type(res).__name__)
         else:
             idx, d = res
             survived_by_idx[idx] = d
@@ -663,6 +744,15 @@ def _apply_faithfulness_gate(draft: AtomicNoteDraft, page_index: dict | None, ci
             # (realer Hrastinski-E2E 2026-07-05: alle Notes via cross_reference
             # auf extend gedreht, Gate skippte kommentarlos).
             print(f"      [faithfulness] skipped (action={draft.action})")
+            _trace_stage_outcome(
+                draft.title, "faithfulness", "skipped", drop_reason="action_not_create", detail=draft.action
+            )
+        elif ENABLE_FAITHFULNESS_GATE and not page_index and draft.action == "create":
+            # #197 Nachbesserung: Gate aktiv + create-Note, aber leerer page_index
+            # (PDF ohne [S. N]-Marker — dokumentierter Fall). Das Gate kann nicht
+            # greifen; ohne Event wäre dieser Skip im Funnel unsichtbar.
+            print("      [faithfulness] skipped (kein Page-Index)")
+            _trace_stage_outcome(draft.title, "faithfulness", "skipped", drop_reason="no_page_index")
         return
 
     from generative.pipeline.faithfulness_gate import run_faithfulness_gate
@@ -670,6 +760,11 @@ def _apply_faithfulness_gate(draft: AtomicNoteDraft, page_index: dict | None, ci
     gate = run_faithfulness_gate(draft.body, page_index, citation)
     if gate.failed:
         draft.faithfulness_fail = True
+        _trace_stage_outcome(
+            draft.title, "faithfulness", "downgraded", drop_reason="faithfulness_fail", detail=f"{gate.n_failed} failed"
+        )
+    else:
+        _trace_stage_outcome(draft.title, "faithfulness", "passed", detail=f"{gate.n_supported} supported")
     for v in gate.verdicts:
         if v.status.startswith("failed_"):
             e_txt = f" e={v.entailment:.2f}" if v.entailment is not None else ""
@@ -1043,6 +1138,7 @@ def _drop_artifacts(drafts: list[AtomicNoteDraft]) -> list[AtomicNoteDraft]:
         body_lower = (draft.body or "").lower()
         if any(phrase in body_lower for phrase in _ABSENCE_PHRASES):
             dropped.append(draft.title)
+            _trace_stage_outcome(draft.title, "artifact", "dropped", drop_reason="absence_artifact")
         else:
             kept.append(draft)
     if dropped:
@@ -1063,6 +1159,7 @@ def dedup_exact(drafts: list[AtomicNoteDraft], existing_concepts: dict[str, str]
     for d in drafts:
         key = _normalize(d.title)
         if key in seen:
+            _trace_stage_outcome(d.title, "dedup", "dropped", drop_reason="exact_dup")
             continue
         exact_match = existing_concepts.get(d.title.lower().strip())
         if exact_match and d.action == "create":
@@ -1182,6 +1279,7 @@ def resolve_sibling_dups(
                 continue
             d = drafts[m]
             drop_idx.add(m)
+            _trace_stage_outcome(d.title, "dedup", "dropped", drop_reason="sibling_neardup", detail=s.title)
             for alias in [d.title, *d.aliases]:
                 _absorb_alias(alias)
             s.source_anchors.extend(d.source_anchors)
@@ -2237,6 +2335,12 @@ def main(argv: list[str] | None = None):
             print(_line, file=sys.stderr)
         return exit_code
 
+    # #197 Schritt 2: Funnel-Top "nach Planner/Extractor generiert" festhalten,
+    # BEVOR Artifact-/Dedup-/Stage-6-Drops die Liste stutzen. Wird als neues Feld
+    # n_extracted persistiert; n_generated (= geschriebene Notes) bleibt für
+    # Alt-Daten-Vergleichbarkeit unverändert.
+    n_extracted = len(drafts)
+
     # --- Artifact-Detector: Abwesenheits-Noten früh verwerfen (kein LLM-Call) ---
     drafts = _drop_artifacts(drafts)
     if not drafts:
@@ -2600,6 +2704,7 @@ def main(argv: list[str] | None = None):
                     "pdf_key": source_path.stem.split(" - ")[0].strip().lower(),
                     "pdf_label": source_path.stem.split(" - ")[0].strip(),
                     "n_generated": written,
+                    "n_extracted": n_extracted,
                     "n_vault": vault_count,
                     "n_inbox": inbox_count,
                     "n_merge": sum(1 for d in drafts if getattr(d, "action", "") == "extend"),
