@@ -38,6 +38,13 @@ def init_db(path: Path = DB_PATH) -> None:
         conn.execute("ALTER TABLE pipeline_runs ADD COLUMN n_dropped INT DEFAULT 0")
     except sqlite3.OperationalError:
         pass
+    # #197 Schritt 2: n_extracted = "nach Planner/Extractor generiert" (Funnel-Top).
+    # Bewusst additiv — n_generated (= geschriebene Notes) bleibt unangetastet,
+    # damit Alt- und Neu-Zeilen vergleichbar bleiben (keine Migration/Mutation).
+    try:
+        conn.execute("ALTER TABLE pipeline_runs ADD COLUMN n_extracted INT DEFAULT 0")
+    except sqlite3.OperationalError:
+        pass
     try:
         conn.execute("ALTER TABLE pipeline_runs ADD COLUMN n_words INT DEFAULT 0")
     except sqlite3.OperationalError:
@@ -92,21 +99,25 @@ def insert_run(conn: sqlite3.Connection, data: dict) -> None:
 
     data-Keys (alle optional ausser run_id):
       run_id, timestamp, pipeline_version, pdf_source, pdf_key, pdf_label,
-      n_generated, n_vault, n_inbox, n_merge, n_dropped, n_words, model,
-      tokens_total, tokens_input, tokens_output, tokens_cache_read,
+      n_generated, n_extracted, n_vault, n_inbox, n_merge, n_dropped, n_words,
+      model, tokens_total, tokens_input, tokens_output, tokens_cache_read,
       duration_s, eval_version
+
+    n_generated = geschriebene Notes (historische Semantik, unangetastet).
+    n_extracted = "nach Planner/Extractor generiert" (Funnel-Top, #197). Fehlt
+    der Key (Alt-Aufrufer), wird 0 geschrieben — keine NULL, kein Crash.
     """
     data.setdefault("timestamp", datetime.utcnow().isoformat())
     conn.execute(
         """
         INSERT OR REPLACE INTO pipeline_runs
           (run_id, timestamp, pipeline_version, pdf_source, pdf_key, pdf_label,
-           n_generated, n_vault, n_inbox, n_merge, n_dropped, n_words, model,
+           n_generated, n_extracted, n_vault, n_inbox, n_merge, n_dropped, n_words, model,
            cost_usd, tokens_total, tokens_input, tokens_output, tokens_cache_read,
            duration_s, eval_version, fully_cached)
         VALUES
           (:run_id, :timestamp, :pipeline_version, :pdf_source, :pdf_key, :pdf_label,
-           :n_generated, :n_vault, :n_inbox, :n_merge, :n_dropped, :n_words, :model,
+           :n_generated, :n_extracted, :n_vault, :n_inbox, :n_merge, :n_dropped, :n_words, :model,
            :cost_usd, :tokens_total, :tokens_input, :tokens_output, :tokens_cache_read,
            :duration_s, :eval_version, :fully_cached)
     """,
@@ -118,6 +129,7 @@ def insert_run(conn: sqlite3.Connection, data: dict) -> None:
             "pdf_key": data.get("pdf_key"),
             "pdf_label": data.get("pdf_label"),
             "n_generated": data.get("n_generated", 0),
+            "n_extracted": data.get("n_extracted", 0),
             "n_vault": data.get("n_vault", 0),
             "n_inbox": data.get("n_inbox", 0),
             "n_merge": data.get("n_merge", 0),

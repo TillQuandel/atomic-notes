@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     pdf_key           TEXT,
     pdf_label         TEXT,
     n_generated       INT  DEFAULT 0,
+    n_extracted       INT  DEFAULT 0,
     n_vault           INT  DEFAULT 0,
     n_inbox           INT  DEFAULT 0,
     n_merge           INT  DEFAULT 0,
