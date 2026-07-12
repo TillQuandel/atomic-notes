@@ -21,6 +21,46 @@ from generative import db as _db
 from generative.eval_quality_v4 import eval_note, EVAL_VERSION
 
 
+def _eval_insert_data(
+    result: dict,
+    eval_id: str,
+    run_id: str,
+    note_name: str,
+    pipeline_version: str,
+    pdf_name: str,
+) -> dict:
+    """Baut das insert_eval-Dict aus einem eval_note()-Result.
+
+    Konsistent mit dem kanonischen Pipeline-Pfad
+    `eval_quality_v4.save_result()` — inkl. der Anker-Roh-Counts
+    anchors_total/anchors_hallucinated, die das Dashboard für die gepoolte
+    Fehlerquote + Wilson-CI braucht (#196 P4). anchor_rate ist im
+    generativen eval_note()-Result nicht enthalten (Extraktiv-Metrik) und
+    wird — wie in save_result — bewusst nicht geschrieben.
+    """
+    return {
+        "eval_id": eval_id,
+        "run_id": run_id,
+        "note_path": note_name,
+        "acceptance_status": None,
+        "hallucination_rate": result.get("hallucination_rate"),
+        "anchors_total": result.get("anchors_total"),
+        "anchors_hallucinated": result.get("anchors_hallucinated"),
+        "coverage_factual": result.get("coverage_factual"),
+        "coverage_rate": result.get("coverage_rate"),
+        "tokens_total": result.get("tokens_total"),
+        "tokens_input": result.get("tokens_input"),
+        "tokens_output": result.get("tokens_output"),
+        "tokens_cache_read": result.get("tokens_cache_read"),
+        "wall_time_s": result.get("wall_time_s"),
+        "pipeline_version": pipeline_version,
+        "pdf": pdf_name,
+        "language": result.get("language"),
+        "eval_version": EVAL_VERSION,
+        "timestamp": result.get("timestamp"),
+    }
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(description="Post-Processing LLM-Eval (eval_quality_v4) auf generierten Notes")
     ap.add_argument("--run-id", required=True, help="run_id aus pipeline_runs")
@@ -63,25 +103,14 @@ def main() -> None:
             with _db.get_db() as conn:
                 _db.insert_eval(
                     conn,
-                    {
-                        "eval_id": eval_id,
-                        "run_id": args.run_id,
-                        "note_path": note_path.name,
-                        "acceptance_status": None,
-                        "hallucination_rate": result.get("hallucination_rate"),
-                        "coverage_factual": result.get("coverage_factual"),
-                        "coverage_rate": result.get("coverage_rate"),
-                        "tokens_total": result.get("tokens_total"),
-                        "tokens_input": result.get("tokens_input"),
-                        "tokens_output": result.get("tokens_output"),
-                        "tokens_cache_read": result.get("tokens_cache_read"),
-                        "wall_time_s": result.get("wall_time_s"),
-                        "pipeline_version": pipeline_version,
-                        "pdf": pdf_path.name,
-                        "language": result.get("language"),
-                        "eval_version": EVAL_VERSION,
-                        "timestamp": result.get("timestamp"),
-                    },
+                    _eval_insert_data(
+                        result,
+                        eval_id=eval_id,
+                        run_id=args.run_id,
+                        note_name=note_path.name,
+                        pipeline_version=pipeline_version,
+                        pdf_name=pdf_path.name,
+                    ),
                 )
             hall = result.get("hallucination_rate")
             cov = result.get("coverage_factual")

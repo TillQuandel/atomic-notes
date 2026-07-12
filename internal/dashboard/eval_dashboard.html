@@ -216,6 +216,8 @@ body.collapsed .theme-toggle { padding: 6px; }
 .fbadge button:hover { opacity: 1; }
 .kpi-n { display: block; font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); margin-top: 1px; }
 .kpi-n.warn-n { color: var(--amber); }
+/* #196 P4: Wilson-CI-Sub-Info an der Fehlerquote-Kachel */
+.kpi-ci { display: block; font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); margin-top: 1px; }
 /* ── Fokus (Tastatur) ─────────────────────────────────────────── */
 :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; border-radius: 3px; }
 .fselect:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
@@ -1326,6 +1328,13 @@ function renderKpis(kpis, thresh, kpiTrend) {
     const nTag = showN
       ? `<span class="kpi-n hint${nWarn?' warn-n':''}">(n=${nBase}${nDiffers?'*':''})<span class="hint-pop">${nHint}</span></span>`
       : '';
+    // #196 P4: Wilson-CI + Anker-N an der Fehlerquote-Kachel. Nur wenn Roh-Counts
+    // vorliegen (kpis.hall_ci_low != null) — im Mean-Fallback (alte DB-Zeilen ohne
+    // Anker-Zähler) keine CI-Zeile. Cluster-Caveat im Tooltip: Anker sind INNERHALB
+    // einer Note korreliert, das echte CI ist breiter als das gepoolte Binomial-CI.
+    const ciTag = (kd.key === 'hall' && kpis?.hall_ci_low != null)
+      ? `<span class="kpi-ci"><span class="hint">CI ${_fmtDE(kpis.hall_ci_low)}–${_fmtDE(kpis.hall_ci_high)} %${kpis.hall_anchors_total != null ? ` · ${_fmtDE(kpis.hall_anchors_total, 0)} Anker` : ''}<span class="hint-pop">95%-Wilson-Konfidenzintervall der gepoolten Fehlerquote über ${_fmtDE(kpis.hall_anchors_total, 0)} Anker aus ${kpis.hall_rows_n} Eval-Zeilen (${kpis.hall_notes_n} Notes). Vorsicht Cluster-Effekt: Anker innerhalb einer Note sind korreliert — das echte CI ist breiter, die Unsicherheit hier also unterschätzt.</span></span></span>`
+      : '';
     // #204 P3: Delta-Chip vs. Vorversion an den Qualitäts-Kacheln — Semantik
     // wie das Spark-Delta (server-berechnet, N-Guard); bei n<20 ausgegraut
     // statt gefärbt (Rausch-Schutz).
@@ -1336,7 +1345,11 @@ function renderKpis(kpis, thresh, kpiTrend) {
       const lowerIsBetter = kd.key === 'hall';
       const arrow = dnum > 0 ? '↑' : dnum < 0 ? '↓' : '·';
       const cls = !vd.reliable ? 'dim' : dnum === 0 ? '' : ((dnum > 0) === lowerIsBetter ? 'bad' : 'good');
-      const chipHint = `Veränderung gegenüber der direkt vorherigen Pipeline-Version, serverseitig berechnet.${vd.reliable ? '' : ' Erst ab n≥20 in beiden Versionen gilt das Delta als belastbar — hier nicht der Fall.'}`;
+      // #196 P5: Vergleichsbasis ist die letzte frühere Version mit n≥20 (nicht
+      // starr die direkte Vorversion) — im Tooltip transparent benennen, WOGEGEN
+      // verglichen wird, inkl. deren n.
+      const prevRef = vd.prev_version ? `Version ${vd.prev_version}${vd.prev_n != null ? ` (n=${vd.prev_n})` : ''}` : 'der vorherigen Pipeline-Version';
+      const chipHint = `Veränderung gegenüber ${prevRef}, serverseitig berechnet.${vd.reliable ? '' : ' Erst ab n≥20 in beiden Versionen gilt das Delta als belastbar — hier nicht der Fall.'}`;
       chip = `<span class="kpi-delta ${cls} hint">${arrow} ${_fmtDE(Math.abs(dnum))}<span class="hint-pop">${chipHint}</span></span>`;
     }
     // #219-Nachbesserung Punkt 1: kein tabindex auf den 4 Hint-Triggern hier —
@@ -1356,6 +1369,7 @@ function renderKpis(kpis, thresh, kpiTrend) {
         <span class="v">${kd.val != null ? _fmtDE(kd.val, kd.digits ?? 1) : '–'}</span>
         ${kd.u ? `<span class="u">${kd.u}</span>` : ''}
       </div>
+      ${ciTag}
       ${nTag}
       ${kd.tgt && !nWarn ? `<span class="tgt hint">${kd.tgt}<span class="hint-pop">${kd.tgtHint||''}</span></span>` : ''}
     </button>`;
@@ -1377,7 +1391,9 @@ function renderKpis(kpis, thresh, kpiTrend) {
     // Auf 1 Dezimale gerundet rechnen UND anzeigen — sonst färbt ein Delta von
     // 0,04 die als „0,0" angezeigte Zahl (#204 P1: Anzeige via _fmtDE, DE-Locale)
     const dnum = (vd && vd.delta != null) ? Math.round(vd.delta * 10) / 10 : null;
-    const prevVer = vers.length >= 2 ? vers[vers.length-2] : null;
+    // #196 P5: Vergleichsbasis ist die letzte frühere Version mit n≥20
+    // (server: version_delta.prev_version), nicht starr die direkte Vorversion.
+    const prevVer = vd?.prev_version ?? (vers.length >= 2 ? vers[vers.length-2] : null);
     // Vorzeichen-Semantik pro Metrik (#193): bei hall/dur/tokens/cost ist ein
     // Anstieg schlecht — vorher wurde nur 'hall' invertiert und z. B. mehr
     // Laufzeit/Tokens grün eingefärbt (maskiert durch den n<20-Guard).
@@ -2094,15 +2110,17 @@ function renderInsights(d) {
     // #36 Punkt 4: Version-über-Version-Delta ergänzen. kpi_trend.deltas.hall
     // ist bereits serverseitig mit N-Guard berechnet (version_delta() in
     // generative/eval_dashboard.py, per TDD getestet) — hier nur verdrahtet.
-    // Bei n<20 in einer der beiden Versionen keine Besser/Schlechter-Wertung,
-    // nur die nackten Zahlen (gleiches Rausch-Schutz-Muster wie das KPI-Spark-Delta).
+    // #196 P5: Vergleichsbasis ist die letzte frühere Version mit n≥20
+    // (vd.prev_version/vd.prev_n), nicht starr die direkte Vorversion — Wert und
+    // Label MÜSSEN aus derselben Quelle kommen, sonst mismatch (vd.prev gehört zu
+    // vd.prev_version, nicht zu vers[-2]). Bei n<20 nur die nackten Zahlen.
     const kt = d.kpi_trend || {};
     const vers = kt.versions || [];
     const vd = kt.deltas?.hall;
     let deltaTxt = '';
-    if (vd && vd.prev != null && vers.length >= 2) {
-      const prevVer = esc(vers[vers.length - 2]);
-      const nPrev = (kt.n || [])[(kt.n || []).length - 2];
+    if (vd && vd.prev != null) {
+      const prevVer = esc(vd.prev_version ?? vers[vers.length - 2] ?? '–');
+      const nPrev = vd.prev_n ?? (kt.n || [])[(kt.n || []).length - 2];
       deltaTxt = ` vs. <strong>${prevVer}</strong>: ${_fmtDE(vd.prev)} % (n=${nPrev})` +
         (vd.reliable ? '' : ` <span class="caveat">(n&lt;20 — nicht belastbar)</span>`);
     }

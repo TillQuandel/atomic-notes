@@ -31,6 +31,8 @@ import webbrowser
 from datetime import datetime
 from pathlib import Path
 
+from generative.eval_common import wilson_ci
+
 # ---------------------------------------------------------------------------
 # Pfade
 # ---------------------------------------------------------------------------
@@ -185,9 +187,8 @@ def _median(lst: list[float]) -> float:
     return statistics.median(lst)
 
 
-def _pooled_hall_pct(rows: list[dict]) -> float | None:
-    """Gepoolte Halluzinationsrate über mehrere Notes: Σ halluzinierte Anker /
-    Σ Anker, in Prozent.
+def _pooled_hall_stats(rows: list[dict]) -> dict | None:
+    """Gepoolte Halluzinationsrate + Wilson-CI + Stichproben-Kennzahlen.
 
     Ankergewichtet statt notengewichtet — beantwortet „wie viel Prozent ALLER
     Anker sind falsch". Robuster als Median (kollabiert bei zero-inflation auf 0)
@@ -195,12 +196,22 @@ def _pooled_hall_pct(rows: list[dict]) -> float | None:
     von KPI-Kachel (_calc_kpis) und Sparkline (eval_dashboard_server), damit
     beide denselben Wert zeigen.
 
+    Rückgabe (oder None, wenn keine bewertbaren Rows):
+      pct           gepoolte Rate in Prozent
+      ci_low/ci_high  95%-Wilson-CI in Prozent — NUR wenn Roh-Counts vorliegen,
+                    sonst None (Mean-Fallback kann kein CI ausweisen)
+      anchors_total Σ Anker (None im Mean-Fallback)
+      rows_n        Zahl der bewertbaren Eval-Zeilen
+      notes_n       distinct Notes darunter
+
     Fallback auf den Mittelwert der Pro-Note-Raten, wenn keine Roh-Counts
     vorliegen (historische DB-Rows vor 2026-06-27 hatten anchors_total nicht).
     """
     rate_rows = [r for r in rows if r.get("hallucination_rate") is not None and r["hallucination_rate"] >= 0]
     if not rate_rows:
         return None
+    rows_n = len(rate_rows)
+    notes_n = _distinct_notes(rate_rows)
     # Nur poolen, wenn ALLE bewertbaren Rows Roh-Counts haben. Sonst würde
     # ankergewichtet über eine Teilmenge gemittelt und der Rest still verworfen
     # (Cross-Review Codex+QWEN 2026-06-27) — bei gemischten Rows daher Mean.
@@ -208,8 +219,30 @@ def _pooled_hall_pct(rows: list[dict]) -> float | None:
         th = sum(r["anchors_total"] for r in rate_rows)
         ah = sum(r["anchors_hallucinated"] for r in rate_rows)
         if th > 0:
-            return round(ah / th * 100, 1)
-    return round(statistics.mean(r["hallucination_rate"] for r in rate_rows) * 100, 1)
+            lo, hi = wilson_ci(ah, th)
+            return {
+                "pct": round(ah / th * 100, 1),
+                "ci_low": round(lo * 100, 1),
+                "ci_high": round(hi * 100, 1),
+                "anchors_total": th,
+                "rows_n": rows_n,
+                "notes_n": notes_n,
+            }
+    # Mean-Fallback: ohne Roh-Counts kein CI ausweisen (null).
+    return {
+        "pct": round(statistics.mean(r["hallucination_rate"] for r in rate_rows) * 100, 1),
+        "ci_low": None,
+        "ci_high": None,
+        "anchors_total": None,
+        "rows_n": rows_n,
+        "notes_n": notes_n,
+    }
+
+
+def _pooled_hall_pct(rows: list[dict]) -> float | None:
+    """Gepoolte Halluzinationsrate in Prozent (nur der Wert; s. _pooled_hall_stats)."""
+    stats = _pooled_hall_stats(rows)
+    return stats["pct"] if stats else None
 
 
 def _pdf_short_name(raw: str) -> str:
@@ -553,7 +586,10 @@ def _calc_kpis(
     # zero-inflated (>50 % der Notes haben 0 halluzinierte Anker), der Median
     # kollabierte sonst auf 0,0 % und verdeckte, dass das System halluziniert
     # (Bug 2026-06-27). Mean-Fallback für Rows ohne Roh-Counts.
-    avg_hall = _pooled_hall_pct(latest_qrows)
+    # #196 P4: dieselbe Poolung liefert zusätzlich das 95%-Wilson-CI + die
+    # Anker-/Zeilen-Kennzahlen für die Kachel — im Mean-Fallback kein CI (null).
+    hall_stats = _pooled_hall_stats(latest_qrows)
+    avg_hall = hall_stats["pct"] if hall_stats else None
 
     cov_vals = [
         v for r in latest_qrows if (v := r.get("coverage_factual") or r.get("coverage_rate")) is not None and v >= 0
@@ -587,6 +623,14 @@ def _calc_kpis(
     return {
         "avg_accept": avg_accept,
         "avg_hall": avg_hall,
+        # #196 P4: 95%-Wilson-CI der gepoolten Fehlerquote (in Prozent) plus
+        # Anker-/Zeilen-/Notes-N für die Kachel-Sub-Info. CI ist None, wenn die
+        # Rate über den Mean-Fallback (Rows ohne Roh-Counts) berechnet wurde.
+        "hall_ci_low": hall_stats["ci_low"] if hall_stats else None,
+        "hall_ci_high": hall_stats["ci_high"] if hall_stats else None,
+        "hall_anchors_total": hall_stats["anchors_total"] if hall_stats else None,
+        "hall_rows_n": hall_stats["rows_n"] if hall_stats else None,
+        "hall_notes_n": hall_stats["notes_n"] if hall_stats else None,
         "avg_cov": avg_cov,
         "kpi_accept_n": accept_generated,
         "kpi_vault_n": accept_vault,
@@ -856,21 +900,55 @@ _DELTA_MIN_N = 20  # unter N=20 kein Besser/Schlechter-Urteil (Apophenie-Schutz)
 
 
 def version_delta(kpi_trend: dict, metric: str) -> dict:
-    """Delta neueste-vs-Vorversion fuer eine KPI-Metrik.
+    """Delta der neuesten Version gegen die letzte belastbare Vorversion.
 
     `kpi_trend["versions"]` ist aufsteigend sortiert (neueste = letzte Position),
-    die Metrik-Arrays laufen parallel dazu. `reliable` ist nur True, wenn beide
-    beteiligten Versionen n>=20 haben — sonst ist das Delta Rauschen (N-Guard).
+    die Metrik-Arrays laufen parallel dazu.
+
+    #196 P5: Vergleichsbasis ist die jüngste FRÜHERE Version mit einem
+    vorhandenen Metrik-Wert UND n>=_DELTA_MIN_N — nicht starr die direkte
+    Vorversion. Direkte Nachbarversionen sind oft Einzel-Note-Wegwerfläufe
+    (n=1–2), gegen die jedes Delta reliable:false wäre. Existiert KEINE frühere
+    Version mit n>=_DELTA_MIN_N, greift der bisherige Fallback (direkte
+    Vorversion, Chip bleibt grau/reliable:false). `prev_version`/`prev_n` machen
+    im Client-Tooltip transparent, WOGEGEN verglichen wird. `reliable` bleibt an
+    den n>=_DELTA_MIN_N-Guard in BEIDEN Versionen gebunden.
     """
     values = kpi_trend.get(metric) or []
     ns = kpi_trend.get("n") or []
+    versions = kpi_trend.get("versions") or []
     latest = values[-1] if values else None
-    prev = values[-2] if len(values) >= 2 else None
     n_latest = ns[-1] if ns else None
-    n_prev = ns[-2] if len(ns) >= 2 else None
+
+    def _n_at(i: int) -> int:
+        return (ns[i] if i < len(ns) else 0) or 0
+
+    def _ver_at(i: int):
+        return versions[i] if i < len(versions) else None
+
+    # Jüngste frühere Version mit Wert und n>=_DELTA_MIN_N suchen (rückwärts).
+    prev = prev_version = n_prev = None
+    for i in range(len(values) - 2, -1, -1):
+        if values[i] is not None and _n_at(i) >= _DELTA_MIN_N:
+            prev, n_prev, prev_version = values[i], _n_at(i), _ver_at(i)
+            break
+    else:
+        # Fallback: direkte Vorversion (bisheriges Verhalten; reliable bleibt False).
+        if len(values) >= 2:
+            prev = values[-2]
+            n_prev = ns[-2] if len(ns) >= 2 else None
+            prev_version = _ver_at(len(values) - 2)
+
     delta = None if (latest is None or prev is None) else round(latest - prev, 4)
     reliable = delta is not None and (n_latest or 0) >= _DELTA_MIN_N and (n_prev or 0) >= _DELTA_MIN_N
-    return {"latest": latest, "prev": prev, "delta": delta, "reliable": reliable}
+    return {
+        "latest": latest,
+        "prev": prev,
+        "delta": delta,
+        "reliable": reliable,
+        "prev_version": prev_version,
+        "prev_n": n_prev,
+    }
 
 
 def _chart_tokens(runs: list[dict]) -> dict:

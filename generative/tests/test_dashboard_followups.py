@@ -74,6 +74,44 @@ def test_version_delta_empty_trend_yields_none_delta():
     assert d["reliable"] is False
 
 
+# ------------------------------------------ P5: Vergleich gegen n>=20-Version
+def test_version_delta_compares_against_last_reliable_version():
+    # neueste v.137 (n=25); direkte Vorversion v.136 hat n=3 (zu klein) →
+    # Vergleichsbasis soll v.135 (n=22) sein, nicht v.136.
+    trend = {
+        "versions": ["v0.3.135", "v0.3.136", "v0.3.137"],
+        "hall": [12.0, 5.0, 9.7],
+        "n": [22, 3, 25],
+    }
+    d = version_delta(trend, "hall")
+    assert d["prev"] == 12.0  # v0.3.135, nicht 5.0 (v0.3.136)
+    assert d["prev_version"] == "v0.3.135"
+    assert d["prev_n"] == 22
+    assert d["delta"] == pytest.approx(-2.3)
+    assert d["reliable"] is True
+
+
+def test_version_delta_falls_back_to_prev_when_no_reliable_history():
+    # keine frühere Version mit n>=20 → Fallback direkte Vorversion, reliable False
+    trend = {
+        "versions": ["v0.3.136", "v0.3.137"],
+        "hall": [5.0, 9.7],
+        "n": [3, 25],
+    }
+    d = version_delta(trend, "hall")
+    assert d["prev"] == 5.0
+    assert d["prev_version"] == "v0.3.136"
+    assert d["prev_n"] == 3
+    assert d["reliable"] is False
+
+
+def test_version_delta_names_prev_version_in_healthy_case():
+    # Direkte Vorversion erfüllt bereits n>=20 → unverändert, aber prev_version benannt.
+    d = version_delta(_kpi_trend(), "hall")
+    assert d["prev_version"] == "v0.3.134"
+    assert d["prev_n"] == 25
+
+
 # ------------------------------------------------------------------- P2 tests
 def _pt(ver, key="a", x=1000, y=4):
     return {"x": x, "y": y, "key": key, "label": key, "ver": ver}
