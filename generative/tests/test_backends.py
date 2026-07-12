@@ -90,6 +90,28 @@ def test_sub_call_full_does_not_retry_timeout_by_default(monkeypatch):
     assert run_mock.call_count == 1
 
 
+def test_sub_call_full_explicit_timeout_retries_zero_does_not_retry(monkeypatch):
+    """#216 Nachbesserung: explizit uebergebenes `timeout_retries=0` muss den
+    Retry unterdruecken -- auch wenn der Modul-Default (`_TIMEOUT_RETRIES`)
+    auf einen Nicht-Null-Wert steht. Der Vorgaenger-Test (oben) prueft nur den
+    Fall "kein Argument uebergeben" (greift auf den Modul-Default zurueck, der
+    zufaellig ebenfalls 0 ist) und haette einen Bug wie
+    `timeout_retries or _TIMEOUT_RETRIES` (0 ist falsy → faellt faelschlich auf
+    den Default zurueck) nicht erkannt. Die `is None`-Weiche in
+    _subscription_backend.call_full() ist bereits korrekt; dieser Test haelt
+    das Verhalten fest."""
+    monkeypatch.setattr(sub_backend, "_TIMEOUT_RETRIES", 1)
+
+    with patch(
+        "subprocess.run",
+        side_effect=subprocess.TimeoutExpired(cmd=["claude"], timeout=300),
+    ) as run_mock:
+        with pytest.raises(RuntimeError, match="Timeout nach"):
+            sub_call_full("test prompt", model="anthropic/claude-opus-4-7", agent="test", timeout_retries=0)
+
+    assert run_mock.call_count == 1
+
+
 def test_sub_call_full_retries_timeout_when_enabled(monkeypatch):
     fake_response = json.dumps(
         {
