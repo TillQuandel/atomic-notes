@@ -900,9 +900,17 @@ def eval_note(
         # damit Audit und Primaerbewertung keine parallelen Parser/Schema-Implementierungen driften lassen.
         audit_items = [item for item in retrieved if item.claim_idx in audit_indices]
         audit_rows, audit_meta = _call_judge(note_title, audit_items, variant="audit", use_cache=use_cache)
-        claim_scores = _claim_scores_from_judge(
-            claims, retrieved, judge_rows, pdf_text, audit_rows, corpus_normalized=corpus_normalized
+        # #151 Teilfix: Nur die auditierten Claims neu bewerten (statt bit-identisch
+        # ALLE judge_rows nochmal durch _claim_scores_from_judge zu schicken — fuer
+        # nicht-auditierte Claims war audit_by_idx.get(claim_idx) in beiden Durchlaeufen
+        # ohnehin immer None, das Ergebnis also reine CPU-Doppelarbeit). Ergebnis wird
+        # per claim_idx zurueckgemergt; nicht-auditierte Eintraege bleiben unveraendert.
+        audited_judge_rows = [row for row in judge_rows if row["claim_idx"] in audit_indices]
+        audited_scores = _claim_scores_from_judge(
+            claims, retrieved, audited_judge_rows, pdf_text, audit_rows, corpus_normalized=corpus_normalized
         )
+        audited_by_idx = {score["claim_idx"]: score for score in audited_scores}
+        claim_scores = [audited_by_idx.get(score["claim_idx"], score) for score in claim_scores]
         llm_meta["calls"] += audit_meta.get("calls", 0)
         llm_meta["input_tokens"] += audit_meta.get("input_tokens", 0)
         llm_meta["output_tokens"] += audit_meta.get("output_tokens", 0)

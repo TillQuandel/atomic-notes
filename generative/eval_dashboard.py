@@ -447,6 +447,13 @@ def _read_token_runs() -> list[dict]:
                 r = json.loads(line)
                 if r.get("cached"):
                     continue
+                # #197 Nachbesserung: Bookkeeping-/Event-Records (note_outcome,
+                # anchor_stats, score_result, stage_outcome …) tragen kein `model`
+                # (Schema-Invariante, vgl. _is_llm_call_record in eval_dashboard_server).
+                # Ohne diesen Filter zählen sie als „Calls" → calls wird aufgebläht und
+                # ein Run mit 0 echten LLM-Calls erschiene als 0-Token-Phantomzeile.
+                if "model" not in r:
+                    continue
                 tin += r.get("input_tokens", 0) or 0
                 tout += r.get("output_tokens", 0) or 0
                 tcr += r.get("cache_read_tokens", 0) or 0

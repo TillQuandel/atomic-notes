@@ -577,6 +577,40 @@ def test_run_rejects_pdf_outside_allowed_dirs(tmp_path):
     assert r.status_code == 400
 
 
+def test_run_glob_fallback_not_attempted_outside_allowed_dirs(tmp_path, monkeypatch):
+    # #186-Nachbesserung (Cross-Model-Review, Punkt 3): resolve_source_path()
+    # lief bisher VOR dem _allowed_roots-Check -- der Apostroph-Glob-Fallback
+    # haette so Verzeichnisse ausserhalb der erlaubten Roots durchsuchen koennen
+    # (Defense-in-Depth-Aufweichung). Der Root-Check muss zuerst laufen, sodass
+    # resolve_source_path fuer nicht-erlaubte Verzeichnisse gar nicht erst
+    # aufgerufen wird.
+    import generative.gui.app as app_module
+
+    allowed = tmp_path / "pdfs"
+    allowed.mkdir()
+    outside = tmp_path / "aussen"
+    outside.mkdir()
+    (outside / "Porst’s-Buch.pdf").write_bytes(b"%PDF-1.4")
+    queried = outside / "Porst's-Buch.pdf"  # existiert nicht exakt, nur die Apostroph-Variante
+
+    def boom(*_args, **_kwargs):
+        raise AssertionError("resolve_source_path lief fuer ein nicht-erlaubtes Verzeichnis -- Reihenfolge falsch")
+
+    monkeypatch.setattr(app_module, "resolve_source_path", boom)
+
+    app = app_module.create_app(
+        run_factory=fake_run,
+        pdf_dirs=[allowed],
+        vault_path=tmp_path,
+        backend="subscription",
+        uploads_dir=tmp_path / "uploads",
+        doctor_fn=fake_doctor,
+    )
+    r = TestClient(app, base_url="http://localhost").post("/api/run", json={"pdf": str(queried), "dry_run": True})
+    assert r.status_code == 400
+    assert "ausserhalb der erlaubten Verzeichnisse" in r.json()["error"]
+
+
 def test_run_accepts_pdf_from_uploads_dir(tmp_path):
     # Hochgeladene PDFs (in uploads_dir) bleiben gültige Lauf-Quellen.
     uploads = tmp_path / "uploads"

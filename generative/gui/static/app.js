@@ -17,6 +17,11 @@ let stageStartedAt = 0;
 let elapsedTimer = null;
 let stageDurations = {}; // Stage-Nummer -> abgeschlossene Dauer in s (P5)
 let runSummary = null; // vom `run_summary`-Event (P5: Zeit/Tokens Final-Report)
+// #216 Nachbesserung: aus dem Warn-Block-Log (orchestrator.py:
+// format_extractor_failure_report) geparste Anzahl endgueltig verlorener
+// Konzepte -- fuellt sich waehrend des Laufs ueber "log"-Events, bevor
+// `exited(rc=3)` sie fuer Log/Banner braucht. null = (noch) keine Zeile gesehen.
+let extractorLossCount = null;
 
 // --- reine Formatierungs-Helfer (P5, ohne DOM-Zugriff — per `node --check`
 // syntaktisch pruefbar; Logik manuell gegen die Plan-Beispiele verifiziert). ---
@@ -41,6 +46,25 @@ function buildRunSummaryText(stageCount, summary) {
     parts.push(`${formatTokenCount(summary.tokens.total)} Tokens`);
   }
   return parts.join(" · ");
+}
+
+// #216 Nachbesserung: Text fuer den Teilverlust-Fall (rc=3 -- Lauf
+// abgeschlossen, aber >=1 Konzept beim Extrahieren verloren, s.
+// orchestrator.py:_EXIT_EXTRACTOR_LOSS). Wortlaut an
+// format_extractor_failure_report() (orchestrator.py) angelehnt, damit CLI
+// und GUI dieselbe Ursache gleich benennen. `count=null` (Log-Zeile aus
+// irgendeinem Grund nicht angekommen/geparst) faellt auf eine Zahl-freie
+// Formulierung zurueck statt eine falsche Zahl zu erfinden (Prinzip 1).
+// Runde-2-Fund (Opus-Review): rc=3 kann auch mit 0 geschriebenen Notes
+// auftreten (orchestrator.py Early-Return `if not drafts:` bei nicht-leeren
+// extractor_failures -- alle Konzepte verloren). "Notes trotzdem geschrieben"
+// waere dann falsch. `writtenCount` kommt aus der echten /api/outputs-Antwort
+// (loadOutputs(), nicht aus dem geparsten Log) -- 0 dort ist die robusteste
+// verfuegbare Evidenz, ob wirklich nichts geschrieben wurde.
+function buildExtractorLossText(count, writtenCount) {
+  const detail = count !== null ? `${count} Konzept(en)` : "einzelne Konzepte";
+  const suffix = writtenCount === 0 ? "keine Notes geschrieben" : "Notes trotzdem geschrieben";
+  return `Teilverlust: ${detail} beim Extrahieren verloren (Timeout/CLI-Fehler, auch nach Retry) — ${suffix}.`;
 }
 
 function renderStepper() {
@@ -119,6 +143,7 @@ function resetRun() {
   activeStage = 0;
   stageDurations = {};
   runSummary = null;
+  extractorLossCount = null;
   $("run-summary").textContent = "";
   $("preview-list").innerHTML = "";
   $("preview-empty").style.display = "block";
@@ -288,10 +313,13 @@ function addExportCard(item) {
   $("exports-list").appendChild(li);
 }
 
+// Rueckgabe: Anzahl geladener Output-Items, oder `null` wenn der Abruf
+// scheiterte (kein verlaesslicher Schriftbeleg -- Aufrufer soll dann nicht
+// von 0 geschriebenen Notes ausgehen, s. buildExtractorLossText).
 async function loadOutputs() {
   try {
     const r = await fetch("/api/outputs");
-    if (!r.ok) return;
+    if (!r.ok) return null;
     const { items, dry_run, exports } = await r.json();
     $("results-h").textContent = dry_run ? "Vorschau-Ergebnisse (nichts im Vault geschrieben)" : "Ergebnisse";
     $("results-section").hidden = false;
@@ -304,7 +332,8 @@ async function loadOutputs() {
     $("exports-section").hidden = !hasExports;
     $("exports-list").innerHTML = "";
     for (const item of exports || []) addExportCard(item);
-  } catch { }
+    return items.length;
+  } catch { return null; }
 }
 
 // --- Verlauf (P4: GET /api/runs, read-only Ergebnis-Sektion) --------------
@@ -355,7 +384,11 @@ function addHistoryEntry(record) {
   const rcKnown = record.rc !== null && record.rc !== undefined;
   const rcOk = record.rc === 0;
   const rcClass = rcKnown ? (rcOk ? "ok" : "warn") : "warn";
-  const rcLabel = !rcKnown ? "abgebrochen/Fehler" : rcOk ? "erfolgreich" : `Fehlercode ${record.rc}`;
+  // #216 Nachbesserung: rc=3 (Teilverlust, s. buildExtractorLossText) bekommt
+  // im Verlauf denselben Namen wie im Live-Log statt der generischen
+  // "Fehlercode N"-Formulierung -- war schon vorher `warn` (nicht `bad`)
+  // eingefaerbt, nur der Text nannte den Grund nicht (Fable-Review-Fund).
+  const rcLabel = !rcKnown ? "abgebrochen/Fehler" : rcOk ? "erfolgreich" : record.rc === 3 ? "Teilverlust (Timeout/CLI-Fehler)" : `Fehlercode ${record.rc}`;
   const notesCount = (record.notes || []).length;
   // P5: Zeit/Tokens nur zeigen, wenn der Lauf ein run_summary-Event hatte
   // (kein Erfinden bei aelteren/gecrashten Records ohne diese Felder, L5).
@@ -422,7 +455,19 @@ function startStream() {
     $("note-progress").textContent = `Note ${d.index}/${d.total}: ${d.title}`;
   });
   es.addEventListener("preview", (e) => addPreview(JSON.parse(e.data)));
-  es.addEventListener("log", (e) => { try { logLine(JSON.parse(e.data).text); } catch { } });
+  es.addEventListener("log", (e) => {
+    try {
+      const text = JSON.parse(e.data).text;
+      logLine(text);
+      // #216 Nachbesserung: Warn-Block-Kopfzeile aus
+      // format_extractor_failure_report() (orchestrator.py) abfangen, um die
+      // verlorene Konzept-Anzahl fuer das rc=3-Handling in `exited` zu haben
+      // (die Zeile laeuft ueber stderr->stdout normal als "log"-Event durch,
+      // s. runner.py:117 stderr=STDOUT).
+      const m = /(\d+)\s+von\s+\d+\s+Konzept\(en\)\s+beim Extrahieren verloren/.exec(text);
+      if (m) extractorLossCount = parseInt(m[1], 10);
+    } catch { }
+  });
   es.addEventListener("error_hint", (e) => { try { showBanner(JSON.parse(e.data).text); } catch { } });
   // P5: Final-Report Zeit/Tokens (run_parser.py) — Summenzeile unter dem Stepper.
   es.addEventListener("run_summary", (e) => {
@@ -442,11 +487,33 @@ function startStream() {
     let rc = 0;
     try { rc = JSON.parse(e.data).returncode; } catch { }
     if (userCancelled) { markStageError(activeStage); logLine("■ Lauf abgebrochen."); }
-    else if (rc === 0) {
-      setStage(99); renderRunSummaryLine(); logLine("● Lauf beendet.");
+    else if (rc === 0 || rc === 3) {
+      // #216 Nachbesserung: rc=3 (orchestrator.py:_EXIT_EXTRACTOR_LOSS) heisst
+      // "Lauf abgeschlossen, aber >=1 Konzept beim Extrahieren verloren" --
+      // KEIN Absturz. Vorher lief das in den else-Zweig: markStageError()
+      // faerbte die zuletzt aktive Stage (typ. die erfolgreich gelaufene
+      // Stage 8) faelschlich rot, und loadOutputs() lief nur bei rc===0, sodass
+      // die real geschriebenen Notes dem GUI-Nutzer nicht angezeigt wurden
+      // (Fable-Kontrollreview-Fund, Design-Maxime 1: erkennen -> klar melden,
+      // kein Fehlalarm).
+      setStage(99); renderRunSummaryLine();
       // P8: Fokus-Sprung erst NACH dem Laden/Sichtbarwerden der Ergebnis-
-      // Sektion, und nur bei erfolgreichem Lauf (Fehler kommunizieren Banner/Stepper).
-      loadOutputs().then(() => $("results-h").focus());
+      // Sektion, und bei erfolgreichem ODER teilerfolgreichem (rc=3) Lauf --
+      // ein harter Fehler (anderer rc) kommuniziert weiterhin nur Banner/Stepper.
+      if (rc === 3) {
+        // Runde-2-Fund: Banner-Wortlaut erst NACH loadOutputs() entscheiden --
+        // der geschriebene Notes-Count (nicht der geparste Verlust-Count) ist
+        // die einzige verlaessliche Evidenz, ob "trotzdem geschrieben" stimmt.
+        loadOutputs().then((writtenCount) => {
+          const msg = buildExtractorLossText(extractorLossCount, writtenCount);
+          logLine(`⚠ ${msg}`);
+          showBanner(msg);
+          $("results-h").focus();
+        });
+      } else {
+        logLine("● Lauf beendet.");
+        loadOutputs().then(() => $("results-h").focus());
+      }
     }
     else { markStageError(activeStage); logLine(`✗ Lauf mit Fehlercode ${rc} beendet.`); }
     loadHistory();

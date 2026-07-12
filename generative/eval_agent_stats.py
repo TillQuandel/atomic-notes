@@ -103,8 +103,16 @@ def run_totals(trace_path: Path) -> dict:
 
     ti = to = tcr = tcc = 0
     cost = 0.0
-    if trace_path.exists():
-        for line in trace_path.read_text(encoding="utf-8").splitlines():
+    # Datei-Lesen defensiv: ein unlesbarer (OSError) oder nicht-UTF-8-Trace
+    # (UnicodeDecodeError) darf die Aggregation nicht werfen — der orchestrator-
+    # Token-Block am Lauf-Ende ruft run_totals ungeschützt auf, ein Crash hier
+    # würde den ganzen Lauf am Ende reißen. Tolerant → Nullen (Contract oben).
+    try:
+        _lines = trace_path.read_text(encoding="utf-8").splitlines() if trace_path.exists() else []
+    except (OSError, UnicodeDecodeError):
+        _lines = []
+    if _lines:
+        for line in _lines:
             if not line.strip():
                 continue
             # Ganze Zeile in try: eine kaputte Zeile (Parse-Fehler, null-Feld,
