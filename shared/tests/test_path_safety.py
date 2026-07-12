@@ -148,3 +148,31 @@ def test_resolve_source_path_no_fallback_without_quote_chars(tmp_path: Path):
     (tmp_path / "anderes-dokument.pdf").write_text("x")
     with pytest.raises(FileNotFoundError):
         resolve_source_path(missing)
+
+
+# -- Nachbesserung (#186 Review): das `?`-Glob matcht JEDES Zeichen, nicht nur
+# Quote-Varianten -- ohne strikten Re-Filter wuerden beliebige Ein-Zeichen-
+# Abweichungen (Buchstabe/Ziffer/Unterstrich) faelschlich als "Apostroph-
+# Variante" durchgehen. -----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "wrong_name",
+    ["PorstXs-Buch.pdf", "Porst_s-Buch.pdf", "Porst5s-Buch.pdf"],
+)
+def test_resolve_source_path_rejects_non_quote_char_glob_matches(tmp_path: Path, wrong_name: str):
+    """`?` im Glob-Pattern matcht auch Nicht-Quote-Zeichen -- das darf NICHT als
+    Apostroph-Variante durchgehen (Fehlmatch aus Cross-Model-Review, 3x konvergent)."""
+    (tmp_path / wrong_name).write_text("x")
+    queried = tmp_path / "Porst's-Buch.pdf"
+    with pytest.raises(FileNotFoundError):
+        resolve_source_path(queried)
+
+
+def test_resolve_source_path_ignores_directory_candidates(tmp_path: Path):
+    """Ein gleichnamiges VERZEICHNIS (Apostroph-Variante im Namen) darf nie als
+    Datei-Fallback zurueckgegeben werden."""
+    (tmp_path / "Porst’s-Buch.pdf").mkdir()
+    queried = tmp_path / "Porst's-Buch.pdf"
+    with pytest.raises(FileNotFoundError):
+        resolve_source_path(queried)

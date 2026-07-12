@@ -56,7 +56,20 @@ def resolve_source_path(source: str | Path) -> Path:
     for ch in _QUOTE_LIKE_CHARS:
         pattern = pattern.replace(ch, "?")
 
-    candidates = sorted(path.parent.glob(pattern)) if path.parent.is_dir() else []
+    # Nachbesserung (#186 Review): `?` im Glob matcht JEDES Zeichen, nicht nur
+    # Quote-Varianten -- ohne den Re-Filter unten wuerden z.B. "PorstXs-Buch.pdf",
+    # "Porst_s-Buch.pdf" oder "Porst5s-Buch.pdf" faelschlich als Apostroph-
+    # Variante von "Porst's-Buch.pdf" durchgehen. Deshalb: nach dem Glob streng
+    # nachfiltern -- Name muss nach Normalisierung aller Quote-Zeichen exakt dem
+    # normalisierten Query-Namen entsprechen, plus is_file() (keine Verzeichnisse).
+    normalized_query = _normalize_quote_chars(path.name)
+    candidates = (
+        sorted(
+            c for c in path.parent.glob(pattern) if c.is_file() and _normalize_quote_chars(c.name) == normalized_query
+        )
+        if path.parent.is_dir()
+        else []
+    )
 
     if len(candidates) == 1:
         print(
@@ -71,6 +84,14 @@ def resolve_source_path(source: str | Path) -> Path:
         raise FileNotFoundError(f"{repr(str(path))} nicht eindeutig -- mehrere Kandidaten gefunden: {listing}")
 
     raise FileNotFoundError(repr(str(path)))
+
+
+def _normalize_quote_chars(name: str) -> str:
+    """Bildet alle Apostroph-/Anfuehrungszeichen-Varianten auf ein einheitliches
+    Zeichen ab, damit zwei Namen die sich nur darin unterscheiden vergleichbar sind."""
+    for ch in _QUOTE_LIKE_CHARS:
+        name = name.replace(ch, "'")
+    return name
 
 
 def contained_child_path(parent: Path, filename: str) -> Path:

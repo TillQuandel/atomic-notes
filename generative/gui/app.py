@@ -783,6 +783,14 @@ def create_app(
             options = {**options, "export_formats_dir": str(export_formats_dir)}
         if not pdf:
             return JSONResponse({"error": f"PDF nicht gefunden: {pdf}"}, status_code=400)
+        # #186-Nachbesserung (Cross-Model-Review, Punkt 3): der Root-Check muss
+        # VOR dem Apostroph-Glob-Fallback laufen -- sonst wuerde resolve_source_path()
+        # Verzeichnisse ausserhalb der erlaubten Roots durchsuchen, bevor der
+        # eigentliche #2-Check (unten) das ueberhaupt ablehnen kann (Defense-in-
+        # Depth-Aufweichung; der Fallback sucht ohnehin nur im selben Verzeichnis
+        # wie der Roh-Pfad, dessen Erlaubtheit hier schon geprueft wird).
+        if not any(_is_within(str(Path(pdf).parent), root) for root in _allowed_roots):
+            return JSONResponse({"error": "PDF liegt ausserhalb der erlaubten Verzeichnisse."}, status_code=400)
         try:
             pdf = str(resolve_source_path(pdf))
         except FileNotFoundError as exc:
