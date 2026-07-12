@@ -188,6 +188,7 @@ def main(argv: list[str] | None = None) -> int:
 
     from generative.config import CHUNK_WORDS
     from generative.pipeline.pdf_chunker import pdf_to_text
+    from shared.path_safety import resolve_source_path
 
     p = argparse.ArgumentParser(description="Phase-A Chunk-/Planner-Recall-Messung (LLM-frei)")
     p.add_argument("pdf", type=Path, help="Pfad zum Quell-PDF")
@@ -209,8 +210,10 @@ def main(argv: list[str] | None = None) -> int:
     p.add_argument("--overlaps", type=int, nargs="+", default=[0, 50, 100, 200], help="Zu testende Overlap-Wortzahlen.")
     args = p.parse_args(argv)
 
-    if not args.pdf.exists():
-        print(f"PDF nicht gefunden: {args.pdf}", file=sys.stderr)
+    try:
+        args.pdf = resolve_source_path(args.pdf)
+    except FileNotFoundError as exc:
+        print(f"PDF nicht gefunden: {exc}", file=sys.stderr)
         return 1
 
     text = pdf_to_text(args.pdf)

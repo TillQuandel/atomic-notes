@@ -91,6 +91,7 @@ from generative.pipeline import (
 from generative.pipeline.page_index import build_page_index
 from generative.schemas.atomic_note import AtomicNoteDraft, ConceptPlan
 from generative.schemas.citation import CitationMeta, build_citation_meta, crossref_override_blocked
+from shared.path_safety import resolve_source_path
 from generative.config import (
     AGENT_VERSION,
     CRITIC_AUTO_THRESHOLD,
@@ -2129,9 +2130,14 @@ def main(argv: list[str] | None = None):
         print(f"\n=== Atomic Agent (load-drafts): {source_path.name} ===\n")
         print(f"  [load-drafts] {len(drafts)} Drafts geladen · Stage 1–5 übersprungen")
     else:
-        source_path = Path(args.source)
-        if not source_path.exists():
-            sys.exit(f"Datei nicht gefunden: {source_path}")
+        # #186-Nachbesserung: derselbe Apostroph-/Anfuehrungszeichen-Glob-Fallback
+        # wie extractive/orchestrator.py und eval_chunk_recall.py -- vorher brach
+        # dieser Haupt-CLI-Pfad mit einem nackten sys.exit bei reinen Apostroph-
+        # Varianten ab.
+        try:
+            source_path = resolve_source_path(args.source)
+        except FileNotFoundError as exc:
+            sys.exit(f"Datei nicht gefunden: {exc}")
         print(f"\n=== Atomic Agent: {source_path.name} ===\n")
         (
             drafts,
