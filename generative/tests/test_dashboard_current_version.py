@@ -137,3 +137,50 @@ def test_accept_ver_falls_back_to_latest_at_or_below_config():
     runs = [_log_run("v0.1.0", 10, 5), _log_run("v0.3.135", 7, 5)]
     kpis = _calc_kpis({}, runs, [], [], current_version="v0.3.140")
     assert kpis["kpi_accept_ver"] == "v0.3.135"
+
+
+# ── notes_eval_pct (#224): Zähler/Nenner auf derselben Versions-Basis ───────
+
+
+def test_notes_eval_pct_guards_against_over_100_pct():
+    # Issue-Repro: 10 distinct Eval-Notes (Re-Evals) vs. nur 3 generierte Notes
+    # derselben Version in den Log-Runs -> vorher 333,3 %, jetzt null/"–".
+    qrows = [_qrow("v0.3.140", f"2026-07-05T20:00:{i:02d}", 0.0, 10, 0) for i in range(10)]
+    runs = [_log_run("v0.3.140", 3, 3)]
+    kpis = _calc_kpis({}, runs, qrows, [], current_version="v0.3.140")
+    assert kpis["n_notes"] == 10
+    assert kpis["generated_kpi_ver"] == "v0.3.140"
+    assert kpis["notes_eval_pct"] is None
+
+
+def test_notes_eval_pct_correct_when_denominator_covers_numerator():
+    # Gesunder Fall: Nenner (20 generiert) >= Zähler (5 evaluiert), gleiche Version.
+    qrows = [_qrow("v0.3.140", f"2026-07-05T20:00:{i:02d}", 0.0, 10, 0) for i in range(5)]
+    runs = [_log_run("v0.3.140", 20, 15)]
+    kpis = _calc_kpis({}, runs, qrows, [], current_version="v0.3.140")
+    assert kpis["n_notes"] == 5
+    assert kpis["generated_kpi_ver"] == "v0.3.140"
+    assert kpis["notes_eval_pct"] == 25.0
+
+
+def test_notes_eval_pct_none_when_no_runs_for_version():
+    # Läufe existieren nur für eine andere Version -> Nenner der KPI-Version = 0.
+    qrows = [_qrow("v0.3.140", "2026-07-05T20:00:00", 0.0, 10, 0)]
+    runs = [_log_run("v0.3.139", 5, 5)]
+    kpis = _calc_kpis({}, runs, qrows, [], current_version="v0.3.140")
+    assert kpis["generated_kpi_ver"] == "v0.3.140"
+    assert kpis["notes_eval_pct"] is None
+
+
+def test_notes_eval_pct_unfiltered_uses_kpi_version_not_all_versions():
+    # Ungefiltert (mehrere Versionen in quality_rows/all_log_runs): der Nenner
+    # darf NICHT über alle Versionen summieren (das war die im tgtHint
+    # dokumentierte Basis-Mischung) -- nur die kpi_version-Zeilen zaehlen.
+    qrows = [_qrow("v0.3.130", f"2026-06-01T10:00:{i:02d}", 0.0, 10, 0) for i in range(30)]
+    qrows += [_qrow("v0.3.140", f"2026-07-05T20:00:{i:02d}", 0.0, 10, 0) for i in range(4)]
+    runs = [_log_run("v0.3.130", 100, 90), _log_run("v0.3.140", 10, 8)]
+    kpis = _calc_kpis({}, runs, qrows, [], current_version="v0.3.140")
+    assert kpis["kpi_version"] == "v0.3.140"
+    assert kpis["n_notes"] == 4
+    assert kpis["generated_kpi_ver"] == "v0.3.140"
+    assert kpis["notes_eval_pct"] == 40.0
