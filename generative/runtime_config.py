@@ -36,7 +36,11 @@ LEGACY = RuntimeConfig(
     profile="legacy",
     inline_eval=True,
     call_timeout_sec=300,
-    timeout_retries=0,
+    # #210: >=1 Timeout-Retry mit frischem CLI-Prozess in JEDEM Profil (fast/balanced
+    # erben diesen Default, quality setzt ohnehin 1). Ein transienter 300s-Hänger darf
+    # nicht den kompletten Lauf inkl. bereits gelaufener Stages 1-4 kosten. Frei per
+    # ATOMIC_AGENT_TIMEOUT_RETRIES überschreibbar (0 = bewusst ohne Retry).
+    timeout_retries=1,
     max_concepts=None,
     max_concurrent_calls=4,
     refine=RefinePolicy(
