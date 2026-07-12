@@ -16,15 +16,17 @@ umbiegen, JSONL zurücklesen — nie die produktive .cache/runs treffen.
 
 from __future__ import annotations
 
+import asyncio
 import json
 import sqlite3
+from unittest.mock import patch
 
 import generative.agents.tracing as tracing
 from generative.agents.tracing import JsonlBackend
 from generative import orchestrator as orch
 from generative.pipeline.claims import Claim
 from generative.pipeline.faithfulness_gate import ClaimVerdict, GateResult
-from generative.schemas.atomic_note import AtomicNoteDraft
+from generative.schemas.atomic_note import AtomicNoteDraft, ConceptItem, ConceptPlan
 from generative.schemas.citation import CitationMeta
 
 
@@ -248,6 +250,132 @@ def test_faithfulness_disabled_emits_no_event(monkeypatch, tmp_path):
     orch._apply_faithfulness_gate(draft, {1: "text"}, _citation())
 
     assert read() == []  # global deaktiviert → kein Gate, kein Event
+
+
+# --- Nachbesserung #197: bisher stumme Funnel-Lücken ------------------------
+
+
+def test_entity_resolution_merge_emits_stage_outcome(monkeypatch, tmp_path):
+    """Cluster-Merge (entity_resolution) verwirft Nicht-Repräsentanten via
+    `consumed`-Set — strukturell derselbe Vorgang wie sibling-Dedup, bekam aber
+    kein Event. Der Draft, der aus der finalen Liste verschwindet, muss ein
+    stage_outcome tragen (Survivor als Detail)."""
+    read = _capture(monkeypatch, tmp_path)
+    monkeypatch.setattr(orch, "ENABLE_ENTITY_RESOLUTION", True)
+    d1 = _draft(title="Red Thread of Information", body="Body Content A")
+    d2 = _draft(title="Roter Faden der Information", body="Body Content A")
+
+    with patch("generative.orchestrator.embeddings") as mock_emb:
+        mock_emb.embed_title.side_effect = ["emb1", "emb2"]
+        mock_emb.cosine.side_effect = [0.95, 0.99]  # Title-accept (Stage 1), Body-Cluster (Stage 2)
+        mock_emb.embed_body.side_effect = ["body_emb1", "body_emb2"]
+        with patch("generative.orchestrator.canonicalizer.merge_cluster") as mock_merge:
+            mock_merge.return_value = d1  # Repräsentant überlebt
+            results = asyncio.run(orch.entity_resolution([d1, d2]))
+
+    assert len(results) == 1
+    events = read()
+    assert len(events) == 1
+    e = events[0]
+    assert e["title"] == "Roter Faden der Information"  # nicht-Repräsentant, verschwindet
+    assert e["stage"] == "dedup"
+    assert e["outcome"] == "dropped"
+    assert e["drop_reason"] == "entity_resolution_merge"
+    assert e["detail"] == "Red Thread of Information"  # Survivor-Titel
+
+
+def test_collect_stage6_baseexception_emits_event_and_report(monkeypatch, tmp_path):
+    """Der BaseException-Zweig (z.B. asyncio.CancelledError außerhalb des
+    guarded Wrappers) droppte die Note bisher lautlos — kein Event, kein
+    Crash-Report. Der Nachbar-Zweig (_Stage6Failure) hat beides; konsistent
+    instrumentieren."""
+    read = _capture(monkeypatch, tmp_path)
+    failed_dir = tmp_path / "failed"
+    results = [(0, _draft(title="Good")), asyncio.CancelledError()]
+
+    survived, crashes = orch._collect_stage6_results(results, failed_dir)
+
+    assert [d.title for d in survived] == ["Good"]
+    assert crashes == []  # BaseException ist kein _Stage6Failure → nicht in crashes
+    events = read()
+    assert len(events) == 1
+    e = events[0]
+    assert e["stage"] == "stage6"
+    assert e["outcome"] == "dropped"
+    assert e["drop_reason"] == "stage6_crash"
+    assert e["detail"] == "CancelledError"
+    assert list(failed_dir.glob("*.json"))  # Crash-Report geschrieben (diagnostizierbar)
+
+
+def _concept(title: str) -> ConceptItem:
+    return ConceptItem(title=title, priority="high", chapter="Ch", action="create")
+
+
+def test_run_extractors_empty_ctext_emits_stage_outcome(monkeypatch, tmp_path):
+    """Konzept nicht im Volltext gefunden (`if not ctext.strip(): continue`) —
+    fiel bisher stumm vor jeder Event-Instrumentierung weg."""
+    read = _capture(monkeypatch, tmp_path)
+    plan = ConceptPlan(source_title="T", source_summary="S", concepts=[_concept("Xyzzy Plughversion Frobnicate")])
+    full_text = "Der schnelle braune Fuchs springt über den faulen Hund."  # kein Titel-Token enthalten
+
+    asyncio.run(orch.run_extractors_per_concept(full_text, plan, existing_concepts={}))
+
+    events = read()
+    assert len(events) == 1
+    e = events[0]
+    assert e["title"] == "Xyzzy Plughversion Frobnicate"
+    assert e["stage"] == "extractor"
+    assert e["outcome"] == "dropped"
+    assert e["drop_reason"] == "empty_extraction"
+
+
+def test_run_extractors_none_and_exception_emit_stage_outcome(monkeypatch, tmp_path):
+    """Extractor-Rückgabe None (leer) bzw. Exception (harter Call-Ausfall)
+    verschwanden bisher nur in stderr + dropped-Zähler."""
+    read = _capture(monkeypatch, tmp_path)
+
+    async def fake_run_per_concept(concept, concept_text, existing_concepts, **kw):
+        if concept.title == "BetaConcept":
+            raise RuntimeError("boom")
+        return None  # AlphaConcept → leere Extraktion
+
+    monkeypatch.setattr(orch.extractor, "run_per_concept", fake_run_per_concept)
+
+    plan = ConceptPlan(
+        source_title="T", source_summary="S", concepts=[_concept("AlphaConcept"), _concept("BetaConcept")]
+    )
+    full_text = (
+        "Einleitung zum Thema AlphaConcept mit weiterem Kontext und Wörtern. "
+        "Anschließend Ausführungen zu BetaConcept mit zusätzlichem Fülltext drumherum."
+    )
+
+    asyncio.run(orch.run_extractors_per_concept(full_text, plan, existing_concepts={}))
+
+    events = read()
+    by_reason = {e["drop_reason"]: e for e in events}
+    assert set(by_reason) == {"empty_extraction", "call_failed"}
+    assert by_reason["empty_extraction"]["title"] == "AlphaConcept"
+    assert by_reason["empty_extraction"]["stage"] == "extractor"
+    assert by_reason["call_failed"]["title"] == "BetaConcept"
+    assert by_reason["call_failed"]["outcome"] == "dropped"
+
+
+def test_faithfulness_no_page_index_emits_skip(monkeypatch, tmp_path):
+    """Gate aktiv, action=create, aber leerer page_index (PDF ohne [S. N]-Marker):
+    griff bisher weder Gate noch Skip-Zweig → gar kein Event."""
+    read = _capture(monkeypatch, tmp_path)
+    monkeypatch.setattr(orch, "ENABLE_FAITHFULNESS_GATE", True)
+
+    draft = _draft(title="Ohne Index", action="create")
+    orch._apply_faithfulness_gate(draft, {}, _citation())  # page_index leer
+
+    events = read()
+    assert len(events) == 1
+    e = events[0]
+    assert e["title"] == "Ohne Index"
+    assert e["stage"] == "faithfulness"
+    assert e["outcome"] == "skipped"
+    assert e["drop_reason"] == "no_page_index"
 
 
 # --- Schritt 2: n_extracted-DB-Feld -----------------------------------------
