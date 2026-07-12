@@ -21,7 +21,9 @@ from generative.eval_dashboard import (
     _build_log_data,
     _calc_pdf_table,
     _chart_acceptance,
+    _distinct_notes,
     _pdf_group_key,
+    _render_pdf_table,
 )
 
 _CUR = "v0.3.140"  # deterministischer Config-Anker für den Orphan-Guard (#191)
@@ -177,3 +179,126 @@ def test_accept_chart_dead_key_has_zero_n():
     dead = [(lbl, n) for lbl, n in zip(chart["labels"], chart["n"]) if "deadkey" in _pdf_group_key(lbl)]
     assert dead, "Routing-only-Key fehlt im Accept-Chart"
     assert dead[0][1] == 0, f"Routing-only-Key sollte n=0 haben, hat {dead[0][1]}"
+
+
+# ═══════════════════════════════════════════════════════════════════════════
+# Nachbesserung PR #222 (#194): 7 konsolidierte Funde (Fable/Mistral/Qwen)
+# ═══════════════════════════════════════════════════════════════════════════
+
+
+# ── (1) Legacy-Renderpfad crasht auf fehlendem 'pages' ──────────────────────
+def test_legacy_render_pdf_table_no_pages_keyerror():
+    """`_render_pdf_table` (Legacy-CLI-Pfad, main→_build_html) darf nicht mit
+    KeyError 'pages' crashen — `_calc_pdf_table` liefert das Feld nicht mehr."""
+    quality_rows, all_log_runs = _bates_fixture()
+    rows = _calc_pdf_table(_build_log_data(all_log_runs), all_log_runs, quality_rows, current_version=_CUR)
+    html = _render_pdf_table(rows)  # RED: KeyError 'pages'
+    assert "<table" in html
+    assert "Seiten" not in html  # Seiten-Spalte strukturell entfernt (DB-Fallback hart 0)
+
+
+# ── (2) Mehrdeutiger Kurz-Key ohne Jahr matcht mehrere Jahrgänge ────────────
+def _beutelspacher_two_years():
+    quality_rows = [
+        _q("Beutelspacher - 2014 - Diskrete Mathematik.pdf", "bs14", "v0.3.140", 0.05, 0.80),
+        _q("Beutelspacher - 2022 - Kryptografie.pdf", "bs22", "v0.3.140", 0.06, 0.70),
+    ]
+    # Routing-Run trägt nur den Autornamen ohne Jahr → Segment-Präfix BEIDER Gruppen
+    all_log_runs = [_run("beutelspacher", "Beutelspacher", "v0.3.140", 10, 7)]
+    return quality_rows, all_log_runs
+
+
+def test_ambiguous_short_key_not_assigned_to_year_group():
+    """(2) Ein jahrloser Autor-Key darf keiner der beiden Jahrgangs-Gruppen
+    zugeschlagen werden — er läuft als eigene Routing-only-Zeile."""
+    quality_rows, all_log_runs = _beutelspacher_two_years()
+    rows = _calc_pdf_table(_build_log_data(all_log_runs), all_log_runs, quality_rows, current_version=_CUR)
+    year_rows = [r for r in rows if r["key"] in ("beutelspacher-2014", "beutelspacher-2022")]
+    assert len(year_rows) == 2
+    # Keine Jahrgangs-Gruppe erbt die Akzeptanz des jahrlosen Runs
+    assert all(r["accept"] is None for r in year_rows), f"Jahrgangs-Zeile hat Run gekapert: {year_rows}"
+    # Der jahrlose Run erscheint als eigene Routing-only-Zeile mit Akzeptanz
+    own = [r for r in rows if r["key"] == "beutelspacher" and r["accept"] is not None]
+    assert len(own) == 1, f"Jahrloser Run nicht als eigene Zeile: {[r['key'] for r in rows]}"
+    assert own[0]["routing_only"] is True
+
+
+def test_run_assignment_is_order_independent():
+    """(2, Determinismus) Die Zuordnung darf nicht von der quality_rows-
+    Reihenfolge (max(key=len)-Tie) abhängen."""
+    quality_rows, all_log_runs = _beutelspacher_two_years()
+    a = _calc_pdf_table(_build_log_data(all_log_runs), all_log_runs, quality_rows, current_version=_CUR)
+    b = _calc_pdf_table(_build_log_data(all_log_runs), all_log_runs, list(reversed(quality_rows)), current_version=_CUR)
+    accept_a = {r["key"]: r["accept"] for r in a}
+    accept_b = {r["key"]: r["accept"] for r in b}
+    assert accept_a == accept_b, f"order-abhängig: {accept_a} != {accept_b}"
+
+
+# ── (4) Distinct-Note-Zähler ist SSoT für Kachel UND Sparkline ──────────────
+def test_distinct_notes_helper_counts_unique():
+    """(4) `_distinct_notes` zählt distinct note_path, Fallback Zeilenindex."""
+    rows = [
+        {"note_path": "a"},
+        {"note_path": "a"},  # Re-Eval derselben Note
+        {"note_path": "b"},
+        {"note": "c"},  # anderer Identifier-Key
+        {},  # ohne Identifier → zählt einzeln (Fallback Index)
+    ]
+    assert _distinct_notes(rows) == 4  # {a, b, c, <index 4>}
+
+
+# ── (5) Reine Orphan-Zeilen sichtbar kennzeichnen ───────────────────────────
+def test_orphan_only_group_is_flagged():
+    """(5) Sind ALLE Versionen einer Quelle > Config-Version, fällt die Zeile
+    auf die Orphan-Version zurück (versions[-1]) und wird als `orphan` markiert."""
+    quality_rows = [
+        _q("Rieder - 2099 - Zukunft.pdf", "r1", "v9.9.99", 0.05, 0.80),
+        _q("Rieder - 2099 - Zukunft.pdf", "r2", "v9.9.98", 0.06, 0.70),
+    ]
+    all_log_runs = [_run("rieder", "Rieder", "v9.9.99", 2, 1)]
+    rows = _calc_pdf_table(_build_log_data(all_log_runs), all_log_runs, quality_rows, current_version=_CUR)
+    row = next(r for r in rows if r["key"].startswith("rieder"))
+    assert row["orphan"] is True, "reine Orphan-Zeile nicht markiert"
+    assert row["version"] == "v9.9.99"  # Fallback versions[-1]
+
+
+def test_normal_group_is_not_flagged_orphan():
+    """(5, Gegenprobe) Eine Zeile mit gültiger (gekappter) Version ist kein Orphan."""
+    quality_rows = [_q("Afzal - 2017 - X.pdf", "a1", "v0.3.140", 0.05, 0.80)]
+    all_log_runs = [_run("afzal", "Afzal", "v0.3.140", 2, 2)]
+    rows = _calc_pdf_table(_build_log_data(all_log_runs), all_log_runs, quality_rows, current_version=_CUR)
+    row = next(r for r in rows if r["key"].startswith("afzal"))
+    assert row["orphan"] is False
+
+
+# ── (6) Leerer Gruppen-Key erzeugt keine Geisterzeile / matcht nicht ALLES ──
+def test_empty_group_key_does_not_wildcard_match():
+    """(6) Eine Eval-Zeile mit leerem Gruppen-Key (pdf='.pdf') darf per
+    `_pdf_matches('')` nicht ALLE Routing-Runs an sich ziehen."""
+    quality_rows = [
+        _q(".pdf", "ghost", "v0.3.140", 0.05, 0.80),  # leerer Gruppen-Key
+        _q("Kling - 2020 - Y.pdf", "k1", "v0.3.140", 0.04, 0.90),
+    ]
+    all_log_runs = [_run("kling", "Kling", "v0.3.140", 3, 3)]
+    rows = _calc_pdf_table(_build_log_data(all_log_runs), all_log_runs, quality_rows, current_version=_CUR)
+    kling = next(r for r in rows if r["key"].startswith("kling"))
+    assert kling["accept"] is not None, "Kling-Run wurde von leerem Gruppen-Key geschluckt"
+    assert kling["accept_n"] == 1
+    # Kein Gruppen-Key ist der leere String
+    assert all(r["key"] for r in rows), f"leerer Gruppen-Key als Zeile: {[r['key'] for r in rows]}"
+
+
+# ── (7) Routing-only-Zeilen als solche gekennzeichnet ───────────────────────
+def test_routing_only_flag_set():
+    """(7) Routing-only-Zeilen (keine Eval-Daten) tragen routing_only=True,
+    Eval-Zeilen routing_only=False."""
+    quality_rows = [_q("Nardi - 1996 - Z.pdf", "n1", "v0.3.140", 0.05, 0.80)]
+    all_log_runs = [
+        _run("nardi", "Nardi", "v0.3.140", 2, 2),
+        _run("solo-routing-key", "solo-routing-key", "v0.3.140", 1, 1),  # nur Routing
+    ]
+    rows = _calc_pdf_table(_build_log_data(all_log_runs), all_log_runs, quality_rows, current_version=_CUR)
+    nardi = next(r for r in rows if r["key"].startswith("nardi"))
+    solo = next(r for r in rows if "solo-routing" in r["key"])
+    assert nardi["routing_only"] is False
+    assert solo["routing_only"] is True

@@ -299,6 +299,12 @@ def _pdf_matches(filter_value: str | None, *candidates: str | None) -> bool:
     return False
 
 
+# Sentinel für Quellen ohne bestimmbaren Gruppen-Schlüssel (leerer pdf-String,
+# z. B. „.pdf"). Ein leerer Key darf NIE als `_pdf_matches`-Filter dienen —
+# `_pdf_matches("")` matcht ALLES und zieht sonst jeden Routing-Run an sich (#194 P6).
+_UNNAMED = "(unbenannt)"
+
+
 def _pdf_group_key(raw: str | None) -> str:
     """Kanonischer Gruppen-Schlüssel für eine PDF-Quelle (SSoT mit dem PDF-Filter/
     -Dropdown, #202/#194).
@@ -560,11 +566,14 @@ def _calc_kpis(
     # `len(log_data)` zählte pdf_key-Varianten mehrfach (bates/bates-2017/
     # bates---2017 = 3) UND verpasste Quellen, die nur in quality_rows stehen
     # (Hertzum/Kaletski). Union aus Eval- und Routing-only-Quellen.
-    _eval_gk = {_pdf_group_key(r["pdf"]) for r in quality_rows if r.get("pdf")}
+    # Leere Gruppen-Keys ausschließen: sie zählten als Geister-Quelle UND
+    # `_pdf_matches("")` matchte jeden Routing-Run → _log_gk kollabierte (#194 P6).
+    _eval_gk = {gk for r in quality_rows if r.get("pdf") and (gk := _pdf_group_key(r["pdf"]))}
     _log_gk = {
-        _pdf_group_key(lr.get("label") or lr.get("key"))
+        gk
         for lr in all_log_runs
-        if not any(_pdf_matches(gk, lr.get("label"), lr.get("key")) for gk in _eval_gk)
+        if not any(_pdf_matches(egk, lr.get("label"), lr.get("key")) for egk in _eval_gk)
+        and (gk := _pdf_group_key(lr.get("label") or lr.get("key")))
     }
     n_canonical_pdfs = len(_eval_gk | _log_gk)
 
@@ -582,7 +591,7 @@ def _calc_kpis(
         # blähten die Zahl auf (50 Instanzen / 39 Notes) und gewichteten die
         # Poolung implizit nach Testlauf-Häufigkeit. Fehlt ein Note-Identifier
         # (synthetische Rows), zählt der Laufindex jede Zeile einzeln.
-        "n_notes": len({r.get("note_path") or r.get("note") or i for i, r in enumerate(latest_qrows)}),
+        "n_notes": _distinct_notes(latest_qrows),
         "total_runs": len(all_log_runs),
         "n_pdfs": n_canonical_pdfs,
         "n_versions": len(all_versions),
@@ -603,6 +612,16 @@ def _calc_kpis(
 
 def _row_version(r: dict) -> str:
     return r.get("version") or r.get("pipeline_version") or ""
+
+
+def _distinct_notes(rows: list[dict]) -> int:
+    """Distinct-Note-Zahl einer Row-Menge: `note_path`|`note` als Identität,
+    Fallback Zeilenindex (synthetische Rows ohne Identifier zählen einzeln).
+
+    SSoT für die „Evaluierte Notes"-KPI-Kachel (`_calc_kpis`), ihre per-Version-
+    Sparkline (`kpi_trend["n"]`, Server) und die per-PDF-Tabelle — sonst zählt
+    die Kachel distinct (40) und die Sparkline Eval-Instanzen (52) (#194 #4)."""
+    return len({r.get("note_path") or r.get("note") or i for i, r in enumerate(rows)})
 
 
 def _newest_capped_version(versions: list[str], current: str | None) -> str | None:
@@ -660,23 +679,34 @@ def _calc_pdf_table(
             current_version = None
 
     # ── Eval-Gruppen (Primärquelle) ──
+    # Leere Gruppen-Keys unter dem Sentinel isolieren, nie als Match-Filter nutzen
+    # (`_pdf_matches("")` matcht ALLES, #194 P6).
     eval_groups: dict[str, list[dict]] = {}
     for r in quality_rows:
         if r.get("pdf"):
-            eval_groups.setdefault(_pdf_group_key(r["pdf"]), []).append(r)
-    group_keys = list(eval_groups)
+            eval_groups.setdefault(_pdf_group_key(r["pdf"]) or _UNNAMED, []).append(r)
+    group_keys = [gk for gk in eval_groups if gk != _UNNAMED]
 
-    # ── Routing-Runs an Eval-Gruppen anhängen (für accept); Rest = Routing-only ──
-    # Jeder Run genau EINER Gruppe zuordnen (längster, also spezifischster Match),
-    # damit ein Autor-Kurzkey nicht in zwei Jahrgangs-Gruppen doppelt zählt.
+    # ── Routing-Runs eindeutig EINER Gruppe zuordnen; Rest = Routing-only ──
+    # Ein jahrloser Autor-Key („beutelspacher") ist Segment-Präfix MEHRERER
+    # Jahrgangs-Gruppen (2014 UND 2022). Ihn per max(key=len)-Tie einer Gruppe
+    # zuzuschlagen war order-abhängig und willkürlich (#194 P2). Regel (ehrlich,
+    # ohne Raten): exakter kanonischer Key gewinnt; sonst nur bei GENAU einem
+    # Match zuordnen; bei mehrdeutigem Kurz-Key eigene Routing-only-Zeile.
     log_by_group: dict[str, list[dict]] = {}
     log_only: dict[str, list[dict]] = {}
     for lr in all_log_runs:
+        run_key = _pdf_group_key(lr.get("label") or lr.get("key")) or _UNNAMED
+        if run_key != _UNNAMED and run_key in eval_groups:
+            log_by_group.setdefault(run_key, []).append(lr)  # exakter Gruppen-Key
+            continue
         matched = [gk for gk in group_keys if _pdf_matches(gk, lr.get("label"), lr.get("key"))]
-        if matched:
-            log_by_group.setdefault(max(matched, key=len), []).append(lr)
+        if len(matched) == 1:
+            log_by_group.setdefault(matched[0], []).append(lr)  # eindeutiger Präfix-Match
         else:
-            log_only.setdefault(_pdf_group_key(lr.get("label") or lr.get("key")), []).append(lr)
+            # 0 Matches → echte Routing-only-Quelle; ≥2 Matches → mehrdeutiger
+            # Kurz-Key: nicht einer Jahrgangs-Gruppe zuschlagen, eigene Zeile.
+            log_only.setdefault(run_key, []).append(lr)
 
     def _label_for(group_key: str, qrows: list[dict], fallback: str) -> str:
         if group_key in _PDF_LABELS:
@@ -694,8 +724,13 @@ def _calc_pdf_table(
         qrows = eval_groups[gk]
         vers = sorted({_row_version(r) for r in qrows if _row_version(r)}, key=_ver_sort_key)
         ver = _newest_capped_version(vers, current_version)
+        # Orphan: ALLE Versionen der Quelle sind NEUER als die Config-Version
+        # (#191). _newest_capped_version fällt dann auf versions[-1] (Orphan)
+        # zurück — die Zeile soll das sichtbar kennzeichnen, nicht unmarkiert als
+        # „neueste Eval-Version" zeigen (#194 P5).
+        orphan = bool(vers) and _capped_latest_version(vers, current_version) is None
         at = [r for r in qrows if _row_version(r) == ver]
-        n_notes = len({r.get("note_path") or r.get("note") or i for i, r in enumerate(at)})
+        n_notes = _distinct_notes(at)
         hall = _pooled_hall_pct(at)
         cov_vals = [v for r in at if (v := r.get("coverage_factual") or r.get("coverage_rate")) is not None and v >= 0]
         cov = round(_median(cov_vals) * 100, 1) if cov_vals else None
@@ -704,8 +739,10 @@ def _calc_pdf_table(
         rows.append(
             {
                 "key": gk,
-                "label": _label_for(gk, qrows, gk),
+                "label": _UNNAMED if gk == _UNNAMED else _label_for(gk, qrows, gk),
                 "version": ver,
+                "orphan": orphan,
+                "routing_only": False,
                 "accept": accept,
                 "accept_ver": accept_ver,
                 "accept_n": accept_n,
@@ -715,16 +752,22 @@ def _calc_pdf_table(
                 "words": _words_for(runs),
             }
         )
-    # 2) Routing-only-Quellen (Union): Akzeptanz vorhanden, keine Eval-Daten
+    # 2) Routing-only-Quellen (Union): Akzeptanz vorhanden, keine Eval-Daten.
+    # Das „Version (Eval)"-Feld trägt hier die Routing-Version — der Client muss
+    # das über routing_only unterscheiden (#194 P7).
     for gk in sorted(log_only):
         runs = log_only[gk]
         accept, accept_ver, accept_n = _accept_from_runs(runs, None, current_version)
         label = _PDF_LABELS.get(gk) or next((r.get("label") for r in runs if r.get("label")), gk)
+        rvers = sorted({r["ver"] for r in runs if r.get("ver")}, key=_ver_sort_key)
+        orphan = bool(rvers) and _capped_latest_version(rvers, current_version) is None
         rows.append(
             {
                 "key": gk,
                 "label": label,
                 "version": accept_ver,
+                "orphan": orphan,
+                "routing_only": True,
                 "accept": accept,
                 "accept_ver": accept_ver,
                 "accept_n": accept_n,
@@ -1023,7 +1066,6 @@ def _render_pdf_table(rows: list[dict]) -> str:
         "<th>Quell-PDF</th>"
         "<th>Letzte Version</th>"
         '<th class="num">W&ouml;rter</th>'
-        '<th class="num">Seiten</th>'
         '<th class="num">Akzeptiert</th>'
         '<th class="num">Fehlerquote</th>'
         '<th class="num">Abdeckung</th>'
@@ -1035,12 +1077,17 @@ def _render_pdf_table(rows: list[dict]) -> str:
         key = r.get("key", "")
         meta = _PDF_META.get(key, {})
         w_str = f"{r['words']:,}".replace(",", ".") if r["words"] else "&mdash;"
-        p_str = str(r["pages"]) if r["pages"] else "&mdash;"
         acc_q = _quant(r["accept"], THRESH_ACCEPT[0], THRESH_ACCEPT[1])
         hall_q = _quant(r["hall"], THRESH_HALL[0], THRESH_HALL[1], invert=True)
         cov_q = _quant(r["cov"], THRESH_COV[0], THRESH_COV[1])
         bar = _mini_bar(r["accept"], THRESH_ACCEPT[0], THRESH_ACCEPT[1])
-        ver_cls = "cur" if r["version"] != "unknown" else ""
+        ver = r.get("version") or "&mdash;"
+        # Routing-only-/Orphan-Zeilen kennzeichnen (Legacy-CLI, #194 P5/P7)
+        if r.get("routing_only"):
+            ver = f"{ver} (nur Routing)"
+        elif r.get("orphan"):
+            ver = f"&#9888; {ver}"
+        ver_cls = "cur" if (not r.get("routing_only") and not r.get("orphan") and r.get("version")) else ""
 
         if meta:
 
@@ -1064,7 +1111,7 @@ def _render_pdf_table(rows: list[dict]) -> str:
             )
             detail = (
                 f'<tr class="detail-row" style="display:none">'
-                f'<td colspan="9" style="padding:0;border-bottom:1px solid var(--hairline)">'
+                f'<td colspan="8" style="padding:0;border-bottom:1px solid var(--hairline)">'
                 f"{meta_html}</td></tr>"
             )
         else:
@@ -1075,9 +1122,8 @@ def _render_pdf_table(rows: list[dict]) -> str:
             f'<tr class="data-row">'
             f"{toggle}"
             f'<td class="td-name" onclick="toggleRow(this.closest(\'tr\').querySelector(\'.expand-btn\'))" style="cursor:pointer">{r["label"]}</td>'
-            f'<td><span class="tag {ver_cls}">{r["version"]}</span></td>'
+            f'<td><span class="tag {ver_cls}">{ver}</span></td>'
             f'<td class="num" style="color:var(--ink-3)">{w_str}</td>'
-            f'<td class="num" style="color:var(--ink-3)">{p_str}</td>'
             f'<td class="num">{bar}{acc_q}</td>'
             f'<td class="num">{hall_q}</td>'
             f'<td class="num">{cov_q}</td>'
