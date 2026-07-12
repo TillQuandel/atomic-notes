@@ -91,6 +91,7 @@ from generative.pipeline import (
 from generative.pipeline.page_index import build_page_index
 from generative.schemas.atomic_note import AtomicNoteDraft, ConceptPlan
 from generative.schemas.citation import CitationMeta, build_citation_meta, crossref_override_blocked
+from generative.schemas.run_context import RunContext
 from shared.path_safety import resolve_source_path
 from generative.config import (
     AGENT_VERSION,
@@ -114,7 +115,6 @@ from generative.config import (
 from generative.runtime_config import (
     load_runtime_config,
     cap_actionable_concepts,
-    count_actionable,
     RunBudget,
     refine_accepted,
     should_attempt_refine,
@@ -1752,18 +1752,166 @@ def _build_citation(
     return citation
 
 
+@dataclasses.dataclass(frozen=True)
+class _PlanExtractResult:
+    """Ergebnis EINER `_plan_and_extract`-Invokation (ein Text-Scope).
+
+    Benannte Felder statt Positions-Tupel — dieselbe Anti-Wiring-Bug-Motivation
+    wie RunContext, nur für die Planner→Extractor-Kette. `kept_actionable` speist
+    die kumulative Budget-Dekrementierung des by-chapter-Pfads; `related` sammelt
+    der by-chapter-Pfad über Kapitel dedupliziert, der Normalpfad nutzt es direkt.
+    """
+
+    drafts: list
+    concept_map: dict
+    dropped: int
+    failures: list
+    related: list
+    kept_actionable: int
+    background_map: dict
+
+
+def _plan_and_extract(
+    *,
+    plan_text: str,
+    hall_text: str,
+    extract_text: str,
+    relevance_profile: dict,
+    existing_concepts: dict,
+    citation: CitationMeta | None,
+    tag_whitelist: list,
+    runtime_config,
+    cap_budget: int | None,
+    cap_label: str,
+    hall_ellipsis: str,
+    by_chapter: bool,
+    source_name: str,
+    n_chunks: int,
+) -> _PlanExtractResult:
+    """Gemeinsame Planner→(Cap)→Background→Extractor-Kette für Normal- und
+    by-chapter-Pfad (#152). Die bug-anfällige Verdrahtung (welcher Text in
+    planner.run/filter_hallucinated/run_extractors_per_concept, welche
+    background_map) lebt hier an EINER Stelle; nur die pfad-spezifischen
+    Ausgabetexte und die Cap-Semantik werden parametrisiert — Verhalten pro Pfad
+    bleibt exakt erhalten (siehe Divergenz-Liste im PR):
+
+    - Textbasis (Div. 3): `plan_text` (Planner), `hall_text` (Halluzinations-
+      Filter), `extract_text` (Extractor) getrennt übergeben.
+    - Cap (Div. 2): `cap_budget`/`cap_label` — by-chapter reicht das pro Kapitel
+      dekrementierte `remaining_concepts` herein und dekrementiert selbst via
+      `kept_actionable`; der Normalpfad cappt einmalig gegen `max_concepts`.
+    - Background (Div. 1): by-chapter fährt IMMER `background_map={}` (bewusst,
+      #102); der Normalpfad gated `background_extractor.run(plan)` über
+      `ENABLE_BACKGROUND_EXTRACTOR` inkl. Stage-4.5-Log.
+    - Spans (Div. 7): Planner- und Extractor-`_span` liegen jetzt hier, der
+      by-chapter-Pfad ERBT sie dadurch (Bookkeeping ohne model-Feld, brechen keine
+      Aggregation); der BackgroundExtractor-Span bleibt normalpfad-only, weil
+      by-chapter den Background-Extractor gar nicht fährt.
+    - Ellipsis (Div. 6): `hall_ellipsis` bewahrt die pfad-eigene Schreibweise der
+      Halluzinations-Zeile ("..." by-chapter / "…" Normalpfad).
+    """
+    primary_authors = _extract_primary_authors(citation)
+    with _span("Planner", pdf=source_name, n_chunks=n_chunks):
+        plan = planner.run(plan_text, relevance_profile, primary_authors=primary_authors)
+        plan, hallucinated = planner.filter_hallucinated(plan, hall_text)
+    if hallucinated:
+        print(
+            f"      {len(hallucinated)} halluzinierte Konzepte verworfen: "
+            f"{', '.join(hallucinated[:3])}{hall_ellipsis if len(hallucinated) > 3 else ''}"
+        )
+    if runtime_config is not None:
+        plan.concepts, _capped = cap_actionable_concepts(plan.concepts, cap_budget)
+        if _capped:
+            print(
+                f"      [runtime-config] {cap_label}={cap_budget} "
+                f"-> {len(_capped)} Konzept(e) übersprungen: "
+                f"{', '.join(c.title for c in _capped[:3])}"
+                f"{'…' if len(_capped) > 3 else ''}"
+            )
+
+    related = [c.title for c in plan.concepts if c.origin == "secondary_mention"]
+    actionable = [c for c in plan.concepts if c.action != "skip" and c.origin != "secondary_mention"]
+
+    if by_chapter:
+        if not actionable:
+            print("      Keine Konzepte fuer dieses Kapitel")
+            # Wie der frühere `continue`: kein Extractor-Call, und `related` dieses
+            # Kapitels wird NICHT akkumuliert (related=[]), kept=0 dekrementiert nicht.
+            return _PlanExtractResult(
+                drafts=[],
+                concept_map={},
+                dropped=0,
+                failures=[],
+                related=[],
+                kept_actionable=0,
+                background_map={},
+            )
+        print(
+            f"      {len(actionable)} Konzepte: "
+            f"{', '.join(c.title for c in actionable[:4])}{'...' if len(actionable) > 4 else ''}"
+        )
+        # #102: hart leer statt background_extractor.run() pro Kapitel — bewusst
+        # (Kosten-Multiplikation), Sichtbarkeit via Skip-Zeile im by-chapter-Zweigkopf.
+        background_map = {}
+    else:
+        if related:
+            print(
+                f"      {len(related)} Sekundär-Erwähnungen → Related Mentions: "
+                f"{', '.join(related[:3])}{'…' if len(related) > 3 else ''}"
+            )
+        print(f"      {len(actionable)} Konzepte geplant ({len(plan.concepts)} total)")
+        for c in actionable:
+            print(f"      [{c.priority:6s}] {c.action:6s} — {c.title}")
+
+        # --- Schritt 4.5: Background-Extractor (nur Normalpfad) ---
+        if ENABLE_BACKGROUND_EXTRACTOR:
+            print("[4.5/7] Background-Extractor: Trainingswissen pro Konzept…")
+            with _span("BackgroundExtractor", pdf=source_name):
+                background_map = background_extractor.run(plan)
+        else:
+            print("[4.5/7] Background-Extractor: deaktiviert (ENABLE_BACKGROUND_EXTRACTOR=0)")
+            background_map = {}
+
+        # --- Schritt 5: Extractor ---
+        print(f"\n[5/7] Extractor: {len(actionable)} Konzepte parallel verarbeiten…")
+
+    with _span("Extractor", pdf=source_name, n_concepts=len(actionable)):
+        drafts, concept_map, dropped, failures = asyncio.run(
+            run_extractors_per_concept(
+                extract_text,
+                plan,
+                existing_concepts,
+                citation=citation,
+                tag_whitelist=tag_whitelist,
+                background_map=background_map,
+                related_mentions=related,
+                max_concurrent_calls=(runtime_config.max_concurrent_calls if runtime_config is not None else None),
+            )
+        )
+
+    if not by_chapter:
+        print(f"      {len(drafts)} Draft-Notes extrahiert")
+
+    return _PlanExtractResult(
+        drafts=drafts,
+        concept_map=concept_map,
+        dropped=dropped,
+        failures=failures,
+        related=related,
+        kept_actionable=len(actionable),
+        background_map=background_map,
+    )
+
+
 def _run_extraction_stages(
     args, source_path: Path, runtime_config=None
 ):  # main() übergibt immer einen RuntimeConfig; None = kein Runtime-Config / Capping deaktiviert
     """Stages 0–5: PDF extract → planning → extraction.
 
     Returns:
-        (drafts, concept_map, existing_concepts, concept_links,
-         text, chunks, acronym_dict, quality_report, pdf_meta,
-         source_path, tag_whitelist, background_map, fb_year,
-         dropped_total, word_count, related_mentions, q_title, citation,
-         extractor_failures)
-        extractor_failures (#210): [(concept_title, error)] für Konzepte, deren
+        RunContext — benannte Felder statt 19er-Positions-Tupel (#152). Der
+        `--load-drafts`-Pfad (`_load_draft_state`) liefert dieselbe Struktur.
+        `extractor_failures` (#210): [(concept_title, error)] für Konzepte, deren
         Extractor-Call mit Exception (Timeout/CLI-Fehler nach Retries) starb.
     """
     from generative.agents.base import trace_run_start as _trace_run_start
@@ -1919,150 +2067,87 @@ def _run_extraction_stages(
                 print("      Leerer Chunk, uebersprungen")
                 continue
 
-            primary_authors = _extract_primary_authors(citation)
-            chapter_plan = planner.run(chunk.text, relevance_profile, primary_authors=primary_authors)
-            chapter_plan, hallucinated = planner.filter_hallucinated(chapter_plan, chunk.text)
-            if hallucinated:
-                print(
-                    f"      {len(hallucinated)} halluzinierte Konzepte verworfen: "
-                    f"{', '.join(hallucinated[:3])}{'...' if len(hallucinated) > 3 else ''}"
-                )
-            if runtime_config is not None:
-                chapter_plan.concepts, _capped = cap_actionable_concepts(
-                    chapter_plan.concepts,
-                    remaining_concepts,
-                )
-                if _capped:
-                    print(
-                        f"      [runtime-config] remaining_concepts={remaining_concepts} "
-                        f"-> {len(_capped)} Konzept(e) übersprungen: "
-                        f"{', '.join(c.title for c in _capped[:3])}"
-                        f"{'…' if len(_capped) > 3 else ''}"
-                    )
-                kept_actionable = count_actionable(chapter_plan.concepts)
-                if remaining_concepts is not None:
-                    remaining_concepts = max(0, remaining_concepts - kept_actionable)
-            ch_related = [c.title for c in chapter_plan.concepts if c.origin == "secondary_mention"]
-            actionable = [c for c in chapter_plan.concepts if c.action != "skip" and c.origin != "secondary_mention"]
-            if not actionable:
-                print("      Keine Konzepte fuer dieses Kapitel")
-                continue
-            print(
-                f"      {len(actionable)} Konzepte: "
-                f"{', '.join(c.title for c in actionable[:4])}{'...' if len(actionable) > 4 else ''}"
+            # #152: gemeinsame Planner→Extractor-Kette. by-chapter reicht dreimal
+            # chunk.text herein (plan/hall/extract), cappt gegen das kumulative
+            # remaining_concepts und fährt background_map={} (#102, Skip-Zeile oben).
+            _pe = _plan_and_extract(
+                plan_text=chunk.text,
+                hall_text=chunk.text,
+                extract_text=chunk.text,
+                relevance_profile=relevance_profile,
+                existing_concepts=existing_concepts,
+                citation=citation,
+                tag_whitelist=tag_whitelist,
+                runtime_config=runtime_config,
+                cap_budget=remaining_concepts,
+                cap_label="remaining_concepts",
+                hall_ellipsis="...",
+                by_chapter=True,
+                source_name=source_path.name,
+                n_chunks=len(chunks),
             )
-
-            ch_drafts, ch_map, ch_dropped, ch_failures = asyncio.run(
-                run_extractors_per_concept(
-                    chunk.text,
-                    chapter_plan,
-                    existing_concepts,
-                    citation=citation,
-                    tag_whitelist=tag_whitelist,
-                    # #102: hart leer statt background_extractor.run() pro Kapitel —
-                    # bewusst (Kosten-Multiplikation), Sichtbarkeit via Skip-Zeile
-                    # oben im by-chapter-Zweigkopf, nicht hier pro Kapitel.
-                    background_map={},
-                    related_mentions=ch_related,
-                    max_concurrent_calls=(runtime_config.max_concurrent_calls if runtime_config is not None else None),
-                )
-            )
-            for t in ch_related:
+            if runtime_config is not None and remaining_concepts is not None:
+                remaining_concepts = max(0, remaining_concepts - _pe.kept_actionable)
+            for t in _pe.related:
                 if t not in related_mentions:
                     related_mentions.append(t)
-            dropped_total += ch_dropped
-            extractor_failures.extend(ch_failures)  # #210
-            all_drafts.extend(ch_drafts)
-            for draft_title, concept_context in ch_map.items():
+            dropped_total += _pe.dropped
+            extractor_failures.extend(_pe.failures)  # #210
+            all_drafts.extend(_pe.drafts)
+            for draft_title, concept_context in _pe.concept_map.items():
                 all_concept_map.setdefault(draft_title, concept_context)
 
         drafts, concept_map = all_drafts, all_concept_map
         print(f"\n      {len(drafts)} Draft-Notes aus {len(chunks)} Kapiteln extrahiert")
     else:
-        # --- Schritt 4: Planner + Halluzinations-Filter ---
+        # --- Schritt 4+4.5+5: Planner + Background + Extractor (Einzeldokument) ---
         print("[4/7] Planner: Konzept-Plan erstellen…")
-        primary_authors = _extract_primary_authors(citation)
-        with _span("Planner", pdf=source_path.name, n_chunks=len(chunks)):
-            concept_plan = planner.run(overview, relevance_profile, primary_authors=primary_authors)
-            concept_plan, hallucinated = planner.filter_hallucinated(concept_plan, text)
-        if hallucinated:
-            print(
-                f"      {len(hallucinated)} halluzinierte Konzepte verworfen: "
-                f"{', '.join(hallucinated[:3])}{'…' if len(hallucinated) > 3 else ''}"
-            )
-        if runtime_config is not None:
-            concept_plan.concepts, _capped = cap_actionable_concepts(
-                concept_plan.concepts,
-                runtime_config.max_concepts,
-            )
-            if _capped:
-                print(
-                    f"      [runtime-config] max_concepts={runtime_config.max_concepts} "
-                    f"-> {len(_capped)} Konzept(e) übersprungen: "
-                    f"{', '.join(c.title for c in _capped[:3])}"
-                    f"{'…' if len(_capped) > 3 else ''}"
-                )
-
-        related_mentions = [c.title for c in concept_plan.concepts if c.origin == "secondary_mention"]
-        if related_mentions:
-            print(
-                f"      {len(related_mentions)} Sekundär-Erwähnungen → Related Mentions: "
-                f"{', '.join(related_mentions[:3])}{'…' if len(related_mentions) > 3 else ''}"
-            )
-
-        actionable = [c for c in concept_plan.concepts if c.action != "skip" and c.origin != "secondary_mention"]
-        print(f"      {len(actionable)} Konzepte geplant ({len(concept_plan.concepts)} total)")
-        for c in actionable:
-            print(f"      [{c.priority:6s}] {c.action:6s} — {c.title}")
-
-        # --- Schritt 4.5: Background-Extractor ---
-        if ENABLE_BACKGROUND_EXTRACTOR:
-            print("[4.5/7] Background-Extractor: Trainingswissen pro Konzept…")
-            with _span("BackgroundExtractor", pdf=source_path.name):
-                background_map = background_extractor.run(concept_plan)
-        else:
-            print("[4.5/7] Background-Extractor: deaktiviert (ENABLE_BACKGROUND_EXTRACTOR=0)")
-
-        # --- Schritt 5: Extractor ---
-        actionable_count = sum(
-            1 for c in concept_plan.concepts if c.action != "skip" and c.origin != "secondary_mention"
+        # #152: dieselbe gemeinsame Kette; Normalpfad plant auf `overview`, filtert
+        # gegen den Volltext `text`, cappt einmalig gegen max_concepts und fährt den
+        # (gated) Background-Extractor.
+        _pe = _plan_and_extract(
+            plan_text=overview,
+            hall_text=text,
+            extract_text=text,
+            relevance_profile=relevance_profile,
+            existing_concepts=existing_concepts,
+            citation=citation,
+            tag_whitelist=tag_whitelist,
+            runtime_config=runtime_config,
+            cap_budget=(runtime_config.max_concepts if runtime_config is not None else None),
+            cap_label="max_concepts",
+            hall_ellipsis="…",
+            by_chapter=False,
+            source_name=source_path.name,
+            n_chunks=len(chunks),
         )
-        print(f"\n[5/7] Extractor: {actionable_count} Konzepte parallel verarbeiten…")
-        with _span("Extractor", pdf=source_path.name, n_concepts=actionable_count):
-            drafts, concept_map, dropped_total, extractor_failures = asyncio.run(
-                run_extractors_per_concept(
-                    text,
-                    concept_plan,
-                    existing_concepts,
-                    citation=citation,
-                    tag_whitelist=tag_whitelist,
-                    background_map=background_map,
-                    related_mentions=related_mentions,
-                    max_concurrent_calls=(runtime_config.max_concurrent_calls if runtime_config is not None else None),
-                )
-            )
-        print(f"      {len(drafts)} Draft-Notes extrahiert")
+        drafts = _pe.drafts
+        concept_map = _pe.concept_map
+        dropped_total = _pe.dropped
+        extractor_failures = _pe.failures
+        related_mentions = _pe.related
+        background_map = _pe.background_map
 
-    return (
-        drafts,
-        concept_map,
-        existing_concepts,
-        concept_links,
-        text,
-        chunks,
-        acronym_dict,
-        quality_report,
-        pdf_meta,
-        source_path,
-        tag_whitelist,
-        background_map,
-        fb.get("Year"),
-        dropped_total,
-        word_count,
-        related_mentions,
-        q_title,
-        citation,
-        extractor_failures,
+    return RunContext(
+        drafts=drafts,
+        concept_map=concept_map,
+        existing_concepts=existing_concepts,
+        concept_links=concept_links,
+        text=text,
+        chunks=chunks,
+        acronym_dict=acronym_dict,
+        quality_report=quality_report,
+        pdf_meta=pdf_meta,
+        source_path=source_path,
+        tag_whitelist=tag_whitelist,
+        background_map=background_map,
+        fb_year=fb.get("Year"),
+        dropped_total=dropped_total,
+        word_count=word_count,
+        related_mentions=related_mentions,
+        q_title=q_title,
+        citation=citation,
+        extractor_failures=extractor_failures,
     )
 
 
@@ -2104,7 +2189,7 @@ def _save_draft_state(
     print(f"  [save-drafts] {len(drafts)} Drafts → {path}")
 
 
-def _load_draft_state(path: str):
+def _load_draft_state(path: str) -> RunContext:
     from generative.schemas.atomic_note import AtomicNoteDraft, TextAnchor, QualityReport, ConceptItem
     from generative.pipeline.pdf_chunker import Chunk
 
@@ -2119,21 +2204,52 @@ def _load_draft_state(path: str):
     concept_links = {k: set(v) for k, v in state["concept_links"].items()}
     quality_report = QualityReport(**state["quality_report"])
     chunks = [Chunk(**c) for c in state["chunks"]]
-    return (
-        drafts,
-        concept_map,
-        state["existing_concepts"],
-        concept_links,
-        state["text"],
-        chunks,
-        state["acronym_dict"],
+    pdf_meta = state["pdf_meta"]
+    source_path = Path(state["source_name"])
+    text = state["text"]
+
+    # --- Rekonstruktion der in _run_extraction_stages berechneten, aber NICHT
+    # persistierten Felder (Stage 1–5 sind hier übersprungen), damit der
+    # --load-drafts-Pfad dieselbe RunContext-Struktur liefert wie der Normalpfad
+    # (#152). Früher lag diese Rekonstruktion inline in main(). ---
+    # q_title wird im Normalpfad von _run_extraction_stages durchgereicht; hier aus
+    # dem geladenen pdf_meta abgeleitet.
+    q_title = (pdf_meta or {}).get("Title")
+    # citation (CitationMeta, #96 E3a): Stage 1–5 übersprungen, daher aus dem
+    # geladenen pdf_meta/quality_report neu konstruiert — dieselbe deterministische
+    # Factory wie im Normalpfad (_build_citation).
+    # #95: physical_pages hier per Zweit-Check auf dieselbe source_path neu ermittelt
+    # (analog zur Edition-Verifikation in main(), die _pdf_page_labels(source_path)
+    # ebenfalls unabhängig neu aufruft) statt über den State persistiert —
+    # deterministisch, solange die PDF-Datei am gespeicherten Pfad noch existiert.
+    citation = _build_citation(
+        pdf_meta,
         quality_report,
-        state["pdf_meta"],
-        state["source_name"],
-        state["tag_whitelist"],
-        state.get("background_map") or {},
-        state.get("filename_year"),
-        state.get("related_mentions") or [],
+        q_title,
+        source_path.name,
+        physical_pages=pdf_chunker.pdf_uses_physical_pages(source_path),
+    )
+
+    return RunContext(
+        drafts=drafts,
+        concept_map=concept_map,
+        existing_concepts=state["existing_concepts"],
+        concept_links=concept_links,
+        text=text,
+        chunks=chunks,
+        acronym_dict=state["acronym_dict"],
+        quality_report=quality_report,
+        pdf_meta=pdf_meta,
+        source_path=source_path,
+        tag_whitelist=state["tag_whitelist"],
+        background_map=state.get("background_map") or {},
+        fb_year=state.get("filename_year"),
+        dropped_total=0,
+        word_count=len(text.split()),
+        related_mentions=state.get("related_mentions") or [],
+        q_title=q_title,
+        citation=citation,
+        extractor_failures=[],  # #210: Stage 1-5 übersprungen → keine Extractor-Calls
     )
 
 
@@ -2232,46 +2348,13 @@ def main(argv: list[str] | None = None):
     from generative.agents.base import trace_event as _trace_event
 
     if args.load_drafts:
-        (
-            drafts,
-            concept_map,
-            existing_concepts,
-            concept_links,
-            text,
-            chunks,
-            acronym_dict,
-            quality_report,
-            pdf_meta,
-            _src_name,
-            tag_whitelist,
-            background_map,
-            fb_year,
-            related_mentions,
-        ) = _load_draft_state(args.load_drafts)
-        source_path = Path(_src_name)
-        # q_title wird im Normalpfad von _run_extraction_stages durchgereicht;
-        # der load-drafts-Pfad überspringt Stage 1–5, daher hier aus pdf_meta ableiten.
-        q_title = (pdf_meta or {}).get("Title")
-        # citation (CitationMeta, #96 E3a) ebenso: Stage 1–5 übersprungen, daher
-        # hier aus dem geladenen pdf_meta/quality_report neu konstruiert — dieselbe
-        # deterministische Factory wie im Normalpfad (_run_extraction_stages).
-        # #95: physical_pages hier per Zweit-Check auf dieselbe source_path neu
-        # ermittelt (analog zur bestehenden Edition-Verifikation weiter unten, die
-        # _pdf_page_labels(source_path) ebenfalls unabhängig vom load-drafts-Pfad
-        # neu aufruft) statt über den State persistiert — deterministisch, solange
-        # die PDF-Datei am gespeicherten Pfad noch existiert.
-        citation = _build_citation(
-            pdf_meta,
-            quality_report,
-            q_title,
-            source_path.name,
-            physical_pages=pdf_chunker.pdf_uses_physical_pages(source_path),
-        )
-        word_count = len(text.split())
-        dropped_total = 0
-        extractor_failures: list[tuple[str, str]] = []  # #210: Stage 1-5 übersprungen → keine Extractor-Calls
+        # #152: _load_draft_state liefert dieselbe RunContext-Struktur wie
+        # _run_extraction_stages (Rekonstruktion von q_title/citation/word_count etc.
+        # liegt jetzt dort, inkl. #95/#96/#210-Begründungen).
+        ctx = _load_draft_state(args.load_drafts)
+        source_path = ctx.source_path
         print(f"\n=== Atomic Agent (load-drafts): {source_path.name} ===\n")
-        print(f"  [load-drafts] {len(drafts)} Drafts geladen · Stage 1–5 übersprungen")
+        print(f"  [load-drafts] {len(ctx.drafts)} Drafts geladen · Stage 1–5 übersprungen")
     else:
         # #186-Nachbesserung: derselbe Apostroph-/Anfuehrungszeichen-Glob-Fallback
         # wie extractive/orchestrator.py und eval_chunk_recall.py -- vorher brach
@@ -2282,56 +2365,40 @@ def main(argv: list[str] | None = None):
         except FileNotFoundError as exc:
             sys.exit(f"Datei nicht gefunden: {exc}")
         print(f"\n=== Atomic Agent: {source_path.name} ===\n")
-        (
-            drafts,
-            concept_map,
-            existing_concepts,
-            concept_links,
-            text,
-            chunks,
-            acronym_dict,
-            quality_report,
-            pdf_meta,
-            source_path,
-            tag_whitelist,
-            background_map,
-            fb_year,
-            dropped_total,
-            word_count,
-            related_mentions,
-            q_title,
-            citation,
-            extractor_failures,
-        ) = _run_extraction_stages(args, source_path, runtime_config)
+        ctx = _run_extraction_stages(args, source_path, runtime_config)
         if args.save_drafts:
             _save_draft_state(
                 args.save_drafts,
-                drafts=drafts,
-                concept_map=concept_map,
-                existing_concepts=existing_concepts,
-                concept_links=concept_links,
-                text=text,
-                chunks=chunks,
-                acronym_dict=acronym_dict,
-                quality_report=quality_report,
-                pdf_meta=pdf_meta,
+                drafts=ctx.drafts,
+                concept_map=ctx.concept_map,
+                existing_concepts=ctx.existing_concepts,
+                concept_links=ctx.concept_links,
+                text=ctx.text,
+                chunks=ctx.chunks,
+                acronym_dict=ctx.acronym_dict,
+                quality_report=ctx.quality_report,
+                pdf_meta=ctx.pdf_meta,
                 source_name=str(source_path),
-                tag_whitelist=tag_whitelist,
-                background_map=background_map,
-                filename_year=fb_year,
-                related_mentions=related_mentions,
+                tag_whitelist=ctx.tag_whitelist,
+                background_map=ctx.background_map,
+                filename_year=ctx.fb_year,
+                related_mentions=ctx.related_mentions,
             )
+
+    # `drafts` wird ab hier durch Dedup-/Stage-6-Stufen ersetzt → lokale (mutierbare)
+    # Bindung; alle übrigen Stage-Ergebnisse werden per Attribut aus `ctx` gelesen.
+    drafts = ctx.drafts
 
     # #210: Extractor-Ausfälle (Timeout/CLI-Fehler nach Retries) sichtbar machen.
     # n_attempted = erfolgreiche Extraktionen (drafts vor Dedup) + dropped (Fehler+Leer);
     # exit_code wird an ALLEN Rückgabepunkten zurückgegeben, damit ein Teilverlust den
     # Prozess mit 3 beendet (unterscheidbar von hartem Abbruch=1) statt still mit 0.
-    n_extract_attempted = len(drafts) + dropped_total
-    exit_code = extractor_failure_exit_code(extractor_failures)
+    n_extract_attempted = len(drafts) + ctx.dropped_total
+    exit_code = extractor_failure_exit_code(ctx.extractor_failures)
 
     if not drafts:
         print("\nKeine Konzepte extrahiert. Fertig.")
-        for _line in format_extractor_failure_report(extractor_failures, n_extract_attempted):
+        for _line in format_extractor_failure_report(ctx.extractor_failures, n_extract_attempted):
             print(_line, file=sys.stderr)
         return exit_code
 
@@ -2345,16 +2412,16 @@ def main(argv: list[str] | None = None):
     drafts = _drop_artifacts(drafts)
     if not drafts:
         print("\nAlle Drafts als Artefakte verworfen. Fertig.")
-        for _line in format_extractor_failure_report(extractor_failures, n_extract_attempted):
+        for _line in format_extractor_failure_report(ctx.extractor_failures, n_extract_attempted):
             print(_line, file=sys.stderr)
         return exit_code
 
     # Qualitäts-Flags aus QualityReport auf alle Notes übertragen
     for d in drafts:
-        d.quality_flags.extend(quality_report.flags)
+        d.quality_flags.extend(ctx.quality_report.flags)
 
     # --- Dedup Stage A: Exact-Match (deterministisch, keine LLM-Calls) ---
-    drafts = dedup_exact(drafts, existing_concepts)
+    drafts = dedup_exact(drafts, ctx.existing_concepts)
     print(f"      {len(drafts)} nach Exact-Dedup")
 
     # --- Dedup Stage B: Entity-Resolution (Embedding-Cluster + LLM-Merge) ---
@@ -2393,24 +2460,24 @@ def main(argv: list[str] | None = None):
     # --- Schritte 6a-c: Verifier + Cross-Reference + Critic pro Note (parallel) ---
     print(f"\n[6/7] Verifier + Cross-Reference + Critic für {len(drafts)} Notes…")
 
-    chunk_map = {c.title: c.text for c in chunks}
+    chunk_map = {c.title: c.text for c in ctx.chunks}
 
     with _span("Stage6-Verifier-CrossRef-Critic", pdf=source_path.name, n_drafts=len(drafts)):
         drafts = asyncio.run(
             process_all_notes_async(
                 drafts,
-                existing_concepts,
-                concept_links,
+                ctx.existing_concepts,
+                ctx.concept_links,
                 chunk_map,
-                full_text=text,
-                acronym_dict=acronym_dict,
-                concept_map=concept_map,
-                quality_report=quality_report,
-                citation=citation,
+                full_text=ctx.text,
+                acronym_dict=ctx.acronym_dict,
+                concept_map=ctx.concept_map,
+                quality_report=ctx.quality_report,
+                citation=ctx.citation,
                 source_path=source_path,
-                tag_whitelist=tag_whitelist,
-                background_map=background_map,
-                related_mentions=related_mentions,
+                tag_whitelist=ctx.tag_whitelist,
+                background_map=ctx.background_map,
+                related_mentions=ctx.related_mentions,
                 runtime_config=runtime_config,
                 refine_budget=refine_budget,
             )
@@ -2422,7 +2489,7 @@ def main(argv: list[str] | None = None):
     # Writer und beide Notes würden geschrieben. Hier auf das vorhandene Signal reagieren
     # und Geschwister eines Laufs deterministisch zu EINER Note kollabieren — nach den
     # per-Draft-Calls (Signal steht erst jetzt fest), vor boilerplate_dedup und Writer.
-    drafts, n_sib = resolve_sibling_dups(drafts, existing_concepts)
+    drafts, n_sib = resolve_sibling_dups(drafts, ctx.existing_concepts)
     if n_sib:
         print(f"      [sibling-dedup] {n_sib} Intra-Run-Near-Dup(s) in Geschwister-Note(s) gemergt")
 
@@ -2446,7 +2513,7 @@ def main(argv: list[str] | None = None):
     # LLM-generierte Autor-/Jahr-Attribution im Body von der kanonischen
     # CitationMeta abweicht (Regressionsfall: "Landry 2019" statt Knowles).
     # Kein Body-Edit, kein Routing-Eingriff — nur ein Review-Hinweis.
-    n_citation_flags = citation_check.apply_citation_check(drafts, citation)
+    n_citation_flags = citation_check.apply_citation_check(drafts, ctx.citation)
     if n_citation_flags:
         print(f"[citation-check] {n_citation_flags} Attribution(s) ohne Quellendeckung geflaggt")
 
@@ -2454,7 +2521,7 @@ def main(argv: list[str] | None = None):
     # Seiteneffekt-freier Review-Hinweis (analog #8/E3b): render_note/render_moc
     # kennzeichnen Seitenangaben bereits als "PDF-S." (citation.physical_pages),
     # dieses Flag macht die Einschränkung zusätzlich im Frontmatter sichtbar.
-    n_physical_flags = citation_check.apply_physical_pages_flag(drafts, citation)
+    n_physical_flags = citation_check.apply_physical_pages_flag(drafts, ctx.citation)
     if n_physical_flags:
         print(f"[physical-pages] {n_physical_flags} Note(s) ohne /PageLabels — Seiten als PDF-Position geflaggt")
 
@@ -2473,7 +2540,7 @@ def main(argv: list[str] | None = None):
     # Extraction-Stage). Nur create-Notes werden markiert (extend/hub out-of-scope).
     _fb = vault_writer.parse_filename_fallback(source_path.name)
     _source_unresolved = routing_report.is_source_unresolved(
-        citation.as_meta_dict(), _fb, crossref_override_blocked(quality_report, q_title)
+        ctx.citation.as_meta_dict(), _fb, crossref_override_blocked(ctx.quality_report, ctx.q_title)
     )
     if _source_unresolved:
         _marked = 0
@@ -2497,7 +2564,7 @@ def main(argv: list[str] | None = None):
     # gesetzt) und sie nicht per Title-Match geraten wurde. Ein gepinntes --doi, das
     # nicht auflöst (falsch/CrossRef down), zählt NICHT als verifiziert → fail-closed,
     # die Note wird geflaggt statt still vertraut. (Codex-Review, fail-open-Lücke.)
-    _doi_verified = bool(quality_report.crossref_year) and not quality_report.doi_from_title_match
+    _doi_verified = bool(ctx.quality_report.crossref_year) and not ctx.quality_report.doi_from_title_match
     if routing_report.is_edition_unverified(_doi_verified, _first_print_page):
         _ed_marked = 0
         for draft in drafts:
@@ -2529,7 +2596,7 @@ def main(argv: list[str] | None = None):
 
     # Issue #21: Sibling-related-Links auf Merge-Targets umschreiben, bevor
     # geschrieben wird — sonst zeigen sie auf nie-erzeugte Draft-Titel-Dateien.
-    n_rewritten = vault_writer.rewrite_merged_related_links(drafts, existing_concepts)
+    n_rewritten = vault_writer.rewrite_merged_related_links(drafts, ctx.existing_concepts)
     if n_rewritten:
         print(f"[merge-links] {n_rewritten} related-Link(s) auf Merge-Target umgeschrieben")
 
@@ -2558,8 +2625,8 @@ def main(argv: list[str] | None = None):
                 draft,
                 source_file=source_path.name,
                 dry_run=args.dry_run,
-                citation=citation,
-                existing_concepts=existing_concepts,
+                citation=ctx.citation,
+                existing_concepts=ctx.existing_concepts,
                 inbox_dir=_inbox_dir,
             )
             will_vault, _ = vault_writer.auto_write_decision(draft)
@@ -2579,7 +2646,7 @@ def main(argv: list[str] | None = None):
     print(f"\n=== Fertig: {written} Notes {'(dry-run)' if args.dry_run else 'geschrieben'} ===")
     # #210: verlorene Konzepte (Timeout/CLI-Fehler) direkt im Summary ausweisen —
     # kein stilles Exit 0. Der Prozess endet unten mit exit_code (3), wenn befüllt.
-    for _line in format_extractor_failure_report(extractor_failures, n_extract_attempted):
+    for _line in format_extractor_failure_report(ctx.extractor_failures, n_extract_attempted):
         print(_line, file=sys.stderr)
     # #45: Final-Report um Gründe-Aggregat erweitern (Routing-Verteilung +
     # "0 PDFs verändert"-Zusicherung sichtbar machen).
@@ -2626,7 +2693,7 @@ def main(argv: list[str] | None = None):
         )
         exported_files, export_messages = export_runner.run_export(
             drafts,
-            citation,
+            ctx.citation,
             export_formats,
             export_root,
             written_files=[_t for _t, _ in written_targets],
@@ -2708,8 +2775,8 @@ def main(argv: list[str] | None = None):
                     "n_vault": vault_count,
                     "n_inbox": inbox_count,
                     "n_merge": sum(1 for d in drafts if getattr(d, "action", "") == "extend"),
-                    "n_dropped": dropped_total,
-                    "n_words": word_count,
+                    "n_dropped": ctx.dropped_total,
+                    "n_words": ctx.word_count,
                     "model": getattr(_db_cfg, "MODEL_PLANNER", ""),
                     "cost_usd": _cost_usd,
                     "tokens_total": _tok_total,

@@ -59,20 +59,21 @@ def test_quality_module_not_shadowed_by_text_quality_gate(monkeypatch):
 
     # Der Quality-Agent (Modul) muss genau einmal erreicht worden sein.
     assert calls["n"] == 1
-    # quality_report wandert an Tupel-Position 7.
-    assert isinstance(result[7], QualityReport)
-    # #210: extractor_failures ist jetzt der letzte Wert; q_title/citation rücken je
-    # eine Position nach vorne.
-    assert result[-1] == []  # extractor_failures (kein Ausfall im Stub)
+    # #152: _run_extraction_stages liefert eine RunContext-Dataclass statt eines
+    # 19er-Positions-Tupels — Zugriff per Attributname (kein Positions-Wiring mehr,
+    # das war die Quelle der q_title-/quality-Shadowing-Bugs).
+    assert isinstance(result.quality_report, QualityReport)
+    # #210: extractor_failures — kein Ausfall im Stub.
+    assert result.extractor_failures == []
     # q_title (erwarteter Quell-Titel) — sonst crasht main() beim CrossRef-Override-
     # Check mit NameError (Ebner-Run-Regression).
-    assert result[-3] == "Titel"
-    # citation (CitationMeta, #96 E3a) muss als vorletzter Wert mitkommen — konstruiert
-    # in _run_extraction_stages VOR dem Planner (Stage 3→4-Grenze), damit Extractor/
-    # Planner dieselben (CrossRef-korrigierten) Werte sehen wie der Vault-Writer.
+    assert result.q_title == "Titel"
+    # citation (CitationMeta, #96 E3a) — konstruiert in _run_extraction_stages VOR dem
+    # Planner (Stage 3→4-Grenze), damit Extractor/Planner dieselben (CrossRef-
+    # korrigierten) Werte sehen wie der Vault-Writer.
     from generative.schemas.citation import CitationMeta
 
-    citation = result[-2]
+    citation = result.citation
     assert isinstance(citation, CitationMeta)
     assert citation.author == "Autor"
     assert citation.year == "2020"
@@ -118,5 +119,6 @@ def test_physical_pages_signal_wired_from_pdf_chunker_into_citation(monkeypatch)
     args = SimpleNamespace(by_chapter=False, dry_run=True, doi=None, llm_fallback=False)
     result = orchestrator._run_extraction_stages(args, Path("fake.pdf"), None)
 
-    citation = result[-2]  # #210: extractor_failures ist jetzt der letzte Wert
+    # #152: Attributzugriff auf die RunContext-Dataclass statt Tupel-Position.
+    citation = result.citation
     assert citation.physical_pages is True
