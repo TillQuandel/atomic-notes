@@ -141,7 +141,12 @@ def _run_eval_note(tmp_path, monkeypatch, spy: list | None = None):
 
         monkeypatch.setattr(eq, "_claim_scores_from_judge", wrapped)
 
-    return eq.eval_note(note_path, pdf_path, content_hash=None)
+    # pipeline_version wird explizit fixiert (statt den Default AGENT_VERSION aus
+    # config.py durchzureichen) -- so bleibt EXPECTED_RESULT["version"] unten stabil
+    # gegenueber _auto_version_bump (bumpt AGENT_VERSION im Maintainer-Modus bei
+    # jeder Pipeline-Code-Aenderung), ohne den config-Wert im Test zu duplizieren.
+    # Konvention wie test_per_agent_tracking.py::test_aggregate_includes_model_config.
+    return eq.eval_note(note_path, pdf_path, pipeline_version="v0.0.0", content_hash=None)
 
 
 class TestAuditPassRecomputesOnlyAuditedClaims:
@@ -183,7 +188,7 @@ EXPECTED_RESULT = {
     "note": "note.md",
     "pdf": "quelle.pdf",
     "language": "DE→DE",
-    "version": "v0.3.140",
+    "version": "v0.0.0",  # explizit fixiert in _run_eval_note, s. Kommentar dort
     "eval_version": "4.1",
     "content_hash": None,
     "claims_total": 6,
@@ -319,14 +324,12 @@ EXPECTED_RESULT = {
     ],
     "quality_flags": ["audit_overridden", "judge_uneinig", "retrieval_low_cosine"],
     "llm_usage": {"calls": 2, "input_tokens": 14, "output_tokens": 14, "cached_calls": 0},
-    "model_config": {
-        "planner": "anthropic/claude-sonnet-4-6",
-        "extractor": "anthropic/claude-sonnet-4-6",
-        "verifier": "anthropic/claude-haiku-4-5-20251001",
-        "critic": "anthropic/claude-haiku-4-5-20251001",
-        "cross_ref": "anthropic/claude-haiku-4-5-20251001",
-        "canonicalizer": "anthropic/claude-sonnet-4-6",
-    },
+    # model_config wird nicht als eigenes Literal dupliziert (eval_note hat dafuer
+    # keinen Override-Parameter wie pipeline_version) -- stattdessen direkter Bezug
+    # auf den echten Modulwert, damit Aenderungen an config.MODEL_CONFIG diesen
+    # Snapshot nicht grundlos brechen. _aggregate() schreibt exakt dieses Objekt
+    # unveraendert ins Ergebnis, die Bit-Identitaets-Aussage bleibt also erhalten.
+    "model_config": eq.MODEL_CONFIG,
 }
 
 
