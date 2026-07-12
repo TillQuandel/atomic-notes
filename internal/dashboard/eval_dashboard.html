@@ -245,7 +245,11 @@ body.collapsed .theme-toggle { padding: 6px; }
 .strip .cell .lbl { font-family: var(--f-mono); font-size: 9.5px; color: var(--ink-4); text-transform: uppercase; letter-spacing: .12em; }
 .strip .cell .val { font-family: var(--f-mono); font-size: 18px; color: var(--ink-1); font-weight: 500; letter-spacing: -.01em; display: flex; align-items: baseline; gap: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .strip .cell .val .u { font-size: 11px; color: var(--ink-4); font-weight: 400; }
-.strip .cell .sub { font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+/* #213 Problem 3: kein Ellipsis-Clip mehr — bei 1200px (8-spaltiger Strip)
+   war der Zellenraum knapper als bei 900px (4 Spalten) oder 1440px, wodurch
+   z.B. "v0.1.0–v0.3.140" abgeschnitten wurde. Zeilenumbruch statt Kürzung
+   hält den Inhalt bei allen Breiten vollständig lesbar. */
+.strip .cell .sub { font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); }
 
 /* ── KPI tiles ─────────────────────────────────────────────────── */
 .kpis {
@@ -258,21 +262,35 @@ body.collapsed .theme-toggle { padding: 6px; }
   display: flex; flex-direction: column; gap: 8px; position: relative;
   min-width: 0; cursor: pointer; text-align: left;
   transition: background .2s;
+  /* #213: Wert-Schriftgröße relativ zur tatsächlichen Kachel-Breite (nicht
+     zur Viewport-Breite) skalieren — vw-Clamp allein überschätzt den Platz
+     in einer 7-Spalten-Reihe systematisch (siehe .v/.u unten). */
+  container-type: inline-size;
 }
 .kpi:last-child { border-right: 0; }
 .kpi:hover { background: var(--bg-elev); }
 .kpi:focus-visible { outline: 2px solid var(--amber); outline-offset: -2px; }
 .kpi.open { background: var(--bg-elev); }
-.kpi .top { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.kpi .top {
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  /* #213 Problem 2: fester Zwei-Zeilen-Slot für das Label — sonst schiebt ein
+     umbrechendes Label (z. B. "Automatisch akzeptiert") nur die eigene
+     value-row nach unten, während schmalere Nachbar-Labels einzeilig bleiben
+     und die Großwerte der Reihe die gemeinsame Grundlinie verlieren. */
+  min-height: 30px;
+}
 .kpi .lbl { font-family: var(--f-mono); font-size: 10px; color: var(--ink-3); text-transform: uppercase; letter-spacing: .12em; }
-.kpi .value-row { display: flex; align-items: baseline; gap: 4px; margin-top: 2px; }
+/* #213 Problem 1: value-row bleibt einzeilig; Wert+Einheit schrumpfen
+   gemeinsam mit der Kachel-Breite (cqw statt vw) — verhindert, dass breite
+   Werte (z. B. "100,0") aus der Kachel in die Nachbar-Kachel überlaufen. */
+.kpi .value-row { display: flex; align-items: baseline; gap: 4px; margin-top: 2px; white-space: nowrap; }
 .kpi .v {
   font-family: var(--f-display); font-weight: 700;
-  font-size: clamp(36px, 3.8vw, 52px); line-height: .92;
+  font-size: clamp(28px, 20cqw, 52px); line-height: .92;
   letter-spacing: -.045em; color: var(--ink-1);
   font-feature-settings: "tnum","lnum";
 }
-.kpi .u { font-family: var(--f-display); font-weight: 600; font-size: clamp(14px,1.4vw,18px); color: var(--ink-3); letter-spacing: -.02em; margin-left: 2px; }
+.kpi .u { font-family: var(--f-display); font-weight: 600; font-size: clamp(12px, 7cqw, 18px); color: var(--ink-3); letter-spacing: -.02em; margin-left: 2px; }
 .kpi .tgt {
   display: inline-flex; align-self: flex-start;
   font-family: var(--f-mono); font-size: 10px; letter-spacing: .04em;
