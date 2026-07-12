@@ -24,6 +24,7 @@ from extractive.pipeline.sentence_extractor import (
     map_sentences_to_pages,
     sumy_language,
 )
+from shared.path_safety import resolve_source_path
 from shared.schemas.atomic_note_extractive import AtomicNoteExtractive
 
 EXTRACTIVE_VERSION = "extractive-v0.2.0"
@@ -71,9 +72,10 @@ def main():
     ap.add_argument("--dry-run", action="store_true", help="Keine Dateien schreiben, nur Eval")
     args = ap.parse_args()
 
-    source = Path(args.source)
-    if not source.exists():
-        sys.exit(f"Fehler: PDF nicht gefunden: {source}")
+    try:
+        source = resolve_source_path(args.source)
+    except FileNotFoundError as exc:
+        sys.exit(f"Fehler: PDF nicht gefunden: {exc}")
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 

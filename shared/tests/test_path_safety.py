@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from shared.path_safety import contained_child_path, safe_filename_stem
+from shared.path_safety import contained_child_path, resolve_source_path, safe_filename_stem
 
 # Unsichere Titel aus dem alten write_note-Test: Traversal, absolute Pfade,
 # Windows-Sondernamen, NUL-Byte. Der Slug muss jeden davon im Zielordner halten.
@@ -94,3 +94,57 @@ def test_contained_child_path_rejects_absolute_sibling():
         target = os.path.join(outside, "evil.md")
         with pytest.raises(ValueError):
             contained_child_path(Path(inside), target)
+
+
+# -- resolve_source_path: Apostroph-/Anfuehrungszeichen-Varianten (#186) --------
+
+
+def test_resolve_source_path_returns_exact_match_unchanged(tmp_path: Path):
+    f = tmp_path / "plain.pdf"
+    f.write_text("x")
+    assert resolve_source_path(f) == f
+
+
+def test_resolve_source_path_finds_curly_apostrophe_file_via_straight_query(tmp_path: Path):
+    """Datei liegt mit typografischem Apostroph (U+2019) vor, Nutzer tippt den geraden ' -- muss trotzdem gefunden werden."""
+    f = tmp_path / "Porst’s-Buch.pdf"
+    f.write_text("x")
+    queried = tmp_path / "Porst's-Buch.pdf"
+    assert resolve_source_path(queried) == f
+
+
+def test_resolve_source_path_finds_straight_apostrophe_file_via_curly_query(tmp_path: Path):
+    """Umgekehrter Fall: Datei mit geradem ', Anfrage mit typografischem U+2019."""
+    f = tmp_path / "Porst's-Buch.pdf"
+    f.write_text("x")
+    queried = tmp_path / "Porst’s-Buch.pdf"
+    assert resolve_source_path(queried) == f
+
+
+def test_resolve_source_path_raises_with_repr_when_no_candidate(tmp_path: Path):
+    missing = tmp_path / "nichts-hier.pdf"
+    with pytest.raises(FileNotFoundError) as exc_info:
+        resolve_source_path(missing)
+    assert repr(str(missing)) in str(exc_info.value)
+
+
+def test_resolve_source_path_raises_and_lists_candidates_when_ambiguous(tmp_path: Path):
+    a = tmp_path / "Porst’s-Buch.pdf"
+    b = tmp_path / "Porst‘s-Buch.pdf"
+    a.write_text("x")
+    b.write_text("x")
+    queried = tmp_path / "Porst's-Buch.pdf"
+    with pytest.raises(FileNotFoundError) as exc_info:
+        resolve_source_path(queried)
+    msg = str(exc_info.value)
+    assert repr(str(queried)) in msg
+    assert str(a) in msg
+    assert str(b) in msg
+
+
+def test_resolve_source_path_no_fallback_without_quote_chars(tmp_path: Path):
+    """Fehlt ein Apostroph-Zeichen ganz (Tippfehler ohne Zweifelszeichen), soll kein Glob-Fallback greifen."""
+    missing = tmp_path / "voellig-anderer-name.pdf"
+    (tmp_path / "anderes-dokument.pdf").write_text("x")
+    with pytest.raises(FileNotFoundError):
+        resolve_source_path(missing)

@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import glob
 import os
 import re
+import sys
 from pathlib import Path
 
 _UNSAFE_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]+')
@@ -15,6 +17,11 @@ _WINDOWS_RESERVED_NAMES = {
     *(f"LPT{i}" for i in range(1, 10)),
 }
 
+# Apostroph-/Anfuehrungszeichen-Varianten, die beim Kopieren aus PDFs/Web
+# unbemerkt gegeneinander vertauscht werden (#186): gerades Apostroph, rechtes/
+# linkes typografisches Apostroph, Gravis, Akut.
+_QUOTE_LIKE_CHARS = "'’‘`´"
+
 
 def safe_filename_stem(value: str, *, max_len: int = 60, fallback: str = "note") -> str:
     stem = str(value or "").lower().replace(" ", "-")
@@ -26,6 +33,44 @@ def safe_filename_stem(value: str, *, max_len: int = 60, fallback: str = "note")
     if stem.upper() in _WINDOWS_RESERVED_NAMES:
         stem = f"{stem}-{fallback}"
     return stem
+
+
+def resolve_source_path(source: str | Path) -> Path:
+    """Loest einen Quell-Dateipfad (z. B. PDF) auf, inkl. Glob-Fallback fuer
+    Apostroph-/Anfuehrungszeichen-Varianten (#186).
+
+    Existiert `source` exakt, wird er unveraendert zurueckgegeben. Sonst wird
+    im selben Verzeichnis nach Dateien gesucht, deren Name bis auf gerade vs.
+    typografische Apostrophe/Anfuehrungszeichen (' ’ ‘ ` ´)
+    identisch ist. Genau ein Treffer wird verwendet (Hinweis auf stderr);
+    bei 0 oder >1 Treffern wirft die Funktion FileNotFoundError mit
+    `repr(str(source))` und -- falls mehrdeutig -- den Kandidaten, damit alle
+    Aufrufer dieselbe, gut lesbare Fehlermeldung erhalten (statt sie je Stelle
+    zu duplizieren).
+    """
+    path = Path(source)
+    if path.exists():
+        return path
+
+    pattern = glob.escape(path.name)
+    for ch in _QUOTE_LIKE_CHARS:
+        pattern = pattern.replace(ch, "?")
+
+    candidates = sorted(path.parent.glob(pattern)) if path.parent.is_dir() else []
+
+    if len(candidates) == 1:
+        print(
+            f"Hinweis: {repr(str(path))} nicht gefunden, verwende Fallback-Treffer "
+            f"(Apostroph-/Anfuehrungszeichen-Variante): {candidates[0]}",
+            file=sys.stderr,
+        )
+        return candidates[0]
+
+    if candidates:
+        listing = ", ".join(str(c) for c in candidates)
+        raise FileNotFoundError(f"{repr(str(path))} nicht eindeutig -- mehrere Kandidaten gefunden: {listing}")
+
+    raise FileNotFoundError(repr(str(path)))
 
 
 def contained_child_path(parent: Path, filename: str) -> Path:

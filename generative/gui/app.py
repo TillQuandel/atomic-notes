@@ -28,6 +28,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from generative.gui import env_file, gui_settings, run_history, runner
 from generative.pipeline.export_runner import EXPORT_FILE_SUFFIXES
+from shared.path_safety import resolve_source_path
 
 logger = logging.getLogger(__name__)
 
@@ -780,8 +781,12 @@ def create_app(
         if options.get("export_formats"):
             export_formats_dir = (exports_dir / run_history.make_run_id(clock())).resolve()
             options = {**options, "export_formats_dir": str(export_formats_dir)}
-        if not pdf or not Path(pdf).exists():
+        if not pdf:
             return JSONResponse({"error": f"PDF nicht gefunden: {pdf}"}, status_code=400)
+        try:
+            pdf = str(resolve_source_path(pdf))
+        except FileNotFoundError as exc:
+            return JSONResponse({"error": f"PDF nicht gefunden: {exc}"}, status_code=400)
         # #2: Quelle muss unter einem erlaubten Root liegen (gelistet/hochgeladen).
         if not any(_is_within(pdf, root) for root in _allowed_roots):
             return JSONResponse({"error": "PDF liegt ausserhalb der erlaubten Verzeichnisse."}, status_code=400)
