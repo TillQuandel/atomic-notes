@@ -9,11 +9,13 @@ ankergewichtet), mit Mittelwert-Fallback wenn keine Roh-Counts vorliegen.
 
 from __future__ import annotations
 
+from generative.eval_common import wilson_ci
 from generative.eval_dashboard import (
     _calc_kpis,
     _dedupe_pdf_options,
     _pdf_filter_key,
     _pooled_hall_pct,
+    _pooled_hall_stats,
     _top_versions,
 )
 
@@ -51,6 +53,54 @@ def test_pooled_mixed_rows_fall_back_to_mean():
     # Teilmengen-Pool wäre 1/2 = 50 %; korrekt: mean([0.5, 0.0]) = 25 %.
     rows = [_qrow("v1", 0.5, 2, 1), _qrow("v1", 0.0)]
     assert _pooled_hall_pct(rows) == 25.0
+
+
+# ── Wilson-CI der gepoolten Rate (#196 P4) ──────────────────────────────────
+
+
+def test_pooled_stats_has_wilson_ci_with_counts():
+    rows = [_qrow("v1", 0.5, 2, 1), _qrow("v1", 0.05, 100, 5)]
+    st = _pooled_hall_stats(rows)
+    assert st["pct"] == 5.9
+    assert st["anchors_total"] == 102
+    assert st["rows_n"] == 2
+    lo, hi = wilson_ci(6, 102)
+    assert st["ci_low"] == round(lo * 100, 1)
+    assert st["ci_high"] == round(hi * 100, 1)
+    assert st["ci_low"] < st["ci_high"]
+
+
+def test_pooled_stats_no_ci_on_mean_fallback():
+    # gemischte Rows → Mean-Fallback → kein CI (Roh-Counts fehlen)
+    rows = [_qrow("v1", 0.5, 2, 1), _qrow("v1", 0.0)]
+    st = _pooled_hall_stats(rows)
+    assert st["pct"] == 25.0
+    assert st["ci_low"] is None
+    assert st["ci_high"] is None
+    assert st["anchors_total"] is None
+
+
+def test_pooled_stats_empty_is_none():
+    assert _pooled_hall_stats([]) is None
+
+
+def test_calc_kpis_exposes_ci_fields_with_counts():
+    rows = [_qrow("v0.3.141", 0.0, 17, 0), _qrow("v0.3.141", 0.083, 12, 1)]
+    kpis = _calc_kpis({}, [], rows, [], current_version="v0.3.141")
+    assert kpis["hall_anchors_total"] == 29
+    assert kpis["hall_ci_low"] is not None
+    assert kpis["hall_ci_high"] is not None
+    assert kpis["hall_ci_low"] < kpis["hall_ci_high"]
+    assert kpis["hall_notes_n"] == 2
+
+
+def test_calc_kpis_ci_null_on_mean_fallback():
+    rows = [_qrow("v0.3.141", x) for x in (0.0, 0.0, 0.083)]
+    kpis = _calc_kpis({}, [], rows, [], current_version="v0.3.141")
+    assert kpis["avg_hall"] == 2.8  # Mean-Fallback (kein CI ableitbar)
+    assert kpis["hall_ci_low"] is None
+    assert kpis["hall_ci_high"] is None
+    assert kpis["hall_anchors_total"] is None
 
 
 # ── KPI-Integration ─────────────────────────────────────────────────────────
