@@ -444,6 +444,9 @@ def build_data(
             # #198 P3: expliziter Join-Marker statt ver-Heuristik — "DB-gejoint"
             # ist die woertliche Option-A-Semantik fuer die total_tokens-KPI
             # (_calc_kpis), nicht ueber die Truthiness von `ver` abgeleitet.
+            # Bewusste Divergenz zum Versions-Chart-Filter (`if not ver: continue`,
+            # eval_dashboard._chart_tokens_by_version): ein DB-gejointer Lauf mit
+            # leerer/NULL pipeline_version zaehlt hier trotzdem in total_tokens mit.
             tr["db_matched"] = tr.get("run_id", "") in _run_info
             info = _run_info.get(tr.get("run_id", ""), {})
             tr["pdf_label"] = info.get("pdf_label", "")
