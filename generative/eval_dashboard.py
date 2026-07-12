@@ -562,7 +562,14 @@ def _calc_kpis(
     total_generated = sum(r["n_total"] for r in all_log_runs)
     total_accepted = sum(r["n_vault"] for r in all_log_runs)
     total_merged = sum(r.get("n_merge", 0) for r in all_log_runs)
-    total_tokens = sum(r["tokens_in"] + r["tokens_out"] for r in token_runs)
+    # #198 P3: Lifetime-Summe nur über DB-gejointe Läufe (Option A). Waisen-
+    # Traces (Trace-JSONL ohne pipeline_runs-Zeile) tragen kein `ver` und
+    # blähten die KPI gegenüber dem Versions-Chart auf (`_chart_tokens_by_
+    # version`, das über `ver` filtert). `db_matched` wird beim Server-Join
+    # gesetzt; Default True erhält den deprecated Standalone-Pfad (main()/
+    # _build_html), der _calc_kpis ohne Server-Join aufruft — dort existiert
+    # der Key nie, und ohne DB-Join lässt sich „gejoint" nicht feststellen.
+    total_tokens = sum(r["tokens_in"] + r["tokens_out"] for r in token_runs if r.get("db_matched", True))
     total_dur_s = sum(r["duration_min"] * 60 for r in token_runs)
     latest_truns = [r for r in token_runs if r.get("ver") == latest_pver] if latest_pver else token_runs
     cur_tokens = sum(r["tokens_in"] + r["tokens_out"] for r in latest_truns)

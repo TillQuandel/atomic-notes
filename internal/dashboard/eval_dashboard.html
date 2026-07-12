@@ -1591,7 +1591,7 @@ function renderStrip(kpis) {
     // #204 P5: "Laufzeit" hier ist Lifetime (alle Versionen) — Scope-Suffix
     // gegen die Kachel "Laufzeit (aktuell)" oben; Zahl war zudem mit Punkt
     // statt Komma formatiert (Locale-Fund an derselben Stelle mitgefixt).
-    cell('Tokens', tok, '', kpis.total_dur_h ? `${_fmtDE(kpis.total_dur_h)}h Laufzeit (gesamt)` : '', 'Summe aus Input- und Output-Tokens aller protokollierten Läufe über alle Versionen — nicht nur die aktuelle (vgl. Kachel „Pipeline-Tokens" oben).');
+    cell('Tokens', tok, '', kpis.total_dur_h ? `${_fmtDE(kpis.total_dur_h)}h Laufzeit (gesamt)` : '', 'Summe aus Input- und Output-Tokens aller Läufe mit DB-Zuordnung, über alle Versionen — nicht nur die aktuelle (vgl. Kachel „Pipeline-Tokens" oben). Traces ohne zugehörige pipeline_runs-Zeile (z. B. abgebrochene Läufe) zählen hier bewusst nicht mit.');
 }
 
 /* ── Table ────────────────────────────────────────────────────── */

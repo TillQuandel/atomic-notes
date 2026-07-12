@@ -441,6 +441,10 @@ def build_data(
             for r in _db_tok.query_pipeline_runs()
         }
         for tr in token_runs:
+            # #198 P3: expliziter Join-Marker statt ver-Heuristik — "DB-gejoint"
+            # ist die woertliche Option-A-Semantik fuer die total_tokens-KPI
+            # (_calc_kpis), nicht ueber die Truthiness von `ver` abgeleitet.
+            tr["db_matched"] = tr.get("run_id", "") in _run_info
             info = _run_info.get(tr.get("run_id", ""), {})
             tr["pdf_label"] = info.get("pdf_label", "")
             tr["ver"] = info.get("ver", "")
@@ -495,6 +499,9 @@ def build_data(
                         "ver": r.get("pipeline_version", ""),
                         "pdf_label": r.get("pdf_label") or r.get("pdf_source", ""),
                         "language": _run_lang_safe.get(r["run_id"], ""),
+                        # #198 P3: kommt direkt aus pipeline_runs — per Konstruktion
+                        # DB-gejoint (kein Waisen-Fall moeglich).
+                        "db_matched": True,
                         "cost_usd": r.get("cost_usd", 0.0) or 0.0,
                         "tokens_in": 0,
                         "tokens_out": 0,
