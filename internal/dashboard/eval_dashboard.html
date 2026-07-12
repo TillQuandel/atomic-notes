@@ -1282,8 +1282,8 @@ function renderKpis(kpis, thresh, kpiTrend) {
       tgtHint:`Schwellenwert für die Ampel-Bewertung: gut ab ${T.cov[0]} %, schlecht bei ${T.cov[1]} % oder darunter. Fest im Dashboard-Code hinterlegt, keine wissenschaftliche Norm.` },
     { id:'kpi-n', key:'n', label:'Evaluierte Notes', val:kpis.n_notes, u:'', digits:0,
       hint:'Anzahl der Notes der aktuellen Pipeline-Version, die den automatischen Qualitäts-Check (Eval) durchlaufen haben — die Stichprobe hinter Fehlerquote und Belegrate.',
-      tone:'info', tgt: kpis.total_generated ? `${_fmtDE(100*kpis.n_notes/kpis.total_generated)} % der Notes` : '–',
-      tgtHint:'Zähler: evaluierte Notes NUR der aktuellen Pipeline-Version (wie die Kachel oben). Nenner: generierte Notes ALLER Pipeline-Versionen. Die Prozentzahl mischt damit zwei unterschiedliche Versions-Basen — keine reine Evaluierungs-Quote der aktuellen Version.' },
+      tone:'info', tgt: kpis.notes_eval_pct!=null ? `${_fmtDE(kpis.notes_eval_pct)} % der Notes` : '–',
+      tgtHint:'Zähler und Nenner teilen dieselbe Versions- und Filterbasis: evaluierte Notes ÷ generierte Notes, beide NUR der aktuellen Pipeline-Version (Kachel oben). „–" wenn zu dieser Version keine generierten Notes protokolliert sind oder mehr Notes evaluiert als generiert wurden (Datenlücke, z. B. Re-Evals ohne zugehörigen Log-/DB-Lauf) — dann würde die Quote über 100 % ergeben.' },
     // #204 P5: "Laufzeit" ohne Scope war eine von vier unterscheidbaren
     // Kennzahlen gleichen Namens (Kachel = aktuelle Version kumuliert, Strip-
     // Zelle = Lifetime, Kosten-Chart = Median je Version, Agenten-Chart =

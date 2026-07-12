@@ -584,6 +584,23 @@ def _calc_kpis(
     }
     n_canonical_pdfs = len(_eval_gk | _log_gk)
 
+    # "Evaluierte Notes"-Quote (#224): Zähler (n_notes, oben) und Nenner müssen
+    # dieselbe Versions-Basis teilen, sonst entstehen Werte >100 % (Zähler aus
+    # DB/note_evals früh gefiltert, alter Nenner `total_generated` aus
+    # all_log_runs über ALLE Versionen gepoolt). Nenner hier = all_log_runs
+    # exakt der kpi_version (`latest_pver`, derselbe Anker wie `latest_qrows`
+    # oben) — bei explizitem Versions-Filter sind quality_rows/all_log_runs
+    # bereits serverseitig auf dieselbe Version eingeschränkt, ungefiltert
+    # erzwingt der exakte Vergleich unten dieselbe Beschränkung nachträglich.
+    generated_kpi_ver = latest_pver
+    kpi_gen_runs = [r for r in all_log_runs if r.get("ver") == generated_kpi_ver]
+    kpi_generated = sum(r["n_total"] for r in kpi_gen_runs)
+    _n_notes = _distinct_notes(latest_qrows)
+    # Guard statt Absurd-Wert: Nenner 0/fehlend (keine Log-/DB-Zeile zur
+    # Version) oder Zähler > Nenner (Datenlücke, z. B. Re-Evals ohne
+    # zugehörigen Log-Run) → null, Client zeigt "–" statt >100 %.
+    notes_eval_pct = round(100 * _n_notes / kpi_generated, 1) if kpi_generated and _n_notes <= kpi_generated else None
+
     return {
         "avg_accept": avg_accept,
         "avg_hall": avg_hall,
@@ -598,7 +615,12 @@ def _calc_kpis(
         # blähten die Zahl auf (50 Instanzen / 39 Notes) und gewichteten die
         # Poolung implizit nach Testlauf-Häufigkeit. Fehlt ein Note-Identifier
         # (synthetische Rows), zählt der Laufindex jede Zeile einzeln.
-        "n_notes": _distinct_notes(latest_qrows),
+        "n_notes": _n_notes,
+        # Server-berechnete "% der Notes"-Quote + ihre Versions-Basis (#224) —
+        # Client rechnet nicht mehr selbst aus n_notes/total_generated (die
+        # unterschiedliche Versions-/Filterkontexte hatten). null = "–".
+        "notes_eval_pct": notes_eval_pct,
+        "generated_kpi_ver": generated_kpi_ver,
         "total_runs": len(all_log_runs),
         "n_pdfs": n_canonical_pdfs,
         "n_versions": len(all_versions),
