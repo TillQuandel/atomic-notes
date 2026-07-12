@@ -28,40 +28,48 @@ _REPO_ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = Path(os.environ.get("ATOMIC_DB_PATH", _REPO_ROOT / ".cache" / "atomic_analytics.db"))
 
 
+def _add_column(conn: sqlite3.Connection, table: str, coldef: str) -> None:
+    """Idempotentes `ALTER TABLE <table> ADD COLUMN <coldef>`.
+
+    #197 Nachbesserung: „duplicate column name" ist der erwartete No-op (Spalte
+    existiert bereits). Jeder ANDERE `OperationalError` — insbesondere „database
+    is locked" bei Parallel-Prozessen — wird NICHT verschluckt, sondern
+    re-raised. Der frühere pauschale `except OperationalError: pass` deutete
+    einen Lock-Fehlschlag als „Spalte existiert" fehl: die Spalte fehlte
+    anschließend, und spätere Inserts crashten. `busy_timeout` (s. init_db)
+    fängt die Race im Normalfall ab; das re-raise ist die Absicherung.
+    """
+    try:
+        conn.execute(f"ALTER TABLE {table} ADD COLUMN {coldef}")
+    except sqlite3.OperationalError as e:
+        if "duplicate column name" not in str(e).lower():
+            raise
+
+
 def init_db(path: Path = DB_PATH) -> None:
     """Erstellt DB + Schema falls nicht vorhanden. Idempotent."""
     path.parent.mkdir(parents=True, exist_ok=True)
     conn = sqlite3.connect(str(path))
+    # #197 Nachbesserung: bei Parallel-Prozessen kann ein ALTER TABLE an einem
+    # Lock scheitern — busy_timeout lässt SQLite bis 5s auf die Freigabe warten,
+    # statt sofort mit „database is locked" abzubrechen (kein WAL-Umbau).
+    conn.execute("PRAGMA busy_timeout=5000")
     conn.executescript(_SCHEMA)
     # Migration für bestehende DBs ohne n_dropped
-    try:
-        conn.execute("ALTER TABLE pipeline_runs ADD COLUMN n_dropped INT DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        conn.execute("ALTER TABLE pipeline_runs ADD COLUMN n_words INT DEFAULT 0")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        conn.execute("ALTER TABLE pipeline_runs ADD COLUMN model TEXT DEFAULT ''")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        conn.execute("ALTER TABLE pipeline_runs ADD COLUMN cost_usd REAL DEFAULT 0.0")
-    except sqlite3.OperationalError:
-        pass
-    try:
-        conn.execute("ALTER TABLE note_evals ADD COLUMN anchor_rate REAL")
-    except sqlite3.OperationalError:
-        pass
+    _add_column(conn, "pipeline_runs", "n_dropped INT DEFAULT 0")
+    # #197 Schritt 2: n_extracted = "nach Planner/Extractor generiert" (Funnel-Top).
+    # Bewusst additiv — n_generated (= geschriebene Notes) bleibt unangetastet,
+    # damit Alt- und Neu-Zeilen vergleichbar bleiben (keine Migration/Mutation).
+    _add_column(conn, "pipeline_runs", "n_extracted INT DEFAULT 0")
+    _add_column(conn, "pipeline_runs", "n_words INT DEFAULT 0")
+    _add_column(conn, "pipeline_runs", "model TEXT DEFAULT ''")
+    _add_column(conn, "pipeline_runs", "cost_usd REAL DEFAULT 0.0")
+    _add_column(conn, "note_evals", "anchor_rate REAL")
     # Anker-Roh-Counts: für die gepoolte Halluzinationsrate (Σ halluziniert /
     # Σ gesamt) im Dashboard — die Pipeline berechnet sie ohnehin, persistiert
     # sie aber bisher nur ins JSONL, nicht in die DB.
     for _col in ("anchors_total", "anchors_hallucinated"):
-        try:
-            conn.execute(f"ALTER TABLE note_evals ADD COLUMN {_col} INT")
-        except sqlite3.OperationalError:
-            pass
+        _add_column(conn, "note_evals", f"{_col} INT")
     conn.commit()
     conn.close()
 
@@ -92,21 +100,25 @@ def insert_run(conn: sqlite3.Connection, data: dict) -> None:
 
     data-Keys (alle optional ausser run_id):
       run_id, timestamp, pipeline_version, pdf_source, pdf_key, pdf_label,
-      n_generated, n_vault, n_inbox, n_merge, n_dropped, n_words, model,
-      tokens_total, tokens_input, tokens_output, tokens_cache_read,
+      n_generated, n_extracted, n_vault, n_inbox, n_merge, n_dropped, n_words,
+      model, tokens_total, tokens_input, tokens_output, tokens_cache_read,
       duration_s, eval_version
+
+    n_generated = geschriebene Notes (historische Semantik, unangetastet).
+    n_extracted = "nach Planner/Extractor generiert" (Funnel-Top, #197). Fehlt
+    der Key (Alt-Aufrufer), wird 0 geschrieben — keine NULL, kein Crash.
     """
     data.setdefault("timestamp", datetime.utcnow().isoformat())
     conn.execute(
         """
         INSERT OR REPLACE INTO pipeline_runs
           (run_id, timestamp, pipeline_version, pdf_source, pdf_key, pdf_label,
-           n_generated, n_vault, n_inbox, n_merge, n_dropped, n_words, model,
+           n_generated, n_extracted, n_vault, n_inbox, n_merge, n_dropped, n_words, model,
            cost_usd, tokens_total, tokens_input, tokens_output, tokens_cache_read,
            duration_s, eval_version, fully_cached)
         VALUES
           (:run_id, :timestamp, :pipeline_version, :pdf_source, :pdf_key, :pdf_label,
-           :n_generated, :n_vault, :n_inbox, :n_merge, :n_dropped, :n_words, :model,
+           :n_generated, :n_extracted, :n_vault, :n_inbox, :n_merge, :n_dropped, :n_words, :model,
            :cost_usd, :tokens_total, :tokens_input, :tokens_output, :tokens_cache_read,
            :duration_s, :eval_version, :fully_cached)
     """,
@@ -118,6 +130,7 @@ def insert_run(conn: sqlite3.Connection, data: dict) -> None:
             "pdf_key": data.get("pdf_key"),
             "pdf_label": data.get("pdf_label"),
             "n_generated": data.get("n_generated", 0),
+            "n_extracted": data.get("n_extracted", 0),
             "n_vault": data.get("n_vault", 0),
             "n_inbox": data.get("n_inbox", 0),
             "n_merge": data.get("n_merge", 0),

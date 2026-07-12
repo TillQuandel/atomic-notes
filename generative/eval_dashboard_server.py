@@ -414,7 +414,11 @@ def build_data(
                 if jl.exists():
                     import json as _json2
 
-                    for line in jl.read_text(encoding="utf-8", errors="replace").splitlines()[:5]:
+                    # #197 Nachbesserung: stage_outcome-Events stehen am Trace-Anfang
+                    # und tragen kein `model` → ein auf 5 Zeilen gekappter Scan fand das
+                    # model nicht mehr. Fenster auf 50 Zeilen erweitert; Zeilen ohne model
+                    # werden ohnehin übersprungen (break nur bei Treffer).
+                    for line in jl.read_text(encoding="utf-8", errors="replace").splitlines()[:50]:
                         try:
                             m = _json2.loads(line.strip()).get("model", "")
                             if m:

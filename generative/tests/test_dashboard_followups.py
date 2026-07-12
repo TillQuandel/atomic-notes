@@ -14,6 +14,7 @@ from generative.eval_dashboard import (
     mark_scaling_recency,
     is_foss_version,
     _chart_tokens_by_version,
+    _chart_longitudinal,
 )
 
 
@@ -106,6 +107,37 @@ def test_mark_scaling_recency_does_not_mutate_input():
     pts = [_pt("v0.1.0")]
     mark_scaling_recency(pts, keep=10)
     assert "recent" not in pts[0]
+
+
+# ---------------------------------------------------- #204 P8c: n je Datenpunkt
+def test_chart_longitudinal_exposes_run_count_per_point():
+    """Ein Punkt aus nur einem Run (n=1) ist statistisch duenn — z.B. ein
+    einzelner 0%-Run kann eine ganze Version wie einen Einbruch aussehen
+    lassen. Ohne Run-Anzahl pro Punkt ist das im Chart nicht erkennbar
+    (#204 P8c)."""
+    runs = [
+        {"key": "a", "label": "A", "ver": "v1", "accept_pct": 0.0},
+        {"key": "a", "label": "A", "ver": "v2", "accept_pct": 80.0},
+        {"key": "a", "label": "A", "ver": "v2", "accept_pct": 100.0},
+    ]
+    from generative.eval_dashboard import _build_log_data
+
+    log_data = _build_log_data(runs)
+    out = _chart_longitudinal(log_data)
+    ds = out["datasets"][0]
+    assert out["versions"] == ["v1", "v2"]
+    assert ds["n"] == [1, 2]
+
+
+def test_chart_longitudinal_n_zero_for_missing_version():
+    runs = [{"key": "a", "label": "A", "ver": "v2", "accept_pct": 50.0}]
+    from generative.eval_dashboard import _build_log_data
+
+    log_data = _build_log_data(runs)
+    out = _chart_longitudinal(log_data)
+    ds = out["datasets"][0]
+    assert out["versions"] == ["v2"]
+    assert ds["n"] == [1]
 
 
 # ----------------------------------------------------- foss/generative-Trennung

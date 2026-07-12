@@ -65,7 +65,7 @@ def _stub_common(monkeypatch, n_chapters: int):
     monkeypatch.setattr(orchestrator.planner, "filter_hallucinated", lambda plan, _text: (plan, []))
 
     async def _no_concepts(*_a, **_k):
-        return ([], {}, 0)
+        return ([], {}, 0, [])  # #210: 4. Rückgabewert = extractor_failures
 
     monkeypatch.setattr(orchestrator, "run_extractors_per_concept", _no_concepts)
 

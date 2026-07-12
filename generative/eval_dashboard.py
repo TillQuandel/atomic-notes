@@ -468,6 +468,13 @@ def _read_token_runs() -> list[dict]:
                 r = json.loads(line)
                 if r.get("cached"):
                     continue
+                # #197 Nachbesserung: Bookkeeping-/Event-Records (note_outcome,
+                # anchor_stats, score_result, stage_outcome …) tragen kein `model`
+                # (Schema-Invariante, vgl. _is_llm_call_record in eval_dashboard_server).
+                # Ohne diesen Filter zählen sie als „Calls" → calls wird aufgebläht und
+                # ein Run mit 0 echten LLM-Calls erschiene als 0-Token-Phantomzeile.
+                if "model" not in r:
+                    continue
                 tin += r.get("input_tokens", 0) or 0
                 tout += r.get("output_tokens", 0) or 0
                 tcr += r.get("cache_read_tokens", 0) or 0
@@ -830,10 +837,15 @@ def _chart_longitudinal(log_data: dict) -> dict:
     for key in sorted(log_data):
         vm = log_data[key]
         data_pts = [_median(vm[v]) if vm.get(v) else None for v in versions]
+        # Anzahl Runs je Punkt (#204 P8c): ein Punkt aus n=1 Run ist duenn —
+        # ein einzelner 0%-Run kann eine ganze Version wie einen Einbruch
+        # aussehen lassen. Client zeigt das im Tooltip statt es zu verstecken.
+        n_pts = [len(vm[v]) if vm.get(v) else 0 for v in versions]
         datasets.append(
             {
                 "label": _PDF_LABELS.get(key, key),
                 "data": data_pts,
+                "n": n_pts,
                 "color": _pdf_color(key),
             }
         )
