@@ -2485,6 +2485,71 @@ def main(argv: list[str] | None = None):
     except Exception:
         print(f"   -> Zeit:   {_wall_s_early}s  |  Tokens: n/a  |  Quelle: {source_path.name}")
 
+    # --- pipeline_runs-Insert: entkoppelt vom Inline-Eval (#198 P1) ---
+    # Dieser Insert lag früher IN Stage 8. Bei deaktiviertem Inline-Eval (Profil
+    # fast/balanced oder ATOMIC_AGENT_INLINE_EVAL=0) kehrte main() VOR dem Insert
+    # zurück — der Lauf hatte einen vollständigen Trace, aber keine DB-Zeile, war
+    # also keiner Pipeline-Version zuordenbar und fiel aus allen versions-gefilterten
+    # Ansichten. Der Insert hängt an nichts Eval-spezifischem (nur an Trace-Tokens +
+    # Run-Zählern), darum läuft er jetzt unbedingt. Die eval-abhängigen note_evals
+    # werden weiterhin ausschließlich bei aktivem Stage-8-Eval geschrieben.
+    from generative import eval_agent_stats as _eas
+    from generative.agents.base import _RUN_DIR as _run_dir_for_meta
+    from generative.agents.base import _RUN_ID as _run_id_for_meta
+
+    _trace_path = _run_dir_for_meta / f"{_run_id_for_meta}.jsonl"
+    _wall_s = round(_time.time() - _run_start, 1)
+    _pre = _eas.run_totals(_trace_path)  # tolerant bei fehlendem/kaputtem Trace → Nullen
+    _tok_in, _tok_out = _pre["input"], _pre["output"]
+    _tok_cache_r, _tok_cache_c = _pre["cache_read"], _pre["cache_create"]
+    _tok_total = _pre["total"]
+    _cost_usd = _pre["cost_usd"]
+
+    run_meta = {
+        "wall_time_s": _wall_s,
+        "tokens_input": _tok_in,
+        "tokens_output": _tok_out,
+        "tokens_cache_read": _tok_cache_r,
+        "tokens_cache_create": _tok_cache_c,
+        "tokens_total": _tok_total,
+    }
+
+    # DB: pipeline_run persistieren. Eigener try/except — ein DB-Fehler darf den
+    # Lauf nie abbrechen. get_db(DB_PATH) liest den Modul-Pfad zur Laufzeit (wie
+    # calibration.collect), damit Tests ihn auf eine tmp-DB umbiegen statt die
+    # produktive DB zu treffen.
+    try:
+        from generative import config as _db_cfg
+        from generative import db as _db
+        from generative.agents.base import _RUN_ID as _db_run_id
+
+        with _db.get_db(_db.DB_PATH) as _conn:
+            _db.insert_run(
+                _conn,
+                {
+                    "run_id": _db_run_id,
+                    "pipeline_version": AGENT_VERSION,
+                    "pdf_source": source_path.name,
+                    "pdf_key": source_path.stem.split(" - ")[0].strip().lower(),
+                    "pdf_label": source_path.stem.split(" - ")[0].strip(),
+                    "n_generated": written,
+                    "n_vault": vault_count,
+                    "n_inbox": inbox_count,
+                    "n_merge": sum(1 for d in drafts if getattr(d, "action", "") == "extend"),
+                    "n_dropped": dropped_total,
+                    "n_words": word_count,
+                    "model": getattr(_db_cfg, "MODEL_PLANNER", ""),
+                    "cost_usd": _cost_usd,
+                    "tokens_total": _tok_total,
+                    "tokens_input": _tok_in,
+                    "tokens_output": _tok_out,
+                    "tokens_cache_read": _tok_cache_r,
+                    "duration_s": _wall_s,
+                },
+            )
+    except Exception as _db_err:
+        print(f"   [warn] DB-Write fehlgeschlagen: {_db_err}")
+
     # --- Stage 8: Qualitäts-Eval (deterministisch, immer gespeichert) ---
     # Läuft nach jedem Run automatisch — PyMuPDF + Fuzzy + Semantic gegen Quell-PDF.
     # Ergebnisse in .cache/quality_history.jsonl für Longitudinal-Vergleiche.
@@ -2515,62 +2580,10 @@ def main(argv: list[str] | None = None):
                         note_files.append(candidates[0])
                         break
 
-        # Pipeline-Tokens/Kosten (Stages 1–7, vor Eval) für run_meta + DB.
-        # Charakterisiert die Note-Generierung; der Stage-8-Eval-Overhead wird
-        # bewusst NICHT in run_meta/DB attribuiert, nur am Run-Ende geprintet.
-        from generative import eval_agent_stats as _eas
-        from generative.agents.base import _RUN_ID, _RUN_DIR
-
-        _trace_path = _RUN_DIR / f"{_RUN_ID}.jsonl"
-        _wall_s = round(_time.time() - _run_start, 1)
-        _pre = _eas.run_totals(_trace_path)
-        _tok_in, _tok_out = _pre["input"], _pre["output"]
-        _tok_cache_r, _tok_cache_c = _pre["cache_read"], _pre["cache_create"]
-        _tok_total = _pre["total"]
-        _cost_usd = _pre["cost_usd"]
-
-        run_meta = {
-            "wall_time_s": _wall_s,
-            "tokens_input": _tok_in,
-            "tokens_output": _tok_out,
-            "tokens_cache_read": _tok_cache_r,
-            "tokens_cache_create": _tok_cache_c,
-            "tokens_total": _tok_total,
-        }
-
-        # DB: pipeline_run persistieren
-        try:
-            from generative.agents.base import _RUN_ID as _db_run_id
-            from generative import config as _db_cfg
-            from generative import db as _db
-
-            with _db.get_db() as _conn:
-                _db.insert_run(
-                    _conn,
-                    {
-                        "run_id": _db_run_id,
-                        "pipeline_version": AGENT_VERSION,
-                        "pdf_source": source_path.name,
-                        "pdf_key": source_path.stem.split(" - ")[0].strip().lower(),
-                        "pdf_label": source_path.stem.split(" - ")[0].strip(),
-                        "n_generated": written,
-                        "n_vault": vault_count,
-                        "n_inbox": inbox_count,
-                        "n_merge": sum(1 for d in drafts if getattr(d, "action", "") == "extend"),
-                        "n_dropped": dropped_total,
-                        "n_words": word_count,
-                        "model": getattr(_db_cfg, "MODEL_PLANNER", ""),
-                        "cost_usd": _cost_usd,
-                        "tokens_total": _tok_total,
-                        "tokens_input": _tok_in,
-                        "tokens_output": _tok_out,
-                        "tokens_cache_read": _tok_cache_r,
-                        "duration_s": _wall_s,
-                    },
-                )
-        except Exception as _db_err:
-            print(f"   [warn] DB-Write fehlgeschlagen: {_db_err}")
-
+        # run_meta + Pipeline-Tokens/Kosten (_pre, _wall_s, _trace_path) sind oben
+        # bereits berechnet und der pipeline_run bereits persistiert (#198 P1 — der
+        # Insert läuft jetzt unbedingt, auch ohne Inline-Eval). Der Stage-8-Eval-
+        # Overhead bleibt bewusst außerhalb von run_meta/DB, nur am Run-Ende geprintet.
         eval_results, _evaluated_count, _reused_count = run_stage8_eval(
             note_files, source_path, run_meta, fresh_run=bool(getattr(args, "fresh_run", False))
         )
