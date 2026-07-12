@@ -928,9 +928,10 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     <div class="table-wrap">
       <table class="cmp" id="cmp-table">
         <thead><tr>
-          <th>Quell-PDF</th><th>Version</th>
-          <th class="num">Wörter</th><th class="num">Seiten</th>
-          <th><span class="hint" tabindex="0">Akzeptiert<span class="hint-pop">Median-Akzeptanzrate über die Läufe der neuesten protokollierten Version dieses PDFs — wie bei „Akzeptanzrate je PDF" in der Qualitäts-Sektion.</span></span></th><th><span class="hint" tabindex="0">Fehlerquote<span class="hint-pop">Durchschnitt (nicht gepoolt) über alle evaluierten Notes dieses PDFs, über alle Pipeline-Versionen — anders berechnet als die KPI-Kachel oben, die nur die aktuelle Version poolt.</span></span></th>
+          <th style="width:28px"></th>
+          <th>Quell-PDF</th><th>Version (Eval)</th>
+          <th class="num">Wörter</th>
+          <th><span class="hint" tabindex="0">Akzeptiert (Routing)<span class="hint-pop">Median-Akzeptanzrate über die Läufe der neuesten protokollierten Version dieses PDFs — wie bei „Akzeptanzrate je PDF" in der Qualitäts-Sektion.</span></span></th><th><span class="hint" tabindex="0">Fehlerquote<span class="hint-pop">Durchschnitt (nicht gepoolt) über alle evaluierten Notes dieses PDFs, über alle Pipeline-Versionen — anders berechnet als die KPI-Kachel oben, die nur die aktuelle Version poolt.</span></span></th>
           <th><span class="hint" tabindex="0">Belegrate<span class="hint-pop">Durchschnitt über alle evaluierten Notes dieses PDFs, über alle Pipeline-Versionen.</span></span></th><th class="num">Notes</th>
         </tr></thead>
         <tbody id="cmp-body"><tr><td colspan="8" style="padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Wird geladen…</td></tr></tbody>
@@ -1573,19 +1574,40 @@ let PDF_META = {};
 // #204 P7: toggleRow() entfernt — nie verdrahtet (kein Caller, kein
 // .detail-row-Markup), halbfertiges Feature ohne Fortsetzungspfad. Die
 // zugehoerige leere Gutter-Spalte (Header + hier) ist ebenfalls raus.
-function renderTable(rows, thresh) {
+function renderTable(rows, thresh, currentVer) {
   const T = thresh;
-  const latest = rows.length ? rows[rows.length-1].version : '';
+  // „cur"-Markierung an der Config-/Code-Version festmachen (Server:
+  // warnings.current_version), NICHT an der letzten Tabellenzeile — die
+  // Routing-only-Zeilen am Ende hätten sonst „aktuell" gekapert
+  // (#191-Versions-Max-Bugklasse, #194 P3).
+  const latest = currentVer || '';
   const accColor = (v) => v>=T.accept[0]?cssv('--mint'):v>=T.accept[1]?cssv('--amber'):cssv('--coral');
   document.getElementById('cmp-body').innerHTML = rows.map(r => {
     const w = r.words ? Number(r.words).toLocaleString('de-DE') : '—';
     const ac = r.accept != null;
+    // Akzeptanz stammt aus dem Routing (pipeline_runs), NICHT aus note_evals —
+    // n der Läufe ausweisen; abweichende Routing-Version getrennt zeigen (#194).
+    const accN = ac ? ` <span class="dim" style="font-size:10px">n=${r.accept_n||0}${(r.accept_ver&&r.accept_ver!==r.version)?' · '+r.accept_ver:''}</span>` : '';
+    // Version-Zelle: Orphan (Version > Code-Version, #191) und Routing-only
+    // (keine Eval-Daten) klar unterscheiden — der Spaltenkopf verspricht
+    // „Version mit Eval-Daten", was für Routing-only-Zeilen nicht gilt (#194 P5/P7).
+    let vTxt = r.version || '–';
+    let vTitle = 'Neueste Pipeline-Version mit Eval-Daten für dieses PDF';
+    let vExtra = '';
+    if (r.routing_only) {
+      vTitle = 'Nur Routing-Lauf (pipeline_runs) — keine Eval-Daten; gezeigt wird die Routing-Version';
+      vExtra = ' <span class="dim" style="font-size:10px">nur Routing</span>';
+    } else if (r.orphan) {
+      vTitle = 'Version neuer als config.AGENT_VERSION — vermutlich Branch-/WIP-Lauf (#191)';
+      vTxt = '⚠ ' + vTxt;
+    }
+    const isCur = !r.routing_only && !r.orphan && r.version && r.version === latest;
     return `<tr>
+      <td style="width:28px"></td>
       <td class="pdf">${r.label||r.key}</td>
-      <td><span class="v-tag${r.version===latest?' cur':''}">${r.version||'–'}</span></td>
+      <td><span class="v-tag${isCur?' cur':''}" title="${vTitle}">${vTxt}</span>${vExtra}</td>
       <td class="num dim">${w}</td>
-      <td class="num dim">${r.pages||'—'}</td>
-      <td>${ac?`<span class="acc-bar"><span class="track"><span class="fill" style="width:${r.accept}%;background:${accColor(r.accept)}"></span></span><span class="pct" style="color:${accColor(r.accept)}">${_fmtDE(r.accept)}%</span></span>`:'—'}</td>
+      <td title="Akzeptanzrate aus dem Routing (pipeline_runs) — andere Datenquelle als Fehlerquote/Belegrate (note_evals). Gepoolt über n Läufe.">${ac?`<span class="acc-bar"><span class="track"><span class="fill" style="width:${r.accept}%;background:${accColor(r.accept)}"></span></span><span class="pct" style="color:${accColor(r.accept)}">${_fmtDE(r.accept)}%</span></span>${accN}`:'—'}</td>
       <td class="${r.hall!=null?(r.hall<=T.hall[0]?'good-t':r.hall>=T.hall[1]?'bad-t':'warn-t'):''}">${r.hall!=null?_fmtDE(r.hall)+'%':'—'}</td>
       <td class="${r.cov!=null?(r.cov>=T.cov[0]?'good-t':r.cov<=T.cov[1]?'bad-t':'warn-t'):''}">${r.cov!=null?_fmtDE(r.cov)+'%':'—'}</td>
       <td class="num dim">${r.n_notes||'—'}</td>
@@ -2067,7 +2089,10 @@ function renderInsights(d) {
   // Qualität: Spannweite der Akzeptanz über PDFs
   const acc = d.accept || {};
   if ((acc.labels||[]).length >= 2) {
-    const pairs = acc.labels.map((l,i)=>({l, v:acc.values[i]})).filter(p=>p.v!=null);
+    // Nur PDFs mit ≥1 evaluierter Note: „0 % von n Notes" ist im Datensatz
+    // sonst nicht von „0 Notes" (Routing-only-Key) unterscheidbar (#194).
+    const pairs = acc.labels.map((l,i)=>({l, v:acc.values[i], n:(acc.n||[])[i]||0}))
+      .filter(p=>p.v!=null && p.n > 0);
     if (pairs.length >= 2) {
       const lo = pairs.reduce((a,b)=>a.v<=b.v?a:b), hi = pairs.reduce((a,b)=>a.v>=b.v?a:b);
       _setInsight('ins-quality',
@@ -2176,7 +2201,7 @@ function _renderWithData(d) {
       gapEl.hidden = false;
     } else gapEl.hidden = true;
   }
-  renderTable(d.pdf_table||[], d.thresholds||{accept:[85,65],hall:[5,15],cov:[80,50]});
+  renderTable(d.pdf_table||[], d.thresholds||{accept:[85,65],hall:[5,15],cov:[80,50]}, d.warnings?.current_version||'');
   renderCharts(d);
   renderCalibration(d.calibration);
   renderInsights(d);

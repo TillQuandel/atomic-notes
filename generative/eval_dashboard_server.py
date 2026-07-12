@@ -648,7 +648,6 @@ def build_data(
         cov = r.get("coverage_factual") or r.get("coverage_rate")
         if cov is not None and float(cov) >= 0:
             quality_by_version[ver]["cov"].append(float(cov) * 100)
-        quality_by_version[ver]["n"] += 1
 
     # Statistiken berechnen (Median ist primär, Mean sekundär)
     def _vkey(v):
@@ -660,6 +659,10 @@ def build_data(
     sorted_pipeline_versions = sorted(quality_by_version.keys(), key=_vkey)
 
     for ver, d2 in quality_by_version.items():
+        # n = distinct Notes (nicht Eval-Instanzen), identisch zur „Evaluierte
+        # Notes"-KPI-Kachel (_calc_kpis.n_notes) — sonst zählt die Kachel distinct
+        # (40) und die kpi_trend.n-Sparkline Instanzen (52) (#194 #4).
+        d2["n"] = D._distinct_notes(d2["rows"])
         # avg_hall = gepoolte Rate (ankergewichtet, Mean-Fallback) — identische
         # Definition wie die KPI-Kachel in _calc_kpis, damit Kachel und Sparkline
         # denselben Wert zeigen.
@@ -757,8 +760,8 @@ def build_data(
         "available_eval_versions": available_versions,
         "warnings": warnings,
         "kpis": D._calc_kpis(log_data, all_log_runs, quality_rows, token_runs),
-        "pdf_table": D._calc_pdf_table(log_data, all_log_runs, quality_rows),
-        "accept": D._chart_acceptance(log_data),
+        "pdf_table": (_pdf_table := D._calc_pdf_table(log_data, all_log_runs, quality_rows)),
+        "accept": D._chart_acceptance(_pdf_table),
         "scatter": _chart_scatter_versioned(quality_rows),
         "long": D._chart_longitudinal(log_data),
         "tokens": D._chart_tokens_by_version(token_runs),
