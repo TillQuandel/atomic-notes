@@ -91,14 +91,24 @@ def parse_output(output: str) -> tuple[int, int]:
 
 @pytest.mark.slow
 @pytest.mark.parametrize("key", ["schlebbe", "kuhlthau", "bates"])
-def test_vault_quote_baseline(key: str):
+def test_vault_quote_baseline(key: str, tmp_path):
     """Vault-Quote darf nicht unter Mindest-Schwelle fallen."""
     pdf = BASELINE_PDFS[key]
     if not pdf.exists():
         pytest.skip(f"Baseline-PDF nicht gefunden: {pdf}")
 
+    # DB-Senke isolieren: dieser Test startet die Pipeline als SUBPROZESS, die
+    # in-process-autouse-Fixture (generative/conftest.py) greift dort NICHT. db.DB_PATH
+    # wird zur db.py-Import-Zeit aus ATOMIC_DB_PATH gelesen — im frischen Prozess also
+    # bindbar. Ohne Override würde jeder Baseline-Lauf eine echte pipeline_runs-Zeile in
+    # die produktive .cache/atomic_analytics.db schreiben (#198 Nachbesserung Fix 3).
+    # Residuum (bewusst NICHT isoliert): Trace (.cache/runs), LLM-Cache (.cache/llm) und
+    # Cache-Rotation kennen keine ENV-Steuerung; sie in tmp umzubiegen bräuchte einen
+    # ATOMIC_CACHE_DIR-Umbau in config.py mit breitem Import-Rippel. Da dies ein ECHTER
+    # Pipeline-Lauf ist (kein Fake-Backend), sind diese Trace-/Cache-Schreibvorgänge
+    # legitime Laufdaten (rotations-gedeckelt), keine schädliche Test-Verschmutzung.
     min_vault, expected_total = THRESHOLDS[key]
-    output = run_pipeline(pdf)
+    output = run_pipeline(pdf, env_overrides={"ATOMIC_DB_PATH": str(tmp_path / "e2e_analytics.db")})
     vault, total = parse_output(output)
 
     assert vault > 0, f"[{key}] Keine Notes extrahiert — Pipeline-Fehler?\n{output[-500:]}"
