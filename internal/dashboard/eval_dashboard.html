@@ -826,19 +826,19 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     <div id="calib-strip" style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;
       border:1px solid var(--hair);background:var(--bg-card);border-radius:4px;margin-bottom:16px;">
       <div style="padding:12px 16px;border-right:1px solid var(--hair)">
-        <div class="hint" tabindex="0" style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px">Evaluiert (v4.1)<span class="hint-pop">Anzahl Notes, die der automatische LLM-Judge (Eval-Version 4.1) bewertet hat — Grundgesamtheit für die Tabelle unten.</span></div>
+        <div style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px"><span class="hint" tabindex="0">Evaluiert (v4.1)<span class="hint-pop">Anzahl Notes, die der automatische LLM-Judge (Eval-Version 4.1) bewertet hat — Grundgesamtheit für die Tabelle unten.</span></span></div>
         <div id="calib-n-eval" style="font-family:var(--f-mono);font-size:18px;color:var(--ink-1);font-weight:500">–</div>
       </div>
       <div style="padding:12px 16px;border-right:1px solid var(--hair)">
-        <div class="hint" tabindex="0" style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px">Human-gelabelt<span class="hint-pop">Anzahl Notes, für die zusätzlich eine manuelle Human-Bewertung vorliegt — Vergleichsbasis für die LLM-Genauigkeit.</span></div>
+        <div style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px"><span class="hint" tabindex="0">Human-gelabelt<span class="hint-pop">Anzahl Notes, für die zusätzlich eine manuelle Human-Bewertung vorliegt — Vergleichsbasis für die LLM-Genauigkeit.</span></span></div>
         <div id="calib-n-labeled" style="font-family:var(--f-mono);font-size:18px;color:var(--ink-1);font-weight:500">–</div>
       </div>
       <div style="padding:12px 16px;border-right:1px solid var(--hair)">
-        <div class="hint" tabindex="0" style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px">Ø Agreement<span class="hint-pop">Mittlere Übereinstimmung zwischen LLM-Urteil und Human-Label über die gelabelten Notes — 100 % heißt, LLM und Mensch stimmen immer überein.</span></div>
+        <div style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px"><span class="hint" tabindex="0">Ø Agreement<span class="hint-pop">Mittlere Übereinstimmung zwischen LLM-Urteil und Human-Label über die gelabelten Notes — 100 % heißt, LLM und Mensch stimmen immer überein.</span></span></div>
         <div id="calib-agree" style="font-family:var(--f-mono);font-size:18px;color:var(--ink-1);font-weight:500">–</div>
       </div>
       <div style="padding:12px 16px">
-        <div class="hint" tabindex="0" style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px">Status<span class="hint-pop">Solange keine Notes human-gelabelt sind, kann die Zuverlässigkeit des automatischen Evals nicht überprüft werden.</span></div>
+        <div style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px"><span class="hint" tabindex="0">Status<span class="hint-pop">Solange keine Notes human-gelabelt sind, kann die Zuverlässigkeit des automatischen Evals nicht überprüft werden.</span></span></div>
         <div id="calib-status" style="font-family:var(--f-mono);font-size:12px;color:var(--amber);font-weight:500">Labeln ausstehend</div>
       </div>
     </div>
@@ -1186,7 +1186,7 @@ function renderKpis(kpis, thresh, kpiTrend) {
       tgt: kpis.avg_accept!=null?(kpis.avg_accept>=T.accept[0]?'Ziel erreicht':`Ziel ≥ ${T.accept[0]} %`):'–',
       tgtHint:`Schwellenwert für die Ampel-Bewertung: gut ab ${T.accept[0]} %, schlecht bei ${T.accept[1]} % oder darunter. Fest im Dashboard-Code hinterlegt, keine wissenschaftliche Norm.` },
     { id:'kpi-hall', key:'hall', label:'Fehlerquote', val:kpis.avg_hall, u:'%', digits:1,
-      hint:'Auch „Halluzinationsrate": Anteil der geprüften Text-Anker (Zitate/Fakten-Aussagen), die im Original-PDF NICHT nachweisbar sind oder ihm widersprechen. Gepoolt über alle Anker aller evaluierten Notes der aktuellen Version (Summe halluziniert / Summe Anker), nicht der Schnitt der Einzelraten. Niedriger ist besser.',
+      hint:'Auch „Halluzinationsrate": Anteil der geprüften Text-Anker (Zitate/Fakten-Aussagen), die im Original-PDF NICHT nachweisbar sind oder ihm widersprechen. Gepoolt über alle Anker aller evaluierten Notes der aktuellen Version (Summe halluziniert / Summe Anker), nicht der Schnitt der Einzelraten — außer bei Notes ohne Roh-Zähler (ältere DB-Einträge vor 2026-06-27): dann Fallback auf den Mittelwert der Einzelraten. Niedriger ist besser.',
       tone: kpis.avg_hall!=null?(kpis.avg_hall<=T.hall[0]?'good':kpis.avg_hall>=T.hall[1]?'bad':'warn'):'neutral',
       tgt: `Ziel ≤ ${T.hall[0]} %`,
       tgtHint:`Schwellenwert für die Ampel-Bewertung: gut bei ${T.hall[0]} % oder darunter, schlecht ab ${T.hall[1]} %. Fest im Dashboard-Code hinterlegt, keine wissenschaftliche Norm.` },
@@ -1198,11 +1198,11 @@ function renderKpis(kpis, thresh, kpiTrend) {
     { id:'kpi-n', key:'n', label:'Evaluierte Notes', val:kpis.n_notes, u:'', digits:0,
       hint:'Anzahl der Notes der aktuellen Pipeline-Version, die den automatischen Qualitäts-Check (Eval) durchlaufen haben — die Stichprobe hinter Fehlerquote und Belegrate.',
       tone:'info', tgt: kpis.total_generated ? `${_fmtDE(100*kpis.n_notes/kpis.total_generated)} % der Notes` : '–',
-      tgtHint:'Anteil der insgesamt generierten Notes, der überhaupt evaluiert wurde — der automatische Qualitäts-Check läuft nicht für jede Note.' },
+      tgtHint:'Zähler: evaluierte Notes NUR der aktuellen Pipeline-Version (wie die Kachel oben). Nenner: generierte Notes ALLER Pipeline-Versionen. Die Prozentzahl mischt damit zwei unterschiedliche Versions-Basen — keine reine Evaluierungs-Quote der aktuellen Version.' },
     { id:'kpi-dur',    key:'dur',    label:'Laufzeit',       val:kpis.cur_dur_h??kpis.total_dur_h,   u:'h', digits:1, tone:'neutral', tgt:'',
-      hint:'Summe der Pipeline-Laufzeit aller Läufe der aktuellen Version, in Stunden (Fallback: Gesamt-Laufzeit über alle Versionen, falls die aktuelle noch keine Token-Läufe hat). Der Versions-Chart in der Kosten-Sektion darunter zeigt dagegen den Median je Version — beide korrekt, aber unterschiedliche Kennzahl.' },
+      hint:'Summe der Pipeline-Laufzeit aller Läufe der aktuellen Version, in Stunden. Der ??-Fallback auf die Gesamt-Laufzeit aller Versionen greift praktisch nie: hat die aktuelle Version keine Läufe, ist die Summe bereits 0,0 (kein null) — die Kachel zeigt dann „0,0 h", nicht die Gesamt-Laufzeit. Der Versions-Chart in der Kosten-Sektion darunter zeigt dagegen den Median je Version — beide korrekt, aber unterschiedliche Kennzahl.' },
     { id:'kpi-tokens', key:'tokens', label:'Pipeline-Tokens', val:(kpis.cur_tokens??kpis.total_tokens)?Math.round((kpis.cur_tokens??kpis.total_tokens)/1e6*100)/100:null, u:'M', digits:2, tone:'neutral', tgt:'',
-      hint:'Summe aus Input- und Output-Tokens aller Läufe der aktuellen Version, in Millionen (Fallback: Gesamtsumme über alle Versionen, falls die aktuelle noch keine Token-Läufe hat). Cache-Reads zählen hier nicht mit (siehe Agenten-Sektion für den Cache-Anteil).' },
+      hint:'Summe aus Input- und Output-Tokens aller Läufe der aktuellen Version, in Millionen. Der Fallback auf die Gesamtsumme aller Versionen greift praktisch nie: ist die Summe der aktuellen Version 0, wertet die Anzeige das als „kein Wert" und zeigt einen Strich (–), nicht die Gesamtsumme. Cache-Reads zählen hier nicht mit (siehe Agenten-Sektion für den Cache-Anteil).' },
     { id:'kpi-cost', key:'cost', label:'API-Kosten',
       val: (kpis.cur_cost_usd > 0) ? kpis.cur_cost_usd : null,
       u:'$', digits: (kpis.cur_cost_usd >= 1 ? 2 : 4), tone:'neutral',
@@ -1225,7 +1225,7 @@ function renderKpis(kpis, thresh, kpiTrend) {
       ? 'Stichprobengröße: Anzahl der Notes bzw. Runs, aus denen dieser Wert berechnet wurde. Unter n=20 gilt der Wert als zu unsicher für eine Ziel-Bewertung — der Ziel-Chip wird deshalb ausgeblendet.'
       : 'Stichprobengröße: Anzahl der Notes bzw. Runs, aus denen dieser Wert berechnet wurde.';
     const nTag = showN
-      ? `<span class="kpi-n hint${nWarn?' warn-n':''}" tabindex="0">(n=${nBase})<span class="hint-pop">${nHint}</span></span>`
+      ? `<span class="kpi-n hint${nWarn?' warn-n':''}">(n=${nBase})<span class="hint-pop">${nHint}</span></span>`
       : '';
     // #204 P3: Delta-Chip vs. Vorversion an den Qualitäts-Kacheln — Semantik
     // wie das Spark-Delta (server-berechnet, N-Guard); bei n<20 ausgegraut
@@ -1238,16 +1238,22 @@ function renderKpis(kpis, thresh, kpiTrend) {
       const arrow = dnum > 0 ? '↑' : dnum < 0 ? '↓' : '·';
       const cls = !vd.reliable ? 'dim' : dnum === 0 ? '' : ((dnum > 0) === lowerIsBetter ? 'bad' : 'good');
       const chipHint = `Veränderung gegenüber der direkt vorherigen Pipeline-Version, serverseitig berechnet.${vd.reliable ? '' : ' Erst ab n≥20 in beiden Versionen gilt das Delta als belastbar — hier nicht der Fall.'}`;
-      chip = `<span class="kpi-delta ${cls} hint" tabindex="0">${arrow} ${_fmtDE(Math.abs(dnum))}<span class="hint-pop">${chipHint}</span></span>`;
+      chip = `<span class="kpi-delta ${cls} hint">${arrow} ${_fmtDE(Math.abs(dnum))}<span class="hint-pop">${chipHint}</span></span>`;
     }
-    return `<button type="button" class="kpi ${kd.tone}${_openKpiIdx===i?' open':''}" id="${kd.id}" onclick="_openKpiSpark(${i})" title="Klick: Versions-Trend">
-      <div class="top"><span class="lbl hint" tabindex="0">${kd.label}<span class="hint-pop">${kd.hint||''}</span></span>${chip}</div>
+    // #219-Nachbesserung Punkt 1: kein tabindex auf den 4 Hint-Triggern hier —
+    // sie sitzen IN diesem <button> (ungueltige Verschachtelung fokussierbarer
+    // Elemente). Tooltip bleibt hover-faehig, Keyboard-Zugang laeuft ueber den
+    // Button selbst. Punkt 6: title-Attribut durch aria-label ersetzt, sonst
+    // zeigt der Browser beim Hover ueber Label/n-Tag/Chip gleichzeitig das
+    // native title "Klick: Versions-Trend" UND den CSS-Hint-Pop.
+    return `<button type="button" class="kpi ${kd.tone}${_openKpiIdx===i?' open':''}" id="${kd.id}" onclick="_openKpiSpark(${i})" aria-label="Klick: Versions-Trend">
+      <div class="top"><span class="lbl hint">${kd.label}<span class="hint-pop">${kd.hint||''}</span></span>${chip}</div>
       <div class="value-row">
         <span class="v">${kd.val != null ? _fmtDE(kd.val, kd.digits ?? 1) : '–'}</span>
         ${kd.u ? `<span class="u">${kd.u}</span>` : ''}
       </div>
       ${nTag}
-      ${kd.tgt && !nWarn ? `<span class="tgt hint" tabindex="0">${kd.tgt}<span class="hint-pop">${kd.tgtHint||''}</span></span>` : ''}
+      ${kd.tgt && !nWarn ? `<span class="tgt hint">${kd.tgt}<span class="hint-pop">${kd.tgtHint||''}</span></span>` : ''}
     </button>`;
   }).join('');
 
