@@ -14,11 +14,18 @@ def test_default_profile_preserves_legacy_behavior():
     assert cfg.profile == "legacy"
     assert cfg.inline_eval is True
     assert cfg.call_timeout_sec == 300
-    assert cfg.timeout_retries == 0
+    assert cfg.timeout_retries == 1  # #210: transienter Timeout bekommt 1 Retry
     assert cfg.max_concepts is None
     assert cfg.refine.enabled is True
     assert cfg.refine.min_trigger_a_score == 2
     assert cfg.refine.max_refines_per_run is None
+
+
+def test_legacy_profile_retries_transient_timeout_once():
+    """#210: auch das legacy-Profil bekommt >=1 Timeout-Retry (frischer CLI-Prozess),
+    damit ein transienter 300s-Hänger nicht den ganzen Lauf inkl. Stages 1-4 kostet."""
+    cfg = load_runtime_config(env={})
+    assert cfg.timeout_retries >= 1
 
 
 def test_fast_profile_prioritizes_short_feedback_loop():
@@ -27,7 +34,7 @@ def test_fast_profile_prioritizes_short_feedback_loop():
     assert cfg.profile == "fast"
     assert cfg.inline_eval is False
     assert cfg.max_concepts == 3
-    assert cfg.timeout_retries == 0
+    assert cfg.timeout_retries == 1  # #210: erbt den legacy-Default (>=1 Retry)
     assert cfg.refine.enabled is False
     assert cfg.refine.max_refines_per_run == 0
 

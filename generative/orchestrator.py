@@ -91,6 +91,7 @@ from generative.pipeline import (
 from generative.pipeline.page_index import build_page_index
 from generative.schemas.atomic_note import AtomicNoteDraft, ConceptPlan
 from generative.schemas.citation import CitationMeta, build_citation_meta, crossref_override_blocked
+from shared.path_safety import resolve_source_path
 from generative.config import (
     AGENT_VERSION,
     CRITIC_AUTO_THRESHOLD,
@@ -186,7 +187,7 @@ async def run_extractors_per_concept(
     background_map: dict[str, list[str]] | None = None,
     related_mentions: list[str] | None = None,
     max_concurrent_calls: int | None = None,
-) -> tuple[list[AtomicNoteDraft], dict, int]:
+) -> tuple[list[AtomicNoteDraft], dict, int, list[tuple[str, str]]]:
     """Pro Konzept ein Extractor-Call mit den relevanten Textstellen aus ALLEN Chunks.
 
     Konzepte mit action='skip' werden übersprungen. Konzepte ohne Treffer im Volltext
@@ -196,8 +197,13 @@ async def run_extractors_per_concept(
     max_concurrent_calls: aus RuntimeConfig gespeist (#101); None → Legacy-Fallback
     auf die feste Konstante MAX_CONCURRENT_CALLS.
 
-    Returns: (drafts, concept_map) — concept_map[concept.title] = (concept, ctext) für
-    Self-Refine-Loop (Milestone 3.6).
+    Returns: (drafts, concept_map, dropped, failures).
+    concept_map[concept.title] = (concept, ctext) für Self-Refine-Loop (Milestone 3.6).
+    dropped = len(tasks) - len(drafts) (Fehler UND legitime Leer-Extraktionen, für n_dropped).
+    failures = [(concept_title, error)] NUR für Calls, die mit Exception starben (#210,
+    Timeout/CLI-Fehler nach Retries) — NICHT für None-Rückgaben (Konzept zu schwach im
+    Text). Trennt echten Verlust vom erwarteten Leer-Fall, damit Summary/Exit-Code nur
+    echte Ausfälle melden.
     """
     sem = asyncio.Semaphore(max_concurrent_calls if max_concurrent_calls is not None else MAX_CONCURRENT_CALLS)
 
@@ -247,6 +253,7 @@ async def run_extractors_per_concept(
     results = await asyncio.gather(*tasks, return_exceptions=True)
     drafts: list[AtomicNoteDraft] = []
     concept_map: dict = {}  # draft.title -> (concept, ctext)
+    failures: list[tuple[str, str]] = []  # #210: (title, error) nur für harte Call-Ausfälle
     for i, r in enumerate(results):
         if isinstance(r, Exception):
             print(f"  [WARN] Extractor '{concept_for_idx[i]}' fehlgeschlagen: {r}", file=sys.stderr)
@@ -256,6 +263,7 @@ async def run_extractors_per_concept(
             _trace_stage_outcome(
                 concept_for_idx[i], "extractor", "dropped", drop_reason="call_failed", detail=str(r)[:120]
             )
+            failures.append((concept_for_idx[i], str(r)))
         elif r is None:
             # #197 Nachbesserung: leere Extraktion → Funnel-Event (vorher nur
             # von run_per_concept als [extractor-empty] auf stderr geloggt).
@@ -268,7 +276,38 @@ async def run_extractors_per_concept(
     dropped = len(tasks) - len(drafts)
     if dropped:
         print(f"      [extractor-empty] {dropped}/{len(tasks)} Konzepte stumm weggefallen", file=sys.stderr)
-    return drafts, concept_map, dropped
+    return drafts, concept_map, dropped, failures
+
+
+# --- #210: Timeout-Verlust im Run-Summary sichtbar machen (kein stilles Verschlucken) ---
+# Exit-Code-Konvention: 0 = voller Erfolg, 1 = harter Abbruch (unbehandelte Exception,
+# z.B. Planner-Timeout nach Retries → kein Plan → Traceback), 3 = Lauf abgeschlossen,
+# aber >=1 Konzept endgültig durch Timeout/CLI-Fehler verloren. 3 hält den Teilverlust
+# von einem harten Absturz unterscheidbar (CI/Wrapper können darauf reagieren).
+_EXIT_EXTRACTOR_LOSS = 3
+
+
+def format_extractor_failure_report(failures: list[tuple[str, str]], n_attempted: int) -> list[str]:
+    """Warn-Block-Zeilen für Konzepte, die beim Extrahieren mit Exception starben.
+
+    Rein (keine Seiteneffekte) → unit-testbar ohne die volle Pipeline. Leere Liste
+    liefert [] (kein Block). Der Aufrufer druckt die Zeilen nach stderr.
+    """
+    if not failures:
+        return []
+    lines = [
+        f"⚠️  {len(failures)} von {n_attempted} Konzept(en) beim Extrahieren verloren "
+        "(Timeout/CLI-Fehler, auch nach Retry) — NICHT in den geschriebenen Notes enthalten:"
+    ]
+    for title, err in failures:
+        reason = "Timeout" if "timeout" in (err or "").lower() else "Fehler"
+        lines.append(f"    - {title}: {reason} — {(err or '')[:160]}")
+    return lines
+
+
+def extractor_failure_exit_code(failures: list[tuple[str, str]]) -> int:
+    """Exit-Code 3 wenn Konzepte endgültig verloren gingen, sonst 0."""
+    return _EXIT_EXTRACTOR_LOSS if failures else 0
 
 
 def _normalize(title: str) -> str:
@@ -1722,7 +1761,10 @@ def _run_extraction_stages(
         (drafts, concept_map, existing_concepts, concept_links,
          text, chunks, acronym_dict, quality_report, pdf_meta,
          source_path, tag_whitelist, background_map, fb_year,
-         dropped_total, word_count, related_mentions, q_title, citation)
+         dropped_total, word_count, related_mentions, q_title, citation,
+         extractor_failures)
+        extractor_failures (#210): [(concept_title, error)] für Konzepte, deren
+        Extractor-Call mit Exception (Timeout/CLI-Fehler nach Retries) starb.
     """
     from generative.agents.base import trace_run_start as _trace_run_start
     from generative.config import MODEL_CONFIG as _MODEL_CONFIG
@@ -1865,6 +1907,7 @@ def _run_extraction_stages(
         all_drafts: list[AtomicNoteDraft] = []
         all_concept_map: dict = {}
         dropped_total = 0
+        extractor_failures: list[tuple[str, str]] = []  # #210
         remaining_concepts = runtime_config.max_concepts if runtime_config is not None else None
 
         for i, chunk in enumerate(chunks, 1):
@@ -1909,7 +1952,7 @@ def _run_extraction_stages(
                 f"{', '.join(c.title for c in actionable[:4])}{'...' if len(actionable) > 4 else ''}"
             )
 
-            ch_drafts, ch_map, ch_dropped = asyncio.run(
+            ch_drafts, ch_map, ch_dropped, ch_failures = asyncio.run(
                 run_extractors_per_concept(
                     chunk.text,
                     chapter_plan,
@@ -1928,6 +1971,7 @@ def _run_extraction_stages(
                 if t not in related_mentions:
                     related_mentions.append(t)
             dropped_total += ch_dropped
+            extractor_failures.extend(ch_failures)  # #210
             all_drafts.extend(ch_drafts)
             for draft_title, concept_context in ch_map.items():
                 all_concept_map.setdefault(draft_title, concept_context)
@@ -1985,7 +2029,7 @@ def _run_extraction_stages(
         )
         print(f"\n[5/7] Extractor: {actionable_count} Konzepte parallel verarbeiten…")
         with _span("Extractor", pdf=source_path.name, n_concepts=actionable_count):
-            drafts, concept_map, dropped_total = asyncio.run(
+            drafts, concept_map, dropped_total, extractor_failures = asyncio.run(
                 run_extractors_per_concept(
                     text,
                     concept_plan,
@@ -2018,6 +2062,7 @@ def _run_extraction_stages(
         related_mentions,
         q_title,
         citation,
+        extractor_failures,
     )
 
 
@@ -2224,12 +2269,18 @@ def main(argv: list[str] | None = None):
         )
         word_count = len(text.split())
         dropped_total = 0
+        extractor_failures: list[tuple[str, str]] = []  # #210: Stage 1-5 übersprungen → keine Extractor-Calls
         print(f"\n=== Atomic Agent (load-drafts): {source_path.name} ===\n")
         print(f"  [load-drafts] {len(drafts)} Drafts geladen · Stage 1–5 übersprungen")
     else:
-        source_path = Path(args.source)
-        if not source_path.exists():
-            sys.exit(f"Datei nicht gefunden: {source_path}")
+        # #186-Nachbesserung: derselbe Apostroph-/Anfuehrungszeichen-Glob-Fallback
+        # wie extractive/orchestrator.py und eval_chunk_recall.py -- vorher brach
+        # dieser Haupt-CLI-Pfad mit einem nackten sys.exit bei reinen Apostroph-
+        # Varianten ab.
+        try:
+            source_path = resolve_source_path(args.source)
+        except FileNotFoundError as exc:
+            sys.exit(f"Datei nicht gefunden: {exc}")
         print(f"\n=== Atomic Agent: {source_path.name} ===\n")
         (
             drafts,
@@ -2250,6 +2301,7 @@ def main(argv: list[str] | None = None):
             related_mentions,
             q_title,
             citation,
+            extractor_failures,
         ) = _run_extraction_stages(args, source_path, runtime_config)
         if args.save_drafts:
             _save_draft_state(
@@ -2270,9 +2322,18 @@ def main(argv: list[str] | None = None):
                 related_mentions=related_mentions,
             )
 
+    # #210: Extractor-Ausfälle (Timeout/CLI-Fehler nach Retries) sichtbar machen.
+    # n_attempted = erfolgreiche Extraktionen (drafts vor Dedup) + dropped (Fehler+Leer);
+    # exit_code wird an ALLEN Rückgabepunkten zurückgegeben, damit ein Teilverlust den
+    # Prozess mit 3 beendet (unterscheidbar von hartem Abbruch=1) statt still mit 0.
+    n_extract_attempted = len(drafts) + dropped_total
+    exit_code = extractor_failure_exit_code(extractor_failures)
+
     if not drafts:
         print("\nKeine Konzepte extrahiert. Fertig.")
-        return
+        for _line in format_extractor_failure_report(extractor_failures, n_extract_attempted):
+            print(_line, file=sys.stderr)
+        return exit_code
 
     # #197 Schritt 2: Funnel-Top "nach Planner/Extractor generiert" festhalten,
     # BEVOR Artifact-/Dedup-/Stage-6-Drops die Liste stutzen. Wird als neues Feld
@@ -2284,7 +2345,9 @@ def main(argv: list[str] | None = None):
     drafts = _drop_artifacts(drafts)
     if not drafts:
         print("\nAlle Drafts als Artefakte verworfen. Fertig.")
-        return
+        for _line in format_extractor_failure_report(extractor_failures, n_extract_attempted):
+            print(_line, file=sys.stderr)
+        return exit_code
 
     # Qualitäts-Flags aus QualityReport auf alle Notes übertragen
     for d in drafts:
@@ -2514,6 +2577,10 @@ def main(argv: list[str] | None = None):
             written += 1
 
     print(f"\n=== Fertig: {written} Notes {'(dry-run)' if args.dry_run else 'geschrieben'} ===")
+    # #210: verlorene Konzepte (Timeout/CLI-Fehler) direkt im Summary ausweisen —
+    # kein stilles Exit 0. Der Prozess endet unten mit exit_code (3), wenn befüllt.
+    for _line in format_extractor_failure_report(extractor_failures, n_extract_attempted):
+        print(_line, file=sys.stderr)
     # #45: Final-Report um Gründe-Aggregat erweitern (Routing-Verteilung +
     # "0 PDFs verändert"-Zusicherung sichtbar machen).
     _summary = routing_report.summarize_routing(drafts)
@@ -2589,6 +2656,72 @@ def main(argv: list[str] | None = None):
     except Exception:
         print(f"   -> Zeit:   {_wall_s_early}s  |  Tokens: n/a  |  Quelle: {source_path.name}")
 
+    # --- pipeline_runs-Insert: entkoppelt vom Inline-Eval (#198 P1) ---
+    # Dieser Insert lag früher IN Stage 8. Bei deaktiviertem Inline-Eval (Profil
+    # fast/balanced oder ATOMIC_AGENT_INLINE_EVAL=0) kehrte main() VOR dem Insert
+    # zurück — der Lauf hatte einen vollständigen Trace, aber keine DB-Zeile, war
+    # also keiner Pipeline-Version zuordenbar und fiel aus allen versions-gefilterten
+    # Ansichten. Der Insert hängt an nichts Eval-spezifischem (nur an Trace-Tokens +
+    # Run-Zählern), darum läuft er jetzt unbedingt. Die eval-abhängigen note_evals
+    # werden weiterhin ausschließlich bei aktivem Stage-8-Eval geschrieben.
+    from generative import eval_agent_stats as _eas
+    from generative.agents.base import _RUN_DIR as _run_dir_for_meta
+    from generative.agents.base import _RUN_ID as _run_id_for_meta
+
+    _trace_path = _run_dir_for_meta / f"{_run_id_for_meta}.jsonl"
+    _wall_s = round(_time.time() - _run_start, 1)
+    _pre = _eas.run_totals(_trace_path)  # tolerant bei fehlendem/kaputtem Trace → Nullen
+    _tok_in, _tok_out = _pre["input"], _pre["output"]
+    _tok_cache_r, _tok_cache_c = _pre["cache_read"], _pre["cache_create"]
+    _tok_total = _pre["total"]
+    _cost_usd = _pre["cost_usd"]
+
+    run_meta = {
+        "wall_time_s": _wall_s,
+        "tokens_input": _tok_in,
+        "tokens_output": _tok_out,
+        "tokens_cache_read": _tok_cache_r,
+        "tokens_cache_create": _tok_cache_c,
+        "tokens_total": _tok_total,
+    }
+
+    # DB: pipeline_run persistieren. Eigener try/except — ein DB-Fehler darf den
+    # Lauf nie abbrechen. get_db(DB_PATH) liest den Modul-Pfad zur Laufzeit (wie
+    # calibration.collect), damit Tests ihn auf eine tmp-DB umbiegen statt die
+    # produktive DB zu treffen.
+    try:
+        from generative import config as _db_cfg
+        from generative import db as _db
+        from generative.agents.base import _RUN_ID as _db_run_id
+
+        with _db.get_db(_db.DB_PATH) as _conn:
+            _db.insert_run(
+                _conn,
+                {
+                    "run_id": _db_run_id,
+                    "pipeline_version": AGENT_VERSION,
+                    "pdf_source": source_path.name,
+                    "pdf_key": source_path.stem.split(" - ")[0].strip().lower(),
+                    "pdf_label": source_path.stem.split(" - ")[0].strip(),
+                    "n_generated": written,
+                    "n_extracted": n_extracted,
+                    "n_vault": vault_count,
+                    "n_inbox": inbox_count,
+                    "n_merge": sum(1 for d in drafts if getattr(d, "action", "") == "extend"),
+                    "n_dropped": dropped_total,
+                    "n_words": word_count,
+                    "model": getattr(_db_cfg, "MODEL_PLANNER", ""),
+                    "cost_usd": _cost_usd,
+                    "tokens_total": _tok_total,
+                    "tokens_input": _tok_in,
+                    "tokens_output": _tok_out,
+                    "tokens_cache_read": _tok_cache_r,
+                    "duration_s": _wall_s,
+                },
+            )
+    except Exception as _db_err:
+        print(f"   [warn] DB-Write fehlgeschlagen: {_db_err}")
+
     # --- Stage 8: Qualitäts-Eval (deterministisch, immer gespeichert) ---
     # Läuft nach jedem Run automatisch — PyMuPDF + Fuzzy + Semantic gegen Quell-PDF.
     # Ergebnisse in .cache/quality_history.jsonl für Longitudinal-Vergleiche.
@@ -2597,7 +2730,7 @@ def main(argv: list[str] | None = None):
         print(
             f"\n[8/8] Qualitäts-Eval übersprungen (Profil: {runtime_config.profile}, inline_eval deaktiviert) — retro via reeval_baseline.py."
         )
-        return
+        return exit_code
     print("\n[8/8] Qualitäts-Eval…")
     try:
         from generative.config import CACHE_DIR as _CACHE_DIR
@@ -2619,63 +2752,10 @@ def main(argv: list[str] | None = None):
                         note_files.append(candidates[0])
                         break
 
-        # Pipeline-Tokens/Kosten (Stages 1–7, vor Eval) für run_meta + DB.
-        # Charakterisiert die Note-Generierung; der Stage-8-Eval-Overhead wird
-        # bewusst NICHT in run_meta/DB attribuiert, nur am Run-Ende geprintet.
-        from generative import eval_agent_stats as _eas
-        from generative.agents.base import _RUN_ID, _RUN_DIR
-
-        _trace_path = _RUN_DIR / f"{_RUN_ID}.jsonl"
-        _wall_s = round(_time.time() - _run_start, 1)
-        _pre = _eas.run_totals(_trace_path)
-        _tok_in, _tok_out = _pre["input"], _pre["output"]
-        _tok_cache_r, _tok_cache_c = _pre["cache_read"], _pre["cache_create"]
-        _tok_total = _pre["total"]
-        _cost_usd = _pre["cost_usd"]
-
-        run_meta = {
-            "wall_time_s": _wall_s,
-            "tokens_input": _tok_in,
-            "tokens_output": _tok_out,
-            "tokens_cache_read": _tok_cache_r,
-            "tokens_cache_create": _tok_cache_c,
-            "tokens_total": _tok_total,
-        }
-
-        # DB: pipeline_run persistieren
-        try:
-            from generative.agents.base import _RUN_ID as _db_run_id
-            from generative import config as _db_cfg
-            from generative import db as _db
-
-            with _db.get_db() as _conn:
-                _db.insert_run(
-                    _conn,
-                    {
-                        "run_id": _db_run_id,
-                        "pipeline_version": AGENT_VERSION,
-                        "pdf_source": source_path.name,
-                        "pdf_key": source_path.stem.split(" - ")[0].strip().lower(),
-                        "pdf_label": source_path.stem.split(" - ")[0].strip(),
-                        "n_generated": written,
-                        "n_extracted": n_extracted,
-                        "n_vault": vault_count,
-                        "n_inbox": inbox_count,
-                        "n_merge": sum(1 for d in drafts if getattr(d, "action", "") == "extend"),
-                        "n_dropped": dropped_total,
-                        "n_words": word_count,
-                        "model": getattr(_db_cfg, "MODEL_PLANNER", ""),
-                        "cost_usd": _cost_usd,
-                        "tokens_total": _tok_total,
-                        "tokens_input": _tok_in,
-                        "tokens_output": _tok_out,
-                        "tokens_cache_read": _tok_cache_r,
-                        "duration_s": _wall_s,
-                    },
-                )
-        except Exception as _db_err:
-            print(f"   [warn] DB-Write fehlgeschlagen: {_db_err}")
-
+        # run_meta + Pipeline-Tokens/Kosten (_pre, _wall_s, _trace_path) sind oben
+        # bereits berechnet und der pipeline_run bereits persistiert (#198 P1 — der
+        # Insert läuft jetzt unbedingt, auch ohne Inline-Eval). Der Stage-8-Eval-
+        # Overhead bleibt bewusst außerhalb von run_meta/DB, nur am Run-Ende geprintet.
         eval_results, _evaluated_count, _reused_count = run_stage8_eval(
             note_files, source_path, run_meta, fresh_run=bool(getattr(args, "fresh_run", False))
         )
@@ -2715,6 +2795,8 @@ def main(argv: list[str] | None = None):
     except Exception as e:
         print(f"      [eval-warn] Qualitäts-Eval übersprungen: {e}", file=sys.stderr)
 
+    return exit_code
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

@@ -41,7 +41,7 @@ def test_quality_module_not_shadowed_by_text_quality_gate(monkeypatch):
     monkeypatch.setattr(orchestrator.planner, "filter_hallucinated", lambda plan, _text: (plan, []))
 
     async def _no_concepts(*_a, **_k):
-        return ([], {}, 0)
+        return ([], {}, 0, [])  # #210: 4. Rückgabewert = extractor_failures
 
     monkeypatch.setattr(orchestrator, "run_extractors_per_concept", _no_concepts)
 
@@ -61,15 +61,18 @@ def test_quality_module_not_shadowed_by_text_quality_gate(monkeypatch):
     assert calls["n"] == 1
     # quality_report wandert an Tupel-Position 7.
     assert isinstance(result[7], QualityReport)
-    # q_title (erwarteter Quell-Titel) — vorletzter Wert, sonst crasht main() beim
-    # CrossRef-Override-Check mit NameError (Ebner-Run-Regression).
-    assert result[-2] == "Titel"
-    # citation (CitationMeta, #96 E3a) muss als LETZTER Wert mitkommen — konstruiert
+    # #210: extractor_failures ist jetzt der letzte Wert; q_title/citation rücken je
+    # eine Position nach vorne.
+    assert result[-1] == []  # extractor_failures (kein Ausfall im Stub)
+    # q_title (erwarteter Quell-Titel) — sonst crasht main() beim CrossRef-Override-
+    # Check mit NameError (Ebner-Run-Regression).
+    assert result[-3] == "Titel"
+    # citation (CitationMeta, #96 E3a) muss als vorletzter Wert mitkommen — konstruiert
     # in _run_extraction_stages VOR dem Planner (Stage 3→4-Grenze), damit Extractor/
     # Planner dieselben (CrossRef-korrigierten) Werte sehen wie der Vault-Writer.
     from generative.schemas.citation import CitationMeta
 
-    citation = result[-1]
+    citation = result[-2]
     assert isinstance(citation, CitationMeta)
     assert citation.author == "Autor"
     assert citation.year == "2020"
@@ -100,7 +103,7 @@ def test_physical_pages_signal_wired_from_pdf_chunker_into_citation(monkeypatch)
     monkeypatch.setattr(orchestrator.planner, "filter_hallucinated", lambda plan, _text: (plan, []))
 
     async def _no_concepts(*_a, **_k):
-        return ([], {}, 0)
+        return ([], {}, 0, [])  # #210: 4. Rückgabewert = extractor_failures
 
     monkeypatch.setattr(orchestrator, "run_extractors_per_concept", _no_concepts)
     monkeypatch.setattr(
@@ -115,5 +118,5 @@ def test_physical_pages_signal_wired_from_pdf_chunker_into_citation(monkeypatch)
     args = SimpleNamespace(by_chapter=False, dry_run=True, doi=None, llm_fallback=False)
     result = orchestrator._run_extraction_stages(args, Path("fake.pdf"), None)
 
-    citation = result[-1]
+    citation = result[-2]  # #210: extractor_failures ist jetzt der letzte Wert
     assert citation.physical_pages is True
