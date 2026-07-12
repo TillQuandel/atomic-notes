@@ -251,8 +251,14 @@ body.collapsed .theme-toggle { padding: 6px; }
 .kpis {
   display: grid; grid-template-columns: repeat(7, 1fr);
   margin-top: 12px; border: 1px solid var(--hair);
-  background: var(--bg-card); border-radius: 4px; overflow: hidden;
+  background: var(--bg-card); border-radius: 4px;
+  /* kein overflow:hidden (#187): clippte sonst die Erklär-Tooltips, die
+     oberhalb der Kachel-Labels aufklappen. Eck-Radius stattdessen an den
+     äußeren Kacheln selbst, damit der Hover-/Tone-Hintergrund weiterhin
+     sauber rundet (siehe .kpi:first-child/:last-child unten). */
 }
+.kpi:first-child { border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
+.kpi:last-child { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
 .kpi {
   padding: 16px 18px 14px; border-right: 1px solid var(--hair);
   display: flex; flex-direction: column; gap: 8px; position: relative;
@@ -297,6 +303,38 @@ body.collapsed .theme-toggle { padding: 6px; }
 .kpi-delta.bad  { background: var(--tint-coral); color: var(--coral); }
 .kpi-delta.dim  { opacity: .55; }
 .kpi .accent { display: none; }
+
+/* ── Erklär-Tooltips (#187): Begriffserklärungen auf Kacheln + Chart-Titeln ──
+   CSS-only (kein JS/Bibliothek): Trigger ist ein Element mit Klasse .hint,
+   Erklärtext liegt als Kindelement .hint-pop direkt daneben im Markup (kein
+   attr()/data-Attribut — vermeidet Anführungszeichen-Escaping bei längeren
+   Sätzen). Sichtbarkeitsschalter ist :hover/:focus-visible auf .hint selbst. */
+.hint { border-bottom: 1px dotted var(--ink-4); cursor: help; position: relative; }
+.hint-pop {
+  position: absolute; left: 50%; transform: translateX(-50%);
+  bottom: calc(100% + 8px);
+  width: max-content; max-width: 260px;
+  padding: 8px 10px;
+  background: var(--bg-elev); color: var(--ink-2);
+  border: 1px solid var(--hair-strong); border-radius: 4px;
+  box-shadow: 0 6px 18px rgba(0,0,0,.28);
+  font-family: var(--f-body); font-size: 11.5px; font-weight: 400;
+  line-height: 1.5; text-transform: none; letter-spacing: normal; white-space: normal;
+  opacity: 0; pointer-events: none; transition: opacity .12s;
+  z-index: 30;
+}
+.hint:hover .hint-pop, .hint:focus-visible .hint-pop { opacity: 1; }
+/* Elemente strukturell am rechten Rand: Tooltip rechtsbündig statt zentriert,
+   sonst ragt er über Kachel-Reihe/Tabelle/Viewport hinaus (#187 Punkt 5) */
+.kpi:last-child .hint-pop,
+.strip .cell:last-child .hint-pop,
+.strip .cell:nth-last-child(2) .hint-pop,
+.row .panel:last-child .hint-pop,
+table.cmp th:last-child .hint-pop,
+table.cmp th:nth-last-child(-n+2) .hint-pop,
+#calib-strip > div:last-child .hint-pop {
+  left: auto; right: 0; transform: none;
+}
 
 /* KPI spark row — außerhalb des kpis-Grid, animiert */
 .spark-row {
@@ -681,14 +719,14 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     <div class="row">
       <div class="panel">
         <div class="p-head">
-          <div><div class="p-title">Akzeptanzrate je PDF</div><div class="p-sub">Anteil der Notes, die <strong>automatisch akzeptiert</strong> wurden.</div></div>
+          <div><div class="p-title"><span class="hint" tabindex="0">Akzeptanzrate je PDF<span class="hint-pop">Median-Akzeptanzrate über die Läufe der jeweils neuesten protokollierten Pipeline-Version dieses PDFs — kann pro PDF eine andere Version sein.</span></span></div><div class="p-sub">Anteil der Notes, die <strong>automatisch akzeptiert</strong> wurden.</div></div>
           <div class="p-meta" id="ax1">in %</div>
         </div>
         <div class="chart-body"><canvas id="ch1"></canvas></div>
       </div>
       <div class="panel">
         <div class="p-head">
-          <div><div class="p-title">Jede Note: Fehlerquote vs. Belegrate</div><div class="p-sub">Jeder Punkt ist eine evaluierte Note. <strong>Links oben</strong> = ideal. <em>Belegrate</em> = Anteil der Textzitate die im Original-PDF nachweisbar sind. Klick auf einen Punkt zeigt Details.</div></div>
+          <div><div class="p-title"><span class="hint" tabindex="0">Jede Note: Fehlerquote vs. Belegrate<span class="hint-pop">Jeder Punkt ist eine einzelne evaluierte Note (nicht gepoolt) — Fehlerquote und Belegrate wie in den KPI-Kacheln oben definiert, aber pro Note statt aggregiert.</span></span></div><div class="p-sub">Jeder Punkt ist eine evaluierte Note. <strong>Links oben</strong> = ideal. <em>Belegrate</em> = Anteil der Textzitate die im Original-PDF nachweisbar sind. Klick auf einen Punkt zeigt Details.</div></div>
           <div class="p-meta" id="ax2">evaluierte notes</div>
         </div>
         <div class="chart-body"><canvas id="ch2"></canvas></div>
@@ -708,7 +746,7 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     <div class="row">
       <div class="panel">
         <div class="p-head">
-          <div><div class="p-title">Token-Verbrauch pro Run</div><div class="p-sub">Input / Output / Cache gestapelt.</div></div>
+          <div><div class="p-title"><span class="hint" tabindex="0">Token-Verbrauch pro Run<span class="hint-pop">Trotz Titel: Balken sind nach Pipeline-Version summiert (Input/Output/Cache gestapelt), nicht pro Einzel-Lauf.</span></span></div><div class="p-sub">Input / Output / Cache gestapelt.</div></div>
           <div class="p-meta" id="ax5">chronologisch</div>
         </div>
         <div class="chart-body"><canvas id="ch5"></canvas></div>
@@ -716,7 +754,7 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
       </div>
       <div class="panel">
         <div class="p-head">
-          <div><div class="p-title">Laufzeit pro Run</div><div class="p-sub">Trend zeigt Pipeline-Effizienz über Versionen.</div></div>
+          <div><div class="p-title"><span class="hint" tabindex="0">Laufzeit pro Run<span class="hint-pop">Median-Laufzeit je Pipeline-Version — nicht die Summe wie bei der Laufzeit-Kachel oben in der Übersicht.</span></span></div><div class="p-sub">Trend zeigt Pipeline-Effizienz über Versionen.</div></div>
           <div class="p-meta">Minuten</div>
         </div>
         <div class="chart-body"><canvas id="ch6"></canvas></div>
@@ -734,14 +772,14 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     <div class="row">
       <div class="panel">
         <div class="p-head">
-          <div><div class="p-title">Output-Tokens je Agent</div><div class="p-sub">Output-Tokens dominieren die Kosten. Anzahl LLM-Calls in Klammern.</div></div>
+          <div><div class="p-title"><span class="hint" tabindex="0">Output-Tokens je Agent<span class="hint-pop">Kumulierte Output-Tokens je Agent-Rolle über die aktuelle Pipeline-Version — Anzahl LLM-Calls in Klammern.</span></span></div><div class="p-sub">Output-Tokens dominieren die Kosten. Anzahl LLM-Calls in Klammern.</div></div>
           <div class="p-meta" id="ax7">kumuliert</div>
         </div>
         <div class="chart-body"><canvas id="ch7"></canvas></div>
       </div>
       <div class="panel">
         <div class="p-head">
-          <div><div class="p-title">Laufzeit je Agent</div><div class="p-sub">Wo ist der Flaschenhals?</div></div>
+          <div><div class="p-title"><span class="hint" tabindex="0">Laufzeit je Agent<span class="hint-pop">Kumulierte Wanduhrzeit je Agent-Rolle über die aktuelle Pipeline-Version — zeigt, wo die Pipeline die meiste Zeit verbringt.</span></span></div><div class="p-sub">Wo ist der Flaschenhals?</div></div>
           <div class="p-meta">kumuliert</div>
         </div>
         <div class="chart-body"><canvas id="ch8"></canvas></div>
@@ -759,7 +797,7 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     <div class="row">
       <div class="panel">
         <div class="p-head">
-          <div><div class="p-title">Skaliert die Pipeline mit der PDF-Länge?</div><div class="p-sub">Lange Papers erzeugen <strong>nicht</strong> linear mehr Notes. Ältere Versionen <span style="opacity:.4">gedimmt</span>.</div></div>
+          <div><div class="p-title"><span class="hint" tabindex="0">Skaliert die Pipeline mit der PDF-Länge?<span class="hint-pop">Ein Punkt pro Lauf: PDF-Wortzahl gegen Anzahl erzeugter Notes. Ältere Versionen (außerhalb der letzten 10) sind gedimmt.</span></span></div><div class="p-sub">Lange Papers erzeugen <strong>nicht</strong> linear mehr Notes. Ältere Versionen <span style="opacity:.4">gedimmt</span>.</div></div>
           <div class="p-meta">Notes vs. Wörter</div>
         </div>
         <div class="chart-body"><canvas id="ch3"></canvas></div>
@@ -767,7 +805,7 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
       </div>
       <div class="panel">
         <div class="p-head">
-          <div><div class="p-title">Akzeptanzrate über Versionen</div><div class="p-sub"><strong>Steigende Linie</strong> = Verbesserung.</div></div>
+          <div><div class="p-title"><span class="hint" tabindex="0">Akzeptanzrate über Versionen<span class="hint-pop">Median-Akzeptanzrate je PDF und Pipeline-Version im Zeitverlauf.</span></span></div><div class="p-sub"><strong>Steigende Linie</strong> = Verbesserung.</div></div>
           <div class="p-meta">Verlauf</div>
         </div>
         <div class="chart-body"><canvas id="ch4"></canvas></div>
@@ -788,19 +826,19 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     <div id="calib-strip" style="display:grid;grid-template-columns:repeat(4,1fr);gap:0;
       border:1px solid var(--hair);background:var(--bg-card);border-radius:4px;margin-bottom:16px;">
       <div style="padding:12px 16px;border-right:1px solid var(--hair)">
-        <div style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px">Evaluiert (v4.1)</div>
+        <div class="hint" tabindex="0" style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px">Evaluiert (v4.1)<span class="hint-pop">Anzahl Notes, die der automatische LLM-Judge (Eval-Version 4.1) bewertet hat — Grundgesamtheit für die Tabelle unten.</span></div>
         <div id="calib-n-eval" style="font-family:var(--f-mono);font-size:18px;color:var(--ink-1);font-weight:500">–</div>
       </div>
       <div style="padding:12px 16px;border-right:1px solid var(--hair)">
-        <div style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px">Human-gelabelt</div>
+        <div class="hint" tabindex="0" style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px">Human-gelabelt<span class="hint-pop">Anzahl Notes, für die zusätzlich eine manuelle Human-Bewertung vorliegt — Vergleichsbasis für die LLM-Genauigkeit.</span></div>
         <div id="calib-n-labeled" style="font-family:var(--f-mono);font-size:18px;color:var(--ink-1);font-weight:500">–</div>
       </div>
       <div style="padding:12px 16px;border-right:1px solid var(--hair)">
-        <div style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px">Ø Agreement</div>
+        <div class="hint" tabindex="0" style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px">Ø Agreement<span class="hint-pop">Mittlere Übereinstimmung zwischen LLM-Urteil und Human-Label über die gelabelten Notes — 100 % heißt, LLM und Mensch stimmen immer überein.</span></div>
         <div id="calib-agree" style="font-family:var(--f-mono);font-size:18px;color:var(--ink-1);font-weight:500">–</div>
       </div>
       <div style="padding:12px 16px">
-        <div style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px">Status</div>
+        <div class="hint" tabindex="0" style="font-family:var(--f-mono);font-size:9.5px;color:var(--ink-4);text-transform:uppercase;letter-spacing:.12em;margin-bottom:4px">Status<span class="hint-pop">Solange keine Notes human-gelabelt sind, kann die Zuverlässigkeit des automatischen Evals nicht überprüft werden.</span></div>
         <div id="calib-status" style="font-family:var(--f-mono);font-size:12px;color:var(--amber);font-weight:500">Labeln ausstehend</div>
       </div>
     </div>
@@ -839,8 +877,8 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
           <th style="width:28px"></th>
           <th>Quell-PDF</th><th>Version</th>
           <th class="num">Wörter</th><th class="num">Seiten</th>
-          <th>Akzeptiert</th><th>Fehlerquote</th>
-          <th>Belegrate</th><th class="num">Notes</th>
+          <th><span class="hint" tabindex="0">Akzeptiert<span class="hint-pop">Median-Akzeptanzrate über die Läufe der neuesten protokollierten Version dieses PDFs — wie bei „Akzeptanzrate je PDF" in der Qualitäts-Sektion.</span></span></th><th><span class="hint" tabindex="0">Fehlerquote<span class="hint-pop">Durchschnitt (nicht gepoolt) über alle evaluierten Notes dieses PDFs, über alle Pipeline-Versionen — anders berechnet als die KPI-Kachel oben, die nur die aktuelle Version poolt.</span></span></th>
+          <th><span class="hint" tabindex="0">Belegrate<span class="hint-pop">Durchschnitt über alle evaluierten Notes dieses PDFs, über alle Pipeline-Versionen.</span></span></th><th class="num">Notes</th>
         </tr></thead>
         <tbody id="cmp-body"><tr><td colspan="9" style="padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Wird geladen…</td></tr></tbody>
       </table>
@@ -1139,24 +1177,38 @@ function renderKpis(kpis, thresh, kpiTrend) {
 
   const toneColor = (tone) => tone==='good'?t.mint:tone==='bad'?t.coral:tone==='warn'?t.amber:tone==='info'?t.teal:t.ink4;
 
+  // #187: hint = Begriffserklärung für Nicht-Techniker, je Kachel via
+  // Code-Herleitung (siehe PR-Beschreibung für Begriff→Text→Quelle-Tabelle).
   const kpiDefs = [
     { id:'kpi-accept', key:'accept', label:'Automatisch akzeptiert', val:kpis.avg_accept, u:'%', digits:1,
+      hint:'Anteil der von der Pipeline erzeugten Notes, die ohne manuelles Zusammenführen direkt in den Vault übernommen wurden. Gepoolt über alle Läufe der aktuellen Pipeline-Version (Summe akzeptiert / Summe generiert), nicht der Schnitt einzelner PDFs.',
       tone: kpis.avg_accept!=null?(kpis.avg_accept>=T.accept[0]?'good':kpis.avg_accept<=T.accept[1]?'bad':'warn'):'neutral',
-      tgt: kpis.avg_accept!=null?(kpis.avg_accept>=T.accept[0]?'Ziel erreicht':`Ziel ≥ ${T.accept[0]} %`):'–' },
+      tgt: kpis.avg_accept!=null?(kpis.avg_accept>=T.accept[0]?'Ziel erreicht':`Ziel ≥ ${T.accept[0]} %`):'–',
+      tgtHint:`Schwellenwert für die Ampel-Bewertung: gut ab ${T.accept[0]} %, schlecht bei ${T.accept[1]} % oder darunter. Fest im Dashboard-Code hinterlegt, keine wissenschaftliche Norm.` },
     { id:'kpi-hall', key:'hall', label:'Fehlerquote', val:kpis.avg_hall, u:'%', digits:1,
+      hint:'Auch „Halluzinationsrate": Anteil der geprüften Text-Anker (Zitate/Fakten-Aussagen), die im Original-PDF NICHT nachweisbar sind oder ihm widersprechen. Gepoolt über alle Anker aller evaluierten Notes der aktuellen Version (Summe halluziniert / Summe Anker), nicht der Schnitt der Einzelraten. Niedriger ist besser.',
       tone: kpis.avg_hall!=null?(kpis.avg_hall<=T.hall[0]?'good':kpis.avg_hall>=T.hall[1]?'bad':'warn'):'neutral',
-      tgt: `Ziel ≤ ${T.hall[0]} %` },
+      tgt: `Ziel ≤ ${T.hall[0]} %`,
+      tgtHint:`Schwellenwert für die Ampel-Bewertung: gut bei ${T.hall[0]} % oder darunter, schlecht ab ${T.hall[1]} %. Fest im Dashboard-Code hinterlegt, keine wissenschaftliche Norm.` },
     { id:'kpi-cov', key:'cov', label:'Belegrate', val:kpis.avg_cov, u:'%', digits:1,
+      hint:'Auch „Coverage": Anteil der Text-Anker einer Note, die im Original-PDF exakt oder sinngemäß bestätigt wurden. Median über die einzelnen Notes der aktuellen Version (anders als die gepoolte Fehlerquote nebenan). Höher ist besser.',
       tone: kpis.avg_cov!=null?(kpis.avg_cov>=T.cov[0]?'good':kpis.avg_cov<=T.cov[1]?'bad':'warn'):'neutral',
-      tgt: kpis.avg_cov!=null?(kpis.avg_cov>=T.cov[0]?'Ziel erreicht':`Ziel ≥ ${T.cov[0]} %`):'–' },
+      tgt: kpis.avg_cov!=null?(kpis.avg_cov>=T.cov[0]?'Ziel erreicht':`Ziel ≥ ${T.cov[0]} %`):'–',
+      tgtHint:`Schwellenwert für die Ampel-Bewertung: gut ab ${T.cov[0]} %, schlecht bei ${T.cov[1]} % oder darunter. Fest im Dashboard-Code hinterlegt, keine wissenschaftliche Norm.` },
     { id:'kpi-n', key:'n', label:'Evaluierte Notes', val:kpis.n_notes, u:'', digits:0,
-      tone:'info', tgt: kpis.total_generated ? `${_fmtDE(100*kpis.n_notes/kpis.total_generated)} % der Notes` : '–' },
-    { id:'kpi-dur',    key:'dur',    label:'Laufzeit',       val:kpis.cur_dur_h??kpis.total_dur_h,   u:'h', digits:1, tone:'neutral', tgt:'' },
-    { id:'kpi-tokens', key:'tokens', label:'Pipeline-Tokens', val:(kpis.cur_tokens??kpis.total_tokens)?Math.round((kpis.cur_tokens??kpis.total_tokens)/1e6*100)/100:null, u:'M', digits:2, tone:'neutral', tgt:'' },
+      hint:'Anzahl der Notes der aktuellen Pipeline-Version, die den automatischen Qualitäts-Check (Eval) durchlaufen haben — die Stichprobe hinter Fehlerquote und Belegrate.',
+      tone:'info', tgt: kpis.total_generated ? `${_fmtDE(100*kpis.n_notes/kpis.total_generated)} % der Notes` : '–',
+      tgtHint:'Anteil der insgesamt generierten Notes, der überhaupt evaluiert wurde — der automatische Qualitäts-Check läuft nicht für jede Note.' },
+    { id:'kpi-dur',    key:'dur',    label:'Laufzeit',       val:kpis.cur_dur_h??kpis.total_dur_h,   u:'h', digits:1, tone:'neutral', tgt:'',
+      hint:'Summe der Pipeline-Laufzeit aller Läufe der aktuellen Version, in Stunden (Fallback: Gesamt-Laufzeit über alle Versionen, falls die aktuelle noch keine Token-Läufe hat). Der Versions-Chart in der Kosten-Sektion darunter zeigt dagegen den Median je Version — beide korrekt, aber unterschiedliche Kennzahl.' },
+    { id:'kpi-tokens', key:'tokens', label:'Pipeline-Tokens', val:(kpis.cur_tokens??kpis.total_tokens)?Math.round((kpis.cur_tokens??kpis.total_tokens)/1e6*100)/100:null, u:'M', digits:2, tone:'neutral', tgt:'',
+      hint:'Summe aus Input- und Output-Tokens aller Läufe der aktuellen Version, in Millionen (Fallback: Gesamtsumme über alle Versionen, falls die aktuelle noch keine Token-Läufe hat). Cache-Reads zählen hier nicht mit (siehe Agenten-Sektion für den Cache-Anteil).' },
     { id:'kpi-cost', key:'cost', label:'API-Kosten',
       val: (kpis.cur_cost_usd > 0) ? kpis.cur_cost_usd : null,
       u:'$', digits: (kpis.cur_cost_usd >= 1 ? 2 : 4), tone:'neutral',
-      tgt: (kpis.cur_cost_usd > 0) ? '' : 'Subscription' },
+      hint:'Summe der USD-Kosten aller Läufe der aktuellen Version, berechnet aus den Modellpreisen. Bei Nutzung über eine Abo-Subscription entstehen keine nutzungsbasierten Kosten — daher „Subscription" statt 0 $.',
+      tgt: (kpis.cur_cost_usd > 0) ? '' : 'Subscription',
+      tgtHint:'Diese Läufe liefen über ein Abo (Subscription) ohne nutzungsbasierte API-Kosten, daher kein $-Betrag.' },
   ];
 
   const nNotes = kpis?.n_notes ?? null;
@@ -1166,8 +1218,14 @@ function renderKpis(kpis, thresh, kpiTrend) {
     const nBase = kd.key === 'accept' ? (kpis?.kpi_accept_n ?? null) : nNotes;
     const showN = nBase != null && ['hall','cov','accept'].includes(kd.key);
     const nWarn = showN && nBase < 20;
+    // #187: n-Tag-Erklärung — Warn-Text (n<20) und allgemeine Erklärung
+    // gehören beide in denselben Hint statt in ein leeres title="" (vorher
+    // hatte der n-Tag ohne Warnung gar keinen Tooltip).
+    const nHint = nWarn
+      ? 'Stichprobengröße: Anzahl der Notes bzw. Runs, aus denen dieser Wert berechnet wurde. Unter n=20 gilt der Wert als zu unsicher für eine Ziel-Bewertung — der Ziel-Chip wird deshalb ausgeblendet.'
+      : 'Stichprobengröße: Anzahl der Notes bzw. Runs, aus denen dieser Wert berechnet wurde.';
     const nTag = showN
-      ? `<span class="kpi-n${nWarn?' warn-n':''}" title="${nWarn?'n<20 — Ziel-Marker ausgeblendet':''}">(n=${nBase})</span>`
+      ? `<span class="kpi-n hint${nWarn?' warn-n':''}" tabindex="0">(n=${nBase})<span class="hint-pop">${nHint}</span></span>`
       : '';
     // #204 P3: Delta-Chip vs. Vorversion an den Qualitäts-Kacheln — Semantik
     // wie das Spark-Delta (server-berechnet, N-Guard); bei n<20 ausgegraut
@@ -1179,17 +1237,17 @@ function renderKpis(kpis, thresh, kpiTrend) {
       const lowerIsBetter = kd.key === 'hall';
       const arrow = dnum > 0 ? '↑' : dnum < 0 ? '↓' : '·';
       const cls = !vd.reliable ? 'dim' : dnum === 0 ? '' : ((dnum > 0) === lowerIsBetter ? 'bad' : 'good');
-      const chipTitle = `Δ vs. Vorversion${vd.reliable ? '' : ' — n<20, nicht belastbar'}`;
-      chip = `<span class="kpi-delta ${cls}" title="${chipTitle}">${arrow} ${_fmtDE(Math.abs(dnum))}</span>`;
+      const chipHint = `Veränderung gegenüber der direkt vorherigen Pipeline-Version, serverseitig berechnet.${vd.reliable ? '' : ' Erst ab n≥20 in beiden Versionen gilt das Delta als belastbar — hier nicht der Fall.'}`;
+      chip = `<span class="kpi-delta ${cls} hint" tabindex="0">${arrow} ${_fmtDE(Math.abs(dnum))}<span class="hint-pop">${chipHint}</span></span>`;
     }
     return `<button type="button" class="kpi ${kd.tone}${_openKpiIdx===i?' open':''}" id="${kd.id}" onclick="_openKpiSpark(${i})" title="Klick: Versions-Trend">
-      <div class="top"><span class="lbl">${kd.label}</span>${chip}</div>
+      <div class="top"><span class="lbl hint" tabindex="0">${kd.label}<span class="hint-pop">${kd.hint||''}</span></span>${chip}</div>
       <div class="value-row">
         <span class="v">${kd.val != null ? _fmtDE(kd.val, kd.digits ?? 1) : '–'}</span>
         ${kd.u ? `<span class="u">${kd.u}</span>` : ''}
       </div>
       ${nTag}
-      ${kd.tgt && !nWarn ? `<span class="tgt">${kd.tgt}</span>` : ''}
+      ${kd.tgt && !nWarn ? `<span class="tgt hint" tabindex="0">${kd.tgt}<span class="hint-pop">${kd.tgtHint||''}</span></span>` : ''}
     </button>`;
   }).join('');
 
@@ -1401,20 +1459,22 @@ window.closeKpiSpark = function() {
 function renderStrip(kpis) {
   const tok = kpis.total_tokens ? _fmtDE(kpis.total_tokens/1e6, 2)+'M' : '–';
   const pct = kpis.total_generated ? _fmtDE(100*kpis.total_accepted/kpis.total_generated) : '–';
-  const cell = (k,v,u,sub) => `<div class="cell"><div class="lbl">${k}</div><div class="val">${v}${u?`<span class="u">${u}</span>`:''}</div>${sub?`<div class="sub">${sub}</div>`:''}</div>`;
+  // #187: 5. Parameter = Begriffserklärung; Label-Div bekommt .hint nur, wenn
+  // eine Erklärung übergeben wird (keine leeren Tooltips).
+  const cell = (k,v,u,sub,hint) => `<div class="cell"><div class="lbl${hint?' hint':''}"${hint?' tabindex="0"':''}>${k}${hint?`<span class="hint-pop">${hint}</span>`:''}</div><div class="val">${v}${u?`<span class="u">${u}</span>`:''}</div>${sub?`<div class="sub">${sub}</div>`:''}</div>`;
   const _sl = document.getElementById('strip-label');
   const _sm = document.getElementById('strip-meta');
   if (_sl) _sl.textContent = 'Alle Versionen — Gesamt';
   if (_sm) _sm.textContent = kpis.n_versions > 1 ? `Kumuliert über alle Runs und Pipeline-Versionen · ${kpis.versions_range}` : kpis.versions_range||'';
   document.getElementById('strip').innerHTML =
-    cell('PDFs', kpis.n_pdfs||'–') +
-    cell('Versionen', kpis.n_versions||'–', '', kpis.versions_range||'') +
-    cell('Runs', kpis.total_runs||'–') +
-    cell('Notes generiert', kpis.total_generated||'–') +
-    cell('Direkt Vault', kpis.total_accepted||'–', '', `/ ${pct} %`) +
-    cell('Merge-Stubs', kpis.total_merged||0) +
-    cell('Dropped', kpis.total_dropped||0) +
-    cell('Tokens', tok, '', kpis.total_dur_h ? kpis.total_dur_h+'h Laufzeit' : '');
+    cell('PDFs', kpis.n_pdfs||'–', '', '', 'Anzahl unterschiedlicher Quell-PDFs mit mindestens einem protokollierten Pipeline-Lauf.') +
+    cell('Versionen', kpis.n_versions||'–', '', kpis.versions_range||'', 'Anzahl unterschiedlicher Pipeline-Versionen mit Runs, plus Spannbreite von ältester bis neuester Version.') +
+    cell('Runs', kpis.total_runs||'–', '', '', 'Anzahl protokollierter Pipeline-Läufe (ein Lauf = eine PDF in einer Version) über alle Versionen.') +
+    cell('Notes generiert', kpis.total_generated||'–', '', '', 'Anzahl aller von der Pipeline erzeugten Draft-Notes, über alle Läufe und Versionen.') +
+    cell('Direkt Vault', kpis.total_accepted||'–', '', `/ ${pct} %`, 'Notes, die ohne manuelles Zusammenführen direkt in den Vault übernommen wurden — kumuliert über ALLE Pipeline-Versionen (nicht nur die aktuelle, siehe Kachel „Automatisch akzeptiert" oben).') +
+    cell('Merge-Stubs', kpis.total_merged||0, '', '', 'Notes, die nicht neu angelegt, sondern in eine bereits bestehende Vault-Note eingefügt/ergänzt wurden.') +
+    cell('Dropped', kpis.total_dropped||0, '', '', 'Von der Pipeline komplett verworfene Konzept-Kandidaten, die es nicht einmal bis zum Draft geschafft haben. Wird nur gezählt, wenn keine Log-Dateien vorliegen und die SQLite-Datenbank als Fallback dient — sonst 0.') +
+    cell('Tokens', tok, '', kpis.total_dur_h ? kpis.total_dur_h+'h Laufzeit' : '', 'Summe aus Input- und Output-Tokens aller protokollierten Läufe über alle Versionen — nicht nur die aktuelle (vgl. Kachel „Pipeline-Tokens" oben).');
 }
 
 /* ── Table ────────────────────────────────────────────────────── */
@@ -1899,7 +1959,7 @@ function renderInsights(d) {
     let cpnTxt = '';
     for (let i = (kt.versions||[]).length - 1; i >= 0; i--) {
       if (kt.cost_per_note?.[i] != null) {
-        cpnTxt = ` <strong>${esc(kt.versions[i])}</strong> (letzter API-Lauf): <strong>${_fmtDE(kt.cost_per_note[i], 4)} $</strong> pro akzeptierter Note.`;
+        cpnTxt = ` <strong>${esc(kt.versions[i])}</strong> (letzter API-Lauf): <strong>${_fmtDE(kt.cost_per_note[i], 4)} $</strong> <span class="hint" tabindex="0">pro akzeptierter Note<span class="hint-pop">API-Kosten dieser Version geteilt durch Anzahl direkt in den Vault übernommener Notes. Nur für Läufe mit echten API-Kosten aussagekräftig — Subscription-Läufe kosten 0 $ und tauchen hier bewusst nicht auf.</span></span>.`;
         break;
       }
     }
