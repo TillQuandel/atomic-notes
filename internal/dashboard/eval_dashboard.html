@@ -1216,9 +1216,13 @@ function renderKpis(kpis, thresh, kpiTrend) {
     // derselben Kachelreihe und koennen sich unterscheiden (z. B. n=64 vs
     // n=52), ohne dass das ohne Kennzeichnung als Fehler wirkt.
     const nDiffers = kd.key === 'accept' && nNotes != null && nBase != null && nBase !== nNotes;
+    // Nachbesserung #204/#221 P8e: bei GLEICHZEITIGEM n<20 + abweichender
+    // Stichprobenbasis erklaerte der title bisher nur n<20 — der Asterisk
+    // (nDiffers) blieb unerklaert, weil der ternary rein exklusiv war.
+    const nDiffersMsg = `Andere Stichprobenbasis als Fehlerquote/Belegrate (dort n=${nNotes}) — Akzeptanz zaehlt generierte Notes, die anderen nur evaluierte.`;
     const nTitle = nWarn
-      ? 'n<20 — Ziel-Marker ausgeblendet'
-      : (nDiffers ? `Andere Stichprobenbasis als Fehlerquote/Belegrate (dort n=${nNotes}) — Akzeptanz zaehlt generierte Notes, die anderen nur evaluierte.` : '');
+      ? ('n<20 — Ziel-Marker ausgeblendet' + (nDiffers ? ` Zusaetzlich: ${nDiffersMsg}` : ''))
+      : (nDiffers ? nDiffersMsg : '');
     const nTag = showN
       ? `<span class="kpi-n${nWarn?' warn-n':''}" title="${nTitle}">(n=${nBase}${nDiffers?'*':''})</span>`
       : '';
@@ -1567,7 +1571,11 @@ function renderCharts(d) {
     // #204 P8b: bei ~20 PDFs sind 6 Encoding-Farben mehrfach vergeben und
     // damit nicht mehr unterscheidbar — Top-N nach Punktzahl + graue
     // "Weitere"-Sammelserie, gleiches Muster wie im Scatter (ch2, PR 38).
-    const MAX_COLORED_SCALING = 5;
+    // Nachbesserung #204/#221 P8b: Schwelle an ch2 angeglichen (t.enc.length,
+    // dort ebenfalls "<= t.enc.length" = kein Gruppieren) — bei exakt 6 PDFs
+    // gab es hier bisher trotz vollstaendig eindeutiger Farbzuordnung eine
+    // unnoetige "Weitere (1 PDFs)"-Gruppe (plus Singular-Fehler).
+    const MAX_COLORED_SCALING = t.enc.length;
     let coloredKeys = keys, restKeys = [];
     if (keys.length > MAX_COLORED_SCALING) {
       const counts = {};
@@ -1577,6 +1585,7 @@ function renderCharts(d) {
       restKeys = sorted.slice(MAX_COLORED_SCALING);
     }
     const restSet = new Set(restKeys);
+    const restLabel = `Weitere (${restKeys.length} PDF${restKeys.length===1?'':'s'})`;
     const swatches = coloredKeys.map((k,i)=>t.enc[i%t.enc.length]);
     const mkDs = (col, label, pts) => ({
       label, data: pts.map(p=>({x:p.x,y:p.y,_p:p})),
@@ -1586,7 +1595,7 @@ function renderCharts(d) {
     });
     const datasets = coloredKeys.map((k,i)=>mkDs(swatches[i], keyLabel(k), d.scaling.points.filter(p=>p.key===k)));
     if (restKeys.length) {
-      datasets.push(mkDs(t.ink4, `Weitere (${restKeys.length} PDFs)`, d.scaling.points.filter(p=>restSet.has(p.key))));
+      datasets.push(mkDs(t.ink4, restLabel, d.scaling.points.filter(p=>restSet.has(p.key))));
     }
     getOrCreate('ch3',{type:'scatter',
       data:{datasets},
@@ -1597,7 +1606,7 @@ function renderCharts(d) {
     });
     const l3=document.getElementById('leg3');
     if(l3) l3.innerHTML=coloredKeys.map((k,i)=>`<span><span class="dot" style="background:${swatches[i]}"></span>${keyLabel(k)}</span>`).join('')
-      + (restKeys.length ? `<span><span class="dot" style="background:${t.ink4}"></span>Weitere (${restKeys.length} PDFs)</span>` : '');
+      + (restKeys.length ? `<span><span class="dot" style="background:${t.ink4}"></span>${restLabel}</span>` : '');
   } else {
     setChartEmpty('ch3');
     const l3=document.getElementById('leg3'); if(l3) l3.innerHTML='';
@@ -1716,7 +1725,12 @@ function renderCharts(d) {
     getOrCreate('ch8',{type:'bar',data:{labels:agLabelsN,datasets:[{data:agDurMin,backgroundColor:bgC,borderWidth:0,borderRadius:2,barPercentage:.65}]},
       options:{indexAxis:'y',maintainAspectRatio:false,responsive:true,animation:{duration:500},
         plugins:{legend:{display:false},tooltip:{callbacks:{label:ctx=>{const m=ctx.raw;return m>=1?`${_fmtDE(m)} min`:`${Math.round(m*60)} s`;}}}},
-        scales:{x:axisCfg({ticks:{callback:v=>v+' min'}}),y:axisCfg({grid:{display:false},ticks:{color:t.ink2,font:{size:12}}})}}});
+        // Nachbesserung #204/#221 P5: bei kleinen Datenstaenden (kumulierte
+        // Laufzeit < 1 min, z. B. Onboarding-Szenario) erzeugt Chart.js sonst
+        // fraktionale Ticks mit voller Float-Praezision ("0.16666666666666666
+        // min"); precision:1 rundet den Tick-Schritt auf 1 Dezimale, _fmtDE
+        // gibt sie mit Komma statt Punkt aus (konsistent zum Tooltip oben).
+        scales:{x:axisCfg({ticks:{callback:v=>_fmtDE(v)+' min', precision:1}}),y:axisCfg({grid:{display:false},ticks:{color:t.ink2,font:{size:12}}})}}});
   } else {
     setChartEmpty('ch7'); setChartEmpty('ch8');
   }
@@ -2113,13 +2127,17 @@ window.resetAllFilters = function() {
 };
 
 let _loadSeq = 0;
-async function loadAndRender() {
+async function loadAndRender(manual = true) {
   const seq = ++_loadSeq;
-  // #204 P8a: Filterwechsel/15s-Poll gaben bisher keinerlei Lade-Feedback —
-  // nur der allererste Boot-Load zeigte den Shimmer-Skeleton (renderSkeleton()
-  // laeuft davor separat). Ab dem 2. Load bestehenden Inhalt dimmen statt
-  // stillschweigend zu warten; _renderWithData hebt das wieder auf.
-  if (window._lastData) document.querySelector('.main')?.classList.add('refreshing');
+  // #204 P8a: Filterwechsel gab bisher keinerlei Lade-Feedback — nur der
+  // allererste Boot-Load zeigte den Shimmer-Skeleton (renderSkeleton()
+  // laeuft davor separat). Ab dem 2. MANUELLEN Load bestehenden Inhalt
+  // dimmen statt stillschweigend zu warten; _renderWithData hebt das wieder
+  // auf. Der automatische 15s-Poll dimmt bewusst NICHT (manual=false,
+  // s. setInterval-Aufruf unten) — sonst sperrt pointer-events:none auf
+  // .main kurzzeitig auch die Filterbar, obwohl der Nutzer nichts angestossen
+  // hat (Nachbesserung #204/#221 P-a).
+  if (manual && window._lastData) document.querySelector('.main')?.classList.add('refreshing');
   try {
     // Eval-Version-Filter entfernt: nie aus URL/State setzen → Server nutzt default (neueste)
     const p = new URLSearchParams();
@@ -2133,7 +2151,10 @@ async function loadAndRender() {
     if (seq === _loadSeq) _renderWithData(data);
   } catch(e) {
     console.warn('Ladefehler:',e);
-    document.querySelector('.main')?.classList.remove('refreshing');
+    // Dimmung nur entfernen, wenn kein neuerer Request mehr aussteht — sonst
+    // reisst ein fehlschlagender AELTERER Request die Dimmung fuer einen noch
+    // laufenden NEUEREN Request weg (Nachbesserung #204/#221 P-a).
+    if (seq === _loadSeq) document.querySelector('.main')?.classList.remove('refreshing');
   }
 }
 
@@ -2161,7 +2182,7 @@ window.addEventListener('load', () => {
   requestAnimationFrame(() => {
     requestAnimationFrame(() => {
       loadAndRender();
-      setInterval(loadAndRender, 15000);
+      setInterval(() => loadAndRender(false), 15000);
       window.addEventListener('resize', _debouncedRerender);
     });
   });

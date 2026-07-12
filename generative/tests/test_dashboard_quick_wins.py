@@ -162,8 +162,10 @@ def test_build_live_html_has_no_mock_path():
     assert "MOCK_DATA" not in html
     assert '<script src="data.js"' not in html
     # Live-Boot: Daten via fetch + 15s-Refresh
+    # Poll ruft loadAndRender(false) — manual=false unterdrueckt die
+    # Refresh-Dimmung beim automatischen Poll (Nachbesserung #204/#221 P-a).
     assert "loadAndRender();" in html
-    assert "setInterval(loadAndRender, 15000)" in html
+    assert "setInterval(() => loadAndRender(false), 15000)" in html
 
 
 def test_calibration_counts_respect_note_filter(calib_db):
