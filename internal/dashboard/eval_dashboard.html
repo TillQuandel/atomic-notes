@@ -1243,11 +1243,15 @@ function renderKpis(kpis, thresh, kpiTrend) {
     // #219-Nachbesserung Punkt 1: kein tabindex auf den 4 Hint-Triggern hier —
     // sie sitzen IN diesem <button> (ungueltige Verschachtelung fokussierbarer
     // Elemente). Tooltip bleibt hover-faehig, Keyboard-Zugang laeuft ueber den
-    // Button selbst. Punkt 6: title-Attribut durch aria-label ersetzt, sonst
-    // zeigt der Browser beim Hover ueber Label/n-Tag/Chip gleichzeitig das
-    // native title "Klick: Versions-Trend" UND den CSS-Hint-Pop.
-    return `<button type="button" class="kpi ${kd.tone}${_openKpiIdx===i?' open':''}" id="${kd.id}" onclick="_openKpiSpark(${i})" aria-label="Klick: Versions-Trend">
-      <div class="top"><span class="lbl hint">${kd.label}<span class="hint-pop">${kd.hint||''}</span></span>${chip}</div>
+    // Button selbst. Punkt 6: title-Attribut entfernt (sonst zeigt der Browser
+    // beim Hover ueber Label/n-Tag/Chip gleichzeitig das native title UND den
+    // CSS-Hint-Pop) — OHNE aria-label-Ersatz: aria-label ueberschreibt laut
+    // WAI-ARIA Accessible-Name-Computation den kompletten Button-Textinhalt,
+    // Screenreader haetten sonst auf allen Kacheln nur "Klick: Versions-Trend"
+    // statt Label+Wert gehoert (Runde-2-Fund). Der Klick-Hinweis steckt
+    // stattdessen im Label-Hint-Pop-Text.
+    return `<button type="button" class="kpi ${kd.tone}${_openKpiIdx===i?' open':''}" id="${kd.id}" onclick="_openKpiSpark(${i})">
+      <div class="top"><span class="lbl hint">${kd.label}<span class="hint-pop">${kd.hint||''} Klick auf die Kachel zeigt den Versions-Trend.</span></span>${chip}</div>
       <div class="value-row">
         <span class="v">${kd.val != null ? _fmtDE(kd.val, kd.digits ?? 1) : '–'}</span>
         ${kd.u ? `<span class="u">${kd.u}</span>` : ''}
