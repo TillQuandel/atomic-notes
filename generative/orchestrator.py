@@ -186,7 +186,7 @@ async def run_extractors_per_concept(
     background_map: dict[str, list[str]] | None = None,
     related_mentions: list[str] | None = None,
     max_concurrent_calls: int | None = None,
-) -> tuple[list[AtomicNoteDraft], dict, int]:
+) -> tuple[list[AtomicNoteDraft], dict, int, list[tuple[str, str]]]:
     """Pro Konzept ein Extractor-Call mit den relevanten Textstellen aus ALLEN Chunks.
 
     Konzepte mit action='skip' werden übersprungen. Konzepte ohne Treffer im Volltext
@@ -196,8 +196,13 @@ async def run_extractors_per_concept(
     max_concurrent_calls: aus RuntimeConfig gespeist (#101); None → Legacy-Fallback
     auf die feste Konstante MAX_CONCURRENT_CALLS.
 
-    Returns: (drafts, concept_map) — concept_map[concept.title] = (concept, ctext) für
-    Self-Refine-Loop (Milestone 3.6).
+    Returns: (drafts, concept_map, dropped, failures).
+    concept_map[concept.title] = (concept, ctext) für Self-Refine-Loop (Milestone 3.6).
+    dropped = len(tasks) - len(drafts) (Fehler UND legitime Leer-Extraktionen, für n_dropped).
+    failures = [(concept_title, error)] NUR für Calls, die mit Exception starben (#210,
+    Timeout/CLI-Fehler nach Retries) — NICHT für None-Rückgaben (Konzept zu schwach im
+    Text). Trennt echten Verlust vom erwarteten Leer-Fall, damit Summary/Exit-Code nur
+    echte Ausfälle melden.
     """
     sem = asyncio.Semaphore(max_concurrent_calls if max_concurrent_calls is not None else MAX_CONCURRENT_CALLS)
 
@@ -242,9 +247,11 @@ async def run_extractors_per_concept(
     results = await asyncio.gather(*tasks, return_exceptions=True)
     drafts: list[AtomicNoteDraft] = []
     concept_map: dict = {}  # draft.title -> (concept, ctext)
+    failures: list[tuple[str, str]] = []  # #210: (title, error) nur für harte Call-Ausfälle
     for i, r in enumerate(results):
         if isinstance(r, Exception):
             print(f"  [WARN] Extractor '{concept_for_idx[i]}' fehlgeschlagen: {r}", file=sys.stderr)
+            failures.append((concept_for_idx[i], str(r)))
         elif r is None:
             pass  # bereits von run_per_concept als [extractor-empty] geloggt
         else:
@@ -255,7 +262,38 @@ async def run_extractors_per_concept(
     dropped = len(tasks) - len(drafts)
     if dropped:
         print(f"      [extractor-empty] {dropped}/{len(tasks)} Konzepte stumm weggefallen", file=sys.stderr)
-    return drafts, concept_map, dropped
+    return drafts, concept_map, dropped, failures
+
+
+# --- #210: Timeout-Verlust im Run-Summary sichtbar machen (kein stilles Verschlucken) ---
+# Exit-Code-Konvention: 0 = voller Erfolg, 1 = harter Abbruch (unbehandelte Exception,
+# z.B. Planner-Timeout nach Retries → kein Plan → Traceback), 3 = Lauf abgeschlossen,
+# aber >=1 Konzept endgültig durch Timeout/CLI-Fehler verloren. 3 hält den Teilverlust
+# von einem harten Absturz unterscheidbar (CI/Wrapper können darauf reagieren).
+_EXIT_EXTRACTOR_LOSS = 3
+
+
+def format_extractor_failure_report(failures: list[tuple[str, str]], n_attempted: int) -> list[str]:
+    """Warn-Block-Zeilen für Konzepte, die beim Extrahieren mit Exception starben.
+
+    Rein (keine Seiteneffekte) → unit-testbar ohne die volle Pipeline. Leere Liste
+    liefert [] (kein Block). Der Aufrufer druckt die Zeilen nach stderr.
+    """
+    if not failures:
+        return []
+    lines = [
+        f"⚠️  {len(failures)} von {n_attempted} Konzept(en) beim Extrahieren verloren "
+        "(Timeout/CLI-Fehler, auch nach Retry) — NICHT in den geschriebenen Notes enthalten:"
+    ]
+    for title, err in failures:
+        reason = "Timeout" if "timeout" in (err or "").lower() else "Fehler"
+        lines.append(f"    - {title}: {reason} — {(err or '')[:160]}")
+    return lines
+
+
+def extractor_failure_exit_code(failures: list[tuple[str, str]]) -> int:
+    """Exit-Code 3 wenn Konzepte endgültig verloren gingen, sonst 0."""
+    return _EXIT_EXTRACTOR_LOSS if failures else 0
 
 
 def _normalize(title: str) -> str:
@@ -1624,7 +1662,10 @@ def _run_extraction_stages(
         (drafts, concept_map, existing_concepts, concept_links,
          text, chunks, acronym_dict, quality_report, pdf_meta,
          source_path, tag_whitelist, background_map, fb_year,
-         dropped_total, word_count, related_mentions, q_title, citation)
+         dropped_total, word_count, related_mentions, q_title, citation,
+         extractor_failures)
+        extractor_failures (#210): [(concept_title, error)] für Konzepte, deren
+        Extractor-Call mit Exception (Timeout/CLI-Fehler nach Retries) starb.
     """
     from generative.agents.base import trace_run_start as _trace_run_start
     from generative.config import MODEL_CONFIG as _MODEL_CONFIG
@@ -1767,6 +1808,7 @@ def _run_extraction_stages(
         all_drafts: list[AtomicNoteDraft] = []
         all_concept_map: dict = {}
         dropped_total = 0
+        extractor_failures: list[tuple[str, str]] = []  # #210
         remaining_concepts = runtime_config.max_concepts if runtime_config is not None else None
 
         for i, chunk in enumerate(chunks, 1):
@@ -1811,7 +1853,7 @@ def _run_extraction_stages(
                 f"{', '.join(c.title for c in actionable[:4])}{'...' if len(actionable) > 4 else ''}"
             )
 
-            ch_drafts, ch_map, ch_dropped = asyncio.run(
+            ch_drafts, ch_map, ch_dropped, ch_failures = asyncio.run(
                 run_extractors_per_concept(
                     chunk.text,
                     chapter_plan,
@@ -1830,6 +1872,7 @@ def _run_extraction_stages(
                 if t not in related_mentions:
                     related_mentions.append(t)
             dropped_total += ch_dropped
+            extractor_failures.extend(ch_failures)  # #210
             all_drafts.extend(ch_drafts)
             for draft_title, concept_context in ch_map.items():
                 all_concept_map.setdefault(draft_title, concept_context)
@@ -1887,7 +1930,7 @@ def _run_extraction_stages(
         )
         print(f"\n[5/7] Extractor: {actionable_count} Konzepte parallel verarbeiten…")
         with _span("Extractor", pdf=source_path.name, n_concepts=actionable_count):
-            drafts, concept_map, dropped_total = asyncio.run(
+            drafts, concept_map, dropped_total, extractor_failures = asyncio.run(
                 run_extractors_per_concept(
                     text,
                     concept_plan,
@@ -1920,6 +1963,7 @@ def _run_extraction_stages(
         related_mentions,
         q_title,
         citation,
+        extractor_failures,
     )
 
 
@@ -2126,6 +2170,7 @@ def main(argv: list[str] | None = None):
         )
         word_count = len(text.split())
         dropped_total = 0
+        extractor_failures: list[tuple[str, str]] = []  # #210: Stage 1-5 übersprungen → keine Extractor-Calls
         print(f"\n=== Atomic Agent (load-drafts): {source_path.name} ===\n")
         print(f"  [load-drafts] {len(drafts)} Drafts geladen · Stage 1–5 übersprungen")
     else:
@@ -2152,6 +2197,7 @@ def main(argv: list[str] | None = None):
             related_mentions,
             q_title,
             citation,
+            extractor_failures,
         ) = _run_extraction_stages(args, source_path, runtime_config)
         if args.save_drafts:
             _save_draft_state(
@@ -2172,15 +2218,26 @@ def main(argv: list[str] | None = None):
                 related_mentions=related_mentions,
             )
 
+    # #210: Extractor-Ausfälle (Timeout/CLI-Fehler nach Retries) sichtbar machen.
+    # n_attempted = erfolgreiche Extraktionen (drafts vor Dedup) + dropped (Fehler+Leer);
+    # exit_code wird an ALLEN Rückgabepunkten zurückgegeben, damit ein Teilverlust den
+    # Prozess mit 3 beendet (unterscheidbar von hartem Abbruch=1) statt still mit 0.
+    n_extract_attempted = len(drafts) + dropped_total
+    exit_code = extractor_failure_exit_code(extractor_failures)
+
     if not drafts:
         print("\nKeine Konzepte extrahiert. Fertig.")
-        return
+        for _line in format_extractor_failure_report(extractor_failures, n_extract_attempted):
+            print(_line, file=sys.stderr)
+        return exit_code
 
     # --- Artifact-Detector: Abwesenheits-Noten früh verwerfen (kein LLM-Call) ---
     drafts = _drop_artifacts(drafts)
     if not drafts:
         print("\nAlle Drafts als Artefakte verworfen. Fertig.")
-        return
+        for _line in format_extractor_failure_report(extractor_failures, n_extract_attempted):
+            print(_line, file=sys.stderr)
+        return exit_code
 
     # Qualitäts-Flags aus QualityReport auf alle Notes übertragen
     for d in drafts:
@@ -2410,6 +2467,10 @@ def main(argv: list[str] | None = None):
             written += 1
 
     print(f"\n=== Fertig: {written} Notes {'(dry-run)' if args.dry_run else 'geschrieben'} ===")
+    # #210: verlorene Konzepte (Timeout/CLI-Fehler) direkt im Summary ausweisen —
+    # kein stilles Exit 0. Der Prozess endet unten mit exit_code (3), wenn befüllt.
+    for _line in format_extractor_failure_report(extractor_failures, n_extract_attempted):
+        print(_line, file=sys.stderr)
     # #45: Final-Report um Gründe-Aggregat erweitern (Routing-Verteilung +
     # "0 PDFs verändert"-Zusicherung sichtbar machen).
     _summary = routing_report.summarize_routing(drafts)
@@ -2493,7 +2554,7 @@ def main(argv: list[str] | None = None):
         print(
             f"\n[8/8] Qualitäts-Eval übersprungen (Profil: {runtime_config.profile}, inline_eval deaktiviert) — retro via reeval_baseline.py."
         )
-        return
+        return exit_code
     print("\n[8/8] Qualitäts-Eval…")
     try:
         from generative.config import CACHE_DIR as _CACHE_DIR
@@ -2610,6 +2671,8 @@ def main(argv: list[str] | None = None):
     except Exception as e:
         print(f"      [eval-warn] Qualitäts-Eval übersprungen: {e}", file=sys.stderr)
 
+    return exit_code
+
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())
