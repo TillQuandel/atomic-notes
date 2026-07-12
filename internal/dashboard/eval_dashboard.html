@@ -204,8 +204,10 @@ body.collapsed .theme-toggle { padding: 6px; }
 .fselect:focus { outline: none; border-color: var(--amber); }
 .delta-pill { margin-left: auto; display: flex; align-items: center; gap: 8px; font-family: var(--f-mono); font-size: 11px; color: var(--ink-3); }
 .delta-pill .num { font-weight: 600; }
-.updated { display: flex; align-items: center; gap: 6px; font-family: var(--f-mono); font-size: 10px; color: var(--ink-3); letter-spacing: .08em; }
-.updated .udot { width: 6px; height: 6px; border-radius: 50%; background: var(--mint); flex-shrink: 0; }
+/* Aktualisiert-Anzeige: nur noch Icon sichtbar, Zeitstempel wandert in den
+   .hint-pop-Tooltip (dasselbe Muster wie die Erklär-Tooltips oben, kein
+   zweites System) */
+.updated { display: flex; align-items: center; font-size: 13px; line-height: 1; color: var(--ink-3); }
 .filter-badges { display: none; flex-wrap: wrap; gap: 6px; padding: 6px 20px; min-height: 0; }
 .fbadge { display: inline-flex; align-items: center; gap: 5px; padding: 2px 8px 2px 10px;
   background: var(--tint-amber); border: 1px solid rgba(232,181,59,.25); border-radius: 3px;
@@ -364,9 +366,15 @@ body.collapsed .theme-toggle { padding: 6px; }
 .row .panel:last-child .hint-pop,
 table.cmp th:last-child .hint-pop,
 table.cmp th:nth-last-child(-n+2) .hint-pop,
-#calib-strip > div:last-child .hint-pop {
+#calib-strip > div:last-child .hint-pop,
+.updated.hint .hint-pop {
   left: auto; right: 0; transform: none;
 }
+/* .updated sitzt ganz oben in der Filterleiste — ein nach oben oeffnender
+   Tooltip (Standardrichtung oben) wuerde ueber den Viewport-Rand
+   hinausragen, weil darueber kein Platz mehr ist. Hier stattdessen nach
+   unten oeffnen. */
+.updated.hint .hint-pop { bottom: auto; top: calc(100% + 8px); }
 
 /* KPI spark row — außerhalb des kpis-Grid, animiert */
 .spark-row {
@@ -717,7 +725,7 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
       </select>
     </div>
     <!-- Eval-Version-Filter entfernt: nur eine eval_version aktiv (Server nutzt default = neueste) -->
-<div class="updated" style="margin-left:auto"><span class="udot"></span><span id="updated-at">lädt…</span></div>
+<span class="updated hint" tabindex="0" style="margin-left:auto">↻<span class="hint-pop" id="updated-at">lädt…</span></span>
   </div>
   <div class="filter-badges" id="filter-badges"></div>
   <div class="empty-banner" id="empty-banner" hidden>
@@ -2194,7 +2202,7 @@ function _renderWithData(d) {
   if (d.all_runs?.length)    _initGlobalRunFilter(d.all_runs);
   const sfTime=document.getElementById('sf-time'); if(sfTime) sfTime.textContent=d.generated_at||'–';
   const footTime=document.getElementById('foot-time'); if(footTime) footTime.textContent=d.generated_at||'–';
-  const updated=document.getElementById('updated-at'); if(updated) updated.textContent='aktualisiert '+(d.generated_at||'–').slice(11);
+  const updated=document.getElementById('updated-at'); if(updated) updated.textContent='Zuletzt aktualisiert: '+(d.generated_at||'–').slice(11)+' · lädt automatisch alle 15 s neu';
   // Loading-Skeletons entfernen
   document.querySelectorAll('.chart-body.loading').forEach(el=>el.classList.remove('loading'));
   // #204 P8a: Refresh-Dimmung (Filterwechsel/15s-Poll) wieder aufheben
