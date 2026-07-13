@@ -606,7 +606,7 @@ def _calc_kpis(
     # _build_html), der _calc_kpis ohne Server-Join aufruft — dort existiert
     # der Key nie, und ohne DB-Join lässt sich „gejoint" nicht feststellen.
     total_tokens = sum(r["tokens_in"] + r["tokens_out"] for r in token_runs if r.get("db_matched", True))
-    total_dur_s = sum(r["duration_min"] * 60 for r in token_runs)
+    total_dur_s = sum(r["duration_min"] * 60 for r in token_runs if r.get("db_matched", True))
     latest_truns = [r for r in token_runs if r.get("ver") == latest_pver] if latest_pver else token_runs
     cur_tokens = sum(r["tokens_in"] + r["tokens_out"] for r in latest_truns)
     cur_dur_h = round(sum(r["duration_min"] for r in latest_truns) / 60, 1)
