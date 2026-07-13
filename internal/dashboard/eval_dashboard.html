@@ -214,6 +214,9 @@ body.collapsed .theme-toggle { padding: 6px; }
   font-family: var(--f-mono); font-size: 10.5px; color: var(--amber); }
 .fbadge button { display: flex; align-items: center; color: var(--amber); opacity: .6; }
 .fbadge button:hover { opacity: 1; }
+.fbadge-reset { margin-left: auto; padding: 2px 10px; border: 1px solid var(--hair-strong); border-radius: 3px;
+  font-family: var(--f-mono); font-size: 10.5px; color: var(--ink-3); background: transparent; }
+.fbadge-reset:hover { border-color: var(--amber); color: var(--amber); }
 .kpi-n { display: block; font-family: var(--f-mono); font-size: 10px; color: var(--ink-4); margin-top: 1px; }
 .kpi-n.warn-n { color: var(--amber); }
 /* #196 P4: Wilson-CI-Sub-Info an der Fehlerquote-Kachel */
@@ -1166,7 +1169,7 @@ function _renderFilterBadges() {
   const labels = { pver: 'Version', pdf: 'PDF', lang: 'Sprache', model: 'Modell', run: 'Lauf' };
   const active = Object.entries(_globalFilters)
     .filter(([k, v]) => v && v !== '__all__' && labels[k]);
-  container.innerHTML = active.map(([k, v]) =>
+  const badges = active.map(([k, v]) =>
     `<span class="fbadge">
       ${_escHTML(labels[k])}: <strong>${_escHTML(v)}</strong>
       <button onclick="_clearFilter('${_escHTML(k)}')" title="Filter entfernen" aria-label="Filter ${_escHTML(labels[k])} entfernen">
@@ -1174,7 +1177,14 @@ function _renderFilterBadges() {
       </button>
     </span>`
   ).join('');
-  container.style.display = active.length ? '' : 'none';
+  // #236: Reset auch außerhalb des Empty-State (0 Treffer) erreichbar, sobald
+  // mindestens ein Filter aktiv ist — vorher steckte der einzige Reset im
+  // Empty-Banner (nur bei 0 Treffern sichtbar).
+  const resetBtn = active.length
+    ? `<button class="fbadge-reset" onclick="resetAllFilters()">Alle Filter zurücksetzen</button>`
+    : '';
+  container.innerHTML = badges + resetBtn;
+  container.style.display = active.length ? 'flex' : 'none';
 }
 
 window._clearFilter = function(key) {
