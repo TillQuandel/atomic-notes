@@ -2316,6 +2316,21 @@ def main(argv: list[str] | None = None):
         _auto_version_bump()
 
     runtime_config = load_runtime_config()
+
+    # #231: Schema-Init/-Migration beim Start — bewusst hier und NICHT im
+    # DB-Write-Block weiter unten (Konfliktvermeidung mit #235, das dort editiert).
+    # Frische ATOMIC_DB_PATH bekommt so ihr Schema VOR dem ersten Insert (sonst
+    # "no such table"), bestehende DBs ziehen fehlende _add_column-Migrationen
+    # nach (z.B. n_extracted, #220) — beides lief bisher nie, weil orchestrator.py
+    # db.init_db() nie aufrief. Best-effort: ein kaputtes DB-File darf den Lauf
+    # nicht killen, der Write-Block unten hat ohnehin sein eigenes try/except.
+    try:
+        import generative.db as _db
+
+        _db.init_db(_db.DB_PATH)
+    except Exception as _db_init_err:
+        print(f"   [warn] DB-Init fehlgeschlagen: {_db_init_err}")
+
     from generative.agents.base import set_llm_runtime_config
 
     set_llm_runtime_config(runtime_config)
