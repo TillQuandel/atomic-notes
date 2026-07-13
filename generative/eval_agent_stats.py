@@ -130,6 +130,7 @@ def run_totals(trace_path: Path) -> dict:
                     input_tokens=e.get("input_tokens", 0),
                     output_tokens=e.get("output_tokens", 0),
                     cache_read_tokens=e.get("cache_read_tokens", 0),
+                    cache_creation_tokens=e.get("cache_creation_tokens", 0),
                 )
             except Exception:
                 continue

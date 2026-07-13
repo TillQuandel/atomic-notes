@@ -70,6 +70,34 @@ def test_gemini_cost():
     assert abs(cost - 0.375) < 0.001  # $0.075 + $0.30 per M
 
 
+def test_cache_creation_cost():
+    """#240: cache_creation-Tokens werden mit cache_write-Preis (1,25x Input,
+    Anthropic-Default-TTL 5min ohne explizites TTL-Flag) bepreist."""
+    with patch("generative.config.BACKEND", "api"):
+        cost = compute_cost_per_call(
+            model="claude-sonnet-4-6", input_tokens=0, output_tokens=0, cache_creation_tokens=1_000_000
+        )
+    assert abs(cost - 3.75) < 0.001  # $3.0 input * 1.25 = $3.75/M cache-write
+
+
+def test_cache_creation_default_zero_matches_legacy_result():
+    """Regressionsschutz: ohne cache_creation_tokens (Default 0) bleibt das
+    Ergebnis exakt wie vor #240 — reine Rückwärtskompatibilität."""
+    with patch("generative.config.BACKEND", "api"):
+        cost_new_default = compute_cost_per_call(
+            model="claude-sonnet-4-6", input_tokens=5000, output_tokens=1000, cache_read_tokens=20000
+        )
+        cost_explicit_zero = compute_cost_per_call(
+            model="claude-sonnet-4-6",
+            input_tokens=5000,
+            output_tokens=1000,
+            cache_read_tokens=20000,
+            cache_creation_tokens=0,
+        )
+    assert cost_new_default == cost_explicit_zero
+    assert abs(cost_new_default - (5000 * 3.0 / 1e6 + 1000 * 15.0 / 1e6 + 20000 * 0.30 / 1e6)) < 1e-9
+
+
 def test_cost_from_jsonl_trace():
     import json
     import tempfile

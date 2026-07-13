@@ -226,6 +226,7 @@ def _read_agent_stats(allowed_run_ids: set | None = None) -> dict:
                         input_tokens=r.get("input_tokens", 0) or 0,
                         output_tokens=r.get("output_tokens", 0) or 0,
                         cache_read_tokens=r.get("cache_read_tokens", 0) or 0,
+                        cache_creation_tokens=r.get("cache_creation_tokens", 0) or 0,
                     )
                 except Exception:
                     pass
