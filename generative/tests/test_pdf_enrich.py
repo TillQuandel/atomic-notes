@@ -1103,3 +1103,78 @@ def test_short_filename_surname_does_not_falsely_confirm_unrelated_embedded():
 def test_exact_surname_confirms_embedded():
     # Gegenprobe: exakter Nachname-Match bestätigt weiterhin korrekt.
     assert _zotero_author_matches_embedded(_Path("Bates - 2017 - Information Behavior.pdf"), "Bates") is True
+
+
+# Gegenstueck-Guard (#234): `_filename_contradicts_embedded_author` meldet einen
+# POSITIVEN Widerspruch NUR, wenn der Dateiname zu einem Autor parst UND dessen
+# Nachname dem eingebetteten Autor widerspricht. Grundlage fuer die /Title-
+# Quarantaene (fremdes Embedded-Meta -> Titel unglaubwuerdig). Nicht die blosse
+# Negation von `_zotero_author_matches_embedded`: nicht-parsbarer Dateiname bzw.
+# fehlender Embedded-Autor sind KEIN Widerspruch (sonst Overreach auf sauberem
+# Bestand ohne widersprechendes Signal).
+from generative.tools.pdf_enrich import _filename_contradicts_embedded_author
+
+
+def test_contradiction_true_on_author_mismatch():
+    # Schlebbe-Realfall: Dateiname Greifeneder, eingebettet Afzal -> Widerspruch.
+    assert (
+        _filename_contradicts_embedded_author(_Path("Schlebbe und Greifeneder - 2022 - Information Need.pdf"), "Afzal")
+        is True
+    )
+
+
+def test_contradiction_false_on_author_match():
+    assert _filename_contradicts_embedded_author(_Path("Bates - 2017 - Information Behavior.pdf"), "Bates") is False
+
+
+def test_contradiction_false_on_unparseable_filename():
+    # Kein parsbarer Dateiname-Autor -> Embedded-Autor NICHT widerlegt -> kein
+    # Widerspruch (Titel darf nicht faelschlich quarantaenisiert werden).
+    assert _filename_contradicts_embedded_author(_Path("scan001.pdf"), "Landry") is False
+
+
+def test_contradiction_false_on_empty_embedded_author():
+    assert _filename_contradicts_embedded_author(_Path("Bates - 2017 - Information Behavior.pdf"), "") is False
+
+
+def test_contradiction_uses_surname_only():
+    # Voller eingebetteter Name, Dateiname nur Nachname: kein Widerspruch (letztes
+    # Token vs. letztes Token, wie beim Match-Guard).
+    assert _filename_contradicts_embedded_author(_Path("Bates - 2017 - X.pdf"), "Marcia J. Bates") is False
+
+
+# Overreach-Bugklasse (Review PR #256, an 4 realen Literatur-PDFs verifiziert):
+# Der beidseitige Nur-letztes-Token-Vergleich brach bei Mehrautoren-Dateinamen und
+# reinen Diakritik-Differenzen -> korrekte Titel wurden faelschlich quarantaenisiert.
+# Fix: Dateiname-Autor an ';'/'und'/'and'/'&' zerlegen, Embedded-Nachname(n) gegen
+# JEDES Segment pruefen (Widerspruch nur, wenn KEIN Segment matcht), diakritik-
+# gefaltet, 'Nachname, Vorname'-Segmente korrekt aufgeloest.
+import pytest
+
+
+@pytest.mark.parametrize(
+    "filename, embedded_author",
+    [
+        # Legitim passender Embedded-ERSTautor bei Mehrautoren-Dateiname.
+        ("Ebner und Gegenfurtner - 2019 - Lernen.pdf", "Christian Ebner"),
+        ("Klingenberg und Weber - 2025 - Studie.pdf", "Christiana Klingenberg"),
+        # Embedded traegt beide Autoren als 'Nachname, Vorname'-Liste (';'-getrennt).
+        ("Deci und Ryan - 1993 - Motivation.pdf", "Deci, Edward L.; Ryan, Richard M."),
+        ("Ayaz und Yanartaş - 2020 - Adoption.pdf", "Ayaz"),
+        # Embedded = ZWEITautor mit Diakritik-Differenz zum Dateinamen.
+        ("Ayaz und Yanartaş - 2020 - Adoption.pdf", "Yanartas"),
+    ],
+)
+def test_no_contradiction_when_embedded_matches_any_filename_author(filename, embedded_author):
+    assert _filename_contradicts_embedded_author(_Path(filename), embedded_author) is False
+
+
+def test_no_contradiction_on_pure_diacritic_difference_single_author():
+    # Yanartaş (Dateiname) vs. Yanartas (embedded, ASCII-gefaltet) -> kein Widerspruch.
+    assert _filename_contradicts_embedded_author(_Path("Yanartaş - 2020 - Adoption.pdf"), "Yanartas") is False
+
+
+def test_contradiction_true_multi_author_when_no_segment_matches():
+    # Regressions-Erhalt: Schlebbe/Afzal bleibt Widerspruch, weil 'Afzal' zu WEDER
+    # 'Schlebbe' NOCH 'Greifeneder' passt (auch mit der neuen Segment-Logik).
+    assert _filename_contradicts_embedded_author(_Path("Schlebbe und Greifeneder - 2022 - Need.pdf"), "Afzal") is True

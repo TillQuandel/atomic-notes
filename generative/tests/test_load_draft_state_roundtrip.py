@@ -174,6 +174,9 @@ def test_save_then_load_reconstructs_full_run_context(monkeypatch, tmp_path):
     assert ctx.fb_year == "2020"
     assert ctx.dropped_total == 0
     assert ctx.word_count == len(TEXT.split()) == 10
+    # q_title laeuft im Reload-Pfad seit #234 durch den /Title-Trust-Cross-Check
+    # (_quarantine_poisoned_embedded_title). Bei sauberem Input — kein
+    # widersprechender InfoDictAuthor — bleibt der Titel unveraendert zitierfaehig.
     assert ctx.q_title == "Informationsverhalten und Kontext"  # aus pdf_meta["Title"]
     assert ctx.extractor_failures == []
 
@@ -197,3 +200,42 @@ def test_save_then_load_reconstructs_full_run_context(monkeypatch, tmp_path):
     ]
     assert raw["tag_whitelist"] == ["uni/ibi/konzept", "uni/ibi/methode"]
     assert raw["text"] == TEXT
+
+
+# --- #234: Reload-Pfad ist ein zweiter, unabhaengiger Trust-Punkt --------------
+# Ein vor dem Fix gespeicherter (oder anderweitig vergifteter) Draft-State kann
+# einen fremden Embedded-Titel + widersprechenden InfoDictAuthor tragen. Der
+# --load-drafts-Pfad muss dieselbe /Title-Quarantaene anwenden wie der Normalpfad,
+# damit der Gift-Titel nicht ueber den Resume in die Zitation zurueckkehrt.
+POISON_SOURCE = "Schlebbe und Greifeneder - 2022 - Information Need, Informationsbedarf und -bedürfnis.pdf"
+POISON_TITLE = "Conceptualisation and Measurement of Information Needs: A Literature Review"
+
+
+def test_load_drafts_quarantines_poisoned_embedded_title(monkeypatch, tmp_path):
+    path = str(tmp_path / "poisoned_state.json")
+    monkeypatch.setattr(orchestrator.pdf_chunker, "pdf_uses_physical_pages", lambda _p: False)
+
+    orchestrator._save_draft_state(
+        path,
+        drafts=_drafts(),
+        concept_map=_concept_map(),
+        existing_concepts={},
+        concept_links={},
+        text=TEXT,
+        chunks=[Chunk(title="Kap. 2", text="[S. 3]\n\nText ...", index=0, page_start=3, page_end=5)],
+        acronym_dict={},
+        quality_report=_quality_report(),
+        # Vergifteter pdf_meta: Fremd-Titel (Afzal) + widersprechender InfoDictAuthor.
+        pdf_meta={"Title": POISON_TITLE, "Subject": "2017", "InfoDictAuthor": "Afzal"},
+        source_name=POISON_SOURCE,
+        tag_whitelist=[],
+        background_map={},
+        filename_year="2022",
+        related_mentions=[],
+    )
+    ctx = orchestrator._load_draft_state(path)
+
+    # Der Gift-Titel ist verworfen; q_title/Zitation nutzen den Dateiname-Titel.
+    assert ctx.q_title != POISON_TITLE
+    assert ctx.citation.title != POISON_TITLE
+    assert ctx.pdf_meta.get("Title") in (None, "")

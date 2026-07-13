@@ -1728,6 +1728,39 @@ def _setup_phoenix_tracing() -> None:
         print(f"[phoenix] Tracing nicht verfügbar ({e}) — Pipeline läuft ohne Traces")
 
 
+def _quarantine_poisoned_embedded_title(pdf_meta: dict, source_path: Path) -> bool:
+    """Verwirft den eingebetteten `/Title`, wenn der eingebettete Info-Dict-Autor
+    dem Dateiname-Autor widerspricht (#234). Mutiert ``pdf_meta`` in place; gibt
+    True zurueck, wenn quarantaenisiert wurde.
+
+    Trust-Symmetrie zum bereits quarantaenisierten `/Author` (pdf_chunker): Ein
+    frueherer ``enrich(rename=True)``-Lauf kann fremde Metadaten (Title/Author/
+    Year) in ein PDF zurueckschreiben (Selbst-Vergiftung). Der `/Author` wird
+    schon nicht mehr als zitierfaehig exportiert (nur diagnostisch als
+    ``InfoDictAuthor``), der `/Title` blieb aber ungeprueft vertrauenswuerdig
+    (Trust-Asymmetrie) und fuehrte zu Fehlattribution (Schlebbe-PDF zitierte den
+    Afzal-2017-Titel). Widerspricht der Info-Dict-Autor dem Dateinamen, ist der
+    GESAMTE eingebettete Block unglaubwuerdig -> `/Title` leeren, damit die
+    vorhandene Fallback-Kaskade (enrich-Merge / q_title / vault_writer) den
+    dateinamen-abgeleiteten Titel nutzt.
+
+    Kein Overreach: greift nur bei parsbarem Dateiname UND echtem Autor-
+    Widerspruch (siehe ``_filename_contradicts_embedded_author``). Fehlender oder
+    passender Embedded-Autor laesst den `/Title` unangetastet — sauberer Bestand
+    bleibt zitierfaehig."""
+    from generative.tools.pdf_enrich import _filename_contradicts_embedded_author
+
+    if pdf_meta.get("Title") and _filename_contradicts_embedded_author(source_path, pdf_meta.get("InfoDictAuthor", "")):
+        poisoned = pdf_meta.pop("Title")
+        print(
+            f"  [meta] Eingebetteter /Title verworfen (#234): Info-Dict-Autor "
+            f"'{pdf_meta.get('InfoDictAuthor')}' widerspricht Dateiname — "
+            f"Fallback auf Dateiname-Titel (verworfen: '{poisoned[:60]}')"
+        )
+        return True
+    return False
+
+
 def _build_citation(
     pdf_meta: dict, quality_report, q_title: str | None, source_name: str, physical_pages: bool = False
 ) -> CitationMeta:
@@ -1965,6 +1998,11 @@ def _run_extraction_stages(
         )
     overview = pdf_chunker.extract_overview(text)
     pdf_meta = pdf_meta_early
+    # #234: Selbst-Vergiftungs-Schutz — eingebetteten /Title verwerfen, wenn der
+    # Info-Dict-Autor dem Dateinamen widerspricht. Vor dem Enrichment, damit der
+    # Merge-Guard unten (leerer Title) einen legitim angereicherten Titel setzen
+    # kann; sonst greift die Fallback-Kaskade auf den Dateiname-Titel.
+    _quarantine_poisoned_embedded_title(pdf_meta, source_path)
     if pdf_meta:
         meta_line = (
             f"{pdf_meta.get('Title', '?')[:60]} | "
@@ -2214,6 +2252,11 @@ def _load_draft_state(path: str) -> RunContext:
     # (#152). Früher lag diese Rekonstruktion inline in main(). ---
     # q_title wird im Normalpfad von _run_extraction_stages durchgereicht; hier aus
     # dem geladenen pdf_meta abgeleitet.
+    # #234: Der Reload ist ein zweiter, unabhaengiger Trust-Punkt — ein vor dem Fix
+    # gespeicherter State kann einen vergifteten /Title tragen. Dieselbe Quarantaene
+    # wie im Normalpfad anwenden, damit der Gift-Titel nicht ueber den Resume zurueckkehrt.
+    if pdf_meta:
+        _quarantine_poisoned_embedded_title(pdf_meta, source_path)
     q_title = (pdf_meta or {}).get("Title")
     # citation (CitationMeta, #96 E3a): Stage 1–5 übersprungen, daher aus dem
     # geladenen pdf_meta/quality_report neu konstruiert — dieselbe deterministische
