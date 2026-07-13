@@ -282,17 +282,21 @@ MDEBERTA_THRESHOLD_CONTRA = float(os.getenv("MDEBERTA_THRESHOLD_CONTRA", "0.3"))
 
 # Preise in USD pro Million Tokens (Stand 2026-05)
 # cache_read: Anthropic berechnet Cache-Reads als eigene günstige Zeile
+# cache_write: Neuanlage eines Cache-Eintrags — Anthropic bepreist das (anders als
+# cache_read) NICHT günstiger, sondern teurer als Input. Backend setzt cache_control
+# ohne TTL-Flag (_litellm_backend.py) ⇒ Anthropic-Default 5-min-Ephemeral-TTL ⇒
+# cache_write = 1,25x Input-Preis (bei 1h-TTL wären es 2x — hier nicht der Fall, #240).
 MODEL_PRICING: dict[str, dict[str, float]] = {
     # Claude (Anthropic API) — https://anthropic.com/pricing
-    "claude-opus-4-7": {"input": 15.0, "output": 75.0, "cache_read": 1.50},
-    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0, "cache_read": 0.30},
-    "claude-haiku-4-5": {"input": 0.80, "output": 4.0, "cache_read": 0.03},
+    "claude-opus-4-7": {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
+    "claude-sonnet-4-6": {"input": 3.0, "output": 15.0, "cache_read": 0.30, "cache_write": 3.75},
+    "claude-haiku-4-5": {"input": 0.80, "output": 4.0, "cache_read": 0.03, "cache_write": 1.0},
     # Gemini (Google API) — https://ai.google.dev/pricing
-    "gemini-3.1-pro": {"input": 2.50, "output": 10.0, "cache_read": 0.0},
-    "gemini-2.5-flash": {"input": 0.075, "output": 0.30, "cache_read": 0.0},
+    "gemini-3.1-pro": {"input": 2.50, "output": 10.0, "cache_read": 0.0, "cache_write": 0.0},
+    "gemini-2.5-flash": {"input": 0.075, "output": 0.30, "cache_read": 0.0, "cache_write": 0.0},
     # OpenAI
-    "gpt-4o": {"input": 5.0, "output": 15.0, "cache_read": 0.0},
-    "gpt-4o-mini": {"input": 0.15, "output": 0.60, "cache_read": 0.0},
+    "gpt-4o": {"input": 5.0, "output": 15.0, "cache_read": 0.0, "cache_write": 0.0},
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60, "cache_read": 0.0, "cache_write": 0.0},
     # Subscription-Aliase → kein Preis (kein API-Key nötig)
     "opus": {},
     "haiku": {},
@@ -304,6 +308,7 @@ def compute_cost_per_call(
     input_tokens: int,
     output_tokens: int,
     cache_read_tokens: int = 0,
+    cache_creation_tokens: int = 0,
 ) -> float:
     """Kosten eines einzelnen LLM-Calls in USD.
     Gibt 0.0 zurück wenn BACKEND!='api' oder Modell nicht in MODEL_PRICING.
@@ -324,6 +329,7 @@ def compute_cost_per_call(
     return round(
         pricing.get("input", 0.0) * input_tokens / per_m
         + pricing.get("output", 0.0) * output_tokens / per_m
-        + pricing.get("cache_read", 0.0) * cache_read_tokens / per_m,
+        + pricing.get("cache_read", 0.0) * cache_read_tokens / per_m
+        + pricing.get("cache_write", 0.0) * cache_creation_tokens / per_m,
         6,
     )
