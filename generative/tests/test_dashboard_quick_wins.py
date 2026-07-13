@@ -94,7 +94,7 @@ def test_canonical_agent_keeps_pipeline_agents():
 NOTE = "vault__Testnote.md"
 
 
-def _seed_db(path):
+def _seed_db(path, cov_rate=None):
     db.init_db(path)
     conn = sqlite3.connect(path)
 
@@ -103,7 +103,7 @@ def _seed_db(path):
             "INSERT INTO note_evals (run_id, note_path, hallucination_rate, "
             "coverage_factual, coverage_rate, pipeline_version, pdf, "
             "eval_version, timestamp) VALUES (?,?,?,?,?,?,?,?,?)",
-            (f"run-{ts}", NOTE, hall, cov_factual, 0.5, pver, "Bates.pdf", "4.1", ts),
+            (f"run-{ts}", NOTE, hall, cov_factual, cov_rate, pver, "Bates.pdf", "4.1", ts),
         )
 
     # Zwei Evals derselben Note: das Label gehört zum 0.30-Eval,
@@ -140,9 +140,22 @@ def test_calibration_labeled_rows_use_label_llm_rate(calib_db):
 
 
 def test_calibration_cov_none_stays_none(calib_db):
-    # coverage_factual NULL → None, nicht 0.0 (gleiche Bug-Klasse wie avg_agree).
+    # coverage_factual UND coverage_rate NULL → None, nicht 0.0 (gleiche
+    # Bug-Klasse wie avg_agree) — echter "keine Daten"-Fall.
     rows = _read_calibration_data()["rows"]
     assert all(r["llm_cov"] is None for r in rows)
+
+
+def test_calibration_cov_falls_back_to_coverage_rate(tmp_path, monkeypatch):
+    # #233: coverage_factual ist seit v4 immer NULL (abgeschaffte v1.3-Metrik);
+    # _read_calibration_data muss auf coverage_rate zurückfallen statt die
+    # LLM-Coverage-Spalte durchgehend leer zu lassen.
+    path = tmp_path / "test.db"
+    _seed_db(path, cov_rate=0.42)
+    monkeypatch.setattr(db, "DB_PATH", path)
+
+    rows = _read_calibration_data()["rows"]
+    assert all(r["llm_cov"] == pytest.approx(42.0) for r in rows)
 
 
 def test_calibration_eval_version_parameter(calib_db):
