@@ -28,6 +28,9 @@ test-output/
 test-output*/
 output/
 *.jsonl
+# Ausnahme: das #232-Retrieval-Goldset ist ein versioniertes Abnahme-Artefakt,
+# kein Run-Output (siehe generative/calibration/retrieval-goldset/README.md).
+!generative/calibration/retrieval-goldset/anchors.jsonl
 tmp/
 
 # graphify Knowledge-Graph (regenerierbares Artefakt, kein Quellcode)
