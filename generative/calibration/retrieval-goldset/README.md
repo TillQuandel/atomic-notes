@@ -75,10 +75,11 @@ Feld-Hinweise:
 | Suehl-Strohmenger 2008 | "Learning Library" (Lauf 3) | `20260712-205627` | 3 | `false_positive_retrieval_miss` |
 
 **Cross-Lingual-Faelle (DE-Claim / EN-Quelle) mit niedriger Presence-Cosine
-0,64-0,67** (reale, deterministisch nachgerechnete Werte aus
-`generative.embeddings`, `paraphrase-multilingual-MiniLM-L12-v2`, max. Satz-
-Cosine ueber alle PDF-Saetze): **`hrastinski-2008__sync__idx4`** (0,666) und
-**`hrastinski-2008__sync__idx13`** (0,640). Diese zwei sind bewusst NICHT die
+~0,64-0,67** (gemessene Werte aus `generative.embeddings`,
+`paraphrase-multilingual-MiniLM-L12-v2`, max. Satz-Cosine ueber alle PDF-Saetze;
+die exakten Ziffern driften leicht mit dem Modell-/Library-Zustand -- siehe
+Caveat in "Beobachtete Zahlen" unten): **`hrastinski-2008__sync__idx4`** (≈0,67)
+und **`hrastinski-2008__sync__idx13`** (≈0,64). Diese zwei sind bewusst NICHT die
 "leichten" Faelle mit hoher Cross-Lingual-Aehnlichkeit -- sie stellen sicher,
 dass ein kuenftiger Fix nicht nur auf einfach zu findende Ankertexte kalibriert
 wird. Die drei Suehl-Strohmenger-Anker sind zusaetzlich ein DE-Quelle/DE-Claim-
@@ -96,13 +97,36 @@ Block-Extraktion liest beide Spalten zeilenweise interleaved
 woertliches Zitat ueber die Spaltengrenze hinweg waere im echten `Chunk.text`
 gar nicht als zusammenhaengender String vorhanden.
 
-## Reale Zahlen aus der Retrieval-Rekonstruktion (master, 2026-07-13)
+## Beobachtete Zahlen aus der Retrieval-Rekonstruktion
 
-Deterministisch reproduziert via `generative.eval_quality_v4._retrieve_claim_contexts`
-gegen die echten Quell-PDFs (kein LLM). Die Chunk-Top-Cosine deckt sich bei
-Hrastinski exakt mit den im Diagnose-Bericht protokollierten Werten (siehe
-`LAUF-INFO.md` der Lauf-5-Session) -- bestaetigt, dass diese Rekonstruktion
-bit-fuer-bit dieselbe Pipeline-Logik nutzt:
+Rekonstruiert via `generative.eval_quality_v4._retrieve_claim_contexts` gegen die
+echten Quell-PDFs (kein LLM). Batched wie Produktion -- alle Claims einer Note
+teilen einen Kontext-Pool (`_build_context_pool`), siehe
+`generative/tests/test_retrieval_goldset.py`.
+
+> **Wichtiger Caveat -- die absolute Recall-Zahl ist NICHT umgebungsstabil.**
+> Der gemessene Evidence-in-Pool-Recall haengt am exakten Zustand von
+> `sentence-transformers`/`transformers`/`torch` und den geladenen Modellgewichten
+> (`paraphrase-multilingual-MiniLM-L12-v2`). Ueber verschiedene Umgebungen wurde
+> der Recall zwischen **2/10 (20 %) und 4/10 (40 %)** beobachtet -- die Cosine-
+> Rangfolge (und damit welcher Home-Chunk gerade noch in `adaptive_k` faellt und
+> welche Nachbar-Chunks `_expand_context` mitzieht) verschiebt sich leicht, u. a.
+> sichtbar an einem `embeddings.position_ids | UNEXPECTED`-Hinweis im BertModel-
+> Load-Report (Modell-/Library-Versionsdrift). **In JEDEM beobachteten Zustand
+> liegt der Recall klar unter der 0,90-Schwelle** -- das Gate ist also robust,
+> nur die konkrete Ziffer ist es nicht.
+>
+> **Konsequenz fuer PR-B (den Fix):** Die Abnahme prueft die Recall-**Verbesserung
+> in DERSELBEN Umgebung** (before/after auf demselben Rechner/Environment),
+> NICHT das Erreichen einer fixen Referenzzahl. Die unten stehende Tabelle und
+> die 2/10-Beobachtung sind eine Momentaufnahme EINES Environments (2026-07-13),
+> kein garantierter Referenzwert -- vor dem Fix zuerst den aktuellen Recall in
+> der eigenen Umgebung frisch messen (`pytest -m slow ...retrieval_goldset -s`),
+> dann gegen den Nach-Fix-Wert vergleichen.
+
+Illustrative Rangfolge aus einer Beispiel-Umgebung (2026-07-13; die Werte selbst
+driften wie oben beschrieben, das qualitative Muster -- Home-Chunk weit ausserhalb
+`adaptive_k` -- ist aber stabil):
 
 | id | chunk_top_cosine | home_chunk_rank | home_chunk_cosine |
 |---|---|---|---|
@@ -118,18 +142,14 @@ bit-fuer-bit dieselbe Pipeline-Logik nutzt:
 | suehl...idx4 | 0.729 | 12 | 0.589 |
 | suehl...idx9 | 0.776 | 12 | 0.581 |
 
-**Evidence-in-Pool-Recall (batched, wie Produktion -- alle Claims einer Note
-teilen einen Kontext-Pool)**: **2/10 = 20,0 %** ueber alle
-`false_positive_retrieval_miss`-Anker (siehe `generative/tests/test_retrieval_goldset.py`).
-Die 2 Treffer (idx4, idx7) sind KEIN Widerspruch zum Bug, sondern zeigen genau
-seine Zufaelligkeit: idx4s Evidenz liegt direkt in Chunk 0, der von idx6/idx7/
-idx11 (nicht von idx4 selbst!) retrieved und dadurch in den gemeinsamen Pool
-gezogen wird; idx7s Evidenz liegt in Chunk 17, der nicht direkt retrieved wird,
-aber als Nachbar von Chunk 16 (idx8s eigenem Retrieval-Treffer) per
-`_expand_context` (±1 Chunk) mit in den Pool expandiert. Bei isolierter
-Einzel-Claim-Retrieval (ohne Batch-Pooling anderer Claims derselben Note) waere
-der Recall 0/10 -- der Batch-Effekt ist also eine reale, aber vom jeweiligen
-Note-Claim-Mix abhaengige Zufallsrettung, kein verlaesslicher Fix.
+Die wenigen Treffer, die es ueberhaupt in den Pool schaffen, sind KEIN Widerspruch
+zum Bug, sondern zeigen seine Zufaelligkeit: sie entstehen nicht dadurch, dass der
+Home-Chunk des jeweiligen Claims retrieved wurde, sondern weil ein Nachbar-Claim
+derselben Note den passenden Chunk zog und ihn (bzw. per `_expand_context` seinen
+±1-Nachbarn) in den gemeinsamen Pool brachte. Bei isolierter Einzel-Claim-
+Retrieval (ohne Batch-Pooling anderer Claims) faellt dieser Zufallseffekt weg --
+der Batch-Effekt ist also eine reale, aber vom jeweiligen Note-Claim-Mix
+abhaengige Zufallsrettung, kein verlaesslicher Fix.
 
 ## Wie erweitern
 

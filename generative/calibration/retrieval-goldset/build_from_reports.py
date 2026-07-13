@@ -39,6 +39,15 @@ from pathlib import Path
 # Die Label-Zelle traegt manchmal Markdown-Bold + Zusatzinfo, z.B.
 # "**contradicted** (Audit-Override, urspr. Judge: partially_supported)" -- das
 # eigentliche Label wird per _LABEL_TOKEN_RE aus der Zelle herausgeloest.
+#
+# EDGE-CASE (bewusst nicht abgesichert): enthaelt der Claim- oder Befund-Text
+# selbst einen pipe-getrennten `| ... | Zahl |`-foermigen Teilstring (z.B. ein
+# eingebettetes Mini-Tabellenfragment oder eine Zahl mit Kontext in Pipes), kann
+# die Regex die Spaltengrenzen falsch setzen und still ein falsches Label/Cosine
+# ziehen. Das ist akzeptiert, weil dieses Skript nur die ZWISCHENSTUFE (Schritt 1)
+# liefert: JEDER so geparste Anker durchlaeuft vor Aufnahme in anchors.jsonl die
+# verpflichtende manuelle `pdftotext`-Gegenprobe (Schritt 2, siehe README) --
+# ein fehlgeparster Wert wuerde dort auffallen und nie ins Goldset gelangen.
 _TABLE_ROW_RE = re.compile(
     r"^\|\s*idx\s*(?P<idx>\d+)\s*\|\s*(?P<claim>.+?)\s*\|\s*(?P<label_cell>[^|]+?)"
     r"\s*\|\s*(?P<cosine>[\d,.]+)\s*\|\s*(?P<befund>.+?)\s*\|\s*$",
