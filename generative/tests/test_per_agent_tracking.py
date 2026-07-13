@@ -40,6 +40,22 @@ def test_trace_run_start_writes_model_config(tmp_path, monkeypatch):
     assert entry["run_id"] == "test-run"
 
 
+def test_trace_run_start_writes_profile(tmp_path, monkeypatch):
+    from generative.agents.tracing import JsonlBackend, trace_run_start
+    import generative.agents.tracing as tracing
+
+    backend = JsonlBackend(run_dir=tmp_path, run_id="test-run")
+    monkeypatch.setattr(tracing, "_backend", backend)
+    monkeypatch.setattr(tracing, "_RUN_ID", "test-run")
+
+    trace_run_start({"planner": "opus"}, profile="fast")
+
+    lines = (tmp_path / "test-run.jsonl").read_text().splitlines()
+    entry = json.loads(lines[0])
+    assert entry["type"] == "run_start"
+    assert entry["profile"] == "fast"
+
+
 def test_model_config_has_required_keys():
     from generative.config import MODEL_CONFIG
 

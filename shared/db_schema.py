@@ -30,7 +30,8 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     tokens_cache_read INT  DEFAULT 0,
     duration_s        REAL DEFAULT 0,
     eval_version      TEXT,
-    fully_cached      INT  DEFAULT 0
+    fully_cached      INT  DEFAULT 0,
+    profile           TEXT DEFAULT ''
 );
 
 CREATE TABLE IF NOT EXISTS note_evals (

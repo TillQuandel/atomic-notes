@@ -64,6 +64,9 @@ def init_db(path: Path = DB_PATH) -> None:
     _add_column(conn, "pipeline_runs", "n_words INT DEFAULT 0")
     _add_column(conn, "pipeline_runs", "model TEXT DEFAULT ''")
     _add_column(conn, "pipeline_runs", "cost_usd REAL DEFAULT 0.0")
+    # #235: aktives Runtime-Profil (legacy/fast/balanced/quality) mitschreiben —
+    # bisher nur im Stdout-Log, dadurch Alt- und A/B-Läufe in der DB ununterscheidbar.
+    _add_column(conn, "pipeline_runs", "profile TEXT DEFAULT ''")
     _add_column(conn, "note_evals", "anchor_rate REAL")
     # Anker-Roh-Counts: für die gepoolte Halluzinationsrate (Σ halluziniert /
     # Σ gesamt) im Dashboard — die Pipeline berechnet sie ohnehin, persistiert
@@ -102,7 +105,7 @@ def insert_run(conn: sqlite3.Connection, data: dict) -> None:
       run_id, timestamp, pipeline_version, pdf_source, pdf_key, pdf_label,
       n_generated, n_extracted, n_vault, n_inbox, n_merge, n_dropped, n_words,
       model, tokens_total, tokens_input, tokens_output, tokens_cache_read,
-      duration_s, eval_version
+      duration_s, eval_version, profile
 
     n_generated = geschriebene Notes (historische Semantik, unangetastet).
     n_extracted = "nach Planner/Extractor generiert" (Funnel-Top, #197). Fehlt
@@ -115,12 +118,12 @@ def insert_run(conn: sqlite3.Connection, data: dict) -> None:
           (run_id, timestamp, pipeline_version, pdf_source, pdf_key, pdf_label,
            n_generated, n_extracted, n_vault, n_inbox, n_merge, n_dropped, n_words, model,
            cost_usd, tokens_total, tokens_input, tokens_output, tokens_cache_read,
-           duration_s, eval_version, fully_cached)
+           duration_s, eval_version, fully_cached, profile)
         VALUES
           (:run_id, :timestamp, :pipeline_version, :pdf_source, :pdf_key, :pdf_label,
            :n_generated, :n_extracted, :n_vault, :n_inbox, :n_merge, :n_dropped, :n_words, :model,
            :cost_usd, :tokens_total, :tokens_input, :tokens_output, :tokens_cache_read,
-           :duration_s, :eval_version, :fully_cached)
+           :duration_s, :eval_version, :fully_cached, :profile)
     """,
         {
             "run_id": data.get("run_id"),
@@ -145,6 +148,7 @@ def insert_run(conn: sqlite3.Connection, data: dict) -> None:
             "duration_s": data.get("duration_s", 0.0),
             "eval_version": data.get("eval_version"),
             "fully_cached": 1 if (data.get("tokens_total", 0) == 0 and data.get("duration_s", 0) > 0) else 0,
+            "profile": data.get("profile", ""),
         },
     )
 

@@ -73,14 +73,15 @@ def trace_event(agent: str, event_type: str, data: dict) -> None:
     )
 
 
-def trace_run_start(model_config: dict) -> None:
-    """Schreibt Run-Start-Entry mit Model-Config."""
+def trace_run_start(model_config: dict, profile: str = "") -> None:
+    """Schreibt Run-Start-Entry mit Model-Config + aktivem Runtime-Profil (#235)."""
     _backend.write(
         {
             "ts": time.strftime("%Y-%m-%dT%H:%M:%S"),
             "type": "run_start",
             "run_id": _RUN_ID,
             "model_config": model_config,
+            "profile": profile,
         }
     )
 

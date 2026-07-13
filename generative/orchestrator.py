@@ -1917,7 +1917,7 @@ def _run_extraction_stages(
     from generative.agents.base import trace_run_start as _trace_run_start
     from generative.config import MODEL_CONFIG as _MODEL_CONFIG
 
-    _trace_run_start(_MODEL_CONFIG)
+    _trace_run_start(_MODEL_CONFIG, profile=getattr(runtime_config, "profile", ""))
 
     # --- Schritt 1: PDF → Text + Metadata → Chunks ---
     print("[1/7] PDF extrahieren und chunken…")
@@ -2799,6 +2799,7 @@ def main(argv: list[str] | None = None):
                     "tokens_output": _tok_out,
                     "tokens_cache_read": _tok_cache_r,
                     "duration_s": _wall_s,
+                    "profile": runtime_config.profile,
                 },
             )
     except Exception as _db_err:
