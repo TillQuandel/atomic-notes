@@ -42,8 +42,17 @@ CREATE TABLE IF NOT EXISTS note_evals (
     hallucination_rate  REAL,
     anchors_total       INT,
     anchors_hallucinated INT,
+    -- DEPRECATED seit v4 (#233): abgeschaffte v1.3-Metrik (satzbasiert,
+    -- confirmed/faktische Saetze) — Schreibpfade setzen seither immer NULL.
+    -- Historische 1.3-Zeilen bleiben lesbar; Leser fallen auf coverage_rate
+    -- zurueck (siehe eval_dashboard_server._read_calibration_data). Spalte
+    -- bewusst nicht gedroppt (Bestandsdaten read-only).
     coverage_factual    REAL,
     coverage_rate       REAL,
+    -- DEPRECATED seit Einfuehrung (#233): durchgehend NULL (598/598 Zeilen,
+    -- Dashboard-Diagnose 2026-07-13) — anchors_hallucinated/anchors_total
+    -- ist die tatsaechlich befuellte Kennzahl (speist hallucination_rate).
+    -- Spalte bewusst nicht gedroppt (Bestandsdaten read-only).
     anchor_rate         REAL,
     tokens_total        INT,
     tokens_input        INT,

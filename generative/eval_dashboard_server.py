@@ -280,13 +280,17 @@ def _read_calibration_data(allowed_note_paths: set | None = None, eval_version: 
                 "llm_hall": round(r["hallucination_rate"] * 100, 1)
                 if r["hallucination_rate"] is not None and r["hallucination_rate"] >= 0
                 else None,
-                "llm_cov": round(r["coverage_factual"] * 100, 1)
-                if r["coverage_factual"] is not None and r["coverage_factual"] >= 0
+                # #233: coverage_factual ist die mit dem v2/v4-Umbau abgeschaffte
+                # v1.3-Metrik — seit v4 durchgehend NULL. Fallback auf
+                # coverage_rate ("Belegrate" im Dashboard), gleiches Muster wie
+                # eval_dashboard.py:595/815/883/1063.
+                "llm_cov": round(v * 100, 1)
+                if (v := r["coverage_factual"] or r["coverage_rate"]) is not None and v >= 0
                 else None,
                 "pdf": r["pdf"],
             }
             for r in conn.execute(
-                "SELECT note_path, hallucination_rate, coverage_factual, pdf "
+                "SELECT note_path, hallucination_rate, coverage_factual, coverage_rate, pdf "
                 "FROM note_evals WHERE eval_version=? ORDER BY timestamp",
                 (eval_version,),
             ).fetchall()
