@@ -1141,3 +1141,40 @@ def test_contradiction_uses_surname_only():
     # Voller eingebetteter Name, Dateiname nur Nachname: kein Widerspruch (letztes
     # Token vs. letztes Token, wie beim Match-Guard).
     assert _filename_contradicts_embedded_author(_Path("Bates - 2017 - X.pdf"), "Marcia J. Bates") is False
+
+
+# Overreach-Bugklasse (Review PR #256, an 4 realen Literatur-PDFs verifiziert):
+# Der beidseitige Nur-letztes-Token-Vergleich brach bei Mehrautoren-Dateinamen und
+# reinen Diakritik-Differenzen -> korrekte Titel wurden faelschlich quarantaenisiert.
+# Fix: Dateiname-Autor an ';'/'und'/'and'/'&' zerlegen, Embedded-Nachname(n) gegen
+# JEDES Segment pruefen (Widerspruch nur, wenn KEIN Segment matcht), diakritik-
+# gefaltet, 'Nachname, Vorname'-Segmente korrekt aufgeloest.
+import pytest
+
+
+@pytest.mark.parametrize(
+    "filename, embedded_author",
+    [
+        # Legitim passender Embedded-ERSTautor bei Mehrautoren-Dateiname.
+        ("Ebner und Gegenfurtner - 2019 - Lernen.pdf", "Christian Ebner"),
+        ("Klingenberg und Weber - 2025 - Studie.pdf", "Christiana Klingenberg"),
+        # Embedded traegt beide Autoren als 'Nachname, Vorname'-Liste (';'-getrennt).
+        ("Deci und Ryan - 1993 - Motivation.pdf", "Deci, Edward L.; Ryan, Richard M."),
+        ("Ayaz und Yanartaş - 2020 - Adoption.pdf", "Ayaz"),
+        # Embedded = ZWEITautor mit Diakritik-Differenz zum Dateinamen.
+        ("Ayaz und Yanartaş - 2020 - Adoption.pdf", "Yanartas"),
+    ],
+)
+def test_no_contradiction_when_embedded_matches_any_filename_author(filename, embedded_author):
+    assert _filename_contradicts_embedded_author(_Path(filename), embedded_author) is False
+
+
+def test_no_contradiction_on_pure_diacritic_difference_single_author():
+    # Yanartaş (Dateiname) vs. Yanartas (embedded, ASCII-gefaltet) -> kein Widerspruch.
+    assert _filename_contradicts_embedded_author(_Path("Yanartaş - 2020 - Adoption.pdf"), "Yanartas") is False
+
+
+def test_contradiction_true_multi_author_when_no_segment_matches():
+    # Regressions-Erhalt: Schlebbe/Afzal bleibt Widerspruch, weil 'Afzal' zu WEDER
+    # 'Schlebbe' NOCH 'Greifeneder' passt (auch mit der neuen Segment-Logik).
+    assert _filename_contradicts_embedded_author(_Path("Schlebbe und Greifeneder - 2022 - Need.pdf"), "Afzal") is True

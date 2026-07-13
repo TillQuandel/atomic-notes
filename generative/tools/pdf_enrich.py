@@ -25,7 +25,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-from shared.author_norm import drop_institutional_coauthors
+from shared.author_norm import _AUTHOR_SEP_RE, drop_institutional_coauthors
 
 try:
     from pypdf import PdfReader
@@ -365,6 +365,13 @@ _MIN_TITLE_REVERSE_CONTAINMENT = 0.6
 _SUBTITLE_SEP_RE = re.compile(r":\s*|\s+[–—-]\s+")
 
 
+def _strip_diacritics(text: str) -> str:
+    """Faltet Diakritika via NFKD + Combining-Strip (método==metodo, Yanartaş==Yanartas).
+    Kein Lowercasing — das entscheidet der Aufrufer."""
+    folded = unicodedata.normalize("NFKD", text)
+    return "".join(c for c in folded if not unicodedata.combining(c))
+
+
 def _significant_tokens(title: str) -> set[str]:
     """Lowercase-Wörter ab _MIN_SIGNIFICANT_TOKEN_LEN Zeichen (Satzzeichen/Ziffern raus).
 
@@ -379,8 +386,7 @@ def _significant_tokens(title: str) -> set[str]:
     strippen.
     """
     raw = re.sub(r"<[^>]+>", " ", html.unescape(str(title or "")))
-    folded = unicodedata.normalize("NFKD", raw.lower())
-    folded = "".join(c for c in folded if not unicodedata.combining(c))
+    folded = _strip_diacritics(raw.lower())
     words = re.findall(r"[^\W\d_]+", folded, flags=re.UNICODE)
     return {w for w in words if len(w) >= _MIN_SIGNIFICANT_TOKEN_LEN}
 
@@ -611,29 +617,61 @@ def _zotero_author_matches_embedded(pdf_path: Path, embedded_author: str) -> boo
     return fn_author == emb_author
 
 
+def _author_surnames(author: str) -> set[str]:
+    """Menge der diakritik-gefalteten Nachnamen aus einem Autor-String (Dateiname
+    ODER Info-Dict). Trenner: ';', ' und ', ' and ', ' & ' (`_AUTHOR_SEP_RE`) —
+    Komma NICHT (das trennt 'Nachname, Vorname').
+
+    Pro Segment ist der Nachname das letzte Token; bei 'Nachname, Vorname'-
+    Segmenten der Teil VOR dem Komma (Deci-Fall: 'Deci, Edward L.' -> 'deci',
+    nicht 'l'). Gefaltet, damit reine Diakritik-Differenzen matchen
+    (Yanartaş == Yanartas)."""
+    surnames: set[str] = set()
+    for segment in _AUTHOR_SEP_RE.split(author):
+        seg = segment.strip()
+        if not seg:
+            continue
+        if "," in seg:
+            seg = seg.split(",", 1)[0].strip()
+        tokens = seg.split()
+        if tokens:
+            surnames.add(_strip_diacritics(tokens[-1].lower()))
+    return surnames
+
+
 def _filename_contradicts_embedded_author(pdf_path: Path, embedded_author: str) -> bool:
     """Gegenstueck zu `_zotero_author_matches_embedded`: meldet einen POSITIVEN
-    Widerspruch zwischen Dateiname-Autor und eingebettetem Info-Dict-Autor.
+    Widerspruch zwischen Dateiname-Autor(en) und eingebettetem Info-Dict-Autor.
 
     Anders als der Match-Guard (der bei nicht-parsbarem Dateiname ODER fehlendem
     Autor False = "nicht positiv bestaetigt" liefert) meldet diese Funktion einen
-    Widerspruch NUR, wenn der Dateiname zu einem Autor parst UND dessen Nachname
-    dem eingebetteten Autor widerspricht. Fehlender Embedded-Autor oder
-    nicht-parsbarer Dateiname -> False (kein Widerspruch, keine Quarantaene).
+    Widerspruch NUR, wenn der Dateiname zu Autor(en) parst UND KEIN eingebetteter
+    Nachname zu IRGENDEINEM Dateiname-Nachnamen passt. Fehlender Embedded-Autor
+    oder nicht-parsbarer Dateiname -> False (kein Widerspruch, keine Quarantaene).
+
+    Mehrautoren-/Diakritika-robust (Review PR #256, an 4 realen Literatur-PDFs
+    verifiziert): Beide Seiten werden an ';'/'und'/'and'/'&' in Einzelautoren
+    zerlegt und nachname-weise (diakritik-gefaltet) verglichen. Ein legitimer
+    Embedded-ERSTautor (= Autor1 einer Mehrautoren-Datei) erzeugt so KEINEN
+    Widerspruch mehr; nur ein echt fremder Autor (Schlebbe/Afzal: 'Afzal' passt zu
+    weder 'Schlebbe' noch 'Greifeneder') loest die /Title-Quarantaene aus.
 
     Genutzt (#234), um den eingebetteten `/Title` zu verwerfen, wenn der
     Metadatenblock nachweislich aus einer fremden Quelle stammt (z.B. via
     frueherem enrich(rename=True) zurueckgeschriebenes Fremd-Meta) — analog zur
-    bereits bestehenden `/Author`-Quarantaene. Nachname-Vergleich (letztes Token),
-    case-insensitiv, konsistent mit dem Match-Guard."""
+    bereits bestehenden `/Author`-Quarantaene."""
     if not embedded_author or not embedded_author.strip():
         return False
     parsed = _parse_filename_dynamic(pdf_path)
     if not parsed or not parsed.get("author"):
         return False
-    fn_author = parsed["author"].split()[-1].lower()
-    emb_author = embedded_author.strip().split()[-1].lower()
-    return fn_author != emb_author
+    fn_surnames = _author_surnames(parsed["author"])
+    emb_surnames = _author_surnames(embedded_author)
+    if not fn_surnames or not emb_surnames:
+        return False
+    # Widerspruch nur, wenn KEIN Embedded-Nachname zu IRGENDEINEM Dateiname-Nachnamen
+    # passt (grosszuegig gegen Mehrautoren-Overreach).
+    return emb_surnames.isdisjoint(fn_surnames)
 
 
 def _meta_complete(meta: dict) -> bool:
