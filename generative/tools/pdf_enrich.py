@@ -611,6 +611,31 @@ def _zotero_author_matches_embedded(pdf_path: Path, embedded_author: str) -> boo
     return fn_author == emb_author
 
 
+def _filename_contradicts_embedded_author(pdf_path: Path, embedded_author: str) -> bool:
+    """Gegenstueck zu `_zotero_author_matches_embedded`: meldet einen POSITIVEN
+    Widerspruch zwischen Dateiname-Autor und eingebettetem Info-Dict-Autor.
+
+    Anders als der Match-Guard (der bei nicht-parsbarem Dateiname ODER fehlendem
+    Autor False = "nicht positiv bestaetigt" liefert) meldet diese Funktion einen
+    Widerspruch NUR, wenn der Dateiname zu einem Autor parst UND dessen Nachname
+    dem eingebetteten Autor widerspricht. Fehlender Embedded-Autor oder
+    nicht-parsbarer Dateiname -> False (kein Widerspruch, keine Quarantaene).
+
+    Genutzt (#234), um den eingebetteten `/Title` zu verwerfen, wenn der
+    Metadatenblock nachweislich aus einer fremden Quelle stammt (z.B. via
+    frueherem enrich(rename=True) zurueckgeschriebenes Fremd-Meta) — analog zur
+    bereits bestehenden `/Author`-Quarantaene. Nachname-Vergleich (letztes Token),
+    case-insensitiv, konsistent mit dem Match-Guard."""
+    if not embedded_author or not embedded_author.strip():
+        return False
+    parsed = _parse_filename_dynamic(pdf_path)
+    if not parsed or not parsed.get("author"):
+        return False
+    fn_author = parsed["author"].split()[-1].lower()
+    emb_author = embedded_author.strip().split()[-1].lower()
+    return fn_author != emb_author
+
+
 def _meta_complete(meta: dict) -> bool:
     """Gibt True zurueck wenn Metadaten-Dict brauchbar ist: Author und Titel beide nicht leer."""
     return bool(meta.get("author", "").strip()) and bool(meta.get("title", "").strip())
