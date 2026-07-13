@@ -55,8 +55,22 @@ def find_pdf(folder_name: str) -> Path | None:
     return candidates[0] if candidates else None
 
 
+def _latest_notes_dir(folder: Path) -> Path:
+    """#241: Notes liegen seit dem run_id-Namespace unter `<stem>/<run_id>/`
+    statt direkt unter `<stem>/`. Bei mehreren run_ids (mehrere Läufe desselben
+    PDFs) zählt nur die NEUESTE (lexikographisch größte, run_id-Format
+    `YYYYMMDD-HHMMSS` sortiert chronologisch) — sonst würde ein mehrfach
+    prozessiertes PDF mit fast-identischen Notes aus jedem Lauf im
+    Kalibrierungs-Sample überrepräsentiert. Legacy-Ablagen ohne run_id-
+    Unterordner (vor #241 geschrieben) werden weiterhin direkt gelesen.
+    """
+    run_dirs = sorted((d for d in folder.iterdir() if d.is_dir()), key=lambda d: d.name)
+    return run_dirs[-1] if run_dirs else folder
+
+
 def candidate_notes(folder: Path) -> list[Path]:
-    return sorted(p for p in folder.glob("*.md") if re.match(r"^(inbox|vault)__", p.name))
+    notes_dir = _latest_notes_dir(folder)
+    return sorted(p for p in notes_dir.glob("*.md") if re.match(r"^(inbox|vault)__", p.name))
 
 
 def main() -> None:

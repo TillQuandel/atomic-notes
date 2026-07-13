@@ -77,7 +77,9 @@ def test_pipeline_run_persisted_when_inline_eval_disabled(tmp_path, monkeypatch,
     monkeypatch.setattr(agents_base, "_backend_call_full_async", async_backend)
 
     # Eigener PDF-Namespace + Cleanup der Dry-Run-eval-Kopien (vault_writer schreibt
-    # sie hart nach .cache/eval/baseline/<stem>/ — nicht parametrisierbar).
+    # sie hart nach .cache/eval/baseline/<stem>/<run_id>/ — nicht parametrisierbar,
+    # #241: run_id-Unterordner seit dem Namespace-Fix). rmtree auf Stem-Ebene räumt
+    # den run_id-Unterordner mit ab.
     fixture_pdf = tmp_path / "persist-fixture.pdf"
     shutil.copyfile(EXAMPLE_PDF, fixture_pdf)
     eval_dir = REPO_ROOT / "generative" / ".cache" / "eval" / "baseline" / "persist-fixture"

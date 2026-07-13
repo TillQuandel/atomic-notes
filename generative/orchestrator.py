@@ -2619,6 +2619,11 @@ def main(argv: list[str] | None = None):
     print("\n[7/7] Vault-Writer…")
     written = 0
     written_targets: list[tuple[Path, bool]] = []
+    # #241: derselbe run_id wird unten (Stage 8, Reader-Seite) für cache_note_dir
+    # wiederverwendet — Writer und Reader müssen denselben Namespace treffen,
+    # sonst findet dry_run_eval_targets die gerade geschriebenen Notes nicht.
+    from generative.agents.base import _RUN_ID as _run_id_for_eval_cache
+
     with _span("VaultWriter", pdf=source_path.name, n_drafts=len(drafts), dry_run=args.dry_run):
         for draft in drafts:
             target = vault_writer.write_note(
@@ -2628,6 +2633,7 @@ def main(argv: list[str] | None = None):
                 citation=ctx.citation,
                 existing_concepts=ctx.existing_concepts,
                 inbox_dir=_inbox_dir,
+                run_id=_run_id_for_eval_cache,
             )
             will_vault, _ = vault_writer.auto_write_decision(draft)
             written_targets.append((target, will_vault))
@@ -2804,7 +2810,9 @@ def main(argv: list[str] | None = None):
 
         # Dry-Run: Notes im Cache-Verzeichnis; Live: im Vault (00-inbox oder 04-wissen)
         if args.dry_run:
-            cache_note_dir = _CACHE_DIR / "eval" / "baseline" / source_path.stem
+            # #241: derselbe run_id wie beim Schreiben oben (_run_id_for_eval_cache) —
+            # sonst sucht der Reader im falschen (leeren) Namespace.
+            cache_note_dir = _CACHE_DIR / "eval" / "baseline" / source_path.stem / _run_id_for_eval_cache
             note_files = dry_run_eval_targets(written_targets, cache_note_dir)
         else:
             from generative.config import INBOX, WISSEN
