@@ -42,6 +42,22 @@ def _find_pdf(folder_name: str) -> Path | None:
     return None
 
 
+def _latest_notes_dir(pdf_dir: Path) -> Path:
+    """Liefert das Verzeichnis mit den aktuell gültigen Baseline-Notes für einen
+    PDF-Stamm-Ordner.
+
+    #241: seit dem run_id-Namespace liegen Notes unter `<stem>/<run_id>/` statt
+    direkt unter `<stem>/`. Bei mehreren run_ids (mehrere Läufe desselben PDFs,
+    z.B. eine A/B-Messreihe) gilt die NEUESTE (lexikographisch größte, da das
+    run_id-Format `YYYYMMDD-HHMMSS` chronologisch sortiert) als die aktuell
+    gültige Baseline — reeval_baseline re-evaluiert den zuletzt geschriebenen
+    Stand, nicht veraltete Zwischenläufe. Legacy-Ablagen ohne run_id-Unterordner
+    (vor #241 geschrieben) werden weiterhin direkt gelesen (Fallback).
+    """
+    run_dirs = sorted((d for d in pdf_dir.iterdir() if d.is_dir()), key=lambda d: d.name)
+    return run_dirs[-1] if run_dirs else pdf_dir
+
+
 def _already_done(note_name: str, conn) -> bool:
     """Prüft ob Note schon mit eval_version=4.1 in DB steht."""
     row = conn.execute(
@@ -70,7 +86,7 @@ def main() -> None:
         if not pdf_path.exists():
             print(f"  [skip] PDF nicht gefunden: {pdf_path.name}")
             continue
-        for note_file in sorted(pdf_dir.glob("vault__*.md")):
+        for note_file in sorted(_latest_notes_dir(pdf_dir).glob("vault__*.md")):
             notes.append((note_file, pdf_path, pdf_dir.name))
 
     print(f"Zu evaluieren: {len(notes)} Notes\n")

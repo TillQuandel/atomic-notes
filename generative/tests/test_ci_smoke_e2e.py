@@ -244,11 +244,12 @@ def test_ci_smoke_e2e_full_stage_wiring(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(agents_base, "_backend_call_full_async", async_backend)
 
     # PDF-Kopie unter EIGENEM Namen: write_note schreibt Dry-Run-eval-Kopien
-    # hart nach `.cache/eval/baseline/<pdf-stem>/` (vault_writer, nicht
-    # parametrisierbar) — mit dem Original-Namen würde dieser Test bei jedem
-    # lokalen Suite-Lauf die ECHTE zettelkasten-primer-Baseline mit Stub-Notes
-    # überschreiben (empirisch passiert, 2026-07-06). Eigener Stub-Namespace
-    # `ci-smoke-fixture` + Cleanup im finally unten.
+    # hart nach `.cache/eval/baseline/<pdf-stem>/<run_id>/` (vault_writer, nicht
+    # parametrisierbar; #241: run_id-Unterordner seit dem Namespace-Fix) — mit
+    # dem Original-Namen würde dieser Test bei jedem lokalen Suite-Lauf die ECHTE
+    # zettelkasten-primer-Baseline mit Stub-Notes überschreiben (empirisch
+    # passiert, 2026-07-06). Eigener Stub-Namespace `ci-smoke-fixture` + Cleanup
+    # im finally unten (rmtree auf Stem-Ebene räumt den run_id-Unterordner mit ab).
     smoke_pdf = tmp_path / "ci-smoke-fixture.pdf"
     shutil.copyfile(EXAMPLE_PDF, smoke_pdf)
     smoke_eval_dir = REPO_ROOT / "generative" / ".cache" / "eval" / "baseline" / "ci-smoke-fixture"

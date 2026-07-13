@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 import difflib
 import hashlib
+import time
 from datetime import date
 from pathlib import Path
 
@@ -941,6 +942,7 @@ def write_note(
     citation: CitationMeta | None = None,
     existing_concepts: dict[str, str] | None = None,
     inbox_dir: Path | None = None,
+    run_id: str | None = None,
 ) -> Path:
     """Schreibt Note immer nach 00-inbox/. Das Weiterrouten zu einem Zielordner
     (z.B. per tag-basiertem Auto-Filing-Plugin) ist Sache des jeweiligen Vaults.
@@ -957,6 +959,14 @@ def write_note(
     Frontmatter-Marker `auto-vault-recommended: true|false` durchgereicht und
     Reason als Quality-Flag — User sieht beim Inbox-Review sofort, was Pipeline
     für Vault-tauglich hält.
+
+    #241: `run_id` namespaced die Dry-Run-Eval-Cache-Kopie (`.cache/eval/baseline/
+    <stem>/<run_id>/`) — ohne das überschreiben zwei Läufe auf demselben PDF sich
+    gegenseitig (Datenverlust). Ohne Angabe generiert write_note selbst einen
+    Zeitstempel-Fallback (kein Import aus `generative.agents` — pipeline/ und
+    agents/ dürfen laut Schichtungs-Test keine privaten Namen voneinander
+    importieren). orchestrator.py übergibt run_id deshalb IMMER explizit
+    (denselben `_RUN_ID` wie der Stage-8-Reader) für garantierte Konsistenz.
     """
     auto, reason = auto_write_decision(note)
     note.auto_vault_recommended = auto
@@ -1086,7 +1096,21 @@ def write_note(
                         print(f"      {_l}")
                     except UnicodeEncodeError:
                         print(f"      {safe(_l)}")
-        eval_dir = Path(__file__).resolve().parents[1] / ".cache" / "eval" / "baseline" / Path(source_file).stem
+        # #241: run_id-Unterordner — ohne den überschreibt ein zweiter Lauf auf
+        # demselben PDF-Stem die Eval-Cache-Kopie des ersten (realer Datenverlust
+        # in der A/B-Effizienzreihe 2026-07-13). Reader-Gegenstueck:
+        # orchestrator.py cache_note_dir (Stage 8) MUSS denselben run_id anhängen.
+        # Fallback (kein run_id übergeben) generiert einen eigenen Zeitstempel
+        # statt `generative.agents.base._RUN_ID` zu importieren — pipeline/ darf
+        # laut Schichtungs-Test (test_layering.py, #153) keine privaten Namen aus
+        # agents/ importieren. Produktionscode (orchestrator.py, außerhalb der
+        # pipeline/agents-Grenze) übergibt run_id deshalb IMMER explizit
+        # (denselben `_RUN_ID`, den auch der Reader verwendet) — der Fallback
+        # greift nur für Aufrufer, denen die run_id-Konsistenz egal ist (Tests).
+        _run_id = run_id if run_id is not None else time.strftime("%Y%m%d-%H%M%S")
+        eval_dir = (
+            Path(__file__).resolve().parents[1] / ".cache" / "eval" / "baseline" / Path(source_file).stem / _run_id
+        )
         eval_dir.mkdir(parents=True, exist_ok=True)
         prefix = "merge" if is_merge_stub else ("vault" if auto else "inbox")
         (eval_dir / f"{prefix}__{target.name}").write_text(content, encoding="utf-8")
