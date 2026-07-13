@@ -731,7 +731,7 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
   </div>
   <div class="filter-badges" id="filter-badges"></div>
   <div class="empty-banner" id="empty-banner" hidden>
-    <span>Diese Filter-Kombination ergibt <strong>0 evaluierte Notes</strong> — Kennzahlen und Charts sind leer.</span>
+    <span id="empty-banner-text">Diese Filter-Kombination ergibt <strong>0 evaluierte Notes</strong> — Kennzahlen und Charts sind leer.</span>
     <button onclick="resetAllFilters()">Filter zurücksetzen</button>
   </div>
 
@@ -1267,11 +1267,16 @@ function renderKpis(kpis, thresh, kpiTrend) {
     // bereits einen eigenen Versions-Trend-Chart (ch4 "Akzeptanzrate je
     // Version" in der Trade-off-Sektion); die Klick-Sparkline duplizierte
     // dieselbe Aussage in einer zweiten, kleineren Darstellung.
-    { id:'kpi-accept', key:'accept', label:'Automatisch akzeptiert', val:kpis.avg_accept, u:'%', digits:1, sparkless:true,
+    { id:'kpi-accept', key:'accept', label:'Automatisch akzeptiert',
+      // #237: bei 0 evaluierten Notes (Merge-only-/Eval-Stage-ausgefallener Lauf)
+      // ist die Akzeptanzrate zwar rechnerisch gültig (Basis: generierte/
+      // Vault-Notes, nicht Evals), aber ohne Eval-Abdeckung nicht als
+      // Qualitätsampel aussagekräftig — Kachel neutralisiert statt grün.
+      val: kpis.n_notes===0 ? null : kpis.avg_accept, u:'%', digits:1, sparkless:true,
       hint:'Anteil der von der Pipeline erzeugten Notes, die ohne manuelles Zusammenführen direkt in den Vault übernommen wurden. Gepoolt über alle Läufe der aktuellen Pipeline-Version (Summe akzeptiert / Summe generiert), nicht der Schnitt einzelner PDFs.',
-      tone: kpis.avg_accept!=null?(kpis.avg_accept>=T.accept[0]?'good':kpis.avg_accept<=T.accept[1]?'bad':'warn'):'neutral',
-      tgt: kpis.avg_accept!=null?(kpis.avg_accept>=T.accept[0]?'Ziel erreicht':`Ziel ≥ ${T.accept[0]} %`):'–',
-      tgtHint:`Schwellenwert für die Ampel-Bewertung: gut ab ${T.accept[0]} %, schlecht bei ${T.accept[1]} % oder darunter. Fest im Dashboard-Code hinterlegt, keine wissenschaftliche Norm.` },
+      tone: kpis.n_notes===0 ? 'neutral' : (kpis.avg_accept!=null?(kpis.avg_accept>=T.accept[0]?'good':kpis.avg_accept<=T.accept[1]?'bad':'warn'):'neutral'),
+      tgt: kpis.n_notes===0 ? '–' : (kpis.avg_accept!=null?(kpis.avg_accept>=T.accept[0]?'Ziel erreicht':`Ziel ≥ ${T.accept[0]} %`):'–'),
+      tgtHint: kpis.n_notes===0 ? 'Diese Filter-Kombination hat 0 evaluierte Notes — die Ampel-Bewertung ist ohne Eval-Abdeckung nicht aussagekräftig.' : `Schwellenwert für die Ampel-Bewertung: gut ab ${T.accept[0]} %, schlecht bei ${T.accept[1]} % oder darunter. Fest im Dashboard-Code hinterlegt, keine wissenschaftliche Norm.` },
     { id:'kpi-hall', key:'hall', label:'Fehlerquote', val:kpis.avg_hall, u:'%', digits:1,
       hint:'Auch „Halluzinationsrate": Anteil der geprüften Text-Anker (Zitate/Fakten-Aussagen), die im Original-PDF NICHT nachweisbar sind oder ihm widersprechen. Gepoolt über alle Anker aller evaluierten Notes der aktuellen Version (Summe halluziniert / Summe Anker), nicht der Schnitt der Einzelraten — außer bei Notes ohne Roh-Zähler (ältere DB-Einträge vor 2026-06-27): dann Fallback auf den Mittelwert der Einzelraten. Niedriger ist besser.',
       tone: kpis.avg_hall!=null?(kpis.avg_hall<=T.hall[0]?'good':kpis.avg_hall>=T.hall[1]?'bad':'warn'):'neutral',
@@ -2228,7 +2233,20 @@ function _renderWithData(d) {
   // Globaler Leer-Hinweis: Filter-Kombination ohne evaluierte Notes
   const banner = document.getElementById('empty-banner');
   const filtersActive = Object.values(_globalFilters).some(v=>v && v!=='__all__');
-  if (banner) banner.hidden = !(filtersActive && (d.kpis?.n_notes??0)===0 && !(d.scatter?.points||[]).length);
+  if (banner) {
+    banner.hidden = !(filtersActive && (d.kpis?.n_notes??0)===0 && !(d.scatter?.points||[]).length);
+    // #237: "Kennzahlen und Charts sind leer" war irrefuehrend, wenn ein
+    // Merge-only-/0-Eval-Lauf trotzdem Betriebskennzahlen (Strip, Akzeptanz-
+    // Basis aus Log-/Routing-Daten) liefert — nur die Eval-basierten
+    // Qualitaets-Charts (Fehlerquote/Belegrate) sind dann tatsaechlich leer.
+    const bannerText = document.getElementById('empty-banner-text');
+    if (!banner.hidden && bannerText) {
+      const hasOperationalData = (d.kpis?.kpi_accept_n??0) > 0;
+      bannerText.innerHTML = hasOperationalData
+        ? 'Diese Filter-Kombination ergibt <strong>0 evaluierte Notes</strong> — nur Betriebskennzahlen (Strip, Akzeptanz-Basis) verfügbar, Qualitäts-Charts (Fehlerquote/Belegrate) bleiben leer.'
+        : 'Diese Filter-Kombination ergibt <strong>0 evaluierte Notes</strong> — Kennzahlen und Charts sind leer.';
+    }
+  }
   renderStrip(d.kpis);
   const verLbl = document.getElementById('kpi-ver-label');
   if (verLbl) verLbl.textContent = d.kpis.kpi_version || '–';
