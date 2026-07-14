@@ -189,3 +189,44 @@ def test_calibration_counts_respect_note_filter(calib_db):
     assert data["n_eval"] == 0
     assert data["n_labeled"] == 0
     assert data["has_labels"] is False
+
+
+# ── #233 Folge (Frontend, urspr. #255): LLM-Coverage-Spalte im Kalibrierungs-
+# View. Datenschicht liefert `llm_cov` bereits (PR #250), aber #calib-table
+# rendert dafuer bisher keine Spalte -> Backend-Wert kommt beim Nutzer nie an.
+
+
+def test_calibration_table_header_has_llm_coverage_column():
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    calib_section = html.split('id="calib-table"')[1].split("</table>")[0]
+    assert "LLM-Coverage" in calib_section
+    # Tooltip muss die deprecatete Quelle + den Fallback erklaeren (#233-Kernbefund).
+    assert "coverage_factual" in calib_section
+    assert "coverage_rate" in calib_section
+    assert "v1.3" in calib_section
+
+
+def test_calibration_row_render_uses_llm_cov_with_fmtde():
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    render_fn = html.split("function renderCalibration(calib)")[1].split("\nlet _calibShowAll")[0]
+    assert "r.llm_cov" in render_fn
+    assert "_fmtDE(" in render_fn
+    # Leere/NULL-Werte defensiv als Strich rendern (eigene Formatfunktion,
+    # analog fmtHall/fmtAgree in derselben Funktion).
+    assert "fmtCov" in render_fn
+
+
+def test_calibration_table_colspan_matches_seven_columns():
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    # Neue Spalte -> #calib-table hat jetzt 7 statt 6 Spalten. Alle drei
+    # Platzhalterzeilen (Loading, "keine Daten", "weitere anzeigen"-Button)
+    # muessen mitziehen, sonst verzieht sich die Zeile (kollabiert nicht,
+    # aber falsch ausgerichtet).
+    assert html.count('colspan="6"') == 0
+    assert html.count('colspan="7"') == 3
