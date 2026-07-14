@@ -1296,16 +1296,22 @@ function renderKpis(kpis, thresh, kpiTrend) {
   // #187: hint = Begriffserklärung für Nicht-Techniker, je Kachel via
   // Code-Herleitung (siehe PR-Beschreibung für Begriff→Text→Quelle-Tabelle).
   const kpiDefs = [
-    // #204 P8g: kein onclick-Sparkline mehr — "Automatisch akzeptiert" hat
-    // bereits einen eigenen Versions-Trend-Chart (ch4 "Akzeptanzrate je
-    // Version" in der Trade-off-Sektion); die Klick-Sparkline duplizierte
-    // dieselbe Aussage in einer zweiten, kleineren Darstellung.
+    // #221-Nachbesserung (#204 P8g, Till-Live-Fund): hier stand vormals
+    // sparkless:true mit der Begruendung, "Automatisch akzeptiert" habe
+    // bereits einen eigenen Versions-Trend-Chart (ch4 "Akzeptanzrate über
+    // Versionen" in der Trade-off-Sektion) — die Klick-Sparkline sei ein
+    // reines Duplikat. Till stuft das als Regression ein: ch4 zeigt die Rate
+    // JE PDF (mehrere Linien pro Version, Median), die Kachel-Sparkline dagegen
+    // die GEPOOLTE Rate ueber alle PDFs — dieselbe Semantik wie die
+    // Klick-Sparklines von Fehlerquote/Belegrate daneben. Kein Duplikat, also
+    // wieder klickbar (kpiTrend.accept liefert bereits echte Werte, siehe
+    // eval_dashboard_server.py _pooled_accept — unveraendert seit vor #221).
     { id:'kpi-accept', key:'accept', label:'Automatisch akzeptiert',
       // #237: bei 0 evaluierten Notes (Merge-only-/Eval-Stage-ausgefallener Lauf)
       // ist die Akzeptanzrate zwar rechnerisch gültig (Basis: generierte/
       // Vault-Notes, nicht Evals), aber ohne Eval-Abdeckung nicht als
       // Qualitätsampel aussagekräftig — Kachel neutralisiert statt grün.
-      val: kpis.n_notes===0 ? null : kpis.avg_accept, u:'%', digits:1, sparkless:true,
+      val: kpis.n_notes===0 ? null : kpis.avg_accept, u:'%', digits:1,
       hint:'Anteil der von der Pipeline erzeugten Notes, die ohne manuelles Zusammenführen direkt in den Vault übernommen wurden. Gepoolt über alle Läufe der aktuellen Pipeline-Version (Summe akzeptiert / Summe generiert), nicht der Schnitt einzelner PDFs.',
       tone: kpis.n_notes===0 ? 'neutral' : (kpis.avg_accept!=null?(kpis.avg_accept>=T.accept[0]?'good':kpis.avg_accept<=T.accept[1]?'bad':'warn'):'neutral'),
       tgt: kpis.n_notes===0 ? '–' : (kpis.avg_accept!=null?(kpis.avg_accept>=T.accept[0]?'Ziel erreicht':`Ziel ≥ ${T.accept[0]} %`):'–'),
