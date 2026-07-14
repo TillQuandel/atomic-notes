@@ -10,7 +10,7 @@ def test_opus_cost():
         cost = compute_cost_per_call(
             model="claude-opus-4-7", input_tokens=1_000_000, output_tokens=1_000_000, cache_read_tokens=0
         )
-    assert abs(cost - 90.0) < 0.01  # $15 input + $75 output per M
+    assert abs(cost - 30.0) < 0.01  # $5 input + $25 output per M
 
 
 def test_opus_cost_with_prefix():
@@ -18,7 +18,7 @@ def test_opus_cost_with_prefix():
         cost = compute_cost_per_call(
             model="anthropic/claude-opus-4-7", input_tokens=1_000_000, output_tokens=1_000_000, cache_read_tokens=0
         )
-    assert abs(cost - 90.0) < 0.01  # provider-Prefix wird gestrippt
+    assert abs(cost - 30.0) < 0.01  # provider-Prefix wird gestrippt
 
 
 def test_haiku_cache_read():
