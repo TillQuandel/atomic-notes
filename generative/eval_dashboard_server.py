@@ -442,6 +442,11 @@ def build_data(
                 "ver": r.get("pipeline_version") or "",
                 "model": r.get("model") or "",
                 "cost_usd": r.get("cost_usd", 0.0) or 0.0,
+                # #239: echte Wall-Clock (inkl. Stage-8) aus der DB — token_runs
+                # kennt nur die Trace-JSONL-Call-Dauer-Summe (duration_min), nicht
+                # die tatsaechlich vergangene Zeit. Fehlt die Spalte (Alt-Zeilen
+                # vor #239), liefert query_pipeline_runs() 0.0 (Spalten-Default).
+                "wall_clock_s": r.get("wall_clock_s", 0.0) or 0.0,
             }
             for r in _db_tok.query_pipeline_runs()
         }
@@ -458,6 +463,7 @@ def build_data(
             tr["ver"] = info.get("ver", "")
             tr["model"] = info.get("model", "")
             tr["cost_usd"] = info.get("cost_usd", 0.0)
+            tr["wall_clock_s"] = info.get("wall_clock_s", 0.0)
         # model aus JSONL-Traces backfillen wenn DB-Eintrag leer
         runs_dir = Path(__file__).parent / ".cache" / "runs"
         for tr in token_runs:
@@ -515,6 +521,7 @@ def build_data(
                         "tokens_out": 0,
                         "tokens_cache": 0,
                         "duration_min": round((r.get("duration_s") or 0.0) / 60, 1),
+                        "wall_clock_s": r.get("wall_clock_s", 0.0) or 0.0,
                         "calls": 0,
                         "date": "",
                     }
