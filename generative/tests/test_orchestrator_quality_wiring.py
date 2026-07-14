@@ -185,6 +185,68 @@ def test_enrich_doi_propagated_to_quality_agent(monkeypatch):
     assert captured.get("doi") == "10.1515/iwp-2016-0057"
 
 
+def test_title_guessed_enrich_doi_not_propagated_as_hard(monkeypatch):
+    """Issue #263 (Nachbesserung): `enrich()` liefert DOIs SEHR unterschiedlicher
+    Verlässlichkeit. Ein per Stage-6-Titelheuristik (OpenAlex) GERATENER DOI
+    (`doi_from_title=True`) darf NICHT wie eine hart verifizierte ID ans
+    Edition-Gate durchgereicht werden — sonst würde er dort `crossref_year`
+    setzen und `doi_from_title_match=False` lassen, das Gate behandelte einen
+    geratenen DOI wie eine harte ID. Er muss stattdessen weiter auf die eigene
+    (soft flaggende) Title-Match-Suche des Quality-Agents fallen.
+
+    Erwartung: `check_quality` bekommt `doi=None` (der title-geratene enrich-DOI
+    wird NICHT propagiert)."""
+    pc = orchestrator.pdf_chunker
+    monkeypatch.setattr(pc, "pdf_to_text", lambda *_a, **_k: "Etwas Quelltext mit Wörtern.")
+    monkeypatch.setattr(pc, "split_by_chapters", lambda *_a, **_k: [SimpleNamespace(title="Intro", text="body")])
+    monkeypatch.setattr(pc, "pdf_metadata", lambda *_a, **_k: {"Pages": "1"})
+    monkeypatch.setattr(pc, "extract_overview", lambda *_a, **_k: "Überblick")
+    monkeypatch.setattr(orchestrator.acronym_fix, "extract_acronym_pairs", lambda *_a, **_k: {})
+    monkeypatch.setattr(
+        orchestrator.context_builder,
+        "build_relevance_profile",
+        lambda *_a, **_k: {"existing_concepts": [], "tag_whitelist": []},
+    )
+    monkeypatch.setattr(orchestrator.context_builder, "build_concept_links", lambda *_a, **_k: {})
+    monkeypatch.setattr(orchestrator, "ENABLE_BACKGROUND_EXTRACTOR", False)
+    monkeypatch.setattr(orchestrator.planner, "run", lambda *_a, **_k: ConceptPlan("Titel", "Summary", []))
+    monkeypatch.setattr(orchestrator.planner, "filter_hallucinated", lambda plan, _text: (plan, []))
+
+    async def _no_concepts(*_a, **_k):
+        return ([], {}, 0, [])
+
+    monkeypatch.setattr(orchestrator, "run_extractors_per_concept", _no_concepts)
+
+    from generative.tools import pdf_enrich as pdf_enrich_module
+
+    monkeypatch.setattr(
+        pdf_enrich_module,
+        "enrich",
+        lambda *_a, **_k: {
+            "title": "Irgendein Titel",
+            "author": "Autor",
+            "year": "2016",
+            "doi": "10.1515/title-guessed",
+            "doi_from_title": True,  # Stage-6-OpenAlex-Titelheuristik
+            "type": "journal-article",
+        },
+    )
+
+    captured: dict = {}
+
+    def _spy_check_quality(**kw):
+        captured.update(kw)
+        return QualityReport(peer_reviewed=None, citation_count=None, retracted=False, flags=[])
+
+    monkeypatch.setattr(orchestrator.quality, "check_quality", _spy_check_quality)
+
+    args = SimpleNamespace(by_chapter=False, dry_run=True, doi=None, llm_fallback=False)
+    orchestrator._run_extraction_stages(args, Path("fake.pdf"), None)
+
+    # Der title-geratene DOI darf NICHT durchgereicht werden.
+    assert captured.get("doi") is None
+
+
 def test_explicit_cli_doi_takes_precedence_over_enrich_doi(monkeypatch):
     """Ein explizit per `--doi` übergebener Wert bleibt autoritativ — Stage 0
     (Enrichment) darf ihn nicht überschreiben (Precedence-Gegenprobe zu obigem

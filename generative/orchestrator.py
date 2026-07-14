@@ -2038,7 +2038,12 @@ def _run_extraction_stages(
                     pdf_meta["Author"] = _enrich_meta["author"]
                 if _enrich_meta.get("year") and not pdf_meta.get("Year"):
                     pdf_meta["Year"] = str(_enrich_meta["year"])
-                if _enrich_meta.get("doi"):
+                # #263: Nur CONFIDENT DOIs propagieren. Ein per Stage-6-Titel-
+                # heuristik (OpenAlex) geratener DOI (`doi_from_title`) darf NICHT
+                # wie eine hart verifizierte ID ans Edition-Gate gehen — er fällt
+                # weiter auf die eigene Title-Match-Suche des Quality-Agents, die
+                # ihn korrekt als soft (`doi_from_title_match=True`) flaggt.
+                if _enrich_meta.get("doi") and not _enrich_meta.get("doi_from_title"):
                     _enrich_doi = _enrich_meta["doi"]
         except Exception as _e:
             print(f"  [warn] PDF-Enrichment fehlgeschlagen: {_e}", file=sys.stderr)
