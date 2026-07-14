@@ -1178,3 +1178,137 @@ def test_contradiction_true_multi_author_when_no_segment_matches():
     # Regressions-Erhalt: Schlebbe/Afzal bleibt Widerspruch, weil 'Afzal' zu WEDER
     # 'Schlebbe' NOCH 'Greifeneder' passt (auch mit der neuen Segment-Logik).
     assert _filename_contradicts_embedded_author(_Path("Schlebbe und Greifeneder - 2022 - Need.pdf"), "Afzal") is True
+
+
+# #260: ue<->ü-Transliteration nicht gefaltet. `_strip_diacritics` (NFKD) entkernt
+# 'ü' nur zu 'u' (nicht zum ASCII-Digraph 'ue'), wodurch Dateiname 'Bühner'
+# (-> 'buhner') und embedded, bereits ASCII-transliteriertes 'Buehner'
+# (-> 'buehner') als Widerspruch galten -> legitimer Titel faelschlich
+# quarantaenisiert. Fix: `_fold_surname_token` transliteriert ue/oe/ae/ss VOR
+# dem Diakritik-Fold.
+def test_no_contradiction_on_ue_transliteration_umlaut_filename():
+    # Dateiname traegt den echten Umlaut, embedded ist bereits ASCII-transliteriert.
+    assert _filename_contradicts_embedded_author(_Path("Bühner - 2019 - Lernprozesse.pdf"), "Buehner") is False
+
+
+def test_no_contradiction_on_ue_transliteration_reverse_direction():
+    # Umgekehrt: Dateiname ist ASCII-transliteriert, embedded traegt den Umlaut.
+    # Transliteration ist bewusst symmetrisch (Vorsicht laut #260 beachtet: ein
+    # echter 'Buehner' ohne Umlaut soll weiterhin gegen 'Bühner' matchen).
+    assert _filename_contradicts_embedded_author(_Path("Buehner - 2019 - Lernprozesse.pdf"), "Bühner") is False
+
+
+def test_no_contradiction_on_ue_transliteration_hyphenated_surname():
+    # Realfall aus #260/#257: 'Fühles-Ubach' (Dateiname) vs. 'Fuehles-Ubach' (embedded).
+    assert _filename_contradicts_embedded_author(_Path("Fühles-Ubach - 2015 - Beratung.pdf"), "Fuehles-Ubach") is False
+
+
+def test_contradiction_still_true_across_ue_transliteration_when_truly_unrelated():
+    # Regressions-Erhalt: die Transliterations-Toleranz darf einen echten
+    # Fremdautor nicht verdecken.
+    assert _filename_contradicts_embedded_author(_Path("Bühner - 2019 - Lernprozesse.pdf"), "Afzal") is True
+
+
+# #259: komma-getrennte Mehrautoren-Dateinamen ohne Konjunktion ('Schlebbe,
+# Greifeneder - 2022 - ...') wurden von `_AUTHOR_SEP_RE` als EIN 'Nachname,
+# Vorname'-Segment fehlinterpretiert -> nur 'schlebbe' ueberlebte, 'greifeneder'
+# ging verloren -> ein legitimer Embedded-Zweitautor 'Greifeneder' loeste
+# faelschlich einen Widerspruch aus.
+#
+# Gewaehlter Weg (minimal-riskant, siehe `_author_surnames`-Docstring):
+# `comma_splits_authors=True` NUR fuer den Dateiname-String. Eine generische
+# Heuristik ("Komma zwischen zwei Nachnamen" vs. "Nachname, Vorname") ist ohne
+# Vornamen-Datenbank strukturell nicht entscheidbar — 'Schlebbe, Greifeneder'
+# und 'Müller, Hans' sehen identisch aus (je zwei Ein-Wort-Komma-Teile). Auf
+# der Embedded-Seite ist 'Nachname, Vorname' jedoch die bibliografische Norm
+# (siehe Deci/Ryan-Fall oben) -> dort bleibt Komma bewusst kein Trenner. Auf
+# der Dateiname-Seite dieser Pipeline hingegen tauchen laut Zotero-Citekey-
+# Konvention NIE Vornamen auf (alle realen/getesteten Mehrautoren-Dateien im
+# Repo nutzen 'Nachname und Nachname2', nie ein blosses Komma) -> dort ist ein
+# Komma praktisch immer ein Autor-Trenner. Diese Asymmetrie macht die
+# Aktivierung nur auf der Dateiname-Seite risikoarm.
+def test_no_contradiction_comma_only_second_author_matches():
+    assert (
+        _filename_contradicts_embedded_author(
+            _Path("Schlebbe, Greifeneder - 2022 - Information Need.pdf"), "Greifeneder"
+        )
+        is False
+    )
+
+
+def test_no_contradiction_comma_only_first_author_matches():
+    assert (
+        _filename_contradicts_embedded_author(_Path("Schlebbe, Greifeneder - 2022 - Information Need.pdf"), "Schlebbe")
+        is False
+    )
+
+
+def test_contradiction_true_comma_only_when_no_author_matches():
+    # Regressions-Erhalt: ein echt fremder Autor loest weiterhin einen
+    # Widerspruch aus, auch mit der neuen Komma-Trenner-Logik.
+    assert (
+        _filename_contradicts_embedded_author(_Path("Schlebbe, Greifeneder - 2022 - Information Need.pdf"), "Afzal")
+        is True
+    )
+
+
+# #263-R2-Marker-Regressionstest: der #263-Review notierte, dass es keinen
+# permanenten Test gibt, dass der Stage-6-Zweig in enrich() (reine Titelsuche
+# -> OpenAlex) `meta["doi_from_title"] = True` setzt (nur die Orchestrator-
+# Seite war getestet). Diese zwei Tests pinnen die Marker-Zeile fest, damit ein
+# kuenftiger Refactor sie nicht unbemerkt entfernen kann.
+def test_enrich_sets_doi_from_title_marker_on_title_search_hit(tmp_path, monkeypatch):
+    from generative.tools import pdf_enrich
+    from unittest.mock import MagicMock
+
+    mock_reader = MagicMock()
+    mock_reader.metadata = {}
+    monkeypatch.setattr(pdf_enrich, "PdfReader", lambda *a, **kw: mock_reader)
+    monkeypatch.setattr(
+        pdf_enrich,
+        "extract_text",
+        lambda path, max_pages=3: "Eine kurze Studie ohne Kennung im Kopfbereich.",
+    )
+    monkeypatch.setattr(
+        pdf_enrich,
+        "openalex_title_search",
+        lambda *a, **k: {
+            "title": "Situated Learning Theory",
+            "author": "Lave",
+            "year": 2020,
+            "doi": "10.9999/example-title-hit",
+            "type": "article",
+        },
+    )
+    pdf = tmp_path / "situated-learning-theory.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = pdf_enrich.enrich(pdf, dry_run=True)
+    assert meta is not None
+    assert meta.get("doi_from_title") is True
+
+
+def test_enrich_does_not_set_doi_from_title_marker_on_hard_doi_hit(tmp_path, monkeypatch):
+    # Gegenprobe: ein harter DOI aus dem Text (-> CrossRef) traegt den Marker
+    # NICHT -- nur die reine Titelsuche (Stage 6) darf ihn setzen.
+    from generative.tools import pdf_enrich
+    import urllib.request
+
+    monkeypatch.setattr(pdf_enrich, "extract_text", lambda path, max_pages=3: "See doi:10.1002/asi.23681 for details")
+    fake_cr = b'{"status":"ok","message":{"title":["Information Behavior"],"author":[{"family":"Bates"}],"published":{"date-parts":[[2017]]},"DOI":"10.1002/asi.23681","type":"journal-article"}}'
+
+    class FakeResp:
+        def read(self):
+            return fake_cr
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *a):
+            pass
+
+    monkeypatch.setattr(urllib.request, "urlopen", lambda *a, **kw: FakeResp())
+    pdf = tmp_path / "paper.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = pdf_enrich.enrich(pdf, dry_run=True)
+    assert meta is not None
+    assert "doi_from_title" not in meta

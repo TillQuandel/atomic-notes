@@ -617,25 +617,60 @@ def _zotero_author_matches_embedded(pdf_path: Path, embedded_author: str) -> boo
     return fn_author == emb_author
 
 
-def _author_surnames(author: str) -> set[str]:
-    """Menge der diakritik-gefalteten Nachnamen aus einem Autor-String (Dateiname
-    ODER Info-Dict). Trenner: ';', ' und ', ' and ', ' & ' (`_AUTHOR_SEP_RE`) —
-    Komma NICHT (das trennt 'Nachname, Vorname').
+# Deutsche Transliterationen VOR dem generischen Diakritik-Fold (#260): NFKD+
+# Combining-Strip allein entkernt 'ü' nur zu 'u' (nicht zum gaengigen ASCII-
+# Digraph 'ue'), wodurch Dateiname 'Bühner' (-> 'buhner') und embedded, bereits
+# ASCII-transliteriertes 'Buehner' (-> 'buehner') sich NICHT traefen. Nur EINE
+# Richtung (Umlaut/Eszett -> Digraph): ein echter 'Buehner' (kein Umlaut im
+# Dateinamen) bleibt unveraendert und matcht weiterhin gegen embedded 'Bühner'
+# — grosszuegig, weil die Folge einer Fehl-Faltung nur Titel-Degradation waere,
+# nie eine Fehlattribution.
+_GERMAN_TRANSLIT_MAP = str.maketrans({"ü": "ue", "ö": "oe", "ä": "ae", "ß": "ss"})
+
+
+def _fold_surname_token(token: str) -> str:
+    """Kanonische Form eines Nachname-Tokens fuer den Autor-Cross-Check:
+    lowercase -> deutsche Transliteration (ue/oe/ae/ss, #260) -> generischer
+    Diakritik-Fold. Reihenfolge ist Pflicht, siehe `_GERMAN_TRANSLIT_MAP`."""
+    return _strip_diacritics(token.lower().translate(_GERMAN_TRANSLIT_MAP))
+
+
+def _author_surnames(author: str, *, comma_splits_authors: bool = False) -> set[str]:
+    """Menge der gefalteten Nachnamen aus einem Autor-String (Dateiname ODER
+    Info-Dict). Trenner: ';', ' und ', ' and ', ' & ' (`_AUTHOR_SEP_RE`) —
+    Komma standardmaessig NICHT (das trennt 'Nachname, Vorname').
 
     Pro Segment ist der Nachname das letzte Token; bei 'Nachname, Vorname'-
     Segmenten der Teil VOR dem Komma (Deci-Fall: 'Deci, Edward L.' -> 'deci',
-    nicht 'l'). Gefaltet, damit reine Diakritik-Differenzen matchen
-    (Yanartaş == Yanartas)."""
+    nicht 'l'). Gefaltet ueber `_fold_surname_token` (Diakritik + gaengige
+    deutsche Transliteration ue/oe/ae/ss, #260), damit 'Yanartaş' == 'Yanartas'
+    UND 'Bühner' == 'Buehner' matchen.
+
+    comma_splits_authors (#259): nur fuer Dateiname-Autor-Strings dieser
+    Pipeline sicher aktivierbar. Von hier auto-generierte/Zotero-Dateinamen
+    tragen NIE Vornamen (Citekey-Konvention: nur Nachname[+Nachname2]) — ein
+    Komma im Dateiname-Autor-Segment ist daher praktisch immer ein Autor-
+    Trenner zwischen zwei Nachnamen ('Schlebbe, Greifeneder'), nie
+    'Nachname, Vorname'. Auf der Embedded-Metadaten-Seite gilt das Gegenteil
+    (bibliografische Norm 'Nachname, Vorname') — dort bleibt der Default False,
+    sonst wuerde z.B. 'Deci, Edward L.' faelschlich in zwei Personen zerrissen.
+    """
     surnames: set[str] = set()
     for segment in _AUTHOR_SEP_RE.split(author):
         seg = segment.strip()
         if not seg:
             continue
         if "," in seg:
+            if comma_splits_authors:
+                for sub in seg.split(","):
+                    sub_tokens = sub.strip().split()
+                    if sub_tokens:
+                        surnames.add(_fold_surname_token(sub_tokens[-1]))
+                continue
             seg = seg.split(",", 1)[0].strip()
         tokens = seg.split()
         if tokens:
-            surnames.add(_strip_diacritics(tokens[-1].lower()))
+            surnames.add(_fold_surname_token(tokens[-1]))
     return surnames
 
 
@@ -651,10 +686,15 @@ def _filename_contradicts_embedded_author(pdf_path: Path, embedded_author: str) 
 
     Mehrautoren-/Diakritika-robust (Review PR #256, an 4 realen Literatur-PDFs
     verifiziert): Beide Seiten werden an ';'/'und'/'and'/'&' in Einzelautoren
-    zerlegt und nachname-weise (diakritik-gefaltet) verglichen. Ein legitimer
-    Embedded-ERSTautor (= Autor1 einer Mehrautoren-Datei) erzeugt so KEINEN
-    Widerspruch mehr; nur ein echt fremder Autor (Schlebbe/Afzal: 'Afzal' passt zu
-    weder 'Schlebbe' noch 'Greifeneder') loest die /Title-Quarantaene aus.
+    zerlegt und nachname-weise (diakritik- + transliterations-gefaltet, #260)
+    verglichen. Ein legitimer Embedded-ERSTautor (= Autor1 einer Mehrautoren-
+    Datei) erzeugt so KEINEN Widerspruch mehr; nur ein echt fremder Autor
+    (Schlebbe/Afzal: 'Afzal' passt zu weder 'Schlebbe' noch 'Greifeneder') loest
+    die /Title-Quarantaene aus. Auf der Dateiname-Seite zaehlt zusaetzlich ein
+    blosses Komma OHNE Konjunktion als Autor-Trenner (#259: 'Schlebbe,
+    Greifeneder' -> beide Nachnamen statt nur 'Schlebbe') — sicher nur dort,
+    weil Dateinamen dieser Pipeline nie Vornamen tragen (siehe
+    `_author_surnames`-Docstring).
 
     Genutzt (#234), um den eingebetteten `/Title` zu verwerfen, wenn der
     Metadatenblock nachweislich aus einer fremden Quelle stammt (z.B. via
@@ -665,7 +705,7 @@ def _filename_contradicts_embedded_author(pdf_path: Path, embedded_author: str) 
     parsed = _parse_filename_dynamic(pdf_path)
     if not parsed or not parsed.get("author"):
         return False
-    fn_surnames = _author_surnames(parsed["author"])
+    fn_surnames = _author_surnames(parsed["author"], comma_splits_authors=True)
     emb_surnames = _author_surnames(embedded_author)
     if not fn_surnames or not emb_surnames:
         return False
