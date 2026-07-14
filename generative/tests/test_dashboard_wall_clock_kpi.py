@@ -145,3 +145,34 @@ def test_html_separates_agent_compute_time_from_wall_clock():
     assert "label:'Agent-Rechenzeit (Summe)'" in html
     assert "label:'Wall-Clock (aktuell)'" in html
     assert "kpis.cur_wall_h" in html
+
+
+# ── #266-Nachbesserung (Tooltip-Nit): der Wall-Clock-Tooltip behauptete ──
+# faelschlich, bei deaktiviertem Inline-Eval sei die Wall-Clock "0,0h".
+# Tatsaechlich gilt dort wall_clock_s == duration_s (insert_run schreibt
+# wall_clock_s beim Insert identisch zu duration_s; update_wall_clock_s()
+# korrigiert die Zeile nur, wenn Stage-8 anschliessend lief, orchestrator.py
+# ~2864-2870/2937-2952). Ohne Stage-8 bleibt wall_clock_s also ein echter,
+# von Null verschiedener Messwert (die real gemessene Laufzeit bis zum
+# Pipeline-Ende) — nicht 0,0h. Nur echte Alt-Zeilen von vor der #239-Spalte
+# liefern 0,0h (Spalten-Default, kein Messwert).
+
+
+def test_wall_clock_tooltip_does_not_claim_zero_for_disabled_inline_eval():
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    # Die alte, falsche Formulierung darf nicht mehr vorkommen.
+    assert "oder bei deaktiviertem Inline-Eval — dort ist die Wall-Clock nicht separat gemessen" not in html
+
+
+def test_wall_clock_tooltip_explains_disabled_inline_eval_as_real_nonzero_value():
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    # Korrigierte Formulierung: bei deaktiviertem Inline-Eval ist der Wert
+    # echt (== duration_s, reale gemessene Laufzeit), NICHT 0,0h.
+    assert "ist der Wert trotzdem echt und NICHT 0,0 h" in html
+    # 0,0h bleibt korrekt auf den einzigen tatsaechlichen Nullfall beschraenkt:
+    # Alt-Zeilen von vor der Wall-Clock-Persistierung (#239).
+    assert "0,0 h nur bei Läufen, deren Daten vor der Wall-Clock-Persistierung entstanden (#239)" in html
