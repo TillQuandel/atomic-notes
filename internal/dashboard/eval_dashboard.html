@@ -1305,8 +1305,21 @@ function renderKpis(kpis, thresh, kpiTrend) {
     // Kennzahlen gleichen Namens (Kachel = aktuelle Version kumuliert, Strip-
     // Zelle = Lifetime, Kosten-Chart = Median je Version, Agenten-Chart =
     // kumuliert je Agent) — Kachel-Label pruezisiert.
-    { id:'kpi-dur',    key:'dur',    label:'Laufzeit (aktuell)', val:kpis.cur_dur_h??kpis.total_dur_h,   u:'h', digits:1, tone:'neutral', tgt:'',
-      hint:'Summe der Pipeline-Laufzeit aller Läufe der aktuellen Version, in Stunden. Der ??-Fallback auf die Gesamt-Laufzeit aller Versionen greift praktisch nie: hat die aktuelle Version keine Läufe, ist die Summe bereits 0,0 (kein null) — die Kachel zeigt dann „0,0 h", nicht die Gesamt-Laufzeit. Der Versions-Chart in der Kosten-Sektion darunter zeigt dagegen den Median je Version — beide korrekt, aber unterschiedliche Kennzahl.' },
+    // #239: "Laufzeit" war zusaetzlich in der Sache falsch benannt — der Wert
+    // ist die SUMME der einzelnen Call-Dauern (Agent-Rechenzeit), nicht die
+    // tatsaechlich vergangene Zeit. Bei paralleler Ausfuehrung ueberlappen
+    // Calls, die Summe kann die echte Wall-Clock je nach Parallelitaetsgrad
+    // ueber- oder unterschaetzen (Befund: 0,98x-1,67x). Kachel umbenannt +
+    // eigene Wall-Clock-Kachel daneben (kpi-wall, aus pipeline_runs.wall_clock_s,
+    // das orchestrator.main() erst NACH Stage-8 persistiert).
+    { id:'kpi-dur',    key:'dur',    label:'Agent-Rechenzeit (Summe)', val:kpis.cur_dur_h??kpis.total_dur_h,   u:'h', digits:1, tone:'neutral', tgt:'',
+      hint:'Summe der Dauer ALLER einzelnen LLM-Calls der aktuellen Version, in Stunden — NICHT die tatsächlich vergangene Zeit. Bei paralleler Ausführung überlappen sich Calls zeitlich, die Summe zählt jeden Call einzeln und kann die echte Wall-Clock (Kachel „Wall-Clock (aktuell)" daneben) je nach Parallelitätsgrad über- oder unterschätzen. Der ??-Fallback auf die Gesamtsumme aller Versionen greift praktisch nie: hat die aktuelle Version keine Läufe, ist die Summe bereits 0,0 (kein null).' },
+    // sparkless: kpiTrend (Server) fuehrt bisher keine Wall-Clock-Zeitreihe je
+    // Version (nur hall/cov/accept/tokens/dur) — ohne Trend-Daten waere die
+    // Sparkline-Kachel klickbar, aber leer. sparkless deckt sich mit dem
+    // Muster der kpi-accept-Kachel oben (Zeile ~1285).
+    { id:'kpi-wall',   key:'wall',    label:'Wall-Clock (aktuell)', val:kpis.cur_wall_h,   u:'h', digits:2, tone:'neutral', tgt:'', sparkless:true,
+      hint:'Summe der ECHTEN Wall-Clock-Zeit (Beginn bis Ende inkl. Stage-8-Qualitäts-Eval) aller Läufe der aktuellen Version, in Stunden — im Gegensatz zur Kachel „Agent-Rechenzeit" daneben (Summe der Call-Dauern, mit Overlap bei Parallelität). 0,0 h bei Läufen ohne Stage-8-Eval, deren Daten vor der Wall-Clock-Persistierung entstanden (#239), oder bei deaktiviertem Inline-Eval — dort ist die Wall-Clock nicht separat gemessen.' },
     { id:'kpi-tokens', key:'tokens', label:'Pipeline-Tokens', val:(kpis.cur_tokens??kpis.total_tokens)?Math.round((kpis.cur_tokens??kpis.total_tokens)/1e6*100)/100:null, u:'M', digits:2, tone:'neutral', tgt:'',
       hint:'Summe aus Input- und Output-Tokens aller Läufe der aktuellen Version, in Millionen. Der Fallback auf die Gesamtsumme aller Versionen greift praktisch nie: ist die Summe der aktuellen Version 0, wertet die Anzeige das als „kein Wert" und zeigt einen Strich (–), nicht die Gesamtsumme. Cache-Reads zählen hier nicht mit (siehe Agenten-Sektion für den Cache-Anteil).' },
     { id:'kpi-cost', key:'cost', label:'API-Kosten',

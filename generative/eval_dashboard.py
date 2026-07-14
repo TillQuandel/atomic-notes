@@ -609,7 +609,18 @@ def _calc_kpis(
     total_dur_s = sum(r["duration_min"] * 60 for r in token_runs if r.get("db_matched", True))
     latest_truns = [r for r in token_runs if r.get("ver") == latest_pver] if latest_pver else token_runs
     cur_tokens = sum(r["tokens_in"] + r["tokens_out"] for r in latest_truns)
+    # cur_dur_h = Summe der Call-Dauern (#239: "Agent-Rechenzeit", NICHT
+    # Wall-Clock — bei parallelen Calls ueberlappt die Zeit, die Summe kann die
+    # tatsaechlich vergangene Zeit deshalb ueber- ODER unterschaetzen, je nach
+    # Parallelitaetsgrad; siehe #239-Befund: 0,98x-1,67x der echten Wall-Clock).
     cur_dur_h = round(sum(r["duration_min"] for r in latest_truns) / 60, 1)
+    # cur_wall_h = echte Wall-Clock (#239-Fix): aus pipeline_runs.wall_clock_s,
+    # das orchestrator.main() nach Abschluss von Stage-8 persistiert (vor dem
+    # Fix nur die Call-Summe oder das VOR Stage-8 geschriebene duration_s,
+    # beides keine Wall-Clock). Fehlt der Key (Alt-Traces vor #239 oder der
+    # deprecated Standalone-Pfad ohne Server-Join), zaehlt der Run mit 0 statt
+    # zu crashen — konsistent mit dem cost_usd-Default-Muster oben.
+    cur_wall_h = round(sum(r.get("wall_clock_s", 0.0) or 0.0 for r in latest_truns) / 3600, 2)
     cur_cost_usd = round(sum(r.get("cost_usd", 0.0) or 0.0 for r in latest_truns), 4)
 
     # PDF-Zahl: distinct kanonische Quellen (SSoT mit der per-PDF-Tabelle, #194).
@@ -686,6 +697,7 @@ def _calc_kpis(
         "total_dur_h": round(total_dur_s / 3600, 1),
         "cur_tokens": cur_tokens,
         "cur_dur_h": cur_dur_h,
+        "cur_wall_h": cur_wall_h,
         "cur_cost_usd": cur_cost_usd,
     }
 

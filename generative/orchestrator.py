@@ -2863,6 +2863,11 @@ def main(argv: list[str] | None = None):
                     "tokens_cache_read": _tok_cache_r,
                     "duration_s": _wall_s,
                     "profile": runtime_config.profile,
+                    # #239: wall_clock_s startet identisch zu duration_s — Stage-8
+                    # ist an dieser Stelle noch nicht gelaufen. Läuft Stage-8
+                    # (inline_eval aktiv), korrigiert der Block unten die Zeile
+                    # nach Abschluss auf die echte Gesamtzeit.
+                    "wall_clock_s": _wall_s,
                 },
             )
     except Exception as _db_err:
@@ -2934,6 +2939,20 @@ def main(argv: list[str] | None = None):
         _eval_out = _grand["output"] - _pre["output"]
         _eval_wall = round(_final_wall - _wall_s, 1)
         _eval_pct = (_eval_out / _grand["output"]) if _grand["output"] else 0.0
+
+        # #239: pipeline_runs-Zeile (oben, VOR Stage-8, insert_run) auf die echte
+        # Gesamtzeit inkl. Eval-Phase korrigieren. Eigener try/except — ein
+        # DB-Fehler hier darf weder den Run-Ende-Print unten noch (via das
+        # umschließende except) die "Qualitäts-Eval übersprungen"-Meldung
+        # fälschlich auslösen (der Eval selbst lief ja erfolgreich durch).
+        try:
+            from generative import db as _db_wall
+
+            with _db_wall.get_db(_db_wall.DB_PATH) as _wall_conn:
+                _db_wall.update_wall_clock_s(_wall_conn, _run_id_for_meta, _final_wall)
+        except Exception as _wall_err:
+            print(f"   [warn] Wall-Clock-Update fehlgeschlagen: {_wall_err}")
+
         print("\n   === Run-Gesamt (inkl. Stage-8-Eval) ===")
         print(f"   -> Zeit:   {_final_wall}s  (davon Stage-8: +{_eval_wall}s)")
         print(
