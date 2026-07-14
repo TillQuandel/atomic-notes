@@ -22,17 +22,25 @@ def test_opus_cost_with_prefix():
 
 
 def test_haiku_cache_read():
+    """#252: cache_read muss der Anthropic-Regel „Cache-Read = 0,1x Input"
+    folgen, wie bei opus/sonnet. Verifiziert gegen die offizielle Anthropic-
+    Preisseite (platform.claude.com/docs/en/about-claude/pricing, Abruf
+    2026-07-14): Haiku 4.5 Base-Input = $1.00/MTok -> Cache-Read = $0.10/MTok."""
     with patch("generative.config.BACKEND", "api"):
         cost = compute_cost_per_call(
             model="claude-haiku-4-5", input_tokens=0, output_tokens=0, cache_read_tokens=1_000_000
         )
-    assert abs(cost - 0.03) < 0.001  # $0.03/M cache-read
+    assert abs(cost - 0.10) < 0.001  # $0.10/M cache-read (0,1x $1.00 Input)
 
 
 def test_haiku_cost_with_date_suffix():
     """#100: MODEL_HAIKU trägt einen Datums-Suffix (-20251001), der Pricing-Key
     nicht — die Normalisierung muss ihn zusätzlich zum Provider-Prefix strippen,
-    sonst verfehlt der eigene Default-String die eigene Tabelle (fail-silent 0.0)."""
+    sonst verfehlt der eigene Default-String die eigene Tabelle (fail-silent 0.0).
+
+    #252: Preise korrigiert auf verifizierte Haiku-4.5-Tarife ($1.00 Input /
+    $5.00 Output per MTok) — die alten Werte ($0.80/$4.0) waren der retired
+    Haiku-3.5-Tarif unter dem 4.5-Key."""
     with patch("generative.config.BACKEND", "api"):
         cost = compute_cost_per_call(
             model="anthropic/claude-haiku-4-5-20251001",
@@ -40,7 +48,7 @@ def test_haiku_cost_with_date_suffix():
             output_tokens=1_000_000,
             cache_read_tokens=0,
         )
-    assert abs(cost - 4.8) < 0.01  # $0.80 input + $4.0 output per M
+    assert abs(cost - 6.0) < 0.01  # $1.00 input + $5.0 output per M
 
 
 def test_unknown_model_returns_zero():
