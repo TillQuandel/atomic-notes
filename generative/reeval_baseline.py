@@ -43,19 +43,47 @@ def _find_pdf(folder_name: str) -> Path | None:
 
 
 def _latest_notes_dir(pdf_dir: Path) -> Path:
-    """Liefert das Verzeichnis mit den aktuell gültigen Baseline-Notes für einen
-    PDF-Stamm-Ordner.
+    """Liefert das run_id-Verzeichnis mit den aktuell gültigen Baseline-Notes für
+    einen PDF-Stamm-Ordner.
 
     #241: seit dem run_id-Namespace liegen Notes unter `<stem>/<run_id>/` statt
     direkt unter `<stem>/`. Bei mehreren run_ids (mehrere Läufe desselben PDFs,
     z.B. eine A/B-Messreihe) gilt die NEUESTE (lexikographisch größte, da das
     run_id-Format `YYYYMMDD-HHMMSS` chronologisch sortiert) als die aktuell
     gültige Baseline — reeval_baseline re-evaluiert den zuletzt geschriebenen
-    Stand, nicht veraltete Zwischenläufe. Legacy-Ablagen ohne run_id-Unterordner
-    (vor #241 geschrieben) werden weiterhin direkt gelesen (Fallback).
+    Stand, nicht veraltete Zwischenläufe. Bei NULL run_id-Unterordnern gilt der
+    Stamm-Ordner selbst als Notes-Verzeichnis (reine Legacy-Ablage vor #241).
+
+    Achtung: im GEMISCHTEN Fall (Legacy-flat-Notes direkt unter `<stem>/` UND
+    run_id-Unterordner) liefert diese Funktion NUR den run_id-Ordner; die
+    zusätzliche Einbeziehung der Legacy-flat-Notes übernimmt `_baseline_note_files`
+    (#261) — diese Funktion allein nicht direkt als Note-Quelle verwenden.
     """
     run_dirs = sorted((d for d in pdf_dir.iterdir() if d.is_dir()), key=lambda d: d.name)
     return run_dirs[-1] if run_dirs else pdf_dir
+
+
+def _baseline_note_files(pdf_dir: Path) -> list[Path]:
+    """Liefert alle aktuell gültigen `vault__*.md`-Baseline-Notes eines PDF-Stamm-
+    Ordners.
+
+    #261: `_latest_notes_dir` verwirft im gemischten Ordner (Legacy-flat +
+    run_id-Unterordner) die pre-#241-Legacy-flat-Notes still, sobald ein
+    run_id-Ordner existiert. Da der Produktions-Baseline-Cache aktuell komplett
+    aus Legacy-flat-Notes besteht, würde damit der gesamte historische Bestand
+    eines PDFs beim ersten Neu-Lauf aus reeval/Kalibrierung fallen. Deshalb
+    werden Legacy-flat-Notes zusätzlich einbezogen und per Dateiname dedupliziert
+    — die gleichnamige Note des neuesten run_id-Ordners hat Vorrang (neueste
+    Pipeline-Ausgabe ist maßgeblich).
+    """
+    latest = _latest_notes_dir(pdf_dir)
+    by_name: dict[str, Path] = {}
+    if latest != pdf_dir:  # gemischt: Legacy-flat direkt unter <stem>/ zuerst (niedrigster Vorrang)
+        for f in pdf_dir.glob("vault__*.md"):
+            by_name[f.name] = f
+    for f in latest.glob("vault__*.md"):  # neuester run_id (bzw. reine Legacy-Ablage) gewinnt
+        by_name[f.name] = f
+    return sorted(by_name.values())
 
 
 def _already_done(note_name: str, conn) -> bool:
@@ -86,7 +114,7 @@ def main() -> None:
         if not pdf_path.exists():
             print(f"  [skip] PDF nicht gefunden: {pdf_path.name}")
             continue
-        for note_file in sorted(_latest_notes_dir(pdf_dir).glob("vault__*.md")):
+        for note_file in _baseline_note_files(pdf_dir):
             notes.append((note_file, pdf_path, pdf_dir.name))
 
     print(f"Zu evaluieren: {len(notes)} Notes\n")
