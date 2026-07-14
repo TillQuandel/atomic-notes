@@ -16,6 +16,51 @@ der Claim im Quelltext steht (falsch-positive Halluzination) bzw. in einem
 Fall ein echter Attributionsfehler, der zufaellig durchs Retrieval "gerettet"
 wurde und deshalb korrekt als `contradicted` erkannt wurde (idx8, siehe unten).
 
+## Status nach PR-B (#232-Fix, F1+F2)
+
+PR-B hebt den Evidence-in-Pool-Recall ueber die Schwelle. Umgesetzt in
+`generative/eval_quality_v4.py`:
+
+- **F1 -- Satz-Level-Retrieval-Rescue** (`_rescue_chunk_indices`,
+  `_sentence_chunk_map` in `_retrieve_claim_contexts`): pro Claim werden die
+  Home-Chunks des/der best-belegenden Satzes/Chunks ADDITIV in den Kontext-Pool
+  injiziert, BEVOR der Judge urteilt -- **kein Relabel** (der Judge entscheidet
+  weiter selbst, der Rescue stellt nur sicher, dass der Beleg im Kontext ist).
+  Zwei Pfade (Union): (1) semantisch nach max. Satz-Cosine je Chunk (faengt
+  Cross-Lingual DE↔EN, wo der Chunk-Mittelwert verwaessert), (2) lexikalisch nach
+  Content-Token-Overlap (faengt starke Paraphrasen gleicher Sprache, wo die
+  Satz-Cosine niedrig ist -- z.B. `suehl idx4`: Satz-Rang 19, aber Lexik-Rang 1;
+  zugleich das Cross-Lingual-Netz gegen die Presence-Scorer-False-Negatives).
+- **F2 -- Titel-/Front-Matter-Chunk-Deprioritisierung**: der erste Chunk wird,
+  wenn er front-matter-typisch aussieht (Title-Case-Dichte / sehr kurz), im
+  adaptive_k-Ranking mild gedaempft (nicht entfernt -- Abstracts enthalten echte
+  Belege; F1 holt den Chunk bei Bedarf zurueck).
+- **Zitat-Marker-robuste Evidence-Normalisierung** (`_normalize_for_evidence`):
+  PyMuPDF interleaviert hochgestellte Zitat-/Fussnoten-Marker als inline
+  Ziffern-Tokens ("... in the social world 5 which implies ...", "... science 42
+  and business 136 ..."). Diese brechen den woertlichen Beleg-Substring-Abgleich
+  (`idx13`, `bates idx6`). Kurze freistehende Ziffern-Tokens (1-3 Stellen) werden
+  symmetrisch auf Beleg UND Pool entfernt -- match-neutral fuer echte Zahlen
+  (z.B. "355 Studien"), 4+-stellige Zahlen (Jahre) bleiben erhalten.
+
+Recall in der Referenz-Umgebung (2026-07-14, dieselbe wie die 2/10-Basis unten):
+**2/10 = 0,200 (VORHER) → 10/10 = 1,000 (NACHHER)**. Die scharfe Assertion
+`recall >= 0.90` in `test_retrieval_goldset.py` ist jetzt hart (kein `xfail`
+mehr). Negativ-Kontrolle `idx8` bleibt gruen (kein Retrieval-Miss, wird vom
+Rescue nicht weg-„repariert"; F1 relabelt ohnehin nicht).
+
+### EVAL_VERSION-Skew (WICHTIG)
+
+Die Retrieval-Methodik hat sich geaendert → `EVAL_VERSION` **4.1 → 4.2**. Der
+Kontext-Pool, den der Judge sieht, ist ein anderer, damit sind Eval-Ergebnisse
+unter 4.2 **nicht direkt** mit den 4.1-Bestandsdaten in `quality_history.jsonl`
+vergleichbar. Der Bump invalidiert den content-adressierten Eval-Cache automatisch
+(neuer `EVAL_CACHE_NAMESPACE = eval-v4.2`), sodass Notes frisch evaluiert werden.
+`quality_history.jsonl` / bestehende Runs bleiben **unveraendert** (read-only) --
+der Skew ist gewollt sichtbar, nicht zu verhindern. Ein fairer Vor/Nach-Vergleich
+der Halluzinationsrate braucht einen **Re-Eval-Sweep** der betroffenen Notes unter
+4.2, nicht den direkten Vergleich gegen alte 4.1-Zeilen.
+
 ## Format
 
 `anchors.jsonl`, ein JSON-Record pro Zeile:

@@ -48,6 +48,7 @@ from generative.eval_common import (
     _normalize,
     _pdf_sentences,
     _read_note_body,
+    _split_sentences,
     extract_claims,
     wilson_ci,
 )
@@ -57,7 +58,15 @@ from generative.pipeline.pdf_chunker import anchor_page_numbers
 _QUALITY_HISTORY = (
     QUALITY_HISTORY  # SSoT: config.QUALITY_HISTORY; Alias für bestehende Importer (run.py, adversarial.py)
 )
-EVAL_VERSION = "4.1"
+# 4.1 → 4.2 (#232): Retrieval-Methodik geaendert — Satz-Level-Retrieval-Rescue (F1)
+# + Titel-Chunk-Deprioritisierung (F2) + Zitat-Marker-robuste Evidence-Normalisierung.
+# Der Kontext-Pool, den der Judge sieht, ist damit ein anderer → alte Eval-Ergebnisse
+# sind nicht direkt vergleichbar. Der Bump invalidiert den content-adressierten
+# Eval-Cache automatisch (neuer EVAL_CACHE_NAMESPACE), sodass Notes unter neuer
+# Methodik frisch evaluiert werden. quality_history.jsonl bleibt unveraendert (der
+# eval_version-Skew ist gewollt sichtbar; fairer Vor/Nach-Vergleich braucht einen
+# Re-Eval-Sweep, siehe generative/calibration/retrieval-goldset/README.md).
+EVAL_VERSION = "4.2"
 # Eval-Judge-Cache ist content-adressiert und vom --fresh-run-Run-Salt entkoppelt:
 # eine inhaltlich unveraenderte Note wird nicht erneut evaluiert, auch wenn die uebrige
 # Pipeline frisch generiert. Versions-gescoped (kein _RUN_ID): run-unabhaengig, aber ein
@@ -99,6 +108,80 @@ MAX_PROMPT_WORDS = 12000
 # protokolliert — sichtbar für Review und spätere n≥50-Kalibrierung/NLI-Gate.
 # Threshold empirisch (n=8, NICHT gold-kalibriert), ENV-tunbar. contradicted unberührt.
 SOURCE_PRESENCE_COSINE = float(os.getenv("ATOMIC_AGENT_SOURCE_PRESENCE_COSINE", "0.75"))
+
+
+# --- F1/F2 Retrieval-Rescue (#232): Granularitaets-Mismatch Chunk vs. Satz -------
+# ROOT CAUSE: Das Chunk-Ranking (_retrieve_claim_contexts) rankt Claims gegen
+# CHUNK-Embeddings (100-180 Token). Der tatsaechlich stuetzende SATZ hat hohe
+# Claim-Cosine, sein Home-Chunk rankt aber weit hinten, weil das Beleg-Signal ueber
+# den Chunk gemittelt wird → er faellt aus adaptive_k → der Judge sieht den Beleg nie
+# → falsch-positives not_in_context (aufgeblaehte Halluzinationsrate). Belegt am
+# Goldset #254 (generative/tests/test_retrieval_goldset.py).
+#
+# F1 = Satz-Level-Retrieval-Rescue VOR dem Judge: den Home-Chunk des/der best-
+# belegenden Satzes/Chunks additiv in den Kontext-Pool injizieren. KEIN Relabel —
+# der Judge entscheidet weiter selbst; der Rescue stellt nur sicher, dass der Beleg
+# im Kontext ist. Zwei komplementaere Pfade (Union), beide guenstig:
+#   1. Semantisch: Chunks nach MAX-Satz-Cosine zum Claim (lokalisiertes Signal statt
+#      Chunk-Mittel). Faengt Cross-Lingual (DE-Claim/EN-Quelle), wo der ganze Chunk
+#      semantisch verwaessert. Floor (RESCUE_SENTENCE_MIN_COSINE) verhindert
+#      Injektion fuer echte Halluzinationen ohne jedes Beleg-Signal.
+#   2. Lexikalisch: Chunks nach Overlap seltener Content-Tokens (>=4 Buchstaben).
+#      Faengt starke Paraphrasen GLEICHER Sprache, wo die Satz-Cosine niedrig ist
+#      (Goldset suehl idx4: Satz-Rang 19, aber Lexik-Rang 1) — der lexikalische
+#      Zweitpfad ist zugleich das geforderte Cross-Lingual-Netz gegen die
+#      Presence-Scorer-False-Negatives bei DE↔EN.
+# Alle Schwellen ENV-tunbar (am Goldset kalibriert, umgebungsabhaengig — siehe
+# calibration/retrieval-goldset/README.md Caveat zur Nicht-Stabilitaet der Ziffern).
+RESCUE_SENTENCE_CHUNKS = int(os.getenv("ATOMIC_AGENT_RESCUE_SENTENCE_CHUNKS", "6"))
+RESCUE_SENTENCE_MIN_COSINE = float(os.getenv("ATOMIC_AGENT_RESCUE_MIN_COSINE", "0.45"))
+RESCUE_LEXICAL_CHUNKS = int(os.getenv("ATOMIC_AGENT_RESCUE_LEXICAL_CHUNKS", "3"))
+RESCUE_LEXICAL_MIN_OVERLAP = int(os.getenv("ATOMIC_AGENT_RESCUE_LEXICAL_MIN_OVERLAP", "2"))
+# F2 = Titel-/Front-Matter-Chunk deprioritisieren: Der erste Chunk (Titelseite/
+# Running-Header/Abstract, z.B. "& Asynchronous Synchronous E-Learning A study of…")
+# dominiert Top-1 fuer ~1/3 der Claims und kollabiert adaptive_k auf k=2. MILDE
+# Score-Daempfung im Ranking (nicht hart entfernen — Abstracts enthalten echte
+# Belege; der F1-Rescue holt den Chunk bei Bedarf zurueck), sodass echte
+# Beleg-Chunks in adaptive_k aufsteigen. Greift nur beim ersten Chunk und nur, wenn
+# er front-matter-typisch aussieht (Title-Case-Dichte / sehr kurz).
+RESCUE_TITLE_CHUNK_PENALTY = float(os.getenv("ATOMIC_AGENT_TITLE_CHUNK_PENALTY", "0.08"))
+
+_CONTENT_TOKEN_RE = re.compile(r"[^\W\d_]{4,}", re.UNICODE)
+
+
+def _content_tokens(text: str) -> set[str]:
+    """Content-Tokens (>=4 Buchstaben, keine Ziffern/Interpunktion) fuer den
+    lexikalischen Rescue-Pfad. Stopwoerter sind ueberwiegend <4 Zeichen und fallen
+    dadurch weg; Zahlen (Zitat-Marker) werden bewusst ignoriert."""
+    return {t.lower() for t in _CONTENT_TOKEN_RE.findall(text)}
+
+
+def _looks_like_front_matter(chunk: Chunk) -> bool:
+    """Konservative Heuristik fuer einen Titelseiten-/Front-Matter-Chunk: sehr kurz
+    ODER hoher Anteil Title-Case-Woerter (Titel/Running-Header sind title-cased,
+    Fliesstext ist es nicht). Nur zum milden Daempfen (F2), nie zum Entfernen."""
+    tokens = chunk.text.split()
+    if len(tokens) < 8:
+        return True
+    titlecase = sum(1 for t in tokens if len(t) > 1 and t[0].isupper() and t[1:].islower())
+    return titlecase / len(tokens) >= 0.45
+
+
+def _sentence_chunk_map(chunks: list[Chunk]) -> tuple[list[str], list[int]]:
+    """Zerlegt jeden Chunk-Text in Saetze und merkt sich pro Satz seinen Home-Chunk.
+    Selbst-enthaltend (nur aus `chunks` ableitbar) — damit der Rescue identisch im
+    Goldset-Testpfad (`_retrieve_claim_contexts(claims, chunks)`) und in der echten
+    Pipeline greift. Ueberlappungssaetze zweier Nachbar-Chunks tauchen doppelt auf;
+    das ist unschaedlich, da `_expand_context` ohnehin die ±1-Nachbarn mitzieht."""
+    sent_texts: list[str] = []
+    sent_chunk_idx: list[int] = []
+    for chunk in chunks:
+        for sentence in _split_sentences(chunk.text):
+            sentence = sentence.strip()
+            if len(sentence) >= 20:
+                sent_texts.append(sentence)
+                sent_chunk_idx.append(chunk.idx)
+    return sent_texts, sent_chunk_idx
 
 
 # --- Stage-8-PDF-Memoisierung (#151, Punkt 1+2) ----------------------------
@@ -246,6 +329,44 @@ def _note_title(note_path: Path, note_body: str) -> str:
     return match.group(1).strip() if match else note_path.stem
 
 
+def _rescue_chunk_indices(
+    claim: str,
+    sent_scores: list[float],
+    sent_chunk_idx: list[int],
+    chunk_tokens: list[set[str]],
+) -> list[int]:
+    """F1: Home-Chunks des/der best-belegenden Satzes/Chunks fuer einen Claim.
+
+    Union zweier Pfade (Reihenfolge = Injektions-Prioritaet):
+      1. Semantisch: distinkte Home-Chunks der hoechst-cosinen Saetze (>= Floor).
+      2. Lexikalisch: Chunks mit dem groessten Content-Token-Overlap (>= Floor).
+    Deterministisch (stabiler Sort ueber Score, Tie-Break = Chunk-Reihenfolge)."""
+    # Pfad 1 -- semantisch: distinkte Home-Chunks in absteigender Satz-Cosine.
+    sem_order = sorted(range(len(sent_scores)), key=lambda i: sent_scores[i], reverse=True)
+    sem_chunks: list[int] = []
+    for si in sem_order:
+        if sent_scores[si] < RESCUE_SENTENCE_MIN_COSINE:
+            break
+        ci = sent_chunk_idx[si]
+        if ci not in sem_chunks:
+            sem_chunks.append(ci)
+        if len(sem_chunks) >= RESCUE_SENTENCE_CHUNKS:
+            break
+
+    # Pfad 2 -- lexikalisch: groesster Content-Token-Overlap (Cross-Lingual-Netz).
+    claim_toks = _content_tokens(claim)
+    lex_scored = [
+        (ci, len(claim_toks & chunk_tokens[ci]))
+        for ci in range(len(chunk_tokens))
+        if len(claim_toks & chunk_tokens[ci]) >= RESCUE_LEXICAL_MIN_OVERLAP
+    ]
+    lex_scored.sort(key=lambda item: (item[1], -item[0]), reverse=True)
+    lex_chunks = [ci for ci, _ in lex_scored[:RESCUE_LEXICAL_CHUNKS]]
+
+    # Union unter Erhalt der Prioritaets-Reihenfolge (semantisch zuerst).
+    return list(dict.fromkeys(sem_chunks + lex_chunks))
+
+
 def _retrieve_claim_contexts(claims: list[str], chunks: list[Chunk], chunk_embs=None) -> list[RetrievedContext]:
     if not claims or not chunks:
         return []
@@ -256,47 +377,72 @@ def _retrieve_claim_contexts(claims: list[str], chunks: list[Chunk], chunk_embs=
         chunk_embs = model.encode(chunk_texts, show_progress_bar=False, normalize_embeddings=True)
     claim_embs = model.encode(claims, show_progress_bar=False, normalize_embeddings=True)
 
+    # F1-Infrastruktur (einmal pro Aufruf): Satz→Home-Chunk-Map + Satz-Embeddings +
+    # Content-Tokens je Chunk. Selbst-enthaltend aus `chunks` — identisch im
+    # Goldset-Testpfad und in der Pipeline.
+    sent_texts, sent_chunk_idx = _sentence_chunk_map(chunks)
+    sent_embs = model.encode(sent_texts, show_progress_bar=False, normalize_embeddings=True) if sent_texts else []
+    chunk_tokens = [_content_tokens(chunk.text) for chunk in chunks]
+
+    # F2: Front-Matter-/Titel-Chunk (nur der erste Chunk, nur wenn front-matter-typisch)
+    # im Ranking mild daempfen, damit echte Beleg-Chunks in adaptive_k aufsteigen.
+    title_penalty = [0.0] * len(chunks)
+    if chunks and _looks_like_front_matter(chunks[0]):
+        title_penalty[0] = RESCUE_TITLE_CHUNK_PENALTY
+
     retrieved: list[RetrievedContext] = []
     for claim_idx, (claim, claim_emb) in enumerate(zip(claims, claim_embs)):
+        chunk_cos = [cosine(chunk_embs[idx], claim_emb) for idx in range(len(chunks))]
         all_ranked = sorted(
-            ((idx, cosine(chunk_embs[idx], claim_emb)) for idx in range(len(chunks))),
-            key=lambda item: item[1],
+            range(len(chunks)),
+            # F2: nur der Sort-Schluessel wird gedaempft; der gespeicherte cosine bleibt roh.
+            key=lambda idx: chunk_cos[idx] - title_penalty[idx],
             reverse=True,
         )
         # Margin-basiertes adaptives TOP_K (Gemini-Review 2026-05-22):
         # Dichte Score-Cluster (≤0.05 Abstand) → k groß halten (Retriever unsicher).
         # Starker Score-Abfall → k=2 aggressiv (eindeutiger Treffer, Tokens sparen).
         # Löst False-Negatives bei paraphrase-multilingual-MiniLM wo Scores dicht clustern.
-        top_score = all_ranked[0][1] if all_ranked else 0.0
+        top_score = (chunk_cos[all_ranked[0]] - title_penalty[all_ranked[0]]) if all_ranked else 0.0
         margin_threshold = top_score - 0.05
         adaptive_k = 2  # Absolutes Minimum
-        for _idx, (_, _score) in enumerate(all_ranked):
-            if _score >= margin_threshold:
-                adaptive_k = max(adaptive_k, _idx + 1)
+        for _pos, idx in enumerate(all_ranked):
+            if chunk_cos[idx] - title_penalty[idx] >= margin_threshold:
+                adaptive_k = max(adaptive_k, _pos + 1)
             else:
                 break
         adaptive_k = min(adaptive_k, TOP_K)  # Obergrenze bei 5
         ranked = all_ranked[:adaptive_k]
+
+        # F1-Rescue: Home-Chunks des/der best-belegenden Satzes/Chunks additiv
+        # anhaengen (kein Relabel — nur sichtbar-machen fuers Judge-Urteil).
+        sent_scores = [cosine(claim_emb, se) for se in sent_embs] if len(sent_embs) else []
+        rescue_ids = _rescue_chunk_indices(claim, sent_scores, sent_chunk_idx, chunk_tokens) if sent_scores else []
+        pool_ids = list(dict.fromkeys([*ranked, *rescue_ids]))
+
         contexts: list[dict[str, Any]] = []
-        for rank, (chunk_idx, score) in enumerate(ranked, start=1):
+        for rank, chunk_idx in enumerate(pool_ids, start=1):
             chunk = chunks[chunk_idx]
             contexts.append(
                 {
                     "rank": rank,
                     "chunk_idx": chunk_idx,
                     "pages": list(chunk.pages),
-                    "cosine": round(float(score), 3),
+                    "cosine": round(float(chunk_cos[chunk_idx]), 3),
                     "text": _expand_context(chunks, chunk_idx),
+                    "rescued": chunk_idx not in ranked,
                 }
             )
-        best_idx = ranked[0][0] if ranked else None
+        best_idx = ranked[0] if ranked else None
         best_chunk = chunks[best_idx] if best_idx is not None else None
         retrieved.append(
             RetrievedContext(
                 claim_idx=claim_idx,
                 claim=claim,
+                # top_cosine/best_* bleiben das PRIMAER-Retrieval-Signal (nicht der
+                # Rescue): decision_engine-Low-Cosine-Audit + best_page haengen daran.
+                top_cosine=round(float(chunk_cos[best_idx]), 3) if best_idx is not None else 0.0,
                 contexts=contexts,
-                top_cosine=round(float(ranked[0][1]), 3) if ranked else 0.0,
                 best_chunk_idx=best_idx,
                 best_page=best_chunk.pages[0] if best_chunk and best_chunk.pages else None,
             )
@@ -571,6 +717,15 @@ def _normalize_for_evidence(text: str) -> str:
     text = text.replace("ﬁ", "fi").replace("ﬂ", "fl")
     text = re.sub(r"-\s+", "", text)
     text = re.sub(r"[^\w\s]", " ", text, flags=re.UNICODE)
+    # #232: PyMuPDF interleaviert hochgestellte Zitat-/Fussnoten-Marker als inline
+    # Ziffern-Tokens ("... in the social world 5 which implies ...", "... science 42
+    # and business 136 as noted ..."). Diese sind Extraktions-Rauschen, kein Inhalt,
+    # und brechen den woertlichen Beleg-Substring-Abgleich (Goldset idx13, bates idx6:
+    # der stuetzende Chunk enthaelt den Satz, aber mit eingestreuten Marker-Ziffern).
+    # Kurze freistehende Ziffern-Tokens (1-3 Stellen) entfernen. Die Normalisierung
+    # wird SYMMETRISCH auf Beleg-Zitat UND Corpus/Pool angewandt → fuer echte Zahlen
+    # (z.B. "355 Studien") match-neutral; 4+-stellige Zahlen (Jahre) bleiben erhalten.
+    text = re.sub(r"\b\d{1,3}\b", " ", text)
     return re.sub(r"\s+", " ", text).strip()
 
 

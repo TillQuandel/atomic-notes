@@ -138,17 +138,15 @@ def test_negative_control_idx8_evidence_reaches_pool(goldset, context_pools_by_p
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(
-    reason="#232 Retrieval-Fix (PR-B, F1+F2) steht aus -- Chunk-Granularitaet lässt "
-    "den stuetzenden Satz oft ausserhalb der adaptive_k-Top-Chunks liegen.",
-    strict=True,
-)
 def test_recall_false_positive_anchors(goldset, context_pools_by_pdf):
     """#232 Abnahme-Kriterium: Evidence-in-Pool-Recall ueber alle
-    false_positive_retrieval_miss-Anker muss >= 90% sein. Auf master ist dieser
-    Wert dokumentiert niedrig -- siehe PR-A-Bericht fuer die exakte Zahl. Sobald
-    PR-B den Recall hebt, wird dieser Test unerwartet gruen (XPASS) und
-    `strict=True` laesst den Lauf dann FAILEN, bis der xfail-Marker entfernt wird."""
+    false_positive_retrieval_miss-Anker muss >= 90% sein. Vor PR-B (F1+F2) lag der
+    Wert dokumentiert niedrig (2/10-4/10, umgebungsabhaengig -- siehe README). PR-B
+    (Satz-Level-Retrieval-Rescue + Titel-Chunk-Deprioritisierung +
+    Zitat-Marker-robuste Evidence-Normalisierung) hebt ihn ueber die Schwelle;
+    der ehemalige `xfail(strict=True)`-Marker wurde entfernt und die Assertion ist
+    jetzt hart. Die absolute Recall-Zahl driftet mit dem Embedding-/Library-Zustand
+    (README-Caveat) -- die Abnahme prueft die Verbesserung in DERSELBEN Umgebung."""
     fp_records = [r for r in goldset if r["adjudication"] == "false_positive_retrieval_miss"]
     assert fp_records, "Kein false_positive_retrieval_miss-Anker im Goldset"
 
