@@ -2014,6 +2014,10 @@ def _run_extraction_stages(
     # --- Stage 0: PDF-Enrichment bei fehlenden Metadaten ---
     _has_author = bool(pdf_meta.get("Author") or pdf_meta.get("author")) if pdf_meta else False
     _has_year = bool(pdf_meta.get("Year") or pdf_meta.get("year")) if pdf_meta else False
+    # #263: der von Stage 0 (CrossRef/etc.) gefundene DOI wird an Stage 3 (Quality-
+    # Agent) durchgereicht — sonst geht er verloren und der Quality-Agent muss ihn
+    # per eigener (unzuverlässigerer) Title-Match-Suche neu finden.
+    _enrich_doi: str | None = None
     if not (_has_author and _has_year):
         print("[0/7] PDF-Enrichment — keine Metadaten im Dateinamen erkannt…")
         try:
@@ -2034,6 +2038,8 @@ def _run_extraction_stages(
                     pdf_meta["Author"] = _enrich_meta["author"]
                 if _enrich_meta.get("year") and not pdf_meta.get("Year"):
                     pdf_meta["Year"] = str(_enrich_meta["year"])
+                if _enrich_meta.get("doi"):
+                    _enrich_doi = _enrich_meta["doi"]
         except Exception as _e:
             print(f"  [warn] PDF-Enrichment fehlgeschlagen: {_e}", file=sys.stderr)
 
@@ -2053,8 +2059,11 @@ def _run_extraction_stages(
     # zitierfähigen Autor/CreationDate-Jahr mehr — pdf_metadata). Muss vor dem
     # Extractor laufen, sonst stünde der Platzhalter "Autor" im Body.
     vault_writer.apply_filename_citation_metadata(pdf_meta, fb)
+    # #263: expliziter --doi (CLI) bleibt autoritativ, sonst der von Stage 0
+    # gefundene DOI — die quality-agent-eigene Title-Match-Suche greift nur noch
+    # als Fallback, wenn weder --doi noch enrich einen DOI geliefert haben.
     quality_report = quality.check_quality(
-        doi=args.doi,
+        doi=args.doi or _enrich_doi,
         title=q_title,
         author=pdf_meta.get("Author") or fb.get("Author"),
         year=pdf_meta.get("Year") or fb.get("Year"),

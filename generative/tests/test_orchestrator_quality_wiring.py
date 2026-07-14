@@ -122,3 +122,117 @@ def test_physical_pages_signal_wired_from_pdf_chunker_into_citation(monkeypatch)
     # #152: Attributzugriff auf die RunContext-Dataclass statt Tupel-Position.
     citation = result.citation
     assert citation.physical_pages is True
+
+
+def test_enrich_doi_propagated_to_quality_agent(monkeypatch):
+    """Issue #263: Stage 0 (PDF-Enrichment) findet den DOI per CrossRef-Lookup —
+    aber Stage 3 (Quality-Agent) ignorierte dieses Ergebnis bisher und suchte den
+    DOI ausschließlich über seine eigene Title-Match-Suche. Scheitert die (bei
+    schwierigen Titeln unzuverlässige) Title-Match-Suche, geht der bereits
+    gefundene DOI verloren -> False-Negative "kein DOI" -> Edition-Gate blockt
+    auto-vault trotz bekanntem, von enrich verifiziertem DOI.
+
+    Der von `pdf_enrich.enrich()` gefundene DOI muss an `quality.check_quality`
+    durchgereicht werden (Title-Match bleibt Fallback für den Fall, dass enrich
+    keinen DOI hatte)."""
+    pc = orchestrator.pdf_chunker
+    monkeypatch.setattr(pc, "pdf_to_text", lambda *_a, **_k: "Etwas Quelltext mit Wörtern.")
+    monkeypatch.setattr(pc, "split_by_chapters", lambda *_a, **_k: [SimpleNamespace(title="Intro", text="body")])
+    # Kein Autor/Jahr im Info-Dict -> Stage 0 (PDF-Enrichment) läuft.
+    monkeypatch.setattr(pc, "pdf_metadata", lambda *_a, **_k: {"Pages": "1"})
+    monkeypatch.setattr(pc, "extract_overview", lambda *_a, **_k: "Überblick")
+    monkeypatch.setattr(orchestrator.acronym_fix, "extract_acronym_pairs", lambda *_a, **_k: {})
+    monkeypatch.setattr(
+        orchestrator.context_builder,
+        "build_relevance_profile",
+        lambda *_a, **_k: {"existing_concepts": [], "tag_whitelist": []},
+    )
+    monkeypatch.setattr(orchestrator.context_builder, "build_concept_links", lambda *_a, **_k: {})
+    monkeypatch.setattr(orchestrator, "ENABLE_BACKGROUND_EXTRACTOR", False)
+    monkeypatch.setattr(orchestrator.planner, "run", lambda *_a, **_k: ConceptPlan("Titel", "Summary", []))
+    monkeypatch.setattr(orchestrator.planner, "filter_hallucinated", lambda plan, _text: (plan, []))
+
+    async def _no_concepts(*_a, **_k):
+        return ([], {}, 0, [])  # #210: 4. Rückgabewert = extractor_failures
+
+    monkeypatch.setattr(orchestrator, "run_extractors_per_concept", _no_concepts)
+
+    from generative.tools import pdf_enrich as pdf_enrich_module
+
+    monkeypatch.setattr(
+        pdf_enrich_module,
+        "enrich",
+        lambda *_a, **_k: {
+            "title": "Informationsdidaktik",
+            "author": "Michel",
+            "year": "2016",
+            "doi": "10.1515/iwp-2016-0057",
+            "type": "journal-article",
+        },
+    )
+
+    captured: dict = {}
+
+    def _spy_check_quality(**kw):
+        captured.update(kw)
+        return QualityReport(peer_reviewed=None, citation_count=None, retracted=False, flags=[])
+
+    monkeypatch.setattr(orchestrator.quality, "check_quality", _spy_check_quality)
+
+    args = SimpleNamespace(by_chapter=False, dry_run=True, doi=None, llm_fallback=False)
+    orchestrator._run_extraction_stages(args, Path("fake.pdf"), None)
+
+    assert captured.get("doi") == "10.1515/iwp-2016-0057"
+
+
+def test_explicit_cli_doi_takes_precedence_over_enrich_doi(monkeypatch):
+    """Ein explizit per `--doi` übergebener Wert bleibt autoritativ — Stage 0
+    (Enrichment) darf ihn nicht überschreiben (Precedence-Gegenprobe zu obigem
+    Test)."""
+    pc = orchestrator.pdf_chunker
+    monkeypatch.setattr(pc, "pdf_to_text", lambda *_a, **_k: "Etwas Quelltext mit Wörtern.")
+    monkeypatch.setattr(pc, "split_by_chapters", lambda *_a, **_k: [SimpleNamespace(title="Intro", text="body")])
+    monkeypatch.setattr(pc, "pdf_metadata", lambda *_a, **_k: {"Pages": "1"})
+    monkeypatch.setattr(pc, "extract_overview", lambda *_a, **_k: "Überblick")
+    monkeypatch.setattr(orchestrator.acronym_fix, "extract_acronym_pairs", lambda *_a, **_k: {})
+    monkeypatch.setattr(
+        orchestrator.context_builder,
+        "build_relevance_profile",
+        lambda *_a, **_k: {"existing_concepts": [], "tag_whitelist": []},
+    )
+    monkeypatch.setattr(orchestrator.context_builder, "build_concept_links", lambda *_a, **_k: {})
+    monkeypatch.setattr(orchestrator, "ENABLE_BACKGROUND_EXTRACTOR", False)
+    monkeypatch.setattr(orchestrator.planner, "run", lambda *_a, **_k: ConceptPlan("Titel", "Summary", []))
+    monkeypatch.setattr(orchestrator.planner, "filter_hallucinated", lambda plan, _text: (plan, []))
+
+    async def _no_concepts(*_a, **_k):
+        return ([], {}, 0, [])
+
+    monkeypatch.setattr(orchestrator, "run_extractors_per_concept", _no_concepts)
+
+    from generative.tools import pdf_enrich as pdf_enrich_module
+
+    monkeypatch.setattr(
+        pdf_enrich_module,
+        "enrich",
+        lambda *_a, **_k: {
+            "title": "Informationsdidaktik",
+            "author": "Michel",
+            "year": "2016",
+            "doi": "10.1515/enrich-doi",
+            "type": "journal-article",
+        },
+    )
+
+    captured: dict = {}
+
+    def _spy_check_quality(**kw):
+        captured.update(kw)
+        return QualityReport(peer_reviewed=None, citation_count=None, retracted=False, flags=[])
+
+    monkeypatch.setattr(orchestrator.quality, "check_quality", _spy_check_quality)
+
+    args = SimpleNamespace(by_chapter=False, dry_run=True, doi="10.1515/cli-doi", llm_fallback=False)
+    orchestrator._run_extraction_stages(args, Path("fake.pdf"), None)
+
+    assert captured.get("doi") == "10.1515/cli-doi"
