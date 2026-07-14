@@ -1307,8 +1307,18 @@ function renderKpis(kpis, thresh, kpiTrend) {
     // kumuliert je Agent) — Kachel-Label pruezisiert.
     { id:'kpi-dur',    key:'dur',    label:'Laufzeit (aktuell)', val:kpis.cur_dur_h??kpis.total_dur_h,   u:'h', digits:1, tone:'neutral', tgt:'',
       hint:'Summe der Pipeline-Laufzeit aller Läufe der aktuellen Version, in Stunden. Der ??-Fallback auf die Gesamt-Laufzeit aller Versionen greift praktisch nie: hat die aktuelle Version keine Läufe, ist die Summe bereits 0,0 (kein null) — die Kachel zeigt dann „0,0 h", nicht die Gesamt-Laufzeit. Der Versions-Chart in der Kosten-Sektion darunter zeigt dagegen den Median je Version — beide korrekt, aber unterschiedliche Kennzahl.' },
-    { id:'kpi-tokens', key:'tokens', label:'Pipeline-Tokens', val:(kpis.cur_tokens??kpis.total_tokens)?Math.round((kpis.cur_tokens??kpis.total_tokens)/1e6*100)/100:null, u:'M', digits:2, tone:'neutral', tgt:'',
-      hint:'Summe aus Input- und Output-Tokens aller Läufe der aktuellen Version, in Millionen. Der Fallback auf die Gesamtsumme aller Versionen greift praktisch nie: ist die Summe der aktuellen Version 0, wertet die Anzeige das als „kein Wert" und zeigt einen Strich (–), nicht die Gesamtsumme. Cache-Reads zählen hier nicht mit (siehe Agenten-Sektion für den Cache-Anteil).' },
+    // #238: drei widersprüchliche Token-Totals je Lauf (KPI-Kachel, DB
+    // tokens_total, echter billable Total) — Billable als Leitzahl etabliert
+    // (kpi-tokens-billable, neu, in+out+cache) UND die bestehende Kachel
+    // präzise umbenannt/gelabelt (war „Pipeline-Tokens", enthält aber
+    // Eval-Judges UND lässt Cache weg — beides irreführend am alten Namen).
+    // sparkless: kpiTrend (Server) fuehrt bisher keine Billable-Zeitreihe je
+    // Version (nur hall/cov/accept/tokens/dur) — ohne Trend-Daten waere die
+    // Sparkline-Kachel klickbar, aber leer (Muster: kpi-accept, Zeile ~1285).
+    { id:'kpi-tokens-billable', key:'tokensBillable', label:'Billable Tokens', val:kpis.cur_tokens_billable?Math.round(kpis.cur_tokens_billable/1e6*100)/100:null, u:'M', digits:2, tone:'neutral', tgt:'', sparkless:true,
+      hint:`Tatsächlicher Token-Verbrauch aller Läufe der aktuellen Version (in+out+Cache, alle Calls inkl. Stage-8-Qualitäts-Eval), in Millionen — die Leitzahl für „wie viel wurde wirklich verbraucht". Aufschlüsselung: In ${_fmtDE((kpis.cur_tokens_in||0)/1e3,0)} k · Out ${_fmtDE((kpis.cur_tokens_out||0)/1e3,0)} k · Cache-Read ${_fmtDE((kpis.cur_tokens_cache_read||0)/1e3,0)} k · Cache-Create ${_fmtDE((kpis.cur_tokens_cache_create||0)/1e3,0)} k. Cache-Reads sind bei Prompt-Caching deutlich günstiger als reguläre Input-Tokens, zählen hier aber trotzdem als Verbrauch mit — anders als die Kachel „Tokens (ohne Cache)" daneben.` },
+    { id:'kpi-tokens', key:'tokens', label:'Tokens (ohne Cache)', val:(kpis.cur_tokens??kpis.total_tokens)?Math.round((kpis.cur_tokens??kpis.total_tokens)/1e6*100)/100:null, u:'M', digits:2, tone:'neutral', tgt:'',
+      hint:'Summe aus Input- und Output-Tokens aller Läufe der aktuellen Version (inkl. Stage-8-Qualitäts-Eval-Calls), in Millionen — OHNE Cache-Reads/-Creates (siehe Kachel „Billable Tokens" daneben für den vollständigen Verbrauch inkl. Cache). Der Fallback auf die Gesamtsumme aller Versionen greift praktisch nie: ist die Summe der aktuellen Version 0, wertet die Anzeige das als „kein Wert" und zeigt einen Strich (–), nicht die Gesamtsumme.' },
     { id:'kpi-cost', key:'cost', label:'API-Kosten',
       val: (kpis.cur_cost_usd > 0) ? kpis.cur_cost_usd : null,
       u:'$', digits: (kpis.cur_cost_usd >= 1 ? 2 : 4), tone:'neutral',
@@ -1622,7 +1632,7 @@ function renderStrip(kpis) {
     // #204 P5: "Laufzeit" hier ist Lifetime (alle Versionen) — Scope-Suffix
     // gegen die Kachel "Laufzeit (aktuell)" oben; Zahl war zudem mit Punkt
     // statt Komma formatiert (Locale-Fund an derselben Stelle mitgefixt).
-    cell('Tokens', tok, '', kpis.total_dur_h ? `${_fmtDE(kpis.total_dur_h)}h Laufzeit (gesamt)` : '', 'Summe aus Input- und Output-Tokens aller Läufe mit DB-Zuordnung, über alle Versionen — nicht nur die aktuelle (vgl. Kachel „Pipeline-Tokens" oben). Traces ohne zugehörige pipeline_runs-Zeile (z. B. abgebrochene Läufe) zählen hier bewusst nicht mit.');
+    cell('Tokens', tok, '', kpis.total_dur_h ? `${_fmtDE(kpis.total_dur_h)}h Laufzeit (gesamt)` : '', 'Summe aus Input- und Output-Tokens aller Läufe mit DB-Zuordnung, über alle Versionen — nicht nur die aktuelle (vgl. Kachel „Tokens (ohne Cache)" oben). Traces ohne zugehörige pipeline_runs-Zeile (z. B. abgebrochene Läufe) zählen hier bewusst nicht mit.');
 }
 
 /* ── Table ────────────────────────────────────────────────────── */
@@ -2163,7 +2173,11 @@ function renderInsights(d) {
   // _chart_tokens_by_version pro Version aggregiert, nicht mehr pro Run — Label angepasst)
   const tok = d.tokens || {};
   if ((tok.labels||[]).length) {
-    const totalTok = (tok.tokens_in||[]).reduce((a,b)=>a+(b||0),0) + (tok.tokens_out||[]).reduce((a,b)=>a+(b||0),0);
+    // #238: totalTok liess Cache aus (~9x-Untertreibung, Befund "50 Versionen
+    // verbrauchten 10,44 M Tokens" ohne die tatsaechlich verbrauchten Cache-
+    // Tokens) — tok.tokens_cache ist serverseitig (_chart_tokens_by_version)
+    // bereits vorhanden, nur hier nie eingerechnet.
+    const totalTok = (tok.tokens_in||[]).reduce((a,b)=>a+(b||0),0) + (tok.tokens_out||[]).reduce((a,b)=>a+(b||0),0) + (tok.tokens_cache||[]).reduce((a,b)=>a+(b||0),0);
     const medDur = _median((tok.duration_min||[]).filter(v=>v>0).sort((a,b)=>a-b));
     // #196 P2: Kosten pro akzeptierter Note — neueste Version mit API-Kosten
     // (subscription-Läufe liefern None und tauchen hier bewusst nicht auf).
@@ -2176,7 +2190,7 @@ function renderInsights(d) {
       }
     }
     _setInsight('ins-cost',
-      `<strong>${tok.labels.length}</strong> Versionen verbrauchten <strong>${_fmtDE(totalTok/1e6, 2)} M</strong> Tokens` +
+      `<strong>${tok.labels.length}</strong> Versionen verbrauchten <strong>${_fmtDE(totalTok/1e6, 2)} M</strong> Tokens (inkl. Cache)` +
       (medDur != null ? `, Median-Laufzeit <strong>${_fmtDE(medDur, 0)} min</strong> pro Version.` : '.') + cpnTxt);
   } else { _setInsight('ins-cost', ''); }
 

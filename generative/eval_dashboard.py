@@ -531,6 +531,13 @@ def _read_token_runs() -> list[dict]:
                     "tokens_in": tin,
                     "tokens_out": tout,
                     "tokens_cache": tcr + tcw,
+                    # #238: cache_read/cache_creation additiv getrennt — bisher nur
+                    # als Summe (tokens_cache, oben, unveraendert fuer bestehende
+                    # Konsumenten wie ch5) verfuegbar. Fuer die Billable-Aufschlues-
+                    # selung im KPI-Kachel-Hint (in/out/cache_r/cache_c statt einer
+                    # Summe, Issue-Fix-Vorschlag).
+                    "tokens_cache_read": tcr,
+                    "tokens_cache_create": tcw,
                     "duration_min": round(dur_ms / 60000, 1),
                     "calls": count,
                 }
@@ -608,7 +615,29 @@ def _calc_kpis(
     total_tokens = sum(r["tokens_in"] + r["tokens_out"] for r in token_runs if r.get("db_matched", True))
     total_dur_s = sum(r["duration_min"] * 60 for r in token_runs if r.get("db_matched", True))
     latest_truns = [r for r in token_runs if r.get("ver") == latest_pver] if latest_pver else token_runs
+    # cur_tokens (#238-Befund Wert 1): in+out ALLER Calls der aktuellen Version
+    # inkl. Eval-Judges (token_runs kommt aus _read_token_runs(), das den
+    # gesamten Trace liest, nicht nur die Pipeline-Phase) — OHNE Cache. Name/
+    # Wert bewusst unveraendert (bestehende Konsumenten), nur das HTML-Label
+    # wird praezisiert.
     cur_tokens = sum(r["tokens_in"] + r["tokens_out"] for r in latest_truns)
+    # cur_tokens_cache: dieselbe token_runs-Quelle, Cache-Anteil separat (fuer
+    # den Kachel-Hint) — tokens_cache war in token_runs bereits vorhanden, nur
+    # nie in eine KPI-Summe eingerechnet.
+    cur_tokens_cache = sum(r.get("tokens_cache", 0) or 0 for r in latest_truns)
+    # Aufschluesselung statt nur der Summe (Issue-Fix-Vorschlag): in/out/
+    # cache_read/cache_create separat fuer den Billable-Kachel-Hint.
+    cur_tokens_in = sum(r.get("tokens_in", 0) or 0 for r in latest_truns)
+    cur_tokens_out = sum(r.get("tokens_out", 0) or 0 for r in latest_truns)
+    cur_tokens_cache_read = sum(r.get("tokens_cache_read", 0) or 0 for r in latest_truns)
+    cur_tokens_cache_create = sum(r.get("tokens_cache_create", 0) or 0 for r in latest_truns)
+    # cur_tokens_billable (#238-Fix): Billable als Leitzahl — in+out+cache,
+    # exakt dieselbe Datenquelle wie cur_tokens (kein neuer Erfassungspfad,
+    # nur die Cache-Spalte zusaetzlich aufsummiert). Entspricht #238-Befund
+    # Wert 3 (echter billable Total inkl. Cache inkl. Eval), nur auf die
+    # aktuelle Version statt den ganzen Trace gescoped (konsistent mit
+    # cur_tokens/cur_dur_h daneben).
+    cur_tokens_billable = cur_tokens + cur_tokens_cache
     cur_dur_h = round(sum(r["duration_min"] for r in latest_truns) / 60, 1)
     cur_cost_usd = round(sum(r.get("cost_usd", 0.0) or 0.0 for r in latest_truns), 4)
 
@@ -685,6 +714,12 @@ def _calc_kpis(
         "total_tokens": total_tokens,
         "total_dur_h": round(total_dur_s / 3600, 1),
         "cur_tokens": cur_tokens,
+        "cur_tokens_cache": cur_tokens_cache,
+        "cur_tokens_billable": cur_tokens_billable,
+        "cur_tokens_in": cur_tokens_in,
+        "cur_tokens_out": cur_tokens_out,
+        "cur_tokens_cache_read": cur_tokens_cache_read,
+        "cur_tokens_cache_create": cur_tokens_cache_create,
         "cur_dur_h": cur_dur_h,
         "cur_cost_usd": cur_cost_usd,
     }
