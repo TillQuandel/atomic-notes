@@ -1707,6 +1707,13 @@ function renderCharts(d) {
     const rawPairs = d.accept.labels.map((l,i)=>({l, v:d.accept.values[i]}))
       .filter(p => p.v != null && (p.v > 0 || (nMap[p.l] && nMap[p.l] > 0)))
       .sort((a,b)=>b.v-a.v);
+    // #249: Balken ohne Eval-Basis (0 evaluierte Notes für dieses PDF, z. B.
+    // Merge-only-Lauf ohne Eval-Stage) neutral färben statt tone-basiert
+    // (mint/amber/coral) — sonst suggeriert ein 100%-Routing-Wert einen
+    // Qualitätserfolg, den die Zahl gar nicht trägt (analog #246, dort die
+    // Akzeptanz-KACHEL). Grau = dasselbe gedämpfte t.ink4 wie die "Weitere"-
+    // Sammelkategorie in Scatter/Scaling — keine neue Farbe.
+    const barColor = (p) => (nMap[p.l]||0)===0 ? t.ink4 : (p.v>=T.accept[0]?t.mint:p.v>=T.accept[1]?t.amber:t.coral);
     const truncLabel = (l) => l.length > 22 ? l.slice(0,20)+'…' : l;
     const ax1 = document.getElementById('ax1');
     if (ax1) ax1.textContent = `in % · N=${rawPairs.reduce((s,p)=>s+(nMap[p.l]||0),0)} Notes`;
@@ -1715,20 +1722,27 @@ function renderCharts(d) {
     getOrCreate('ch1', {
       type:'bar',
       data:{
-        labels: rawPairs.map(p=>`${truncLabel(p.l)}${nMap[p.l]?' (n='+nMap[p.l]+')':''}`),
+        // (n=X) IMMER anzeigen, auch bei 0 — vorher liess der Truthy-Check
+        // (`nMap[p.l]?...`) den Hinweis genau dann verschwinden, wenn er am
+        // wichtigsten wäre (0 ist falsy).
+        labels: rawPairs.map(p=>`${truncLabel(p.l)}${nMap[p.l]!=null?' (n='+nMap[p.l]+')':''}`),
         datasets:[{data:rawPairs.map(p=>p.v),
-          backgroundColor:rawPairs.map(p=>p.v>=T.accept[0]?t.mint+'bb':p.v>=T.accept[1]?t.amber+'bb':t.coral+'bb'),
+          backgroundColor:rawPairs.map(p=>barColor(p)+'bb'),
           borderWidth:0, borderRadius:2, barPercentage:.7, categoryPercentage:.85}]
       },
       options:{indexAxis:'y',maintainAspectRatio:false,responsive:true,animation:{duration:500,easing:'easeOutQuart'},
         layout:{padding:{right:52}},
-        plugins:{tooltip:{callbacks:{label:ctx=>`${_fmtDE(ctx.parsed.x)} % akzeptiert`}}},
+        plugins:{tooltip:{callbacks:{label:ctx=>{
+          const p = rawPairs[ctx.dataIndex];
+          const base = `${_fmtDE(ctx.parsed.x)} % akzeptiert`;
+          return (nMap[p.l]||0)===0 ? [base, 'keine Eval-Basis — 0 Notes evaluiert (nur Routing-Daten)'] : base;
+        }}}},
         scales:{x:axisCfg({beginAtZero:true,max:100,ticks:{callback:v=>v+' %',stepSize:25}}),
           y:axisCfg({grid:{display:false},ticks:{color:t.ink3,font:{size:10.5},autoSkip:false}})}},
       plugins:[{id:'vals',afterDatasetsDraw(chart){
         const {ctx}=chart; ctx.save(); ctx.font='600 10.5px "IBM Plex Sans"'; ctx.textAlign='left'; ctx.textBaseline='middle';
         chart.getDatasetMeta(0).data.forEach((bar,i)=>{
-          const val=rawPairs[i]?.v??0; const col=val>=T.accept[0]?t.mint:val>=T.accept[1]?t.amber:t.coral;
+          const val=rawPairs[i]?.v??0; const col=barColor(rawPairs[i]);
           ctx.fillStyle=col; ctx.fillText(_fmtDE(val)+' %', bar.x+6, bar.y);
         }); ctx.restore();
       }}]
@@ -1743,11 +1757,19 @@ function renderCharts(d) {
   }
 
   // ch2 — Scatter
-  if (d.scatter?.points?.length) renderScatter(d.scatter, T);
+  // #249: gemergte, nicht evaluierte Notes (Routing "Merge" — landen im
+  // Vault, werden aber nie separat neu evaluiert, #237-Diagnosebefund) haben
+  // kein Fehlerquote/Belegrate-Koordinatenpaar und können darum nicht als
+  // Punkt geplottet werden, ohne Werte zu erfinden. Statt sie deshalb
+  // stillschweigend wegzulassen: eigene, explizit beschriftete Kategorie in
+  // der Legende neben dem Scatter — dieselbe visuelle Sprache (Dot + Label)
+  // wie die bestehende "Weitere"-Sammelkategorie.
+  const merged = _mergedBreakdown(d.pdf_table);
+  if (d.scatter?.points?.length) renderScatter(d.scatter, T, merged);
   else {
     setChartEmpty('ch2');
     const ax2=document.getElementById('ax2'); if(ax2) ax2.textContent='0 evaluierte notes';
-    const l2=document.getElementById('leg2'); if(l2) l2.innerHTML='';
+    const l2=document.getElementById('leg2'); if(l2) l2.innerHTML=_mergedLegendChip(merged);
     _resolveDrawer([]);
   }
 
@@ -1972,7 +1994,26 @@ function _resolveDrawer(points) {
   else _renderNoteDrawer(_drawerLast, true);
 }
 
-function renderScatter(scat, T) {
+/* #249: "gemergt, nicht evaluiert" — eigene Kategorie statt stiller
+   Auslassung. Quelle ist d.pdf_table[].n_merge (SSoT: _accept_from_runs in
+   generative/eval_dashboard.py, dieselbe Versions-Basis wie accept/accept_n
+   — kein zweiter Aggregations-Pfad). */
+function _mergedBreakdown(pdfTable) {
+  const rows = (pdfTable||[]).filter(r => (r.n_merge||0) > 0);
+  const total = rows.reduce((s,r)=>s+(r.n_merge||0),0);
+  return {total, rows};
+}
+function _mergedLegendChip(merged) {
+  if (!merged || !merged.total) return '';
+  const t = C();
+  const detail = merged.rows.map(r => `${_escHTML(r.label||r.key)}: ${r.n_merge}`).join(' · ');
+  return `<span class="hint" tabindex="0"><span class="dot" style="background:${t.ink4}"></span>`
+    + `${merged.total} gemergt, nicht evaluiert`
+    + `<span class="hint-pop">Per Merge in bestehende Vault-Notes eingefügt, nie separat neu evaluiert — `
+    + `zählen aber in Akzeptanz-/Vault-Kennzahlen mit. ${detail}</span></span>`;
+}
+
+function renderScatter(scat, T, merged) {
   const t = C();
   const pdfList=scat.pdfs||[];
   // Kein lokaler Filter — globale Filter-Bar steuert die Daten.
@@ -2040,7 +2081,8 @@ function renderScatter(scat, T) {
   const l2=document.getElementById('leg2');
   if(l2 && ch2chart) l2.innerHTML=ch2chart.data.datasets.map(ds=>
     `<span><span class="dot" style="background:${ds.borderColor}"></span>${_escHTML(ds.label)}</span>`).join('')
-    +`<span style="margin-left:auto"><span class="dot" style="background:color-mix(in srgb, var(--mint) 40%, transparent)"></span>Zielzone</span>`;
+    +`<span style="margin-left:auto"><span class="dot" style="background:color-mix(in srgb, var(--mint) 40%, transparent)"></span>Zielzone</span>`
+    +_mergedLegendChip(merged);
   _resolveDrawer(scat.points);
 }
 

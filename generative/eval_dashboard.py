@@ -766,18 +766,25 @@ def _accept_from_runs(runs: list[dict], prefer_ver: str | None, current: str | N
     (note_evals trägt keine acceptance_status). Bevorzugt die Eval-Version der
     Zeile (`prefer_ver`), damit alle Kennzahlen auf derselben Version stehen;
     fehlt sie in den Runs, die neueste (gekappte) Routing-Version. Gibt
-    (accept, accept_ver, accept_n) zurück; accept_ver kann von der Eval-Version
-    abweichen und wird darum getrennt ausgewiesen.
+    (accept, accept_ver, accept_n, n_merge) zurück; accept_ver kann von der
+    Eval-Version abweichen und wird darum getrennt ausgewiesen.
+
+    n_merge (#249): Σ Merge-Stub-Notes derselben Runs/Version — SSoT-konform
+    auf derselben Versions-Basis wie accept/accept_n berechnet (kein zweiter
+    Aggregations-Pfad). Speist die "gemergt, nicht evaluiert"-Kategorie im
+    Scatter-Panel; diese Notes landen im Vault, werden aber nie separat neu
+    evaluiert (#237-Diagnosebefund).
     """
     if not runs:
-        return None, None, 0
+        return None, None, 0, 0
     vers = sorted({r["ver"] for r in runs if r.get("ver")}, key=_ver_sort_key)
     av = prefer_ver if (prefer_ver and prefer_ver in vers) else _newest_capped_version(vers, current)
     at = [r for r in runs if r.get("ver") == av]
     tot = sum(r.get("n_total", 0) or 0 for r in at)
     vault = sum(r.get("n_vault", 0) or 0 for r in at)
+    n_merge = sum(r.get("n_merge", 0) or 0 for r in at)
     accept = round(vault / tot * 100, 1) if tot else None
-    return accept, av, len(at)
+    return accept, av, len(at), n_merge
 
 
 def _calc_pdf_table(
@@ -862,7 +869,7 @@ def _calc_pdf_table(
         cov_vals = [v for r in at if (v := r.get("coverage_factual") or r.get("coverage_rate")) is not None and v >= 0]
         cov = round(_median(cov_vals) * 100, 1) if cov_vals else None
         runs = log_by_group.get(gk, [])
-        accept, accept_ver, accept_n = _accept_from_runs(runs, ver, current_version)
+        accept, accept_ver, accept_n, n_merge = _accept_from_runs(runs, ver, current_version)
         rows.append(
             {
                 "key": gk,
@@ -873,6 +880,9 @@ def _calc_pdf_table(
                 "accept": accept,
                 "accept_ver": accept_ver,
                 "accept_n": accept_n,
+                # n_merge (#249): Merge-Stubs derselben Runs/Version — nie separat
+                # neu evaluiert, speist die "gemergt, nicht evaluiert"-Kategorie.
+                "n_merge": n_merge,
                 "hall": hall,
                 "cov": cov,
                 "n_notes": n_notes,
@@ -884,7 +894,7 @@ def _calc_pdf_table(
     # das über routing_only unterscheiden (#194 P7).
     for gk in sorted(log_only):
         runs = log_only[gk]
-        accept, accept_ver, accept_n = _accept_from_runs(runs, None, current_version)
+        accept, accept_ver, accept_n, n_merge = _accept_from_runs(runs, None, current_version)
         label = _PDF_LABELS.get(gk) or next((r.get("label") for r in runs if r.get("label")), gk)
         rvers = sorted({r["ver"] for r in runs if r.get("ver")}, key=_ver_sort_key)
         orphan = bool(rvers) and _capped_latest_version(rvers, current_version) is None
@@ -898,6 +908,7 @@ def _calc_pdf_table(
                 "accept": accept,
                 "accept_ver": accept_ver,
                 "accept_n": accept_n,
+                "n_merge": n_merge,
                 "hall": None,
                 "cov": None,
                 "n_notes": 0,
