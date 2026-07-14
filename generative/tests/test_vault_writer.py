@@ -309,9 +309,7 @@ def test_pdfx_iso_title_looks_bad():
 
 
 def test_quellen_block_falls_back_to_filename_title_for_pdfx_junk():
-    citation = CitationMeta(
-        author="Michel", year="2016", title=ISO_PDFX_TITLE, doi=None, source_file=MICHEL_PDF_NAME
-    )
+    citation = CitationMeta(author="Michel", year="2016", title=ISO_PDFX_TITLE, doi=None, source_file=MICHEL_PDF_NAME)
     block = build_quellen_block("Kernaussage (S. 3).", MICHEL_PDF_NAME, citation)
     assert ISO_PDFX_TITLE not in block
     assert "Informationsdidaktik in Zeiten des Information Overload" in block
