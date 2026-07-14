@@ -270,7 +270,7 @@ body.collapsed .theme-toggle { padding: 6px; }
 
 /* ── KPI tiles ─────────────────────────────────────────────────── */
 .kpis {
-  display: grid; grid-template-columns: repeat(7, 1fr);
+  display: grid;
   margin-top: 12px; border: 1px solid var(--hair);
   background: var(--bg-card); border-radius: 4px;
   /* kein overflow:hidden (#187): clippte sonst die Erklär-Tooltips, die
@@ -278,6 +278,13 @@ body.collapsed .theme-toggle { padding: 6px; }
      äußeren Kacheln selbst, damit der Hover-/Tone-Hintergrund weiterhin
      sauber rundet (siehe .kpi:first-child/:last-child unten). */
 }
+/* Zwei beschriftete Gruppen (Till-Entscheid, Nachfolge-PR zu #266) statt
+   einer einzelnen 9-Kachel-Reihe: "Qualität" (4 Kacheln) und "Kosten &
+   Performance" (5 Kacheln) sind jetzt eigene, randscharfe Boxen mit eigener
+   Spalten-Anzahl — passt exakt in eine Zeile statt asynchron über 7 Spalten
+   umzubrechen (vorher 7+2). Kein Slider/Karussell (explizites Anti-Pattern).*/
+.kpis-quality { grid-template-columns: repeat(4, 1fr); }
+.kpis-perf    { grid-template-columns: repeat(5, 1fr); }
 .kpi:first-child { border-top-left-radius: 4px; border-bottom-left-radius: 4px; }
 .kpi:last-child { border-top-right-radius: 4px; border-bottom-right-radius: 4px; }
 .kpi {
@@ -618,15 +625,19 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
 
 /* ── Responsive ─────────────────────────────────────────────────── */
 @media (max-width: 1200px) {
-  .kpis { grid-template-columns: repeat(4, 1fr); }
-  .kpi:nth-child(4n) { border-right: 0; }
-  .kpi:nth-child(-n+4) { border-bottom: 1px solid var(--hair); }
+  /* .kpis-quality hat bereits 4 Spalten (siehe Basis-Regel oben) — passt
+     hier ohne Änderung in eine Zeile, kein Umbruch, kein extra Rand nötig. */
+  .kpis-perf { grid-template-columns: repeat(4, 1fr); }
+  .kpis-perf .kpi:nth-child(4n) { border-right: 0; }
+  .kpis-perf .kpi:nth-child(-n+4) { border-bottom: 1px solid var(--hair); }
 }
 @media (max-width: 900px) {
   .strip { grid-template-columns: repeat(4,1fr); }
-  .kpis { grid-template-columns: 1fr 1fr; }
-  .kpi:nth-child(4n) { border-right: 1px solid var(--hair); }
-  .kpi:nth-child(2n) { border-right: 0; }
+  .kpis-quality, .kpis-perf { grid-template-columns: 1fr 1fr; }
+  .kpis-quality .kpi:nth-child(2n) { border-right: 0; }
+  .kpis-quality .kpi:nth-child(-n+2) { border-bottom: 1px solid var(--hair); }
+  .kpis-perf .kpi:nth-child(2n) { border-right: 0; }
+  .kpis-perf .kpi:nth-child(-n+4) { border-bottom: 1px solid var(--hair); }
   .filterbar { min-height: auto; padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
   .filter-group { height: auto; padding: 4px 12px; }
 }
@@ -759,7 +770,15 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
       <span class="sub-label">Qualität — <span id="kpi-ver-label" style="color:var(--amber)">lädt…</span></span>
       <span class="sub-meta">Neueste Pipeline-Version · Klick auf Kachel zeigt Versions-Trend</span>
     </div>
-    <div class="kpis" id="kpis"><div style="grid-column:1/-1;padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Daten werden geladen…</div></div>
+    <div class="kpis kpis-quality" id="kpis-quality"><div style="grid-column:1/-1;padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Daten werden geladen…</div></div>
+
+    <!-- Kosten & Performance: dieselbe Version, andere Kennzahl-Achse (Ressourcenverbrauch statt Note-Qualität) — Label wiederverwendet von Sektion "Kosten & Performance" (id="s-cost") weiter unten. -->
+    <div class="sub-head" style="margin-top:20px">
+      <span class="sub-label">Kosten &amp; Performance</span>
+      <span class="sub-meta">Neueste Pipeline-Version · Klick auf Kachel zeigt Versions-Trend</span>
+    </div>
+    <div class="kpis kpis-perf" id="kpis-perf"><div style="grid-column:1/-1;padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Daten werden geladen…</div></div>
+
     <div class="spark-row" id="spark-row">
       <div class="spark-row-inner" id="spark-inner"></div>
     </div>
@@ -1319,7 +1338,14 @@ function renderKpis(kpis, thresh, kpiTrend) {
     // Sparkline-Kachel klickbar, aber leer. sparkless deckt sich mit dem
     // Muster der kpi-accept-Kachel oben (Zeile ~1285).
     { id:'kpi-wall',   key:'wall',    label:'Wall-Clock (aktuell)', val:kpis.cur_wall_h,   u:'h', digits:2, tone:'neutral', tgt:'', sparkless:true,
-      hint:'Summe der ECHTEN Wall-Clock-Zeit (Beginn bis Ende inkl. Stage-8-Qualitäts-Eval) aller Läufe der aktuellen Version, in Stunden — im Gegensatz zur Kachel „Agent-Rechenzeit" daneben (Summe der Call-Dauern, mit Overlap bei Parallelität). 0,0 h bei Läufen ohne Stage-8-Eval, deren Daten vor der Wall-Clock-Persistierung entstanden (#239), oder bei deaktiviertem Inline-Eval — dort ist die Wall-Clock nicht separat gemessen.' },
+      // #266-Nachbesserung (Tooltip-Nit): Text behauptete faelschlich "0,0h"
+      // bei deaktiviertem Inline-Eval. Tatsaechlich schreibt insert_run()
+      // wall_clock_s beim Insert IMMER identisch zu duration_s (echter
+      // Messwert, orchestrator.py _wall_s); update_wall_clock_s() korrigiert
+      // die Zeile nur NACH oben, wenn Stage-8 anschliessend lief. Ohne
+      // Stage-8 bleibt wall_clock_s also ein echter, von 0 verschiedener
+      // Wert — 0,0h gilt nur fuer echte Alt-Zeilen von vor der #239-Spalte.
+      hint:'Summe der ECHTEN Wall-Clock-Zeit (Beginn bis Ende) aller Läufe der aktuellen Version, in Stunden — im Gegensatz zur Kachel „Agent-Rechenzeit" daneben (Summe der Call-Dauern, mit Overlap bei Parallelität). Inklusive Stage-8-Qualitäts-Eval, sofern er lief. Bei deaktiviertem Inline-Eval (kein Stage-8) ist der Wert trotzdem echt und NICHT 0,0 h: er entspricht der real gemessenen Laufzeit bis zum Pipeline-Ende, weil dort keine separate Eval-Phase fehlt, die noch dazukäme. 0,0 h nur bei Läufen, deren Daten vor der Wall-Clock-Persistierung entstanden (#239) — dort fehlt die Spalte schlicht, kein Messwert.' },
     // #238: drei widersprüchliche Token-Totals je Lauf (KPI-Kachel, DB
     // tokens_total, echter billable Total) — Billable als Leitzahl etabliert
     // (kpi-tokens-billable, neu, in+out+cache) UND die bestehende Kachel
@@ -1341,7 +1367,7 @@ function renderKpis(kpis, thresh, kpiTrend) {
   ];
 
   const nNotes = kpis?.n_notes ?? null;
-  document.getElementById('kpis').innerHTML = kpiDefs.map((kd, i) => {
+  const kpiHtmlParts = kpiDefs.map((kd, i) => {
     // Akzeptanzrate kommt aus Log-Runs (Stichprobe = generierte Notes der
     // KPI-Version), nicht aus evaluierten Notes — eigene n-Basis.
     const nBase = kd.key === 'accept' ? (kpis?.kpi_accept_n ?? null) : nNotes;
@@ -1411,7 +1437,14 @@ function renderKpis(kpis, thresh, kpiTrend) {
       ${nTag}
       ${kd.tgt && !nWarn ? `<span class="tgt hint">${kd.tgt}<span class="hint-pop">${kd.tgtHint||''}</span></span>` : ''}
     </button>`;
-  }).join('');
+  });
+  // Zwei beschriftete Gruppen (Till-Entscheid, Nachfolge-PR zu #266): die
+  // ersten 4 kpiDefs sind "Qualität", die restlichen 5 "Kosten & Performance"
+  // (Reihenfolge oben in kpiDefs ist die Gruppen-Grenze — siehe Kommentare
+  // dort). _openKpiIdx bleibt ein Index INS kpiDefs-Array, unabhängig davon,
+  // in welchen der beiden Container gerendert wird.
+  document.getElementById('kpis-quality').innerHTML = kpiHtmlParts.slice(0, 4).join('');
+  document.getElementById('kpis-perf').innerHTML = kpiHtmlParts.slice(4).join('');
 
   _kpiData = {kpis, thresh, kpiTrend, _defs: kpiDefs};  // nach kpiDefs-Definition
 
@@ -2377,9 +2410,11 @@ function renderSkeleton() {
   const strip = document.getElementById('strip');
   if (strip) strip.innerHTML = Array.from({length:8}, () =>
     `<div class="cell"><div class="skel" style="height:10px;width:60%"></div><div class="skel" style="height:22px;width:45%;margin-top:6px"></div></div>`).join('');
-  const kpis = document.getElementById('kpis');
-  if (kpis) kpis.innerHTML = Array.from({length:7}, () =>
-    `<div class="kpi" style="cursor:default"><div class="skel" style="height:10px;width:70%"></div><div class="skel" style="height:44px;width:55%;margin-top:8px"></div></div>`).join('');
+  const skelTile = `<div class="kpi" style="cursor:default"><div class="skel" style="height:10px;width:70%"></div><div class="skel" style="height:44px;width:55%;margin-top:8px"></div></div>`;
+  const kpisQuality = document.getElementById('kpis-quality');
+  if (kpisQuality) kpisQuality.innerHTML = Array.from({length:4}, () => skelTile).join('');
+  const kpisPerf = document.getElementById('kpis-perf');
+  if (kpisPerf) kpisPerf.innerHTML = Array.from({length:5}, () => skelTile).join('');
   document.querySelectorAll('.chart-body').forEach(el=>el.classList.add('loading'));
 }
 function _debounce(fn, ms) {
