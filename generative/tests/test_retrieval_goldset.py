@@ -40,7 +40,12 @@ import pytest
 
 from generative.config import LITERATURE_DIR
 from generative.eval_common import _chunks_from_sentences, _pdf_sentences
-from generative.eval_quality_v4 import _build_context_pool, _normalize_for_evidence, _retrieve_claim_contexts
+from generative.eval_quality_v4 import (
+    _build_context_pool,
+    _normalize_for_evidence,
+    _rescue_budget,
+    _retrieve_claim_contexts,
+)
 from generative.pipeline.pdf_chunker import anchor_page_numbers
 
 GOLDSET_PATH = Path(__file__).parent.parent / "calibration" / "retrieval-goldset" / "anchors.jsonl"
@@ -121,6 +126,97 @@ def test_goldset_negative_control_metadata(goldset):
     assert idx8["id"] not in fp_ids, "Negativ-Kontrolle darf nicht in die FP-Recall-Population fallen"
 
 
+def _load_by_id(goldset: list[dict], anchor_id: str) -> dict:
+    rec = next((r for r in goldset if r["id"] == anchor_id), None)
+    assert rec is not None, f"Anker fehlt im Goldset: {anchor_id}"
+    return rec
+
+
+def _chunks_for(pdf_name: str):
+    pdf_path = LITERATURE_DIR / pdf_name
+    if not pdf_path.exists():
+        pytest.skip(f"Quell-PDF fehlt (LITERATURE_DIR={LITERATURE_DIR}): {pdf_path}")
+    with fitz.open(str(pdf_path)) as doc:
+        page_numbers = anchor_page_numbers(pdf_path, len(doc))
+        sentence_pairs = _pdf_sentences(doc, page_numbers)
+    return _chunks_from_sentences(sentence_pairs)
+
+
+def test_masking_probes_excluded_from_fp_population(goldset):
+    """Metadaten-Invariante (modellunabhaengig): die Masking-Proben duerfen NIE in
+    die false_positive_retrieval_miss-Recall-Population rutschen -- sonst wuerde der
+    Recall-Test sie faelschlich als „einzubringende Belege" werten, obwohl sie gar
+    keinen echten Beleg haben."""
+    fp_ids = {r["id"] for r in goldset if r["adjudication"] == "false_positive_retrieval_miss"}
+    for anchor_id, expected_adj in (
+        ("hrastinski-2008__sync__masking-probe-dropout", "topical_hallucination_probe"),
+        ("hrastinski-2008__sync__off-topic-control", "off_topic_control"),
+    ):
+        rec = _load_by_id(goldset, anchor_id)
+        assert rec["adjudication"] == expected_adj
+        assert rec["expected_label"] == "not_in_context"
+        assert rec["id"] not in fp_ids
+
+
+@pytest.mark.slow
+def test_masking_probe_injects_context_but_not_fabricated_evidence(goldset, minilm_model):
+    """#232 Masking-Richtung (Unter-Zaehl-Seite), testbar OHNE Judge:
+
+    Eine THEMEN-NAHE, aber im PDF NICHT belegte Halluzination
+    (`topical_hallucination_probe`) passiert den RESCUE_SENTENCE_MIN_COSINE-Floor
+    (Off-Topic-Filter, kein Halluzinations-Filter) und bekommt on-topic Chunks in
+    den Pool injiziert. Assertiert wird das, was ein Test OHNE LLM belegen KANN:
+
+      1. Der (fabrizierte, nicht existierende) Beleg taucht NICHT im Pool auf --
+         der Rescue erfindet keine Evidenz, er verschiebt nur Retrieval.
+      2. Es WIRD aber on-topic Kontext injiziert (rescued > 0) -- genau das ist die
+         Masking-Angriffsflaeche, die F1 (anders als das flag-only Fix B) oeffnet.
+      3. Das Budget-Cap greift: rescued <= `_rescue_budget(n_chunks)`.
+
+    Was dieser Test NICHT beweist: dass die aggregierte hallucination_rate ehrlich
+    bleibt (d.h. dass der echte Judge den injizierten on-topic-Kontext NICHT lenient
+    als Support liest). Diese volle Masking-Validierung braucht einen Re-Eval-Sweep
+    mit echtem Judge (LLM, separat) -- die deterministischen Goldset-Tests fahren
+    keinen Judge."""
+    probe = _load_by_id(goldset, "hrastinski-2008__sync__masking-probe-dropout")
+    chunks = _chunks_for(probe["source_pdf"])
+    budget = _rescue_budget(len(chunks))
+
+    items = _retrieve_claim_contexts([probe["claim"]], chunks)
+    assert len(items) == 1
+    item = items[0]
+    _, pool_text = _build_context_pool(items)
+
+    n_rescued = sum(1 for ctx in item.contexts if ctx.get("rescued"))
+    # 1. Der fabrizierte Beleg darf NICHT im Pool erscheinen (kein erfundener Support).
+    assert not _evidence_in_pool(probe["evidence_quote"], pool_text), (
+        "Masking-Probe: der (nicht existierende) Beleg darf nicht im Pool auftauchen -- "
+        "der Rescue darf keine Evidenz fabrizieren."
+    )
+    # 2. Es wird on-topic Kontext injiziert -- die dokumentierte Masking-Flaeche.
+    assert n_rescued > 0, (
+        "Masking-Probe: die themen-nahe Halluzination sollte den Off-Topic-Floor passieren "
+        "und Kontext injiziert bekommen (sonst waere Assertion 1 vakuum)."
+    )
+    # 3. Das Budget-Cap begrenzt die Masking-Flaeche.
+    assert n_rescued <= budget, f"Rescue-Budget verletzt: {n_rescued} > {budget}"
+
+
+@pytest.mark.slow
+def test_off_topic_claim_receives_no_rescue(goldset, minilm_model):
+    """Zeigt, was der RESCUE_SENTENCE_MIN_COSINE-Floor TATSAECHLICH leistet (und nur
+    das): reines OFF-TOPIC (Photosynthese gegen ein E-Learning-PDF, Top-Cosine ~0.08)
+    bekommt NULL Rescue-Chunks. Der Floor ist ein Off-Topic-Gate, kein
+    Halluzinations-Gate -- der Kontrast zur `topical_hallucination_probe` (die trotz
+    fehlenden Belegs Kontext bekommt) macht genau diese Grenze testbar."""
+    control = _load_by_id(goldset, "hrastinski-2008__sync__off-topic-control")
+    chunks = _chunks_for(control["source_pdf"])
+    items = _retrieve_claim_contexts([control["claim"]], chunks)
+    assert len(items) == 1
+    n_rescued = sum(1 for ctx in items[0].contexts if ctx.get("rescued"))
+    assert n_rescued == 0, f"Off-Topic-Claim sollte 0 Rescue-Chunks bekommen, bekam {n_rescued}"
+
+
 @pytest.mark.slow
 def test_negative_control_idx8_evidence_reaches_pool(goldset, context_pools_by_pdf):
     """Anders als bei den FP-Ankern IST die kontrahierende Table-3-Evidenz fuer
@@ -138,17 +234,15 @@ def test_negative_control_idx8_evidence_reaches_pool(goldset, context_pools_by_p
 
 
 @pytest.mark.slow
-@pytest.mark.xfail(
-    reason="#232 Retrieval-Fix (PR-B, F1+F2) steht aus -- Chunk-Granularitaet lässt "
-    "den stuetzenden Satz oft ausserhalb der adaptive_k-Top-Chunks liegen.",
-    strict=True,
-)
 def test_recall_false_positive_anchors(goldset, context_pools_by_pdf):
     """#232 Abnahme-Kriterium: Evidence-in-Pool-Recall ueber alle
-    false_positive_retrieval_miss-Anker muss >= 90% sein. Auf master ist dieser
-    Wert dokumentiert niedrig -- siehe PR-A-Bericht fuer die exakte Zahl. Sobald
-    PR-B den Recall hebt, wird dieser Test unerwartet gruen (XPASS) und
-    `strict=True` laesst den Lauf dann FAILEN, bis der xfail-Marker entfernt wird."""
+    false_positive_retrieval_miss-Anker muss >= 90% sein. Vor PR-B (F1+F2) lag der
+    Wert dokumentiert niedrig (2/10-4/10, umgebungsabhaengig -- siehe README). PR-B
+    (Satz-Level-Retrieval-Rescue + Titel-Chunk-Deprioritisierung +
+    Zitat-Marker-robuste Evidence-Normalisierung) hebt ihn ueber die Schwelle;
+    der ehemalige `xfail(strict=True)`-Marker wurde entfernt und die Assertion ist
+    jetzt hart. Die absolute Recall-Zahl driftet mit dem Embedding-/Library-Zustand
+    (README-Caveat) -- die Abnahme prueft die Verbesserung in DERSELBEN Umgebung."""
     fp_records = [r for r in goldset if r["adjudication"] == "false_positive_retrieval_miss"]
     assert fp_records, "Kein false_positive_retrieval_miss-Anker im Goldset"
 

@@ -2014,6 +2014,10 @@ def _run_extraction_stages(
     # --- Stage 0: PDF-Enrichment bei fehlenden Metadaten ---
     _has_author = bool(pdf_meta.get("Author") or pdf_meta.get("author")) if pdf_meta else False
     _has_year = bool(pdf_meta.get("Year") or pdf_meta.get("year")) if pdf_meta else False
+    # #263: der von Stage 0 (CrossRef/etc.) gefundene DOI wird an Stage 3 (Quality-
+    # Agent) durchgereicht — sonst geht er verloren und der Quality-Agent muss ihn
+    # per eigener (unzuverlässigerer) Title-Match-Suche neu finden.
+    _enrich_doi: str | None = None
     if not (_has_author and _has_year):
         print("[0/7] PDF-Enrichment — keine Metadaten im Dateinamen erkannt…")
         try:
@@ -2034,6 +2038,13 @@ def _run_extraction_stages(
                     pdf_meta["Author"] = _enrich_meta["author"]
                 if _enrich_meta.get("year") and not pdf_meta.get("Year"):
                     pdf_meta["Year"] = str(_enrich_meta["year"])
+                # #263: Nur CONFIDENT DOIs propagieren. Ein per Stage-6-Titel-
+                # heuristik (OpenAlex) geratener DOI (`doi_from_title`) darf NICHT
+                # wie eine hart verifizierte ID ans Edition-Gate gehen — er fällt
+                # weiter auf die eigene Title-Match-Suche des Quality-Agents, die
+                # ihn korrekt als soft (`doi_from_title_match=True`) flaggt.
+                if _enrich_meta.get("doi") and not _enrich_meta.get("doi_from_title"):
+                    _enrich_doi = _enrich_meta["doi"]
         except Exception as _e:
             print(f"  [warn] PDF-Enrichment fehlgeschlagen: {_e}", file=sys.stderr)
 
@@ -2053,8 +2064,11 @@ def _run_extraction_stages(
     # zitierfähigen Autor/CreationDate-Jahr mehr — pdf_metadata). Muss vor dem
     # Extractor laufen, sonst stünde der Platzhalter "Autor" im Body.
     vault_writer.apply_filename_citation_metadata(pdf_meta, fb)
+    # #263: expliziter --doi (CLI) bleibt autoritativ, sonst der von Stage 0
+    # gefundene DOI — die quality-agent-eigene Title-Match-Suche greift nur noch
+    # als Fallback, wenn weder --doi noch enrich einen DOI geliefert haben.
     quality_report = quality.check_quality(
-        doi=args.doi,
+        doi=args.doi or _enrich_doi,
         title=q_title,
         author=pdf_meta.get("Author") or fb.get("Author"),
         year=pdf_meta.get("Year") or fb.get("Year"),
@@ -2849,6 +2863,11 @@ def main(argv: list[str] | None = None):
                     "tokens_cache_read": _tok_cache_r,
                     "duration_s": _wall_s,
                     "profile": runtime_config.profile,
+                    # #239: wall_clock_s startet identisch zu duration_s — Stage-8
+                    # ist an dieser Stelle noch nicht gelaufen. Läuft Stage-8
+                    # (inline_eval aktiv), korrigiert der Block unten die Zeile
+                    # nach Abschluss auf die echte Gesamtzeit.
+                    "wall_clock_s": _wall_s,
                 },
             )
     except Exception as _db_err:
@@ -2920,6 +2939,20 @@ def main(argv: list[str] | None = None):
         _eval_out = _grand["output"] - _pre["output"]
         _eval_wall = round(_final_wall - _wall_s, 1)
         _eval_pct = (_eval_out / _grand["output"]) if _grand["output"] else 0.0
+
+        # #239: pipeline_runs-Zeile (oben, VOR Stage-8, insert_run) auf die echte
+        # Gesamtzeit inkl. Eval-Phase korrigieren. Eigener try/except — ein
+        # DB-Fehler hier darf weder den Run-Ende-Print unten noch (via das
+        # umschließende except) die "Qualitäts-Eval übersprungen"-Meldung
+        # fälschlich auslösen (der Eval selbst lief ja erfolgreich durch).
+        try:
+            from generative import db as _db_wall
+
+            with _db_wall.get_db(_db_wall.DB_PATH) as _wall_conn:
+                _db_wall.update_wall_clock_s(_wall_conn, _run_id_for_meta, _final_wall)
+        except Exception as _wall_err:
+            print(f"   [warn] Wall-Clock-Update fehlgeschlagen: {_wall_err}")
+
         print("\n   === Run-Gesamt (inkl. Stage-8-Eval) ===")
         print(f"   -> Zeit:   {_final_wall}s  (davon Stage-8: +{_eval_wall}s)")
         print(

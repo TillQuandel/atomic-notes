@@ -67,6 +67,10 @@ def init_db(path: Path = DB_PATH) -> None:
     # #235: aktives Runtime-Profil (legacy/fast/balanced/quality) mitschreiben —
     # bisher nur im Stdout-Log, dadurch Alt- und A/B-Läufe in der DB ununterscheidbar.
     _add_column(conn, "pipeline_runs", "profile TEXT DEFAULT ''")
+    # #239: echte Wall-Clock-Zeit inkl. Stage-8-Eval — siehe SCHEMA_SQL-Kommentar
+    # in shared/db_schema.py fuer den Zwei-Phasen-Schreibpfad (insert_run VOR,
+    # update_wall_clock_s NACH Stage-8).
+    _add_column(conn, "pipeline_runs", "wall_clock_s REAL DEFAULT 0")
     _add_column(conn, "note_evals", "anchor_rate REAL")
     # Anker-Roh-Counts: für die gepoolte Halluzinationsrate (Σ halluziniert /
     # Σ gesamt) im Dashboard — die Pipeline berechnet sie ohnehin, persistiert
@@ -105,11 +109,16 @@ def insert_run(conn: sqlite3.Connection, data: dict) -> None:
       run_id, timestamp, pipeline_version, pdf_source, pdf_key, pdf_label,
       n_generated, n_extracted, n_vault, n_inbox, n_merge, n_dropped, n_words,
       model, tokens_total, tokens_input, tokens_output, tokens_cache_read,
-      duration_s, eval_version, profile
+      duration_s, eval_version, profile, wall_clock_s
 
     n_generated = geschriebene Notes (historische Semantik, unangetastet).
     n_extracted = "nach Planner/Extractor generiert" (Funnel-Top, #197). Fehlt
     der Key (Alt-Aufrufer), wird 0 geschrieben — keine NULL, kein Crash.
+
+    wall_clock_s (#239): beim Insert (VOR Stage-8) identisch zu duration_s —
+    der Aufrufer (orchestrator.main()) uebergibt hier bewusst denselben Wert.
+    Nach Stage-8 korrigiert update_wall_clock_s() die Zeile auf die echte
+    Gesamtzeit inkl. Eval-Phase.
     """
     data.setdefault("timestamp", datetime.utcnow().isoformat())
     conn.execute(
@@ -118,12 +127,12 @@ def insert_run(conn: sqlite3.Connection, data: dict) -> None:
           (run_id, timestamp, pipeline_version, pdf_source, pdf_key, pdf_label,
            n_generated, n_extracted, n_vault, n_inbox, n_merge, n_dropped, n_words, model,
            cost_usd, tokens_total, tokens_input, tokens_output, tokens_cache_read,
-           duration_s, eval_version, fully_cached, profile)
+           duration_s, eval_version, fully_cached, profile, wall_clock_s)
         VALUES
           (:run_id, :timestamp, :pipeline_version, :pdf_source, :pdf_key, :pdf_label,
            :n_generated, :n_extracted, :n_vault, :n_inbox, :n_merge, :n_dropped, :n_words, :model,
            :cost_usd, :tokens_total, :tokens_input, :tokens_output, :tokens_cache_read,
-           :duration_s, :eval_version, :fully_cached, :profile)
+           :duration_s, :eval_version, :fully_cached, :profile, :wall_clock_s)
     """,
         {
             "run_id": data.get("run_id"),
@@ -149,8 +158,22 @@ def insert_run(conn: sqlite3.Connection, data: dict) -> None:
             "eval_version": data.get("eval_version"),
             "fully_cached": 1 if (data.get("tokens_total", 0) == 0 and data.get("duration_s", 0) > 0) else 0,
             "profile": data.get("profile", ""),
+            "wall_clock_s": data.get("wall_clock_s", 0.0),
         },
     )
+
+
+def update_wall_clock_s(conn: sqlite3.Connection, run_id: str, wall_clock_s: float) -> None:
+    """Korrigiert `wall_clock_s` eines bereits per insert_run() geschriebenen Runs (#239).
+
+    insert_run() laeuft VOR Stage-8 und schreibt dort nur die Zeit bis dahin
+    (identisch zu duration_s — Stage-8 ist noch nicht gelaufen). Nach Abschluss
+    von Stage-8 (Eval-Phase) ruft orchestrator.main() dies auf, um die Zeile auf
+    die tatsaechliche Gesamtlaufzeit zu korrigieren. No-op falls run_id nicht
+    existiert (kein impliziter Insert hier — insert_run() bleibt der einzige
+    Schreibpfad, der eine neue Zeile anlegt).
+    """
+    conn.execute("UPDATE pipeline_runs SET wall_clock_s = ? WHERE run_id = ?", (wall_clock_s, run_id))
 
 
 def insert_eval(conn: sqlite3.Connection, data: dict) -> None:

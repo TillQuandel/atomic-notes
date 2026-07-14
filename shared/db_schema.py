@@ -31,7 +31,16 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     duration_s        REAL DEFAULT 0,
     eval_version      TEXT,
     fully_cached      INT  DEFAULT 0,
-    profile           TEXT DEFAULT ''
+    profile           TEXT DEFAULT '',
+    -- #239: echte Wall-Clock-Zeit inkl. Stage-8-Eval. duration_s wird VOR
+    -- Stage-8 geschrieben (orchestrator.py insert_run-Call) und unterzeichnet
+    -- deshalb systematisch (Eval-Phase fehlt, 30-37% zu niedrig laut Befund).
+    -- wall_clock_s startet identisch zu duration_s beim Insert und wird nach
+    -- Abschluss von Stage-8 per db.update_wall_clock_s() auf die tatsaechliche
+    -- Gesamtzeit korrigiert. Bei deaktiviertem Inline-Eval (Profil fast/
+    -- balanced) bleibt wall_clock_s == duration_s (kein Stage-8 gelaufen,
+    -- beide Werte sind dann korrekt identisch).
+    wall_clock_s      REAL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS note_evals (
