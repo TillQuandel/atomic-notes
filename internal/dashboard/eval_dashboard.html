@@ -936,6 +936,10 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
           <th>Note</th>
           <th>PDF</th>
           <th class="num">LLM-Fehlerquote</th>
+          <!-- #233 (Folge #255): LLM-Coverage-Spalte. Tooltip erklaert die
+               abgeschaffte v1.3-Quelle + den seit v4 aktiven Fallback, sonst
+               wirkt der Spaltenname wie eine zweite Fehlerquote. -->
+          <th class="num" style="min-width:120px"><span class="hint" tabindex="0">LLM-Coverage<span class="hint-pop">Belegrate laut LLM-Judge. `coverage_factual` (satzbasiert) ist die mit dem v4-Umbau abgeschaffte v1.3-Metrik und liefert seither nur NULL — angezeigt wird der seit Eval v4 aktive Fallback `coverage_rate` (claim-basierte Belegrate).</span></span></th>
           <!-- #204 P8d: solange 0 Notes human-gelabelt sind, stehen hier nur
                "–"-Platzhalter; ohne min-width kollabiert die Auto-Tabellen-
                spalte auf Dash-Breite. -->
@@ -944,7 +948,7 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
           <th>Status</th>
         </tr></thead>
         <tbody id="calib-body">
-          <tr><td colspan="6" style="padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">
+          <tr><td colspan="7" style="padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">
             Daten werden geladen…
           </td></tr>
         </tbody>
@@ -2103,7 +2107,7 @@ function renderCalibration(calib) {
   // Tabelle
   const body = el('calib-body'); if (!body) return;
   if (!calib.rows || !calib.rows.length) {
-    body.innerHTML = `<tr><td colspan="6" style="padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">
+    body.innerHTML = `<tr><td colspan="7" style="padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">
       Keine v4.1-Eval-Daten — erst reeval_baseline.py ausführen</td></tr>`;
     return;
   }
@@ -2114,6 +2118,12 @@ function renderCalibration(calib) {
   const fmtHall = (v, emptyTitle) => v != null
     ? `<span class="${v <= 5 ? 'good-t' : v >= 20 ? 'bad-t' : 'warn-t'}">${_fmtDE(v)} %</span>`
     : `<span class="dash"${emptyTitle?` title="${emptyTitle}"`:''}>–</span>`;
+  // #233: llm_cov ist hoehere-ist-besser (Belegrate), Schwellen wie
+  // THRESH_COV in generative/eval_dashboard.py (80/50) — anders gepolt als
+  // fmtHall oben (niedriger ist besser).
+  const fmtCov = (v) => v != null
+    ? `<span class="${v >= 80 ? 'good-t' : v <= 50 ? 'bad-t' : 'warn-t'}">${_fmtDE(v)} %</span>`
+    : `<span class="dash" title="Keine Belegrate erfasst (weder coverage_factual noch coverage_rate gesetzt)">–</span>`;
   const fmtAgree = (v, emptyTitle) => v != null
     ? `<span class="${v >= 80 ? 'good-t' : v >= 60 ? 'warn-t' : 'bad-t'}">${_fmtDE(v)} %</span>`
     : `<span class="dash"${emptyTitle?` title="${emptyTitle}"`:''}>–</span>`;
@@ -2140,10 +2150,11 @@ function renderCalibration(calib) {
     <td style="font-family:var(--f-mono);font-size:12px;max-width:280px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${_escHTML(r.note)}">${_escHTML(r.note)}</td>
     <td class="dim" style="font-size:12px">${_escHTML((r.pdf||'').split(' - ')[0]||r.pdf||'–')}</td>
     <td class="num">${fmtHall(r.llm_hall)}</td>
+    <td class="num">${fmtCov(r.llm_cov)}</td>
     <td class="num">${fmtHall(r.human_hall, 'Noch nicht human-gelabelt')}</td>
     <td class="num">${fmtAgree(r.agreement, 'Noch nicht human-gelabelt')}</td>
     <td>${fmtStatus(r.status)}</td>
-  </tr>`).join('') + (calib.rows.length > LIMIT ? `<tr><td colspan="6" style="padding:10px;text-align:center">
+  </tr>`).join('') + (calib.rows.length > LIMIT ? `<tr><td colspan="7" style="padding:10px;text-align:center">
     <button type="button" class="calib-more" onclick="_toggleCalibRows()">${_calibShowAll ? `Nur Top ${LIMIT} zeigen` : `Alle ${calib.rows.length} anzeigen (${hidden} weitere)`}</button>
   </td></tr>` : '');
 }
