@@ -189,7 +189,7 @@ EXPECTED_RESULT = {
     "pdf": "quelle.pdf",
     "language": "DE→DE",
     "version": "v0.0.0",  # explizit fixiert in _run_eval_note, s. Kommentar dort
-    "eval_version": "4.1",
+    "eval_version": "4.2",  # #232: Bump 4.1->4.2 (Retrieval-Methodik F1+F2), Snapshot nachgezogen
     "content_hash": None,
     "claims_total": 6,
     "claims_supported_exact": 0,
