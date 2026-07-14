@@ -9,7 +9,13 @@ Coverage-Schwerpunkt:
 import unittest
 from unittest.mock import patch
 
-from generative.pipeline.vault_writer import convert_inline_to_footnotes, build_quellen_block, render_merge_stub, VAULT
+from generative.pipeline.vault_writer import (
+    convert_inline_to_footnotes,
+    build_quellen_block,
+    render_merge_stub,
+    VAULT,
+    _TITLE_LOOKS_BAD,
+)
 from generative.schemas.atomic_note import AtomicNoteDraft
 from generative.schemas.citation import CitationMeta
 
@@ -281,3 +287,31 @@ def test_no_author_anywhere_stays_unresolved():
     fb = {}
     apply_filename_citation_metadata(meta, fb)
     assert "Author" not in meta
+
+
+# ---- PDF/X-Konformitäts-Metadaten-Titel im Quellen-Block (#262) ----------------
+# Befund: Verlags-PDFs mit PDF/X-Produktionsmetadaten tragen als /Title die
+# ISO-Konformitätsbezeichnung (z.B. "ISO 15930 - Electronic document file format
+# for prepress digital data exchange (PDF/X)") statt des echten Aufsatztitels.
+# _quarantine_poisoned_embedded_title (#234) greift hier nicht, weil kein
+# widersprüchlicher Info-Dict-Autor vorliegt (Bestandsschutz-Fall, siehe
+# test_no_embedded_author_keeps_title in test_title_trust_cross_check.py) —
+# der Gift-Titel bleibt also unangetastet in citation.title und müsste vom
+# F4-Fallback in build_quellen_block (_TITLE_LOOKS_BAD) aufgefangen werden.
+# Vorher deckte _TITLE_LOOKS_BAD nur Zahlenmüll/Word-Header ab, nicht diese
+# ISO/PDF-X-Konformitäts-Titel-Familie -> RED.
+ISO_PDFX_TITLE = "ISO 15930 - Electronic document file format for prepress digital data exchange (PDF/X)"
+MICHEL_PDF_NAME = "Michel - 2016 - Informationsdidaktik in Zeiten des Information Overload.pdf"
+
+
+def test_pdfx_iso_title_looks_bad():
+    assert _TITLE_LOOKS_BAD.match(ISO_PDFX_TITLE)
+
+
+def test_quellen_block_falls_back_to_filename_title_for_pdfx_junk():
+    citation = CitationMeta(
+        author="Michel", year="2016", title=ISO_PDFX_TITLE, doi=None, source_file=MICHEL_PDF_NAME
+    )
+    block = build_quellen_block("Kernaussage (S. 3).", MICHEL_PDF_NAME, citation)
+    assert ISO_PDFX_TITLE not in block
+    assert "Informationsdidaktik in Zeiten des Information Overload" in block
