@@ -49,7 +49,12 @@ def _yaml_list(items: list[str], indent: str = "  ") -> str:
 
 _FILENAME_PATTERN_FULL = re.compile(r"^(?P<author>.+?)\s+-\s+(?P<year>\d{4})\s+-\s+(?P<title>.+?)$")
 _FILENAME_PATTERN_NOYEAR = re.compile(r"^(?P<author>.+?)\s+-\s+(?P<title>.+?)$")
-_TITLE_LOOKS_BAD = re.compile(r"^[\d\s\.\-]+$|^Microsoft Word")  # Zahlenmüll oder Word-Doc-Header
+# Zahlenmüll, Word-Doc-Header oder ISO-Konformitäts-Metadaten-Titel aus PDF/X-
+# Produktionsmetadaten (#262: Verlags-PDFs mit PDF/X-Konformität tragen als
+# /Title die ISO-Bezeichnung "ISO <Nr> - ... (PDF/X)" statt des echten Titels —
+# kein widersprüchlicher Info-Dict-Autor, daher greift die #234-Quarantäne
+# hier nicht; dieselbe Familie deckt PDF/A, PDF/UA etc. ab).
+_TITLE_LOOKS_BAD = re.compile(r"^[\d\s\.\-]+$|^Microsoft Word|^ISO\s+\d+.*\(PDF/[A-Z]+")
 
 
 def parse_filename_fallback(source_file: str) -> dict[str, str]:
