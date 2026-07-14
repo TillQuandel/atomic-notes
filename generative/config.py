@@ -290,7 +290,12 @@ MODEL_PRICING: dict[str, dict[str, float]] = {
     # Claude (Anthropic API) — https://anthropic.com/pricing
     "claude-opus-4-7": {"input": 15.0, "output": 75.0, "cache_read": 1.50, "cache_write": 18.75},
     "claude-sonnet-4-6": {"input": 3.0, "output": 15.0, "cache_read": 0.30, "cache_write": 3.75},
-    "claude-haiku-4-5": {"input": 0.80, "output": 4.0, "cache_read": 0.03, "cache_write": 1.0},
+    # #252: input/output/cache_read/cache_write waren der retired Haiku-3.5-Tarif
+    # unter dem 4.5-Key ($0.80/$4.0/$0.03/$1.0). Verifiziert gegen die offizielle
+    # Anthropic-Preisseite (platform.claude.com/docs/en/about-claude/pricing,
+    # Abruf 2026-07-14): Haiku 4.5 = $1.00 Input, $5.00 Output; cache_read =
+    # 0,1x Input = $0.10; cache_write (5min-Default-TTL) = 1,25x Input = $1.25.
+    "claude-haiku-4-5": {"input": 1.0, "output": 5.0, "cache_read": 0.10, "cache_write": 1.25},
     # Gemini (Google API) — https://ai.google.dev/pricing
     "gemini-3.1-pro": {"input": 2.50, "output": 10.0, "cache_read": 0.0, "cache_write": 0.0},
     "gemini-2.5-flash": {"input": 0.075, "output": 0.30, "cache_read": 0.0, "cache_write": 0.0},
