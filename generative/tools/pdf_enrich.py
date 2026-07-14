@@ -888,6 +888,14 @@ def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False, re
                 print(f"  -> OpenAlex-Treffer verworfen (schwacher Titel-Match): '{meta.get('title', '')[:60]}'")
                 meta = None
             elif meta:
+                # #263: Provenienz-Marker. Dieser DOI stammt aus reiner Titel-
+                # Heuristik (OpenAlex-Suche + _title_match_confident-Gate), NICHT
+                # aus einer harten ID (DOI/arXiv/PMID im Text) oder CrossRef-
+                # Bestätigung. Downstream (Edition-Gate) darf ihn deshalb nicht wie
+                # eine hart verifizierte ID behandeln — er fällt auf die eigene
+                # (soft flaggende) Title-Match-Suche des Quality-Agents zurück.
+                if meta.get("doi"):
+                    meta["doi_from_title"] = True
                 print(f"  -> OpenAlex: {meta['author']} ({meta['year']}) -- {meta['title'][:60]}")
 
     # Stage 6.5: Grobid (lokaler Server, optional)
