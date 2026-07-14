@@ -19,6 +19,7 @@ import sys
 from collections import Counter, defaultdict
 from dataclasses import dataclass
 from datetime import datetime
+from itertools import zip_longest
 from pathlib import Path
 from typing import Any
 
@@ -120,23 +121,51 @@ SOURCE_PRESENCE_COSINE = float(os.getenv("ATOMIC_AGENT_SOURCE_PRESENCE_COSINE", 
 #
 # F1 = Satz-Level-Retrieval-Rescue VOR dem Judge: den Home-Chunk des/der best-
 # belegenden Satzes/Chunks additiv in den Kontext-Pool injizieren. KEIN Relabel —
-# der Judge entscheidet weiter selbst; der Rescue stellt nur sicher, dass der Beleg
-# im Kontext ist. Zwei komplementaere Pfade (Union), beide guenstig:
+# der Judge entscheidet weiter selbst; der Rescue stellt nur sicher, dass ein
+# plausibel stuetzender Chunk im Kontext ist. Zwei komplementaere Pfade (Union):
 #   1. Semantisch: Chunks nach MAX-Satz-Cosine zum Claim (lokalisiertes Signal statt
 #      Chunk-Mittel). Faengt Cross-Lingual (DE-Claim/EN-Quelle), wo der ganze Chunk
-#      semantisch verwaessert. Floor (RESCUE_SENTENCE_MIN_COSINE) verhindert
-#      Injektion fuer echte Halluzinationen ohne jedes Beleg-Signal.
+#      semantisch verwaessert.
 #   2. Lexikalisch: Chunks nach Overlap seltener Content-Tokens (>=4 Buchstaben).
 #      Faengt starke Paraphrasen GLEICHER Sprache, wo die Satz-Cosine niedrig ist
 #      (Goldset suehl idx4: Satz-Rang 19, aber Lexik-Rang 1) — der lexikalische
-#      Zweitpfad ist zugleich das geforderte Cross-Lingual-Netz gegen die
+#      Zweitpfad ist zugleich das Cross-Lingual-Netz gegen die
 #      Presence-Scorer-False-Negatives bei DE↔EN.
+#
+# ⚠ MASKING-RISIKO (Unter-Zaehl-Seite, ehrlich): RESCUE_SENTENCE_MIN_COSINE ist ein
+# OFF-TOPIC-Filter, KEIN Halluzinations-Filter. Er blockt nur Claims OHNE jedes
+# topische Signal (empirisch: Photosynthese-Claim gegen Hrastinski, cos 0.17 → 0
+# Chunks). Eine THEMEN-NAHE, aber unbelegte Halluzination (empirisch: fabriziert
+# "reduziert Abbrecherquote um 30%", max Satz-Cosine 0.64; "empfiehlt Ersatz durch
+# Chatbots", 0.68) liegt in DERSELBEN Cosine-Range wie echte Cross-Lingual-Belege
+# (0.64-0.67) und passiert den Floor → bekommt on-topic Chunks injiziert. Es gibt
+# KEINEN sauberen Cosine-Cut, der topische Halluzination von echtem Cross-Lingual-
+# Beleg trennt. Anders als das flag-only Fix B (das NUR flaggte, nie injizierte;
+# `apply_source_presence_fallback`) speist F1 tatsaechlich Kontext in den Judge-Pool:
+# liest der Judge injizierten on-topic-Kontext lenient als Paraphrase-Support, wird
+# eine echte Halluzination maskiert. Das Budget-Cap unten begrenzt diese Flaeche
+# (weniger injizierter Kontext = kleinere Masking-Angriffsflaeche), eliminiert sie
+# aber NICHT. Die volle Masking-Validierung (bleibt die aggregierte
+# hallucination_rate ehrlich?) braucht einen Re-Eval-Sweep mit echtem Judge (LLM,
+# separat) — die deterministischen Goldset-Tests (kein Judge) messen nur die
+# Ueber-Zaehl-Seite + das Budget-Cap, nicht das Judge-Urteil.
 # Alle Schwellen ENV-tunbar (am Goldset kalibriert, umgebungsabhaengig — siehe
 # calibration/retrieval-goldset/README.md Caveat zur Nicht-Stabilitaet der Ziffern).
 RESCUE_SENTENCE_CHUNKS = int(os.getenv("ATOMIC_AGENT_RESCUE_SENTENCE_CHUNKS", "6"))
+# Off-topic-Floor (siehe Masking-Warnung oben): sortiert nur Claim/Satz-Paare ohne
+# topischen Bezug aus, trennt NICHT belegt von unbelegt-aber-themennah.
 RESCUE_SENTENCE_MIN_COSINE = float(os.getenv("ATOMIC_AGENT_RESCUE_MIN_COSINE", "0.45"))
 RESCUE_LEXICAL_CHUNKS = int(os.getenv("ATOMIC_AGENT_RESCUE_LEXICAL_CHUNKS", "3"))
 RESCUE_LEXICAL_MIN_OVERLAP = int(os.getenv("ATOMIC_AGENT_RESCUE_LEXICAL_MIN_OVERLAP", "2"))
+# Budget-Cap: harte Obergrenze der pro Claim injizierten Rescue-Chunks, zusaetzlich
+# an die Dokumentgroesse gekoppelt (Anteil), damit kleine PDFs nicht zu grossen
+# Teilen in den Pool wandern. Direkt gegen das Masking-Risiko: je weniger on-topic
+# Kontext fuer einen (evtl. unbelegten) Claim im Pool, desto kleiner die Flaeche,
+# auf der ein lenienter Judge Support halluzinieren koennte. Semantischer und
+# lexikalischer Pfad werden vor dem Cap fair verschraenkt (Round-Robin), damit das
+# Cap keinen Pfad aushungert.
+RESCUE_MAX_CHUNKS = int(os.getenv("ATOMIC_AGENT_RESCUE_MAX_CHUNKS", "6"))
+RESCUE_MAX_DOC_FRACTION = float(os.getenv("ATOMIC_AGENT_RESCUE_MAX_DOC_FRACTION", "0.30"))
 # F2 = Titel-/Front-Matter-Chunk deprioritisieren: Der erste Chunk (Titelseite/
 # Running-Header/Abstract, z.B. "& Asynchronous Synchronous E-Learning A study of…")
 # dominiert Top-1 fuer ~1/3 der Claims und kollabiert adaptive_k auf k=2. MILDE
@@ -329,18 +358,32 @@ def _note_title(note_path: Path, note_body: str) -> str:
     return match.group(1).strip() if match else note_path.stem
 
 
+def _rescue_budget(n_chunks: int) -> int:
+    """Harte Obergrenze der pro Claim injizierten Rescue-Chunks: min(fixes Cap,
+    Anteil am Dokument). Kleine PDFs sollen nicht zu grossen Teilen in den Pool
+    wandern (Masking-Flaeche), mindestens 1 Chunk bleibt aber moeglich."""
+    frac_cap = max(1, round(RESCUE_MAX_DOC_FRACTION * n_chunks))
+    return min(RESCUE_MAX_CHUNKS, frac_cap)
+
+
 def _rescue_chunk_indices(
     claim: str,
     sent_scores: list[float],
     sent_chunk_idx: list[int],
     chunk_tokens: list[set[str]],
+    budget: int,
 ) -> list[int]:
-    """F1: Home-Chunks des/der best-belegenden Satzes/Chunks fuer einen Claim.
+    """F1: Home-Chunks des/der best-belegenden Satzes/Chunks fuer einen Claim,
+    hart gedeckelt auf `budget` (Masking-Flaeche begrenzen).
 
-    Union zweier Pfade (Reihenfolge = Injektions-Prioritaet):
-      1. Semantisch: distinkte Home-Chunks der hoechst-cosinen Saetze (>= Floor).
+    Zwei Pfade werden fair verschraenkt (Round-Robin), damit das Cap keinen Pfad
+    aushungert (der lexikalische Cross-Lingual-Treffer wuerde sonst hinter den
+    semantischen Chunks abgeschnitten):
+      1. Semantisch: distinkte Home-Chunks der hoechst-cosinen Saetze (>= Off-Topic-Floor).
       2. Lexikalisch: Chunks mit dem groessten Content-Token-Overlap (>= Floor).
     Deterministisch (stabiler Sort ueber Score, Tie-Break = Chunk-Reihenfolge)."""
+    if budget <= 0:
+        return []
     # Pfad 1 -- semantisch: distinkte Home-Chunks in absteigender Satz-Cosine.
     sem_order = sorted(range(len(sent_scores)), key=lambda i: sent_scores[i], reverse=True)
     sem_chunks: list[int] = []
@@ -363,8 +406,13 @@ def _rescue_chunk_indices(
     lex_scored.sort(key=lambda item: (item[1], -item[0]), reverse=True)
     lex_chunks = [ci for ci, _ in lex_scored[:RESCUE_LEXICAL_CHUNKS]]
 
-    # Union unter Erhalt der Prioritaets-Reihenfolge (semantisch zuerst).
-    return list(dict.fromkeys(sem_chunks + lex_chunks))
+    # Round-Robin-Verschraenkung (semantisch zuerst je Runde), dedup, dann Cap.
+    merged: list[int] = []
+    for pair in zip_longest(sem_chunks, lex_chunks):
+        for ci in pair:
+            if ci is not None and ci not in merged:
+                merged.append(ci)
+    return merged[:budget]
 
 
 def _retrieve_claim_contexts(claims: list[str], chunks: list[Chunk], chunk_embs=None) -> list[RetrievedContext]:
@@ -415,9 +463,14 @@ def _retrieve_claim_contexts(claims: list[str], chunks: list[Chunk], chunk_embs=
         ranked = all_ranked[:adaptive_k]
 
         # F1-Rescue: Home-Chunks des/der best-belegenden Satzes/Chunks additiv
-        # anhaengen (kein Relabel — nur sichtbar-machen fuers Judge-Urteil).
+        # anhaengen (kein Relabel — nur sichtbar-machen fuers Judge-Urteil), hart
+        # gedeckelt (Masking-Flaeche begrenzen, siehe Warnung an den Konstanten).
         sent_scores = [cosine(claim_emb, se) for se in sent_embs] if len(sent_embs) else []
-        rescue_ids = _rescue_chunk_indices(claim, sent_scores, sent_chunk_idx, chunk_tokens) if sent_scores else []
+        rescue_ids = (
+            _rescue_chunk_indices(claim, sent_scores, sent_chunk_idx, chunk_tokens, _rescue_budget(len(chunks)))
+            if sent_scores
+            else []
+        )
         pool_ids = list(dict.fromkeys([*ranked, *rescue_ids]))
 
         contexts: list[dict[str, Any]] = []
@@ -723,8 +776,13 @@ def _normalize_for_evidence(text: str) -> str:
     # und brechen den woertlichen Beleg-Substring-Abgleich (Goldset idx13, bates idx6:
     # der stuetzende Chunk enthaelt den Satz, aber mit eingestreuten Marker-Ziffern).
     # Kurze freistehende Ziffern-Tokens (1-3 Stellen) entfernen. Die Normalisierung
-    # wird SYMMETRISCH auf Beleg-Zitat UND Corpus/Pool angewandt → fuer echte Zahlen
-    # (z.B. "355 Studien") match-neutral; 4+-stellige Zahlen (Jahre) bleiben erhalten.
+    # wird SYMMETRISCH auf Beleg-Zitat UND Corpus/Pool angewandt → bei ZAHLGLEICHHEIT
+    # (z.B. beide "355 Studien") match-neutral; 4+-stellige Zahlen (Jahre) bleiben
+    # erhalten. Bewusste Einschraenkung: bei Zahl-DIFFERENZ verliert der Vergleich die
+    # Diskriminanz ("42 participants" vs "87 participants" → beide "participants") —
+    # akzeptabel, weil (a) die Produktions-Evidence-Verifikation ohnehin fuzzy ist
+    # (token_set_ratio >= 0.90, wo 1-3 Zahl-Tokens den Score kaum kippen) und (b) der
+    # numerische Faktencheck nicht Aufgabe dieses Marker-Filters ist.
     text = re.sub(r"\b\d{1,3}\b", " ", text)
     return re.sub(r"\s+", " ", text).strip()
 
