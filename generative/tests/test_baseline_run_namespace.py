@@ -211,3 +211,98 @@ class TestCalibrationSampleFindsNestedNotes:
         (folder / "vault__Legacy.md").write_text("legacy", encoding="utf-8")
 
         assert candidate_notes(folder) == [folder / "vault__Legacy.md"]
+
+
+class TestReevalBaselineMixedLegacyFlat:
+    """#261: Im GEMISCHTEN Ordner (Legacy-flat `vault__*.md` direkt unter <stem>/
+    PLUS >=1 run_id-Unterordner) wurden die Legacy-flat-Notes auf master still
+    verworfen, sobald ein run_id-Ordner existierte — der gesamte pre-#241-
+    Baseline-Bestand fiel damit beim ersten Neu-Lauf aus reeval/Kalibrierung
+    (realer Datenverlust: der Produktions-Cache ist aktuell komplett Legacy-flat).
+    Fix (b): Legacy-flat-Notes zusaetzlich einbeziehen, dedupliziert per Dateiname
+    (die Note des neuesten run_id-Ordners hat Vorrang)."""
+
+    def test_mixed_folder_includes_both_legacy_flat_and_run_id_notes(self, tmp_path):
+        from generative.reeval_baseline import _baseline_note_files
+
+        pdf_dir = tmp_path / "Mixed-Stem"
+        pdf_dir.mkdir()
+        (pdf_dir / "vault__Legacy.md").write_text("legacy", encoding="utf-8")  # pre-#241 flat
+        run_dir = pdf_dir / "20260113-120000"
+        run_dir.mkdir()
+        (run_dir / "vault__New.md").write_text("new", encoding="utf-8")
+
+        files = _baseline_note_files(pdf_dir)
+
+        assert sorted(p.name for p in files) == ["vault__Legacy.md", "vault__New.md"]
+        assert (pdf_dir / "vault__Legacy.md") in files
+        assert (run_dir / "vault__New.md") in files
+
+    def test_mixed_folder_dedupes_same_filename_run_id_wins(self, tmp_path):
+        from generative.reeval_baseline import _baseline_note_files
+
+        pdf_dir = tmp_path / "Mixed-Dup-Stem"
+        pdf_dir.mkdir()
+        (pdf_dir / "vault__Dup.md").write_text("legacy-body", encoding="utf-8")
+        run_dir = pdf_dir / "20260113-120000"
+        run_dir.mkdir()
+        (run_dir / "vault__Dup.md").write_text("run-body", encoding="utf-8")
+
+        files = _baseline_note_files(pdf_dir)
+
+        assert files == [run_dir / "vault__Dup.md"]
+        assert files[0].read_text(encoding="utf-8") == "run-body"
+
+    def test_pure_legacy_and_pure_nested_unchanged(self, tmp_path):
+        from generative.reeval_baseline import _baseline_note_files
+
+        legacy = tmp_path / "Legacy-Only"
+        legacy.mkdir()
+        (legacy / "vault__L.md").write_text("l", encoding="utf-8")
+        assert _baseline_note_files(legacy) == [legacy / "vault__L.md"]
+
+        nested = tmp_path / "Nested-Only"
+        nested.mkdir()
+        run_dir = nested / "20260113-120000"
+        run_dir.mkdir()
+        (run_dir / "vault__N.md").write_text("n", encoding="utf-8")
+        assert _baseline_note_files(nested) == [run_dir / "vault__N.md"]
+
+
+class TestCalibrationSampleMixedLegacyFlat:
+    """#261 fuer calibration/sample.candidate_notes(): dieselbe Regel — Legacy-flat
+    zusaetzlich einbeziehen, per Dateiname dedupliziert (run_id gewinnt)."""
+
+    def test_mixed_folder_includes_both_legacy_flat_and_run_id_notes(self, tmp_path):
+        from generative.calibration.sample import candidate_notes
+
+        folder = tmp_path / "Mixed-Stem"
+        folder.mkdir()
+        (folder / "vault__Legacy.md").write_text("legacy", encoding="utf-8")
+        (folder / "inbox__LegacyInbox.md").write_text("legacy2", encoding="utf-8")
+        run_dir = folder / "20260113-120000"
+        run_dir.mkdir()
+        (run_dir / "vault__New.md").write_text("new", encoding="utf-8")
+
+        notes = candidate_notes(folder)
+
+        assert sorted(p.name for p in notes) == [
+            "inbox__LegacyInbox.md",
+            "vault__Legacy.md",
+            "vault__New.md",
+        ]
+
+    def test_mixed_folder_dedupes_same_filename_run_id_wins(self, tmp_path):
+        from generative.calibration.sample import candidate_notes
+
+        folder = tmp_path / "Mixed-Dup-Stem"
+        folder.mkdir()
+        (folder / "vault__Dup.md").write_text("legacy-body", encoding="utf-8")
+        run_dir = folder / "20260113-120000"
+        run_dir.mkdir()
+        (run_dir / "vault__Dup.md").write_text("run-body", encoding="utf-8")
+
+        notes = candidate_notes(folder)
+
+        assert notes == [run_dir / "vault__Dup.md"]
+        assert notes[0].read_text(encoding="utf-8") == "run-body"

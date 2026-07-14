@@ -61,16 +61,39 @@ def _latest_notes_dir(folder: Path) -> Path:
     PDFs) zählt nur die NEUESTE (lexikographisch größte, run_id-Format
     `YYYYMMDD-HHMMSS` sortiert chronologisch) — sonst würde ein mehrfach
     prozessiertes PDF mit fast-identischen Notes aus jedem Lauf im
-    Kalibrierungs-Sample überrepräsentiert. Legacy-Ablagen ohne run_id-
-    Unterordner (vor #241 geschrieben) werden weiterhin direkt gelesen.
+    Kalibrierungs-Sample überrepräsentiert. Bei NULL run_id-Unterordnern gilt
+    der Stamm-Ordner selbst (reine Legacy-Ablage vor #241).
+
+    Achtung: im GEMISCHTEN Fall (Legacy-flat + run_id-Unterordner) liefert dies
+    NUR den run_id-Ordner; die Legacy-flat-Notes zieht `candidate_notes` (#261)
+    zusätzlich hinzu.
     """
     run_dirs = sorted((d for d in folder.iterdir() if d.is_dir()), key=lambda d: d.name)
     return run_dirs[-1] if run_dirs else folder
 
 
 def candidate_notes(folder: Path) -> list[Path]:
-    notes_dir = _latest_notes_dir(folder)
-    return sorted(p for p in notes_dir.glob("*.md") if re.match(r"^(inbox|vault)__", p.name))
+    """Alle aktuell gültigen `{inbox,vault}__*.md`-Notes eines PDF-Stamm-Ordners.
+
+    #261: im gemischten Ordner (Legacy-flat direkt unter `<stem>/` + run_id-
+    Unterordner) würde `_latest_notes_dir` allein die pre-#241-Legacy-flat-Notes
+    still verwerfen. Sie werden daher zusätzlich einbezogen und per Dateiname
+    dedupliziert — die gleichnamige Note des neuesten run_id-Ordners gewinnt.
+    """
+
+    def _matches(p: Path) -> bool:
+        return re.match(r"^(inbox|vault)__", p.name) is not None
+
+    latest = _latest_notes_dir(folder)
+    by_name: dict[str, Path] = {}
+    if latest != folder:  # gemischt: Legacy-flat zuerst (niedrigster Vorrang)
+        for p in folder.glob("*.md"):
+            if _matches(p):
+                by_name[p.name] = p
+    for p in latest.glob("*.md"):  # neuester run_id (bzw. reine Legacy-Ablage) gewinnt
+        if _matches(p):
+            by_name[p.name] = p
+    return sorted(by_name.values())
 
 
 def main() -> None:
