@@ -1639,6 +1639,20 @@ window._openKpiSpark = function(idx) {
     row.style.setProperty('--spark-border-color', _toneColor(tone));
   }
 
+  // #274-Nachbesserung (Till-Live-Fund): es gibt nur EINE #spark-row im DOM
+  // (kein Duplikat je Gruppe) — sie muss beim Oeffnen/Umschalten direkt unter
+  // die Gruppe der angeklickten Kachel wandern, sonst haengt sie fix unter der
+  // unteren Gruppe (kpis-perf), auch wenn eine Qualitaets-Kachel angeklickt
+  // wurde. idx<4 ist dieselbe Slice-Grenze wie kpiDefs.slice(0,4)/.slice(4)
+  // in renderKpis. Muss VOR dem Oeffnen (open-Klasse) UND beim Umschalten
+  // zwischen den beiden Gruppen laufen (Re-Render in renderKpis fasst die
+  // Row selbst nicht an — nur die innerHTML der beiden Kacheln-Container —
+  // sie springt also zwischen Renders nicht zurueck).
+  if (row) {
+    const host = document.getElementById(idx < 4 ? 'kpis-quality' : 'kpis-perf');
+    if (host) host.insertAdjacentElement('afterend', row);
+  }
+
   if (wasOpen && inner) {
     inner.classList.add('switching');
     setTimeout(() => {

@@ -69,3 +69,19 @@ def test_kpi_defs_order_matches_group_split_quality_first_four_perf_last_five():
     # Slice-Grenze bei Index 4 im tatsaechlichen Render-Code verankert.
     assert ".slice(0, 4)" in html
     assert ".slice(4)" in html
+
+
+def test_spark_row_relocates_to_clicked_kpi_group_on_open():
+    """#274-Nachbesserung (Till-Live-Fund): die EINE #spark-row saß nach dem
+    Gruppen-Umbau (#274) fix im HTML nach #kpis-perf — ein Klick auf eine
+    Qualitäts-Kachel (idx<4) öffnete die Trend-Row also unter der FALSCHEN
+    (unteren) Gruppe statt direkt unter der eigenen. Fix: _openKpiSpark hängt
+    die Row per insertAdjacentElement('afterend', ...) dynamisch unter die
+    Gruppe der angeklickten Kachel — dieselbe idx<4-Grenze wie der
+    kpiDefs-Slice-Split oben.
+    """
+    html = _build_live_html()
+    open_fn = html.split("window._openKpiSpark = function(idx) {")[1].split("window.closeKpiSpark = function()")[0]
+    assert "insertAdjacentElement('afterend', row)" in open_fn
+    assert "kpis-quality" in open_fn and "kpis-perf" in open_fn
+    assert "idx < 4" in open_fn
