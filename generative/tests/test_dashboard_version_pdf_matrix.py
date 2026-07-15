@@ -493,6 +493,30 @@ def test_prod_pattern_140_143_only_hrastinski_shared():
     assert cmp["overall"]["hall_b"] == 30.0
 
 
+# ── Produktionsmuster B3 (v0.3.130 vs v0.3.143, Bates-pdf_key-Drift) ────────
+# Statistiker-Abnahme zu PR #305 (Opus, adversarial): _version_pair_compare
+# lieferte fuer das Paar common_pdfs=[], obwohl Bates in BEIDEN Versionen
+# evaluiert wurde -- die Quelle stand nur unter zwei verschiedenen pdf_key-
+# Schreibweisen in note_evals.pdf (DB-Beleg atomic_analytics.db, s. PR-Body).
+
+
+def test_pair_compare_bates_drift_variant_counts_as_common_pdf():
+    """B3-Befund: v0.3.130 evaluiert Bates unter dem Kebab-Key
+    "bates-2017.pdf", v0.3.143 unter der "2017"-Missing-Year-Drift-Variante
+    "Bates - Information Behavior.pdf". Vor der Kanonisierung (_pdf_group_key)
+    fiel common_pdfs für dieses (und jedes v0.3.143-vs-alt-)Paar leer aus --
+    Bates verschwand still aus dem Schnittmengen-Delta."""
+    rows = [
+        _q("bates-2017.pdf", "b1", "v0.3.130", hall=0.05, cov=0.8),
+        _q("bates-2017.pdf", "b2", "v0.3.130", hall=0.06, cov=0.75),
+        _q("Bates - Information Behavior.pdf", "b3", "v0.3.143", hall=0.1, cov=0.7),
+    ]
+    cmp = _version_pair_compare(rows, "v0.3.130", "v0.3.143")
+    assert cmp["common_pdfs"] == ["bates-2017"]
+    assert cmp["per_pdf"]["bates-2017"]["n_a"] == 2
+    assert cmp["per_pdf"]["bates-2017"]["n_b"] == 1
+
+
 # ── build_version_pdf_matrix: Orchestrierung Matrix + alle Versionspaare ──
 
 
@@ -605,12 +629,17 @@ def test_pair_matrix_does_not_hardcode_exclude_known_artifact_row(monkeypatch):
     #232-Artefakt-Zeile darf nicht hartkodiert herausgefiltert werden -- ein
     dominanter Ausreisser (hier stellvertretend: eine einzelne 90%-Zeile in
     einer sonst sauberen PDF-Version) muss in der Matrix sichtbar bleiben,
-    inkl. n=1 als Signal fuer die Alleinherrschaft ueber den Zellwert."""
-    evals = _matrix_rows_for(3, "v0.3.142", "Bates.pdf", 0.05)
-    evals += [_dbrow("artefakt-note", "v0.3.143", "Bates.pdf", 0.90, "2026-07-12T21:51:18")]
+    inkl. n=1 als Signal fuer die Alleinherrschaft ueber den Zellwert.
+
+    Fixture-Name bewusst NICHT "Bates" (PR pdf_key-Kanonisierung führte einen
+    Alias bare "Bates" -> "bates-2017" ein, s. test_dashboard_pdf_filter.py) --
+    dieser Test prüft #232-Artefakt-Sichtbarkeit, keine Bates-Identität; der
+    Docstring sagt "stellvertretend", der Name ist hier rein platzhalternd."""
+    evals = _matrix_rows_for(3, "v0.3.142", "Testquelle.pdf", 0.05)
+    evals += [_dbrow("artefakt-note", "v0.3.143", "Testquelle.pdf", 0.90, "2026-07-12T21:51:18")]
     data = _patched_build_data(monkeypatch, evals)
     pm = data["pair_matrix"]
-    cell = pm["cells"]["bates"]["v0.3.143"]
+    cell = pm["cells"]["testquelle"]["v0.3.143"]
     assert cell is not None
     assert cell["n"] == 1
     assert cell["median_hall"] == 90.0
