@@ -205,13 +205,18 @@ def main() -> None:
                 print(f"  [warn] Pipeline-Labels für Agreement nicht ladbar: {_ke}", file=_sys.stderr)
 
         # LLM-Halluzinationsraten aus note_evals holen (kanonische DB: db.DB_PATH —
-        # nicht generative/.cache, dort liegt keine DB)
+        # nicht generative/.cache, dort liegt keine DB). note_evals kann mehrere
+        # Zeilen derselben Note tragen (Re-Evals, s. Statistik-Review 2026-07-15/
+        # eval_dashboard._dedup_latest_per_note) — ohne ORDER BY war die Zeilen-
+        # reihenfolge unspezifiziert und "letzte gewinnt" damit nicht-deterministisch;
+        # `ORDER BY timestamp` macht "neueste Eval-Zeile gewinnt" explizit, dieselbe
+        # Dedup-Basis wie KPI-Kachel/per-PDF-Tabelle.
         _db.init_db(_db.DB_PATH)
         conn_plain = _sq.connect(str(_db.DB_PATH))
         llm_rates = {
             r[0]: r[1]
             for r in conn_plain.execute(
-                "SELECT note_path, hallucination_rate FROM note_evals WHERE eval_version='4.1'"
+                "SELECT note_path, hallucination_rate FROM note_evals WHERE eval_version='4.1' ORDER BY timestamp"
             ).fetchall()
         }
         conn_plain.close()

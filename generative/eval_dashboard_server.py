@@ -713,12 +713,6 @@ def build_data(
         if ver not in quality_by_version:
             quality_by_version[ver] = {"hall": [], "cov": [], "accept": [], "n": 0, "rows": []}
         quality_by_version[ver]["rows"].append(r)
-        hall_val = r.get("hallucination_rate")
-        if hall_val is not None and float(hall_val) >= 0:
-            quality_by_version[ver]["hall"].append(float(hall_val) * 100)
-        cov = r.get("coverage_factual") or r.get("coverage_rate")
-        if cov is not None and float(cov) >= 0:
-            quality_by_version[ver]["cov"].append(float(cov) * 100)
 
     # Statistiken berechnen (Median ist primär, Mean sekundär)
     def _vkey(v):
@@ -730,6 +724,19 @@ def build_data(
     sorted_pipeline_versions = sorted(quality_by_version.keys(), key=_vkey)
 
     for ver, d2 in quality_by_version.items():
+        # Re-Eval-Dedup (Statistik-Review 2026-07-15): pro Note nur die
+        # neueste Eval-Zeile — VOR der hall/cov-Extraktion, damit Kachel
+        # (_calc_kpis), per-PDF-Tabelle und diese Sparkline dieselbe Basis
+        # teilen (Produktionsbeleg: 52 Zeilen / 40 distinct Notes bei
+        # v0.3.140, gepoolte Rate sonst um ~2pp nach unten verzerrt).
+        d2["rows"] = D._dedup_latest_per_note(d2["rows"])
+        for r in d2["rows"]:
+            hall_val = r.get("hallucination_rate")
+            if hall_val is not None and float(hall_val) >= 0:
+                d2["hall"].append(float(hall_val) * 100)
+            cov = r.get("coverage_factual") or r.get("coverage_rate")
+            if cov is not None and float(cov) >= 0:
+                d2["cov"].append(float(cov) * 100)
         # n = distinct Notes (nicht Eval-Instanzen), identisch zur „Evaluierte
         # Notes"-KPI-Kachel (_calc_kpis.n_notes) — sonst zählt die Kachel distinct
         # (40) und die kpi_trend.n-Sparkline Instanzen (52) (#194 #4).
@@ -741,6 +748,17 @@ def build_data(
         d2["avg_cov"] = round(sum(d2["cov"]) / len(d2["cov"]), 1) if d2["cov"] else None
         d2["median_hall"] = _safe_median(d2["hall"])
         d2["median_cov"] = _safe_median(d2["cov"])
+        # Notes je PDF-Quelle (Statistik-Review 2026-07-15, Fix 2): Basis für
+        # den Corpus-Overlap-Guard in D.version_delta — kanonischer
+        # PDF-Gruppen-Schlüssel (SSoT mit PDF-Filter/-Tabelle, #194/#202)
+        # statt Rohtitel, sonst zählen Volltitel- und Kebab-Varianten
+        # derselben Quelle als "verschiedene" PDFs.
+        _pdf_notes: dict[str, int] = {}
+        for r in d2["rows"]:
+            gk = D._pdf_group_key(r.get("pdf")) if r.get("pdf") else ""
+            if gk:
+                _pdf_notes[gk] = _pdf_notes.get(gk, 0) + 1
+        d2["pdf_notes"] = _pdf_notes
 
     # Trend-Daten fuer KPI-Drill-Down (sortierte Listen parallel zu sorted_pipeline_versions)
     # Akzeptanzrate je Pipeline-Version: gepoolt (sum vault / sum total) —
@@ -795,6 +813,9 @@ def build_data(
         "cost": [
             round(sum(cost_by_ver.get(v, [])), 4) if cost_by_ver.get(v) else None for v in sorted_pipeline_versions
         ],
+        # pdf_notes (Statistik-Review 2026-07-15, Fix 2): {pdf_group_key: n_notes}
+        # je Version — Basis für den Corpus-Overlap-Guard in D.version_delta().
+        "pdf_notes": [quality_by_version[v].get("pdf_notes", {}) for v in sorted_pipeline_versions],
     }
     # Kosten pro akzeptierter Note je Version (#196 P2): nur für API-Runs mit
     # Pricing aussagekräftig — subscription-Läufe kosten 0 (compute_cost_per_call)
