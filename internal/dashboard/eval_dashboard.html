@@ -772,9 +772,10 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     </div>
     <div class="kpis kpis-quality" id="kpis-quality"><div style="grid-column:1/-1;padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Daten werden geladen…</div></div>
 
-    <!-- Kosten & Performance: dieselbe Version, andere Kennzahl-Achse (Ressourcenverbrauch statt Note-Qualität) — Label wiederverwendet von Sektion "Kosten & Performance" (id="s-cost") weiter unten. -->
+    <!-- Kosten & Performance: dieselbe Version wie "Qualität" oben (#kpi-ver-label) — eigenes Label
+         id="kpi-ver-label-perf", von derselben JS-Zuweisung befuellt (SSoT, kein zweiter Datenpfad). -->
     <div class="sub-head" style="margin-top:20px">
-      <span class="sub-label">Kosten &amp; Performance</span>
+      <span class="sub-label">Kosten &amp; Performance — <span id="kpi-ver-label-perf" style="color:var(--amber)">lädt…</span></span>
       <span class="sub-meta">Neueste Pipeline-Version · Klick auf Kachel zeigt Versions-Trend</span>
     </div>
     <div class="kpis kpis-perf" id="kpis-perf"><div style="grid-column:1/-1;padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Daten werden geladen…</div></div>
@@ -2373,6 +2374,8 @@ function _renderWithData(d) {
   renderStrip(d.kpis);
   const verLbl = document.getElementById('kpi-ver-label');
   if (verLbl) verLbl.textContent = d.kpis.kpi_version || '–';
+  const verLblPerf = document.getElementById('kpi-ver-label-perf');
+  if (verLblPerf) verLblPerf.textContent = d.kpis.kpi_version || '–';
   renderKpis(d.kpis, d.thresholds||{accept:[85,65],hall:[5,15],cov:[80,50]}, d.kpi_trend);
   // Eval-Coverage-Gap: Vault-Notes der KPI-Version ohne Eval sichtbar machen
   const gapEl = document.getElementById('kpi-gap');

@@ -137,7 +137,7 @@ MAX_CONCURRENT_CALLS = 4
 CALL_TIMEOUT_SEC = int(os.getenv("ATOMIC_AGENT_CALL_TIMEOUT", "300"))
 
 # Pipeline-Version für agent-version Frontmatter
-AGENT_VERSION = "v0.3.140"  # RuntimeConfig bis in LLM-Backends verdrahtet
+AGENT_VERSION = "v0.3.144"  # Dashboard-Serie #273-#276/#290 + Versions-Label
 
 
 def is_maintainer() -> bool:
