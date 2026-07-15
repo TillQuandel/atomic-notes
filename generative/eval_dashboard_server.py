@@ -912,14 +912,29 @@ def _vault_name() -> str:
 
 
 def _chart_scatter_versioned(quality_rows: list[dict]) -> dict:
-    """Scatter-Daten mit Version-Info fuer den Version-Filter."""
+    """Scatter-Daten mit Version-Info fuer den Version-Filter.
+
+    Re-Eval-Dedup (Nachbesserung adversariale Kontrolle #293): pro
+    pipeline_version nur die neueste Eval-Zeile je Note — dieselbe Basis wie
+    KPI-Kachel/per-PDF-Tabelle/kpi_trend (`_dedup_latest_per_note`). Vorher
+    zeigte der Scatter Eval-Instanzen (52 Punkte bei v0.3.140), während die
+    Kachel korrekt 40 distinct Notes auswies; re-evaluierte Notes erschienen
+    doppelt (z. B. "Asynchronous E-Learning" bei x=0,0 UND x=29,4) — die
+    "Instanzen vs. distinct"-Bugklasse (#194). Gruppierung JE Version, nicht
+    global: dieselbe Note in zwei Versionen bleibt zwei Punkte (der
+    Versions-Filter des Scatters vergleicht Versionen)."""
+    by_ver: dict[str, list[dict]] = {}
+    for r in quality_rows:
+        by_ver.setdefault(r.get("version") or r.get("pipeline_version") or "unbekannt", []).append(r)
+    deduped_rows = [r for rows in by_ver.values() for r in D._dedup_latest_per_note(rows)]
+
     points: list[dict] = []
     pdf_map: dict[str, str] = {}
     versions: list[str] = []
 
     import re as _re
 
-    for r in quality_rows:
+    for r in deduped_rows:
         hall = r.get("hallucination_rate")
         cov = r.get("coverage_factual") or r.get("coverage_rate")
         # Sentinel-Werte (-1.0 = ungültig) überspringen

@@ -210,3 +210,46 @@ def test_calc_pdf_table_hall_uses_deduped_basis():
     row = next(r for r in rows if r["key"].startswith("quelle"))
     assert row["hall"] == 100.0  # nur neueste Zeile (10/10), nicht gepoolt über beide (5/20=25%)
     assert row["n_notes"] == 1
+
+
+# ── Scatter nutzt dieselbe Basis (Nachbesserung adversariale Kontrolle #293) ─
+# Befund: _chart_scatter_versioned deduplizierte NICHT — der Scatter zeigte 52
+# Punkte (v0.3.140), während die KPI-Kachel nach Fix 1 korrekt "40 evaluierte
+# Notes" sagte; re-evaluierte Notes erschienen doppelt (z. B. "Asynchronous
+# E-Learning" bei x=0,0 UND x=29,4). Dieselbe "Instanzen vs. distinct"-
+# Bugklasse (#194), die dieser PR schließt.
+
+
+def test_scatter_shows_distinct_notes_per_version():
+    from generative.eval_dashboard_server import _chart_scatter_versioned
+
+    rows = [
+        # dup.md: 3 Re-Evals in v1 -> nur der neueste Punkt (x=29.4) darf erscheinen
+        _qrow("dup.md", "v1", 0.0, 17, 0, "2026-06-21T19:50:12"),
+        _qrow("dup.md", "v1", 0.0, 17, 0, "2026-06-21T21:20:53"),
+        _qrow("dup.md", "v1", 0.294, 17, 5, "2026-07-05T19:59:18"),
+        _qrow("solo.md", "v1", 0.1, 10, 1, "2026-06-25T00:00:00"),
+    ]
+    for r in rows:
+        r["pdf"] = "Quelle - 2020 - X.pdf"
+    out = _chart_scatter_versioned(rows)
+    assert len(out["points"]) == 2, f"Scatter zeigt Eval-Instanzen statt distinct Notes: {len(out['points'])} Punkte"
+    dup_points = [p for p in out["points"] if p["label"] == "dup"]
+    assert len(dup_points) == 1
+    assert dup_points[0]["x"] == 29.4  # neueste Eval-Zeile gewinnt, nicht die alte 0,0
+
+
+def test_scatter_dedup_is_per_version_not_global():
+    from generative.eval_dashboard_server import _chart_scatter_versioned
+
+    # Dieselbe Note in ZWEI Versionen bleibt zwei Punkte (der Versions-Filter
+    # des Scatters vergleicht Versionen) — Dedup nur INNERHALB einer Version.
+    rows = [
+        _qrow("a.md", "v1", 0.1, 10, 1, "2026-06-01T00:00:00"),
+        _qrow("a.md", "v2", 0.2, 10, 2, "2026-06-02T00:00:00"),
+    ]
+    for r in rows:
+        r["pdf"] = "Quelle - 2020 - X.pdf"
+    out = _chart_scatter_versioned(rows)
+    assert len(out["points"]) == 2
+    assert sorted(p["version"] for p in out["points"]) == ["v1", "v2"]
