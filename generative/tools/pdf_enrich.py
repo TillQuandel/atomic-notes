@@ -792,6 +792,15 @@ def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False, re
     """
     print(f"[pdf-enrich] {pdf_path.name}")
 
+    # #282: roh-extrahierter, format-valider DOI aus dem Kopfbereich (Stage 1) merken
+    # -- auch wenn CrossRef ihn nicht kennt. Betrifft strukturell DataCite-registrierte
+    # DOIs deutscher Repositorien (peDOCS, edoc.hu-berlin.de u.ae.), die CrossRef gar
+    # nicht fuehrt. Der DOI stand woertlich im Dokument -- das ist bereits eine harte
+    # Quelle, keine Titel-Heuristik (#263). Registry-Bestaetigung bleibt eine
+    # Anreicherung (Autor/Titel/Jahr, Peer-Review-Signal), ist aber kein Beleg-Kriterium
+    # fuer den DOI-Wert selbst.
+    _raw_doi: str | None = None
+
     # Stage 0: Eingebettete PDF-Metadaten (mit Dateiname-Cross-Check)
     meta = read_pdf_metadata(pdf_path)
     if meta:
@@ -843,6 +852,7 @@ def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False, re
     if not meta:
         doi = extract_doi(header_text)
         if doi:
+            _raw_doi = doi
             print(f"  -> DOI gefunden: {doi}")
             cr = crossref_lookup(doi)
             if cr and _meta_complete(cr):
@@ -959,6 +969,15 @@ def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False, re
     if not meta:
         print("  -> Keine Metadaten gefunden -- uebersprungen", file=sys.stderr)
         return None
+
+    # #282: keine spaetere Stage hat einen DOI geliefert (weder Registry-bestaetigt
+    # noch titel-geraten) -- der roh-extrahierte Kopfbereich-DOI darf trotzdem
+    # durchgereicht werden. Kein `doi_from_title`-Marker: das ist keine
+    # Titel-Heuristik. Ueberschreibt NIE einen bereits gesetzten (auch titel-
+    # geratenen) DOI -- die #263-Provenienz-Markierung bleibt unangetastet.
+    if _raw_doi and not meta.get("doi"):
+        meta["doi"] = _raw_doi
+        print(f"  -> DOI ohne Registry-Bestaetigung uebernommen (Format-valide): {_raw_doi}")
 
     if not rename:
         return meta
