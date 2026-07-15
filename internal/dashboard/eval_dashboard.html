@@ -1913,8 +1913,14 @@ function renderPairMatrix(d) {
     return `<tr><td class="pdf">${_escHTML(p.label || p.key)}</td>${tds}</tr>`;
   }).join('');
 
+  // Cap-Fussnote (adversariale Abnahme, Befund 3): der 15er-Cap (+ n>=3-
+  // Schwelle) droppt Versionen still — analog excluded_archived_versions
+  // als Disclosure ausweisen statt Versionen kommentarlos verschwinden zu lassen.
+  const dropNote = (pm.n_versions_dropped || 0) > 0
+    ? ` · ${pm.n_versions_dropped} weitere Version(en) mit Eval-Daten nicht gezeigt (Top-15-Deckelung, min. n≥3 je Version — die neueste immer dabei).`
+    : '';
   _setInsight('ins-pairmatrix',
-    `${pdfs.length} PDF-Quellen × ${versions.length} Versionen. Zellwert = Median über deduplizierte Notes ` +
+    `${pdfs.length} PDF-Quellen × ${versions.length} Versionen${dropNote ? '' : '.'}${dropNote} Zellwert = Median über deduplizierte Notes ` +
     `(neueste Zeile je Note, keine Pseudoreplikation) — Fehlerquote oben, Belegrate darunter, n je Zelle. ` +
     `<span class="caveat">Zellen mit n&lt;3 sind gedimmt, aber nicht versteckt — Tooltip zeigt Min–Max-Spanne.</span>`);
 
@@ -1985,18 +1991,28 @@ function renderPairCompare(d) {
       <td><span class="pm-paired-tag ${c.paired ? 'yes' : 'no'}" title="${_escHTML(pairTitle)}">${c.paired ? `gepaart n=${c.n_paired}` : 'PDF-Ebene'}</span></td>
     </tr>`;
   });
+  // B3 (adversariale Abnahme): leere Schnittmenge trotz Quellen auf beiden
+  // Seiten ist im Bestand oft PDF-Key-Drift — dieselbe Quelle unter zwei
+  // Gruppen-Keys (z. B. bates-2017 vs. bates-information-behavior, #194/#202).
+  // Darauf hinweisen statt nur "kein Delta" zu sagen.
+  const maybeDrift = !cmp.common_pdfs.length && (cmp.only_a.length || cmp.only_b.length)
+    ? '<br><span style="color:var(--ink-4)">Hinweis: möglicherweise PDF-Key-Drift — dieselbe Quelle kann unter verschiedenen Keys geführt sein (#194/#202); siehe die Listen unten.</span>'
+    : '';
   body.innerHTML = rows.length ? rows.join('') : (
     '<tr><td colspan="9" style="padding:1.5rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">' +
-    'Keine gemeinsamen PDF-Quellen zwischen diesen Versionen — Corpus vollständig ausgetauscht, kein Delta berechenbar.</td></tr>'
+    'Keine gemeinsamen PDF-Quellen zwischen diesen Versionen — Corpus vollständig ausgetauscht, kein Delta berechenbar.' + maybeDrift + '</td></tr>'
   );
 
   const ov = cmp.overall;
   const overlapTxt = ov.notes_overlap_b != null
     ? ` · ${_fmtDE(ov.notes_overlap_b * 100, 0)} % der Notes von ${_escHTML(hi)} teilen eine Quelle mit ${_escHTML(lo)}`
     : '';
+  // Gesamt-Delta = ankergewichtet gepoolte Fehlerquote (B1, SSoT mit der
+  // KPI-Kachel — Median kollabiert bei zero-inflation auf 0,0) über exakt
+  // die Zeilen-Auswahl der Tabelle (B2: n = Summe der Zeilen-n).
   summary.innerHTML = `<strong>${ov.n_common_pdfs} von ${ov.n_pdfs_a}/${ov.n_pdfs_b}</strong> PDFs gemeinsam (${_escHTML(lo)} vs. ${_escHTML(hi)})${overlapTxt}. ` +
     (ov.hall_delta != null
-      ? `Gesamt-Delta Fehlerquote über die Schnittmenge: ${deltaTd(ov.hall_delta, true)} (n=${ov.n_notes_a}/${ov.n_notes_b} Notes).`
+      ? `Gesamt-Delta Fehlerquote über die Schnittmenge (gepoolt, ankergewichtet): ${deltaTd(ov.hall_delta, true)} — ${_fmtDE(ov.hall_a)} % → ${_fmtDE(ov.hall_b)} % (n=${ov.n_notes_a}/${ov.n_notes_b} Notes, Zeilen-Basis).`
       : '<span class="caveat">Keine gemeinsame PDF-Quelle — kein Gesamt-Delta berechenbar.</span>');
 
   const onlyParts = [];

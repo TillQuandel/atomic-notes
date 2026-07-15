@@ -1253,6 +1253,13 @@ def _calc_version_pdf_matrix(quality_rows: list[dict], versions: list[str] | Non
     `_top_versions` (SSoT mit dem bestehenden Versions-Dropdown: 15 neueste
     Versionen mit n>=3 Zeilen, die jeweils neueste IMMER dabei, auch bei
     kleinerem n), anschliessend chronologisch aufsteigend sortiert.
+
+    `n_versions_dropped` (adversariale Abnahme 2026-07-15, Befund 3): Zahl
+    der Versionen MIT Eval-Zeilen, die nicht in `versions` gezeigt werden
+    (Cap/min_n-Filter bzw. explizite Auswahl) — analog zur
+    `excluded_archived_versions`-Disclosure, damit das UI den Drop als
+    Fussnote ausweisen kann, statt Versionen kommentarlos verschwinden zu
+    lassen (Audit: 35 von 50 Versionen still gedroppt).
     """
     groups: dict[str, list[dict]] = {}
     for r in quality_rows:
@@ -1261,6 +1268,7 @@ def _calc_version_pdf_matrix(quality_rows: list[dict], versions: list[str] | Non
             if gk:
                 groups.setdefault(gk, []).append(r)
 
+    versions_with_data = {ver for r in quality_rows if (ver := _row_version(r))}
     if versions is None:
         counts: dict[str, int] = {}
         for r in quality_rows:
@@ -1284,7 +1292,12 @@ def _calc_version_pdf_matrix(quality_rows: list[dict], versions: list[str] | Non
         pdfs_out.append({"key": gk, "label": _label_for_group(gk, rows)})
         cells[gk] = {ver: _matrix_cell_stats([r for r in rows if _row_version(r) == ver]) for ver in versions}
 
-    return {"versions": versions, "pdfs": pdfs_out, "cells": cells}
+    return {
+        "versions": versions,
+        "pdfs": pdfs_out,
+        "cells": cells,
+        "n_versions_dropped": len(versions_with_data - set(versions)),
+    }
 
 
 def _pair_metric_stats(rows: list[dict]) -> dict:
@@ -1333,6 +1346,24 @@ def _version_pair_compare(quality_rows: list[dict], version_a: str, version_b: s
     Version, `paired=False`), damit der Client die Paarungs-Staerke
     kennzeichnen kann statt sie stillschweigend gleich zu behandeln.
 
+    `overall` (adversariale Abnahme 2026-07-15, B1+B2): das Gesamt-Aggregat
+    poolt die Fehlerquote ANKERGEWICHTET (`_pooled_hall_pct`, dieselbe
+    Definition wie die KPI-Kachel — der Median kollabiert bei der
+    zero-inflated hallucination_rate auf 0,0 und verdeckt echte Regressionen;
+    Audit-Beleg 140/143: Median-Headline 0,0pp bei sichtbarer Regression in
+    2 von 3 gemeinsamen PDFs). Coverage im overall ist das notengewichtete
+    Mittel ueber denselben Gueltigkeitsfilter — note_evals traegt keine
+    Claim-Roh-Counts, ein Anker-Pool analog `_pooled_hall_stats` existiert
+    fuer Coverage nicht. `overall` nutzt dabei EXAKT dieselbe Zeilen-Auswahl
+    wie die per-PDF-Zeilen (gepaarte Teilmenge wo paired, sonst PDF-Ebene) —
+    `n_notes_a`/`n_notes_b` ist damit die Summe der Zeilen-n, kein zweiter,
+    widerspruechlicher n-Begriff in der Anzeige. Die per-PDF-Zeilen selbst
+    bleiben Median-basiert (`_pair_metric_stats`, mit Min/Max abgenommen).
+    Ausnahme `notes_overlap_b`: bewusst weiter auf voller PDF-Ebene (alle
+    dedup'ten Notes der Common-PDFs / alle Notes von version_b) — die
+    Kennzahl misst Corpus-Ueberlappung (Semantik von `version_delta`s
+    `pdf_overlap`), nicht die Vergleichs-Stichprobe.
+
     `quality_rows` MUSS bereits auf eine einzelne eval_version eingeschraenkt
     sein (Aufrufer-Pflicht, s. Modul-Kommentar oben). Dedupliziert `version_a`/
     `version_b` intern je Version (nicht global) — `_dedup_latest_per_note`s
@@ -1356,6 +1387,8 @@ def _version_pair_compare(quality_rows: list[dict], version_a: str, version_b: s
     only_b = sorted(set(pdf_b) - set(pdf_a))
 
     per_pdf: dict[str, dict] = {}
+    used_a: list[dict] = []  # exakt die Zeilen-Auswahl (gepaart/PDF-Ebene) — Basis fuer overall (B2)
+    used_b: list[dict] = []
     for gk in common:
         a_rows, b_rows = pdf_a[gk], pdf_b[gk]
         keys_a = {k for i, r in enumerate(a_rows) if (k := _real_note_key(r, i)) is not None}
@@ -1368,6 +1401,8 @@ def _version_pair_compare(quality_rows: list[dict], version_a: str, version_b: s
         else:
             a_use, b_use = a_rows, b_rows
             paired, n_paired = False, None
+        used_a.extend(a_use)
+        used_b.extend(b_use)
         sa, sb = _pair_metric_stats(a_use), _pair_metric_stats(b_use)
         per_pdf[gk] = {
             "paired": paired,
@@ -1382,25 +1417,40 @@ def _version_pair_compare(quality_rows: list[dict], version_a: str, version_b: s
             "cov_delta": _pair_delta(sb["cov"], sa["cov"]),
         }
 
-    common_rows_a = [r for gk in common for r in pdf_a[gk]]
-    common_rows_b = [r for gk in common for r in pdf_b[gk]]
-    overall_a, overall_b = _pair_metric_stats(common_rows_a), _pair_metric_stats(common_rows_b)
+    def _cov_mean(rows: list[dict]) -> float | None:
+        """Notengewichtetes Coverage-Mittel (B1) — derselbe Gueltigkeitsfilter
+        wie `_pair_metric_stats`/`_matrix_cell_stats` (inkl. D4-Fix via
+        `_row_coverage`); Mean statt Median, weil das overall-Aggregat nicht
+        auf einer schiefen/kleinen Verteilung kollabieren soll. Kein Anker-
+        Pool moeglich: note_evals hat keine Claim-Roh-Counts fuer Coverage."""
+        vals = [float(v) * 100 for r in rows if (v := _row_coverage(r)) is not None and float(v) >= 0]
+        return round(sum(vals) / len(vals), 1) if vals else None
+
+    # overall: ankergewichtet gepoolte Fehlerquote (SSoT `_pooled_hall_pct`,
+    # Mean-Fallback ohne Roh-Counts) + notengewichtete Coverage — ueber die
+    # ZEILEN-Auswahl (used_a/used_b), damit die Headline-n zur Summe der
+    # per-PDF-Zeilen passt (B2; s. Docstring).
+    hall_a, hall_b = _pooled_hall_pct(used_a), _pooled_hall_pct(used_b)
+    cov_a, cov_b = _cov_mean(used_a), _cov_mean(used_b)
+    common_rows_b_pdf_level = [r for gk in common for r in pdf_b[gk]]
     overall = {
         "n_common_pdfs": len(common),
         "n_pdfs_a": len(pdf_a),
         "n_pdfs_b": len(pdf_b),
-        "n_notes_a": len(common_rows_a),
-        "n_notes_b": len(common_rows_b),
-        "hall_a": overall_a["hall"],
-        "hall_b": overall_b["hall"],
-        "hall_delta": _pair_delta(overall_b["hall"], overall_a["hall"]),
-        "cov_a": overall_a["cov"],
-        "cov_b": overall_b["cov"],
-        "cov_delta": _pair_delta(overall_b["cov"], overall_a["cov"]),
+        "n_notes_a": len(used_a),
+        "n_notes_b": len(used_b),
+        "hall_a": hall_a,
+        "hall_b": hall_b,
+        "hall_delta": _pair_delta(hall_b, hall_a),
+        "cov_a": cov_a,
+        "cov_b": cov_b,
+        "cov_delta": _pair_delta(cov_b, cov_a),
         # Notengewichteter Anteil: wie viel Prozent der (dedup'ten) Notes von
         # version_b aus einer mit version_a geteilten PDF-Quelle stammen —
         # dieselbe Kennzahl-Semantik wie `version_delta`s `pdf_overlap`.
-        "notes_overlap_b": round(len(common_rows_b) / len(rows_b), 3) if rows_b else None,
+        # Bewusst volle PDF-Ebene (nicht die gepaarte Teilmenge): misst
+        # Corpus-Ueberlappung, nicht die Vergleichs-Stichprobe (s. Docstring).
+        "notes_overlap_b": round(len(common_rows_b_pdf_level) / len(rows_b), 3) if rows_b else None,
     }
 
     return {

@@ -176,6 +176,102 @@ def test_cell_stats_none_coverage_factual_falls_back_to_coverage_rate():
     assert stats["median_cov"] == 80.0
 
 
+# ── overall-Aggregat: gepoolt statt Median, Zeilen-konsistente Auswahl ──────
+# (Adversariale Abnahme 2026-07-15, Befunde B1+B2)
+
+
+def _qa(pdf, note, ver, hall, cov=0.5, anchors_total=10, anchors_hall=None):
+    """note_evals-Zeile MIT Anker-Roh-Counts (fuer den ankergewichteten Pool)."""
+    return {
+        "pdf": pdf,
+        "note_path": note,
+        "pipeline_version": ver,
+        "hallucination_rate": hall,
+        "anchors_total": anchors_total,
+        "anchors_hallucinated": anchors_hall if anchors_hall is not None else round(hall * anchors_total),
+        "coverage_factual": cov,
+        "timestamp": "2026-01-01T00:00:00",
+    }
+
+
+def test_pair_compare_overall_pooled_not_median_zero_inflation():
+    """B1 (Audit-Fall): hallucination_rate ist zero-inflated — der Median
+    kollabiert auf 0,0 und meldet '0,0pp Delta', obwohl eine Seite real
+    regrediert (derselbe Befund, der `_pooled_hall_stats` fuer die KPI-Kachel
+    begruendet hat). Das overall-Aggregat MUSS ankergewichtet poolen:
+    vB = 0/10 + 0/10 + 3/10 Anker -> 10,0 %, nicht Median 0,0 %."""
+    rows = [
+        _qa("Shared.pdf", "a1", "vA", 0.0),
+        _qa("Shared.pdf", "a2", "vA", 0.0),
+        _qa("Shared.pdf", "a3", "vA", 0.0),
+        _qa("Shared.pdf", "b1", "vB", 0.0),
+        _qa("Shared.pdf", "b2", "vB", 0.0),
+        _qa("Shared.pdf", "b3", "vB", 0.3),  # 3/10 Anker halluziniert
+    ]
+    cmp = _version_pair_compare(rows, "vA", "vB")
+    ov = cmp["overall"]
+    assert ov["hall_a"] == 0.0
+    assert ov["hall_b"] == 10.0  # gepoolt 3/30 — Median waere 0.0 (RED-Anker)
+    assert ov["hall_delta"] == 10.0  # nicht 0.0
+
+
+def test_pair_compare_overall_uses_paired_subset_consistent_with_rows():
+    """B2: overall poolte UNGEPAART (alle Notes der Common-PDFs), waehrend die
+    per-PDF-Zeilen die gepaarte Teilmenge zeigen — n-Widerspruch in der Anzeige
+    (Audit: Headline n=12/8 vs. Zeilen 4/4). overall MUSS dieselbe Auswahl
+    nutzen wie die Zeilen: gepaarte Teilmenge wenn paired, sonst PDF-Ebene."""
+    rows = [
+        _qa("Shared.pdf", "vault__p1.md", "vA", 0.1),  # gepaart (p1 in beiden)
+        _qa("Shared.pdf", "x1.md", "vA", 0.9),  # NUR vA — darf overall nicht beeinflussen
+        _qa("Shared.pdf", "inbox__p1.md", "vB", 0.2),  # gepaart (Namespace-Wechsel)
+        _qa("Shared.pdf", "y1.md", "vB", 0.0),  # NUR vB
+        _qa("Shared.pdf", "y2.md", "vB", 0.0),  # NUR vB
+    ]
+    cmp = _version_pair_compare(rows, "vA", "vB")
+    cell = cmp["per_pdf"]["shared"]
+    assert cell["paired"] is True and cell["n_a"] == 1 and cell["n_b"] == 1
+    ov = cmp["overall"]
+    # Headline-n == Summe der Zeilen-n (nicht 2/3 ungepaart)
+    assert ov["n_notes_a"] == 1
+    assert ov["n_notes_b"] == 1
+    # Pool nur ueber die gepaarte Teilmenge: 1/10 bzw. 2/10 Anker
+    assert ov["hall_a"] == 10.0  # nicht von x1 (0.9) verzerrt
+    assert ov["hall_b"] == 20.0  # nicht von y1/y2 (0.0) verduennt
+
+
+def test_pair_compare_overall_n_sums_row_ns_mixed_pairing():
+    # Mischfall: PDF 1 gepaart (1/1), PDF 2 PDF-Ebene (2/1) -> Headline 3/2.
+    rows = [
+        _qa("P1.pdf", "vault__p.md", "vA", 0.1),
+        _qa("P1.pdf", "solo-a.md", "vA", 0.5),
+        _qa("P1.pdf", "merge__p.md", "vB", 0.2),
+        _qa("P2.pdf", "u1.md", "vA", 0.0),
+        _qa("P2.pdf", "u2.md", "vA", 0.0),
+        _qa("P2.pdf", "w1.md", "vB", 0.1),
+    ]
+    cmp = _version_pair_compare(rows, "vA", "vB")
+    sum_a = sum(c["n_a"] for c in cmp["per_pdf"].values())
+    sum_b = sum(c["n_b"] for c in cmp["per_pdf"].values())
+    assert cmp["overall"]["n_notes_a"] == sum_a == 3
+    assert cmp["overall"]["n_notes_b"] == sum_b == 2
+
+
+def test_pair_compare_overall_cov_is_note_weighted_mean_not_median():
+    """Coverage im overall: notengewichtetes Mittel (es gibt keine Claim-Roh-
+    Counts in note_evals, also keinen Anker-Pool analog `_pooled_hall_stats`)
+    — Mean != Median bei schiefer Verteilung: 0.0/0.1/0.8 -> Mean 30.0,
+    Median waere 10.0."""
+    rows = [
+        _qa("Shared.pdf", "a1", "vA", 0.0, cov=0.0),
+        _qa("Shared.pdf", "a2", "vA", 0.0, cov=0.1),
+        _qa("Shared.pdf", "a3", "vA", 0.0, cov=0.8),
+        _qa("Shared.pdf", "b1", "vB", 0.0, cov=0.5),
+    ]
+    cmp = _version_pair_compare(rows, "vA", "vB")
+    assert cmp["overall"]["cov_a"] == 30.0  # Mean — Median (10.0) waere falsch
+    assert cmp["overall"]["cov_b"] == 50.0
+
+
 def test_pair_compare_zero_coverage_factual_not_swallowed_by_or_fallback():
     """Dieselbe D4-Regression fuer den Paarvergleichs-Pfad (_pair_metric_stats):
     cov_a muss die echte 0.0 aus coverage_factual zeigen, nicht coverage_rate."""
@@ -518,3 +614,63 @@ def test_pair_matrix_does_not_hardcode_exclude_known_artifact_row(monkeypatch):
     assert cell is not None
     assert cell["n"] == 1
     assert cell["median_hall"] == 90.0
+
+
+# ── 15er-Cap-Disclosure (adversariale Abnahme, Befund 3) ────────────────────
+
+
+def test_matrix_reports_n_versions_dropped_by_cap():
+    """`_top_versions` deckelt auf 15 Versionen (min_n=3) — im Audit fielen so
+    35 von 50 Versionen still aus der Matrix. Der Drop muss als Zahl in der
+    Payload stehen (analog `excluded_archived_versions`), damit das UI eine
+    Fussnote zeigen kann statt Versionen kommentarlos verschwinden zu lassen."""
+    rows = [_q("a.pdf", f"n{i}", "v0.3.2", hall=0.1, cov=0.5) for i in range(3)]
+    rows += [_q("a.pdf", f"m{i}", "v0.3.3", hall=0.1, cov=0.5) for i in range(3)]
+    rows.append(_q("a.pdf", "solo", "v0.3.1", hall=0.1, cov=0.5))  # n=1, nicht neueste -> gedroppt
+    m = _calc_version_pdf_matrix(rows)
+    assert m["versions"] == ["v0.3.2", "v0.3.3"]
+    assert m["n_versions_dropped"] == 1
+
+
+def test_matrix_n_versions_dropped_zero_when_all_shown():
+    rows = [_q("a.pdf", f"n{i}", "v1", hall=0.1, cov=0.5) for i in range(3)]
+    m = _calc_version_pdf_matrix(rows)
+    assert m["n_versions_dropped"] == 0
+
+
+def test_build_data_pair_matrix_exposes_n_versions_dropped(monkeypatch):
+    evals = _matrix_rows_for(3, "v0.3.142", "Shared.pdf", 0.1)
+    evals += _matrix_rows_for(3, "v0.3.143", "Shared.pdf", 0.2)
+    evals += [_dbrow("old-solo", "v0.3.10", "Shared.pdf", 0.1, "2026-01-01T00:00:00")]  # n=1 -> Cap/min_n
+    data = _patched_build_data(monkeypatch, evals)
+    assert data["pair_matrix"]["n_versions_dropped"] == 1
+
+
+# ── Frontend-Anker (B3-Drift-Hinweis, B4-Cap-Fussnote) ─────────────────────
+# `internal/dashboard/eval_dashboard.html` enthaelt ein bewusstes NUL-Byte —
+# Zugriff ausschliesslich ueber `_build_live_html()` (Muster:
+# test_dashboard_agent_stats_empty_message.py), nie ueber bash grep/sed.
+
+
+def _pairmatrix_js_block() -> str:
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    start = html.index("function renderPairMatrix")
+    end = html.index("/* ── Charts", start)
+    return html[start:end]
+
+
+def test_html_pair_compare_empty_intersection_mentions_key_drift():
+    """B3: common_pdfs=[] bei nicht-leeren only_a/only_b ist im Bestand oft
+    PDF-Key-Drift (dieselbe Quelle unter zwei Gruppen-Keys, #194/#202) — der
+    leere Vergleich muss darauf hinweisen statt nur 'kein Delta' zu sagen."""
+    block = _pairmatrix_js_block()
+    assert "PDF-Key-Drift" in block
+    assert "#194" in block
+
+
+def test_html_pair_matrix_shows_version_cap_footnote():
+    block = _pairmatrix_js_block()
+    assert "n_versions_dropped" in block
+    assert "nicht gezeigt" in block
