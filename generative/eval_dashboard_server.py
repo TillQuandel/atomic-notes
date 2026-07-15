@@ -415,6 +415,12 @@ def build_data(
 
     # Filter — niemals Versionen mischen
     quality_rows = [r for r in all_quality_rows if r.get("eval_version") == eval_version] if eval_version else []
+    # Snapshot VOR den Einzelwert-Filtern (pdf/pipeline_version/language/model/
+    # run) unten -- Basis fuer die Versions×PDF-Paarvergleich-Matrix (#pair_matrix,
+    # Multi-Perspektiven-Dashboard-Review 2026-07-15). Die Matrix zeigt bewusst
+    # IMMER den vollen Corpus der aktiven eval_version: ein aktiver PDF- oder
+    # Versions-Filter wuerde sie sonst auf 1 Zelle kollabieren lassen.
+    _matrix_base_rows = list(quality_rows)
     # Dropdown-Optionen VOR dem Filtern — immer alle Optionen anzeigen
     all_langs = sorted({r.get("language") or "" for r in quality_rows if r.get("language")})
     if pipeline_version:
@@ -871,6 +877,38 @@ def build_data(
         "current_version": _cur_ver or "",
     }
 
+    # ── Versions×PDF-Paarvergleich (Multi-Perspektiven-Dashboard-Review
+    # 2026-07-15, P1-Empfehlung aller 3 Statistiker): eigene Rohdaten-Basis
+    # (_matrix_base_rows, s. oben) -- unabhaengig von PDF-/Versions-/Modell-/
+    # Sprach-/Lauf-Filtern, aber auf dieselbe eval_version beschraenkt (#5).
+    # foss-Versionen UND archivierte WIP-Laeufe (bestehender Mechanismus:
+    # `pipeline_runs_archive`/`query_archived_pipeline_versions`, #193) werden
+    # ausgeschlossen -- Letzteres wird zusaetzlich kenntlich gemacht
+    # (`excluded_archived_versions`), statt die Versionen stillschweigend
+    # verschwinden zu lassen. Einzelne Ausreisser-ZEILEN (z. B. der bekannte,
+    # NICHT quarantaenierte #232-Artefakt-Lauf) sind davon nicht betroffen --
+    # sie fliessen bewusst ein (Till-Entscheid), ihre Dominanz macht die Matrix
+    # ueber n/Min/Max je Zelle sichtbar statt sie hartkodiert zu entfernen.
+    try:
+        from generative import db as _db_arch
+
+        _archived_vers = set(_db_arch.query_archived_pipeline_versions())
+    except Exception:
+        _archived_vers = set()
+    _matrix_rows = [
+        r
+        for r in _matrix_base_rows
+        if not D.is_foss_version(r.get("version") or r.get("pipeline_version") or "")
+        and (r.get("version") or r.get("pipeline_version")) not in _archived_vers
+    ]
+    _excluded_archived = sorted(
+        {v for r in _matrix_base_rows if (v := (r.get("version") or r.get("pipeline_version"))) in _archived_vers},
+        key=D._ver_sort_key,
+    )
+    pair_matrix = D.build_version_pdf_matrix(_matrix_rows)
+    pair_matrix["excluded_archived_versions"] = _excluded_archived
+    pair_matrix["eval_version"] = eval_version
+
     return {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "eval_version": eval_version,
@@ -909,6 +947,7 @@ def build_data(
             eval_version=eval_version or "4.1",
         ),
         "pdf_meta": {k: v for k, v in D._PDF_META.items()},
+        "pair_matrix": pair_matrix,
         "vault_name": _vault_name(),
         "thresholds": {
             "accept": list(D.THRESH_ACCEPT),

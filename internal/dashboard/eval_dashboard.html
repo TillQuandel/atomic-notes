@@ -508,6 +508,19 @@ table.cmp td.dim { color: var(--ink-3); }
 .acc-bar .pct { font-weight: 600; }
 .good-t { color: var(--mint); } .bad-t { color: var(--coral); } .warn-t { color: var(--amber); }
 
+/* ── Versions×PDF-Paarvergleich-Matrix ──────────────────────────── */
+table.pm-matrix td, table.pm-matrix th { padding: 9px 12px; }
+table.pm-matrix td.pdf { white-space: nowrap; }
+.pm-cell { text-align: center; min-width: 74px; line-height: 1.35; }
+.pm-cell .pm-cov { display: block; font-size: 11px; color: var(--ink-3); }
+.pm-cell .pm-n { display: block; font-size: 9.5px; color: var(--ink-4); margin-top: 1px; }
+/* Spezifikation #3: n<3-Zellen werden gedimmt, NICHT versteckt. */
+.pm-cell.pm-low-n { opacity: .5; }
+.pm-cmp-filters { display: flex; width: fit-content; border: 1px solid var(--hair); border-radius: 4px; background: var(--bg-card); margin-bottom: 12px; }
+.pm-paired-tag { display: inline-block; font-family: var(--f-mono); font-size: 10px; padding: 1px 6px; border-radius: 2px; white-space: nowrap; }
+.pm-paired-tag.yes { background: var(--tint-mint); color: var(--mint); }
+.pm-paired-tag.no { background: var(--hair); color: var(--ink-4); }
+
 /* ── Kalibrierungs-Tabelle: Mehr-anzeigen-Toggle ───────────────── */
 .calib-more {
   padding: 5px 14px; border: 1px solid var(--hair-strong); border-radius: 3px;
@@ -693,6 +706,10 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     <a href="#s-compare" class="nav-item" title="Vergleich nach PDF">
       <span class="ico"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4"><path d="M8 2v12M3 5l5-3 5 3M3 11l5 3 5-3"/></svg></span>
       <span class="nav-label">Vergleich</span>
+    </a>
+    <a href="#s-pairmatrix" class="nav-item" title="Versions×PDF-Paarvergleich">
+      <span class="ico"><svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.4"><rect x="1.5" y="1.5" width="4" height="4" rx=".5"/><rect x="6.5" y="1.5" width="4" height="4" rx=".5"/><rect x="11.5" y="1.5" width="3" height="4" rx=".5"/><rect x="1.5" y="6.5" width="4" height="4" rx=".5"/><rect x="6.5" y="6.5" width="4" height="4" rx=".5"/><rect x="11.5" y="6.5" width="3" height="4" rx=".5"/></svg></span>
+      <span class="nav-label">Paarvergleich</span>
     </a>
   </nav>
 
@@ -983,6 +1000,53 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
         </tr></thead>
         <tbody id="cmp-body"><tr><td colspan="8" style="padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Wird geladen…</td></tr></tbody>
       </table>
+    </div>
+  </section>
+
+  <!-- ── Versions×PDF-Paarvergleich (Multi-Perspektiven-Dashboard-Review
+       2026-07-15, P1 aller 3 Statistiker) ───────────────────────────── -->
+  <section class="section" id="s-pairmatrix">
+    <div class="sec-head">
+      <span class="sec-name">Versions×PDF-Paarvergleich</span>
+      <span class="sec-right">Median je Zelle, dedupliziert · eval_version <strong id="pm-evalver">–</strong></span>
+    </div>
+    <p class="insight" id="ins-pairmatrix"></p>
+    <div class="insight" id="pm-archived-note" style="border-left-color:var(--ink-4)" hidden></div>
+
+    <div class="table-wrap">
+      <table class="cmp pm-matrix" id="pm-table">
+        <thead><tr id="pm-thead"></tr></thead>
+        <tbody id="pm-body"><tr><td style="padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Wird geladen…</td></tr></tbody>
+      </table>
+    </div>
+
+    <div style="margin-top:26px">
+      <div class="sec-head" style="border-bottom:none;padding-bottom:0;margin-bottom:12px">
+        <span class="sec-name" style="font-size:10px">Versions-Vergleich — Delta nur auf Schnittmenge</span>
+      </div>
+      <div class="pm-cmp-filters">
+        <div class="filter-group">
+          <span class="filter-label">Version A</span>
+          <select class="fselect" id="pm-ver-a" onchange="renderPairCompare(window._lastData)"></select>
+        </div>
+        <div class="filter-group" style="border-right:none">
+          <span class="filter-label">Version B</span>
+          <select class="fselect" id="pm-ver-b" onchange="renderPairCompare(window._lastData)"></select>
+        </div>
+      </div>
+      <p class="insight" id="pm-compare-summary"></p>
+      <div class="table-wrap">
+        <table class="cmp" id="pm-compare-table">
+          <thead><tr>
+            <th>Quell-PDF</th>
+            <th class="num">Fehlerquote A</th><th class="num">Fehlerquote B</th><th class="num">Δ Fehlerquote</th>
+            <th class="num">Belegrate A</th><th class="num">Belegrate B</th><th class="num">Δ Belegrate</th>
+            <th class="num">n (A/B)</th><th>Paarung</th>
+          </tr></thead>
+          <tbody id="pm-compare-body"><tr><td colspan="9" style="padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Wird geladen…</td></tr></tbody>
+        </table>
+      </div>
+      <p class="insight" id="pm-only-note" style="border-left-color:var(--ink-4)"></p>
     </div>
   </section>
 
@@ -1788,6 +1852,177 @@ function renderTable(rows, thresh, currentVer) {
   }).join('');
 }
 
+/* ── Versions×PDF-Paarvergleich (Multi-Perspektiven-Dashboard-Review
+   2026-07-15, P1 aller 3 Statistiker) ───────────────────────────── */
+function _pmVerParts(v) { return (String(v || '').match(/\d+/g) || []).map(Number); }
+function _pmVerCmp(a, b) {
+  const pa = _pmVerParts(a), pb = _pmVerParts(b);
+  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
+    const d = (pa[i] || 0) - (pb[i] || 0);
+    if (d) return d;
+  }
+  return 0;
+}
+
+function renderPairMatrix(d) {
+  const pm = d.pair_matrix || {};
+  const T = d.thresholds || { hall: [5, 15], cov: [80, 50] };
+  const versions = pm.versions || [];
+  const pdfs = pm.pdfs || [];
+  const cells = pm.cells || {};
+
+  const evEl = document.getElementById('pm-evalver');
+  if (evEl) evEl.textContent = pm.eval_version || d.eval_version || '–';
+
+  const archNote = document.getElementById('pm-archived-note');
+  if (archNote) {
+    const excluded = pm.excluded_archived_versions || [];
+    archNote.innerHTML = excluded.length
+      ? `${excluded.length} archivierte WIP-Version(en) ausgeschlossen (verwaiste Branch-Läufe, ` +
+        `bestehender Archiv-Mechanismus #193): ${excluded.map(_escHTML).join(', ')}.`
+      : '';
+    archNote.hidden = excluded.length === 0;
+  }
+
+  const thead = document.getElementById('pm-thead');
+  const tbody = document.getElementById('pm-body');
+  if (!versions.length || !pdfs.length) {
+    if (thead) thead.innerHTML = '<th>Quell-PDF</th>';
+    if (tbody) tbody.innerHTML = '<tr><td style="padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Keine Daten für die aktuelle eval_version.</td></tr>';
+    _setInsight('ins-pairmatrix', '');
+    return;
+  }
+
+  if (thead) thead.innerHTML = '<th>Quell-PDF</th>' + versions.map(v => `<th class="num">${_escHTML(v)}</th>`).join('');
+
+  if (tbody) tbody.innerHTML = pdfs.map(p => {
+    const row = cells[p.key] || {};
+    const tds = versions.map(v => {
+      const c = row[v];
+      if (!c) return '<td class="pm-cell dim">–</td>';
+      const lowN = (c.n || 0) < 3;
+      const hallCls = c.median_hall != null ? (c.median_hall <= T.hall[0] ? 'good-t' : c.median_hall >= T.hall[1] ? 'bad-t' : 'warn-t') : '';
+      const hasSpread = c.min_hall != null && c.max_hall != null && c.min_hall !== c.max_hall;
+      const spreadTxt = hasSpread ? ` · Spanne ${_fmtDE(c.min_hall)}–${_fmtDE(c.max_hall)} % (Min–Max über die ${c.n} Notes)` : '';
+      const title = `n=${c.n} Note(n)${spreadTxt}${lowN ? ' · unter n=3 — Wert mit Vorsicht lesen, kann von einer Einzelzeile dominiert sein' : ''}`;
+      return `<td class="pm-cell${lowN ? ' pm-low-n' : ''}" title="${_escHTML(title)}">` +
+        `<span class="${hallCls}">${c.median_hall != null ? _fmtDE(c.median_hall) + '%' : '–'}</span>` +
+        `<span class="pm-cov">${c.median_cov != null ? _fmtDE(c.median_cov) + '%' : '–'}</span>` +
+        `<span class="pm-n">n=${c.n}</span></td>`;
+    }).join('');
+    return `<tr><td class="pdf">${_escHTML(p.label || p.key)}</td>${tds}</tr>`;
+  }).join('');
+
+  // Cap-Fussnote (adversariale Abnahme, Befund 3): der 15er-Cap (+ n>=3-
+  // Schwelle) droppt Versionen still — analog excluded_archived_versions
+  // als Disclosure ausweisen statt Versionen kommentarlos verschwinden zu lassen.
+  const dropNote = (pm.n_versions_dropped || 0) > 0
+    ? ` · ${pm.n_versions_dropped} weitere Version(en) mit Eval-Daten nicht gezeigt (Top-15-Deckelung, min. n≥3 je Version — die neueste immer dabei).`
+    : '';
+  _setInsight('ins-pairmatrix',
+    `${pdfs.length} PDF-Quellen × ${versions.length} Versionen${dropNote ? '' : '.'}${dropNote} Zellwert = Median über deduplizierte Notes ` +
+    `(neueste Zeile je Note, keine Pseudoreplikation) — Fehlerquote oben, Belegrate darunter, n je Zelle. ` +
+    `<span class="caveat">Zellen mit n&lt;3 sind gedimmt, aber nicht versteckt — Tooltip zeigt Min–Max-Spanne.</span>`);
+
+  _pmInitVersionSelects(versions);
+  renderPairCompare(d);
+}
+
+function _pmInitVersionSelects(versions) {
+  const selA = document.getElementById('pm-ver-a'), selB = document.getElementById('pm-ver-b');
+  if (!selA || !selB) return;
+  const keepA = selA.value, keepB = selB.value;
+  const opts = versions.map(v => `<option value="${_escHTML(v)}">${_escHTML(v)}</option>`).join('');
+  selA.innerHTML = opts;
+  selB.innerHTML = opts;
+  // Default: die zwei jüngsten Versionen (Liste ist aufsteigend sortiert) --
+  // eine bereits gültige Nutzerauswahl bleibt über Reloads/Polling erhalten.
+  const validA = versions.includes(keepA), validB = versions.includes(keepB);
+  selA.value = validA ? keepA : (versions[versions.length - 2] || versions[0]);
+  selB.value = validB ? keepB : versions[versions.length - 1];
+}
+
+function renderPairCompare(d) {
+  if (!d) return;
+  const pm = d.pair_matrix || {};
+  const selA = document.getElementById('pm-ver-a'), selB = document.getElementById('pm-ver-b');
+  const body = document.getElementById('pm-compare-body');
+  const summary = document.getElementById('pm-compare-summary');
+  const onlyNote = document.getElementById('pm-only-note');
+  if (!selA || !selB || !body || !summary || !onlyNote || !selA.value || !selB.value) return;
+
+  if (selA.value === selB.value) {
+    body.innerHTML = '<tr><td colspan="9" style="padding:1.5rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Zwei unterschiedliche Versionen wählen.</td></tr>';
+    summary.innerHTML = ''; onlyNote.innerHTML = '';
+    return;
+  }
+  // Lookup-Key ist immer "<ältere>|<jüngere>" (Server-Konvention,
+  // build_version_pdf_matrix) -- unabhängig davon, was der Nutzer als "A"/"B"
+  // gewählt hat, zuerst chronologisch sortieren.
+  const [lo, hi] = [selA.value, selB.value].sort(_pmVerCmp);
+  const cmp = (pm.compare || {})[`${lo}|${hi}`];
+  if (!cmp) {
+    body.innerHTML = '<tr><td colspan="9" style="padding:1.5rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Kein Vergleich verfügbar.</td></tr>';
+    summary.innerHTML = ''; onlyNote.innerHTML = '';
+    return;
+  }
+
+  const T = d.thresholds || { hall: [5, 15], cov: [80, 50] };
+  const pdfLabel = (key) => ((pm.pdfs || []).find(x => x.key === key) || {}).label || key;
+  const hallTd = (v) => v != null ? `<span class="${v <= T.hall[0] ? 'good-t' : v >= T.hall[1] ? 'bad-t' : 'warn-t'}">${_fmtDE(v)}%</span>` : '–';
+  const covTd = (v) => v != null ? `<span class="${v >= T.cov[0] ? 'good-t' : v <= T.cov[1] ? 'bad-t' : 'warn-t'}">${_fmtDE(v)}%</span>` : '–';
+  const deltaTd = (v, lowerIsBetter) => {
+    if (v == null) return '–';
+    const arrow = v > 0 ? '↑' : v < 0 ? '↓' : '·';
+    const cls = v === 0 ? '' : ((v > 0) === lowerIsBetter ? 'bad-t' : 'good-t');
+    return `<span class="${cls}">${arrow} ${_fmtDE(Math.abs(v))}pp</span>`;
+  };
+
+  const rows = cmp.common_pdfs.map(key => {
+    const c = cmp.per_pdf[key];
+    const pairTitle = c.paired
+      ? `Notengepaart über ${c.n_paired} gemeinsame Note(n) — dieselbe Note in beiden Versionen identifiziert.`
+      : 'Keine gemeinsamen Notes zwischen den Versionen — Vergleich auf PDF-Ebene (alle Notes je Version, ungepaart).';
+    return `<tr>
+      <td class="pdf">${_escHTML(pdfLabel(key))}</td>
+      <td class="num">${hallTd(c.hall_a)}</td><td class="num">${hallTd(c.hall_b)}</td><td class="num">${deltaTd(c.hall_delta, true)}</td>
+      <td class="num">${covTd(c.cov_a)}</td><td class="num">${covTd(c.cov_b)}</td><td class="num">${deltaTd(c.cov_delta, false)}</td>
+      <td class="num dim">${c.n_a}/${c.n_b}</td>
+      <td><span class="pm-paired-tag ${c.paired ? 'yes' : 'no'}" title="${_escHTML(pairTitle)}">${c.paired ? `gepaart n=${c.n_paired}` : 'PDF-Ebene'}</span></td>
+    </tr>`;
+  });
+  // B3 (adversariale Abnahme): leere Schnittmenge trotz Quellen auf beiden
+  // Seiten ist im Bestand oft PDF-Key-Drift — dieselbe Quelle unter zwei
+  // Gruppen-Keys (z. B. bates-2017 vs. bates-information-behavior, #194/#202).
+  // Darauf hinweisen statt nur "kein Delta" zu sagen.
+  const maybeDrift = !cmp.common_pdfs.length && (cmp.only_a.length || cmp.only_b.length)
+    ? '<br><span style="color:var(--ink-4)">Hinweis: möglicherweise PDF-Key-Drift — dieselbe Quelle kann unter verschiedenen Keys geführt sein (#194/#202); siehe die Listen unten.</span>'
+    : '';
+  body.innerHTML = rows.length ? rows.join('') : (
+    '<tr><td colspan="9" style="padding:1.5rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">' +
+    'Keine gemeinsamen PDF-Quellen zwischen diesen Versionen — Corpus vollständig ausgetauscht, kein Delta berechenbar.' + maybeDrift + '</td></tr>'
+  );
+
+  const ov = cmp.overall;
+  const overlapTxt = ov.notes_overlap_b != null
+    ? ` · ${_fmtDE(ov.notes_overlap_b * 100, 0)} % der Notes von ${_escHTML(hi)} teilen eine Quelle mit ${_escHTML(lo)}`
+    : '';
+  // Gesamt-Delta = ankergewichtet gepoolte Fehlerquote (B1, SSoT mit der
+  // KPI-Kachel — Median kollabiert bei zero-inflation auf 0,0) über exakt
+  // die Zeilen-Auswahl der Tabelle (B2: n = Summe der Zeilen-n).
+  summary.innerHTML = `<strong>${ov.n_common_pdfs} von ${ov.n_pdfs_a}/${ov.n_pdfs_b}</strong> PDFs gemeinsam (${_escHTML(lo)} vs. ${_escHTML(hi)})${overlapTxt}. ` +
+    (ov.hall_delta != null
+      ? `Gesamt-Delta Fehlerquote über die Schnittmenge (gepoolt, ankergewichtet): ${deltaTd(ov.hall_delta, true)} — ${_fmtDE(ov.hall_a)} % → ${_fmtDE(ov.hall_b)} % (n=${ov.n_notes_a}/${ov.n_notes_b} Notes, Zeilen-Basis).`
+      : '<span class="caveat">Keine gemeinsame PDF-Quelle — kein Gesamt-Delta berechenbar.</span>');
+
+  const onlyParts = [];
+  if (cmp.only_a.length) onlyParts.push(`nur in ${_escHTML(lo)}: ${cmp.only_a.map(k => _escHTML(pdfLabel(k))).join(', ')}`);
+  if (cmp.only_b.length) onlyParts.push(`nur in ${_escHTML(hi)}: ${cmp.only_b.map(k => _escHTML(pdfLabel(k))).join(', ')}`);
+  onlyNote.innerHTML = onlyParts.length
+    ? `<span class="caveat">Nicht geteilte PDF-Quellen (fließen NICHT ins Delta ein) — ${onlyParts.join(' · ')}.</span>`
+    : '';
+}
+
 /* ── Charts ───────────────────────────────────────────────────── */
 function renderCharts(d) {
   const T = d.thresholds;
@@ -2470,6 +2705,7 @@ function _renderWithData(d) {
     } else gapEl.hidden = true;
   }
   renderTable(d.pdf_table||[], d.thresholds||{accept:[85,65],hall:[5,15],cov:[80,50]}, d.warnings?.current_version||'');
+  renderPairMatrix(d);
   renderCharts(d);
   renderCalibration(d.calibration);
   renderInsights(d);
