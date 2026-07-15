@@ -191,6 +191,70 @@ def test_refine_acceptance_preserves_current_gate():
     assert refine_accepted(_draft(3, hard_gates=True), auto_threshold=4) is False
 
 
+# ---------------------------------------------------------------------------
+# #286: Refine verwirft präzise Critic-Korrekturhinweise ohne Score-Verbesserung
+# ---------------------------------------------------------------------------
+
+
+def test_refine_accepted_takes_original_for_parity_check():
+    """Issue #286 Repro: Critic benennt einen konkreten, gezielt behebbaren Fehler
+    (hier stellvertretend für den H1-Transkriptionsfehler aus Lauf 6b). Der Refine-
+    Versuch behebt ihn, aber Score und Hard-Gate-Status bleiben unverändert (4/False
+    == 4/False) — der Score bildet den benannten Fehler offenbar nicht ab. Bisher
+    wurde die überarbeitete Fassung trotzdem verworfen ("Original behalten"), obwohl
+    der bekannte Fehler damit im Endprodukt bleibt."""
+    original = _draft(4, hard_gates=False, hint="Entferne '(tanzmodellȱ)' aus dem Titel — Transkriptionsfehler.")
+    refined = _draft(4, hard_gates=False)
+
+    assert refine_accepted(refined, original, auto_threshold=4) is True
+
+
+def test_refine_accepted_parity_requires_concrete_critic_hint():
+    """Ohne echten Critic-Hinweis (z.B. nur synthesized_hint, revision_hint leer)
+    bleibt die strikte Score/Hard-Gate-Schranke bestehen — die Parität allein
+    rechtfertigt keine Übernahme."""
+    original = _draft(4, hard_gates=False, hint="")
+    refined = _draft(4, hard_gates=False)
+
+    assert refine_accepted(refined, original, auto_threshold=4) is False
+
+
+def test_refine_accepted_parity_rejects_score_regression():
+    """Score-Verschlechterung bleibt trotz Hinweis abgelehnt — Parität heißt
+    Gleichstand, nicht "irgendwie in der Nähe"."""
+    original = _draft(4, hard_gates=False, hint="fix title")
+    refined = _draft(3, hard_gates=False)
+
+    assert refine_accepted(refined, original, auto_threshold=4) is False
+
+
+def test_refine_accepted_parity_rejects_hard_gate_regression():
+    """Wenn Refine die Hard-Gates zusätzlich zerstört (True → False), darf die
+    Parität-Ausnahme nicht greifen, selbst bei gleichem Score."""
+    original = _draft(4, hard_gates=True, hint="fix title")
+    refined = _draft(4, hard_gates=False)
+
+    assert refine_accepted(refined, original, auto_threshold=4) is False
+
+
+def test_refine_accepted_parity_accepts_hard_gate_improvement():
+    """Gleicher Score, aber Hard-Gates springen False → True: strikt nicht
+    schlechter (sogar besser) — muss über die Parität-Ausnahme akzeptiert werden,
+    auch wenn der Score allein noch unter dem Auto-Threshold liegt."""
+    original = _draft(4, hard_gates=False, hint="fix title")
+    refined = _draft(4, hard_gates=True)
+
+    assert refine_accepted(refined, original, auto_threshold=5) is True
+
+
+def test_refine_accepted_without_original_keeps_legacy_behavior():
+    """Aufrufe ohne `original` (Rückwärtskompatibilität) verhalten sich wie vorher —
+    rein score-/hard-gate-basiert, keine Parität-Ausnahme möglich."""
+    refined = _draft(4, hard_gates=False)
+
+    assert refine_accepted(refined, auto_threshold=4) is False
+
+
 def test_trigger_b_fallthrough_without_hint_or_disabled():
     cfg = load_runtime_config(env={"ATOMIC_AGENT_PROFILE": "balanced"})
 
