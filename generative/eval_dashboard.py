@@ -1159,6 +1159,279 @@ def version_delta(kpi_trend: dict, metric: str) -> dict:
     }
 
 
+# ---------------------------------------------------------------------------
+# Versions×PDF-Paarvergleich (Multi-Perspektiven-Dashboard-Review 2026-07-15,
+# P1-Empfehlung aller 3 Statistiker, vom adversarialen Statistiker modifiziert)
+# ---------------------------------------------------------------------------
+#
+# `version_delta` oben haertet EIN Delta (neueste vs. letzte belastbare
+# Vorversion) gegen PDF-Mix-Artefakte. Diese Funktionen erweitern dasselbe
+# Prinzip auf eine frei waehlbare Versions×PDF-Matrix mit Median-Fehlerquote/
+# -Belegrate je Zelle (n PFLICHT, dedupliziert) und paarweisen Versions-
+# Vergleichen, deren Deltas NUR ueber die von beiden Versionen geteilten PDFs
+# rechnen (nicht ueber den vollen, moeglicherweise ausgetauschten Corpus).
+#
+# Aufrufer-Pflichten (Server, kein I/O hier — reine Aggregation):
+#   - `quality_rows` auf EINE eval_version eingeschraenkt (Mix waere ein
+#     Messartefakt, #5 der Spezifikation — dieselbe Konvention wie
+#     `_dedup_latest_per_note`).
+#   - foss-/archivierte Versionen (`is_foss_version`,
+#     `db.query_archived_pipeline_versions`) vor dem Aufruf herausgefiltert.
+#     Einzelne Ausreisser-ZEILEN (z. B. der bekannte, NICHT quarantaenierte
+#     #232-Artefakt-Lauf) werden hier bewusst NICHT hartkodiert entfernt —
+#     ihre Dominanz wird ueber n/Min/Max je Zelle sichtbar statt versteckt.
+
+
+def _matrix_cell_stats(rows: list[dict]) -> dict | None:
+    """Median-Fehlerquote/-Belegrate + n + Min/Max-Spannweite fuer EINE (PDF,
+    Version)-Zelle der Matrix.
+
+    `rows` muss bereits auf genau eine (pdf_group_key, pipeline_version)-
+    Kombination eingeschraenkt sein; dedupliziert HIER selbst per
+    `_dedup_latest_per_note` (#293-Pseudoreplikations-Schutz), damit Aufrufer
+    diesen Schritt nicht separat erledigen muessen. `n` ist die Zahl
+    distinkter Notes NACH Dedup — Pflichtfeld fuer jede Zelle (Spezifikation
+    #3); Zellen mit n<3 dimmt der Client, versteckt sie aber nicht.
+
+    Median statt gepoolter (ankergewichteter) Rate — anders als die KPI-
+    Kachel (`_calc_kpis`) —, weil die Matrix explizit "Median-Halluzinations-
+    rate/-Coverage je Zelle" zeigen soll; bei den kleinen Zellgroessen (oft
+    <20 Notes je PDF×Version) macht der Median eine dominante Einzelzeile
+    zudem SICHTBAR (siehe min/max) statt sie ankergewichtet zu verwischen.
+
+    None nur, wenn nach Dedup GAR KEINE Zeile fuer diese Zelle existiert
+    (keine Daten — Client zeigt eine leere Zelle). Existieren Zeilen, aber
+    keine traegt eine gueltige Fehlerquote/Belegrate, bleibt `n` gesetzt und
+    nur `median_hall`/`median_cov` sind None ("–" im Client).
+    """
+    deduped = _dedup_latest_per_note(rows)
+    if not deduped:
+        return None
+    hall_vals = [
+        round(float(r["hallucination_rate"]) * 100, 1)
+        for r in deduped
+        if r.get("hallucination_rate") is not None and float(r["hallucination_rate"]) >= 0
+    ]
+    cov_vals = [
+        round(float(v) * 100, 1)
+        for r in deduped
+        if (v := (r.get("coverage_factual") or r.get("coverage_rate"))) is not None and float(v) >= 0
+    ]
+    return {
+        "n": len(deduped),
+        "median_hall": round(_median(hall_vals), 1) if hall_vals else None,
+        "min_hall": min(hall_vals) if hall_vals else None,
+        "max_hall": max(hall_vals) if hall_vals else None,
+        "median_cov": round(_median(cov_vals), 1) if cov_vals else None,
+        "min_cov": min(cov_vals) if cov_vals else None,
+        "max_cov": max(cov_vals) if cov_vals else None,
+    }
+
+
+_MATRIX_VERSION_LIMIT = 15  # dieselbe Deckelung wie das bestehende Versions-Dropdown
+_MATRIX_VERSION_MIN_N = 3  # ... und dieselbe n>=3-Schwelle (SSoT: `_top_versions`)
+
+
+def _calc_version_pdf_matrix(quality_rows: list[dict], versions: list[str] | None = None) -> dict:
+    """Rohdaten der Versions×PDF-Matrix: eine Zelle je (PDF, Pipeline-Version).
+
+    `quality_rows` MUSS bereits auf eine einzelne eval_version eingeschraenkt
+    sein (Aufrufer-Pflicht, s. Modul-Kommentar oben).
+
+    `versions`: explizite Spalten-Reihenfolge (aufsteigend, aelteste zuerst —
+    wie `_chart_longitudinal`s Zeitachse). None -> automatisch ermittelt ueber
+    `_top_versions` (SSoT mit dem bestehenden Versions-Dropdown: 15 neueste
+    Versionen mit n>=3 Zeilen, die jeweils neueste IMMER dabei, auch bei
+    kleinerem n), anschliessend chronologisch aufsteigend sortiert.
+    """
+    groups: dict[str, list[dict]] = {}
+    for r in quality_rows:
+        if r.get("pdf"):
+            gk = _pdf_group_key(r["pdf"])
+            if gk:
+                groups.setdefault(gk, []).append(r)
+
+    if versions is None:
+        counts: dict[str, int] = {}
+        for r in quality_rows:
+            ver = _row_version(r)
+            if ver:
+                counts[ver] = counts.get(ver, 0) + 1
+        versions = sorted(
+            _top_versions(counts, limit=_MATRIX_VERSION_LIMIT, min_n=_MATRIX_VERSION_MIN_N), key=_ver_sort_key
+        )
+
+    def _label_for_group(gk: str, rows: list[dict]) -> str:
+        if gk in _PDF_LABELS:
+            return _PDF_LABELS[gk]
+        pdfs = [r.get("pdf") for r in rows if r.get("pdf")]
+        return _pdf_short_name(max(pdfs, key=len)) if pdfs else gk
+
+    pdfs_out = []
+    cells: dict[str, dict[str, dict | None]] = {}
+    for gk in sorted(groups):
+        rows = groups[gk]
+        pdfs_out.append({"key": gk, "label": _label_for_group(gk, rows)})
+        cells[gk] = {ver: _matrix_cell_stats([r for r in rows if _row_version(r) == ver]) for ver in versions}
+
+    return {"versions": versions, "pdfs": pdfs_out, "cells": cells}
+
+
+def _pair_metric_stats(rows: list[dict]) -> dict:
+    """Median-Fehlerquote/-Belegrate ueber `rows` (bereits dedupliziert vom
+    Aufrufer) — geteilter Baustein von `_version_pair_compare`s per-PDF- und
+    Gesamt-Statistik, dieselbe Median-Definition wie `_matrix_cell_stats`."""
+    hall = [
+        round(float(r["hallucination_rate"]) * 100, 1)
+        for r in rows
+        if r.get("hallucination_rate") is not None and float(r["hallucination_rate"]) >= 0
+    ]
+    cov = [
+        round(float(v) * 100, 1)
+        for r in rows
+        if (v := (r.get("coverage_factual") or r.get("coverage_rate"))) is not None and float(v) >= 0
+    ]
+    return {
+        "hall": round(_median(hall), 1) if hall else None,
+        "cov": round(_median(cov), 1) if cov else None,
+    }
+
+
+def _pair_delta(b: float | None, a: float | None) -> float | None:
+    return round(b - a, 1) if (a is not None and b is not None) else None
+
+
+def _real_note_key(r: dict, idx: int) -> str | None:
+    """`_note_key`, aber None statt Index-Fallback fuer Rows ohne echten
+    Identifier. `_note_key`s `__row{i}`-Fallback ist fuer `_distinct_notes`
+    korrekt (jede identifierlose Zeile zaehlt einzeln INNERHALB einer Liste),
+    waere aber beim Note-Pairing ZWISCHEN zwei verschiedenen Versions-Listen
+    ein Bug: zwei voellig unabhaengige Zeilen an derselben Listenposition in
+    Version A und B wuerden sonst faelschlich als "dieselbe Note" gepaart."""
+    if not (r.get("note_path") or r.get("note")):
+        return None
+    return _note_key(r, idx)
+
+
+def _version_pair_compare(quality_rows: list[dict], version_a: str, version_b: str) -> dict:
+    """Versions-Paarvergleich mit Schnittmengen-Regel (Spezifikation #1):
+    Deltas rechnen NUR ueber PDFs, die in BEIDEN Versionen vorkommen — ein
+    Vergleich ueber den vollen (moeglicherweise ausgetauschten) Corpus ist
+    sonst ein PDF-Mix-Artefakt statt eines echten Versions-Effekts
+    (Produktionsbeleg #293: v0.3.140 vs v0.3.143 teilten nur 3 von 9/5 PDFs).
+
+    Note-Paarung wo moeglich (Spezifikation #2): teilen sich zwei Versionen
+    fuer dieselbe PDF-Quelle echte Note-Identifier (`_note_key`, #293), wird
+    NUR ueber die gemeinsamen Notes verglichen (`paired=True`, `n_paired`
+    gesetzt) — sonst PDF-Ebene (alle deduplizierten Notes dieser PDF je
+    Version, `paired=False`), damit der Client die Paarungs-Staerke
+    kennzeichnen kann statt sie stillschweigend gleich zu behandeln.
+
+    `quality_rows` MUSS bereits auf eine einzelne eval_version eingeschraenkt
+    sein (Aufrufer-Pflicht, s. Modul-Kommentar oben). Dedupliziert `version_a`/
+    `version_b` intern je Version (nicht global) — `_dedup_latest_per_note`s
+    Vertrag verlangt Aufruf pro einzelner Pipeline-Version.
+    """
+    rows_a = _dedup_latest_per_note([r for r in quality_rows if _row_version(r) == version_a])
+    rows_b = _dedup_latest_per_note([r for r in quality_rows if _row_version(r) == version_b])
+
+    def _pdf_map(rows: list[dict]) -> dict[str, list[dict]]:
+        m: dict[str, list[dict]] = {}
+        for r in rows:
+            if r.get("pdf"):
+                gk = _pdf_group_key(r["pdf"])
+                if gk:
+                    m.setdefault(gk, []).append(r)
+        return m
+
+    pdf_a, pdf_b = _pdf_map(rows_a), _pdf_map(rows_b)
+    common = sorted(set(pdf_a) & set(pdf_b))
+    only_a = sorted(set(pdf_a) - set(pdf_b))
+    only_b = sorted(set(pdf_b) - set(pdf_a))
+
+    per_pdf: dict[str, dict] = {}
+    for gk in common:
+        a_rows, b_rows = pdf_a[gk], pdf_b[gk]
+        keys_a = {k for i, r in enumerate(a_rows) if (k := _real_note_key(r, i)) is not None}
+        keys_b = {k for i, r in enumerate(b_rows) if (k := _real_note_key(r, i)) is not None}
+        shared = keys_a & keys_b
+        if shared:
+            a_use = [r for i, r in enumerate(a_rows) if _real_note_key(r, i) in shared]
+            b_use = [r for i, r in enumerate(b_rows) if _real_note_key(r, i) in shared]
+            paired, n_paired = True, len(shared)
+        else:
+            a_use, b_use = a_rows, b_rows
+            paired, n_paired = False, None
+        sa, sb = _pair_metric_stats(a_use), _pair_metric_stats(b_use)
+        per_pdf[gk] = {
+            "paired": paired,
+            "n_paired": n_paired,
+            "n_a": len(a_use),
+            "n_b": len(b_use),
+            "hall_a": sa["hall"],
+            "hall_b": sb["hall"],
+            "hall_delta": _pair_delta(sb["hall"], sa["hall"]),
+            "cov_a": sa["cov"],
+            "cov_b": sb["cov"],
+            "cov_delta": _pair_delta(sb["cov"], sa["cov"]),
+        }
+
+    common_rows_a = [r for gk in common for r in pdf_a[gk]]
+    common_rows_b = [r for gk in common for r in pdf_b[gk]]
+    overall_a, overall_b = _pair_metric_stats(common_rows_a), _pair_metric_stats(common_rows_b)
+    overall = {
+        "n_common_pdfs": len(common),
+        "n_pdfs_a": len(pdf_a),
+        "n_pdfs_b": len(pdf_b),
+        "n_notes_a": len(common_rows_a),
+        "n_notes_b": len(common_rows_b),
+        "hall_a": overall_a["hall"],
+        "hall_b": overall_b["hall"],
+        "hall_delta": _pair_delta(overall_b["hall"], overall_a["hall"]),
+        "cov_a": overall_a["cov"],
+        "cov_b": overall_b["cov"],
+        "cov_delta": _pair_delta(overall_b["cov"], overall_a["cov"]),
+        # Notengewichteter Anteil: wie viel Prozent der (dedup'ten) Notes von
+        # version_b aus einer mit version_a geteilten PDF-Quelle stammen —
+        # dieselbe Kennzahl-Semantik wie `version_delta`s `pdf_overlap`.
+        "notes_overlap_b": round(len(common_rows_b) / len(rows_b), 3) if rows_b else None,
+    }
+
+    return {
+        "version_a": version_a,
+        "version_b": version_b,
+        "common_pdfs": common,
+        "only_a": only_a,
+        "only_b": only_b,
+        "per_pdf": per_pdf,
+        "overall": overall,
+    }
+
+
+def build_version_pdf_matrix(quality_rows: list[dict]) -> dict:
+    """Server-Fassade: Matrix-Zellen + paarweise Versions-Vergleiche fuer JEDE
+    Kombination der in der Matrix gezeigten Versionen (aufsteigend sortiert,
+    also `version_a` immer die aeltere, `version_b` die juengere Seite eines
+    Schluessels `"<a>|<b>"`). `eval_dashboard_server.build_data()` ruft nur
+    diese eine Funktion; sie ist die einzige Schnittstelle nach aussen.
+
+    `quality_rows` MUSS bereits auf eine einzelne eval_version + foss-/
+    archivierte Versionen eingeschraenkt sein (Aufrufer-Pflicht, s. oben).
+    Die Zahl der Versionen ist durch `_calc_version_pdf_matrix` auf
+    `_MATRIX_VERSION_LIMIT` (15) gedeckelt — bis zu 15·14/2 = 105 Paare, pro
+    Paar nur eine Handvoll Zeilen zu verarbeiten (lokaler Dashboard-Server,
+    kein Performance-Problem).
+    """
+    matrix = _calc_version_pdf_matrix(quality_rows)
+    versions = matrix["versions"]
+    compare: dict[str, dict] = {}
+    for i, va in enumerate(versions):
+        for vb in versions[i + 1 :]:
+            compare[f"{va}|{vb}"] = _version_pair_compare(quality_rows, va, vb)
+    matrix["compare"] = compare
+    return matrix
+
+
 def _chart_tokens(runs: list[dict]) -> dict:
     return {
         "labels": [r["date"] for r in runs],
