@@ -1312,3 +1312,104 @@ def test_enrich_does_not_set_doi_from_title_marker_on_hard_doi_hit(tmp_path, mon
     meta = pdf_enrich.enrich(pdf, dry_run=True)
     assert meta is not None
     assert "doi_from_title" not in meta
+
+
+# --- #282: roh-extrahierter DOI darf bei CrossRef-Fehlschlag nicht verlorengehen ---
+# Bug-Klasse: Stage 1 findet einen format-validen DOI im Kopfbereich (z.B. DataCite-
+# DOIs deutscher Repositorien wie peDOCS/edoc.hu-berlin.de), aber CrossRef kennt ihn
+# strukturell nicht. Bisher wurde der DOI dann komplett verworfen, obwohl er
+# woertlich im Dokument steht -- spaetere Stages liefern Titel/Autor/Jahr, aber
+# `meta["doi"]` bleibt leer -> Quality-Agent setzt faelschlich "kein DOI"-Flag.
+
+
+def test_enrich_keeps_raw_doi_when_crossref_lookup_fails(tmp_path, monkeypatch):
+    """#282: format-valider DOI im Kopfbereich, CrossRef kennt ihn nicht (DataCite-
+    Fall) -- Stage 5 (Zotero-Dateiname) liefert trotzdem Titel/Autor/Jahr. Der roh-
+    extrahierte DOI muss durchgereicht werden, ohne als titel-geraten (#263) zu
+    gelten."""
+    from generative.tools import pdf_enrich
+    from unittest.mock import MagicMock
+
+    mock_reader = MagicMock()
+    mock_reader.metadata = {}
+    monkeypatch.setattr(pdf_enrich, "PdfReader", lambda *a, **kw: mock_reader)
+    monkeypatch.setattr(
+        pdf_enrich,
+        "extract_text",
+        lambda path, max_pages=3: "Eine Studie. doi:10.25656/01:11173 Kein weiterer Hinweis.",
+    )
+    # CrossRef kennt den DataCite-registrierten DOI nicht (peDOCS-Fall aus #282).
+    monkeypatch.setattr(pdf_enrich, "crossref_lookup", lambda doi: None)
+    monkeypatch.setattr(pdf_enrich, "openalex_title_search", lambda *a, **k: None)
+
+    pdf = tmp_path / "Meier - 2019 - Eine Studie.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = pdf_enrich.enrich(pdf, dry_run=True)
+
+    assert meta is not None
+    assert meta["author"] == "Meier"  # Stage 5: Zotero-Dateiname-Parsing
+    assert meta["doi"] == "10.25656/01:11173"
+    assert not meta.get("doi_from_title")  # harte Quelle, kein Titel-Rateergebnis
+
+
+def test_enrich_does_not_invent_doi_without_format_match(tmp_path, monkeypatch):
+    """Negativkontrolle zu #282: ohne format-validen DOI-Treffer im Kopfbereich darf
+    enrich() keinen DOI erfinden -- nur ein tatsaechlich per Regex gefundener String
+    zaehlt als 'hart'."""
+    from generative.tools import pdf_enrich
+    from unittest.mock import MagicMock
+
+    mock_reader = MagicMock()
+    mock_reader.metadata = {}
+    monkeypatch.setattr(pdf_enrich, "PdfReader", lambda *a, **kw: mock_reader)
+    monkeypatch.setattr(
+        pdf_enrich,
+        "extract_text",
+        lambda path, max_pages=3: "Eine Studie ganz ohne jede Kennung im Text.",
+    )
+    monkeypatch.setattr(pdf_enrich, "openalex_title_search", lambda *a, **k: None)
+
+    pdf = tmp_path / "Meier - 2019 - Eine Studie.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = pdf_enrich.enrich(pdf, dry_run=True)
+
+    assert meta is not None
+    assert meta["author"] == "Meier"
+    assert not meta.get("doi")
+
+
+def test_enrich_raw_doi_does_not_override_title_guessed_doi(tmp_path, monkeypatch):
+    """#282 Gegenprobe zu #263: findet Stage 6 (Titelsuche) am Ende trotzdem einen
+    eigenen (weicheren) DOI, darf der roh-extrahierte DOI aus Stage 1 diesen NICHT
+    ueberschreiben -- die `doi_from_title`-Provenienz-Markierung muss erhalten
+    bleiben, sonst verwaessert der Fix die #263-Schutzsemantik."""
+    from generative.tools import pdf_enrich
+    from unittest.mock import MagicMock
+
+    mock_reader = MagicMock()
+    mock_reader.metadata = {}
+    monkeypatch.setattr(pdf_enrich, "PdfReader", lambda *a, **kw: mock_reader)
+    monkeypatch.setattr(
+        pdf_enrich,
+        "extract_text",
+        lambda path, max_pages=3: "doi:10.25656/01:99999 im Kopf, aber CrossRef kennt sie nicht.",
+    )
+    monkeypatch.setattr(pdf_enrich, "crossref_lookup", lambda doi: None)
+    monkeypatch.setattr(
+        pdf_enrich,
+        "openalex_title_search",
+        lambda *a, **k: {
+            "title": "Situated Learning Theory",
+            "author": "Lave",
+            "year": 2020,
+            "doi": "10.9999/example-title-hit",
+            "type": "article",
+        },
+    )
+    pdf = tmp_path / "situated-learning-theory.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = pdf_enrich.enrich(pdf, dry_run=True)
+
+    assert meta is not None
+    assert meta["doi"] == "10.9999/example-title-hit"
+    assert meta.get("doi_from_title") is True
