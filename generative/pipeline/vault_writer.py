@@ -1065,6 +1065,11 @@ def write_note(
                 note.tag_review_status = kept_status or "needs-review"
         content = render_note(note, source_file, citation=citation)
 
+    # #283: realer Schreib-Ausgang für n_merge (statt Planner-Intent) — Draft-Snapshot,
+    # analog zu auto_vault_recommended oben. Gilt in dry_run wie live identisch, weil
+    # is_merge_stub schon vor der dry_run-Verzweigung feststeht (kein Schreibpfad-Unterschied).
+    note.is_merge_stub = is_merge_stub
+
     if dry_run:
         if is_merge_stub:
             marker = f"[Merge-Stub -> {existing_vault.relative_to(VAULT)}]"

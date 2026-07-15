@@ -1355,6 +1355,33 @@ def resolve_sibling_dups(
     return kept, len(drop_idx)
 
 
+def count_actual_merges(drafts: list[AtomicNoteDraft], n_sibling_dedup: int) -> int:
+    """#283: n_merge aus tatsächlichen Merge-AUSGÄNGEN statt Planner-Intent.
+
+    Bug: `pipeline_runs.n_merge` zählte bisher `sum(1 for d in drafts if
+    d.action == "extend")` — die Planner-VORAB-Klassifikation, nicht das
+    tatsächliche Verify-/Dedup-Ergebnis. Ein als "extend" geplantes Konzept
+    kann am Ende trotzdem als eigene Note landen (dangling Intra-Run-extend,
+    resolve_sibling_dups setzt es auf "create" zurück, oder das extend_path-Ziel
+    löst beim Schreiben gar nicht auf), während ein als "create" geplantes
+    Konzept durch cross_reference/den Vault-Title-Match erst beim Schreiben zum
+    Merge wird — Planung und Ausgang laufen zustandsabhängig auseinander
+    (Belege: Lauf 2 hatte 1 Merge-Stub im Log, DB n_merge=0; Lauf 5 hatte 2
+    Sibling-Dedup-Merges bei 0 geplanten extends, DB n_merge=0; Lauf 3s
+    scheinbar korrektes n_merge=2 war Zufall).
+
+    Reale Merges kommen aus zwei disjunkten Quellen (Fix-Richtung #283):
+    - Sibling-Dedup-Absorption (resolve_sibling_dups, VOR dem Schreiben) —
+      absorbierte Drafts sind zum Zeitpunkt dieses Aufrufs schon aus `drafts`
+      entfernt, deshalb als Zähler übergeben statt erneut zählbar.
+    - Merge-Stub-Erzeugung beim Schreiben (vault_writer.write_note setzt
+      draft.is_merge_stub, wenn der Draft als Diff-Stub zu einer bestehenden
+      Vault-Note statt als eigene Note geschrieben wurde) — ausgewertet auf
+      den POST-Write-Drafts, kein doppeltes Zählen derselben Note möglich.
+    """
+    return n_sibling_dedup + sum(1 for d in drafts if d.is_merge_stub)
+
+
 def flag_redundant_siblings(
     drafts: list[AtomicNoteDraft],
     threshold: float | None = None,
@@ -2907,7 +2934,9 @@ def main(argv: list[str] | None = None):
                     "n_extracted": n_extracted,
                     "n_vault": vault_count,
                     "n_inbox": inbox_count,
-                    "n_merge": sum(1 for d in drafts if getattr(d, "action", "") == "extend"),
+                    # #283: realer Merge-Ausgang (Sibling-Dedup-Absorption + Merge-Stub-
+                    # Erzeugung beim Schreiben) statt Planner-Intent (action == "extend").
+                    "n_merge": count_actual_merges(drafts, n_sib),
                     "n_dropped": ctx.dropped_total,
                     "n_words": ctx.word_count,
                     "model": getattr(_db_cfg, "MODEL_PLANNER", ""),
