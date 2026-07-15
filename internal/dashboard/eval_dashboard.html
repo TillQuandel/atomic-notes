@@ -509,6 +509,31 @@ table.cmp td.dim { color: var(--ink-3); }
 .good-t { color: var(--mint); } .bad-t { color: var(--coral); } .warn-t { color: var(--amber); }
 
 /* ── Versions×PDF-Paarvergleich-Matrix ──────────────────────────── */
+/* Till-Live-Befund am gemergten #305: die Matrix (16 Spalten, ~1500px
+   Mindestbreite via nowrap + .pm-cell min-width) war oberhalb des
+   1200px-Breakpoints nicht nach rechts scrollbar — die #203-P3-Media-Query
+   oben gibt `.table-wrap` dort auf overflow-x:visible frei (fuer die
+   Bestandstabellen korrekt: die passen dann), `.app{overflow-x:clip}`
+   schnitt den Matrix-Ueberlauf ab (Repro 1440px: Wrapper 1162px, Tabelle
+   1497px, scrollLeft unbeweglich). Eigene Wrapper-Klasse haelt den
+   Scroll-Container in ALLEN Viewport-Breiten aktiv — Spezifitaet (0,2,0)
+   schlaegt die Media-Query-Regel (0,1,0); der sticky-thead der Media-Query
+   entfaellt fuer die Matrix ohnehin (Scroll-Container waere sein
+   Containing-Block, #203-P3-Begruendung). */
+.table-wrap.pm-scroll { overflow-x: auto; overflow-y: hidden; }
+/* Erste Spalte (PDF-Namen) beim Horizontal-Scroll fixiert — opaker
+   Card-Hintergrund, sonst schiebt sich der Zellinhalt beim Scrollen
+   sichtbar darunter durch. */
+.table-wrap.pm-scroll th:first-child,
+.table-wrap.pm-scroll td:first-child { position: sticky; left: 0; background: var(--bg-card); z-index: 2; }
+/* Die Zebra-/Hover-Overlays von table.cmp sind semi-transparent (rgba) —
+   in der sticky-Spalte scheinen sonst die darunter durchgescrollten Zellen
+   durch. Die Light-Zebra-Regel `body.light table.cmp ... td` (0,3,4)
+   schlaegt die Regel oben (0,3,1), darum hier mit hoeherer Spezifitaet
+   (0,5,4) opak halten. Bewusster Trade-off: der 1,5–3,5%-Tint (Zebra/Hover)
+   entfaellt nur in dieser einen Spalte. */
+.table-wrap.pm-scroll table.cmp tbody tr:nth-child(even) td:first-child,
+.table-wrap.pm-scroll table.cmp tbody tr:hover td:first-child { background: var(--bg-card); }
 table.pm-matrix td, table.pm-matrix th { padding: 9px 12px; }
 table.pm-matrix td.pdf { white-space: nowrap; }
 .pm-cell { text-align: center; min-width: 74px; line-height: 1.35; }
@@ -1013,7 +1038,9 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     <p class="insight" id="ins-pairmatrix"></p>
     <div class="insight" id="pm-archived-note" style="border-left-color:var(--ink-4)" hidden></div>
 
-    <div class="table-wrap">
+    <!-- pm-scroll: eigener, IMMER aktiver Scroll-Container (16 Spalten passen
+         in keiner Viewport-Breite — s. CSS-Kommentar an .table-wrap.pm-scroll) -->
+    <div class="table-wrap pm-scroll">
       <table class="cmp pm-matrix" id="pm-table">
         <thead><tr id="pm-thead"></tr></thead>
         <tbody id="pm-body"><tr><td style="padding:2rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">Wird geladen…</td></tr></tbody>

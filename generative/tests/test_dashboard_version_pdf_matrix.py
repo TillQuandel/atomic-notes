@@ -674,3 +674,23 @@ def test_html_pair_matrix_shows_version_cap_footnote():
     block = _pairmatrix_js_block()
     assert "n_versions_dropped" in block
     assert "nicht gezeigt" in block
+
+
+def test_html_pair_matrix_table_has_dedicated_scroll_wrapper():
+    """Till-Live-Befund am gemergten #305: die Matrix (16 Spalten, ~1500px
+    Mindestbreite via nowrap/min-width) war oberhalb des 1200px-Breakpoints
+    nicht nach rechts scrollbar — die #203-P3-Media-Query gibt dort
+    `.table-wrap` auf overflow-x:visible frei (fuer Bestandstabellen korrekt,
+    die passen dann), `.app{overflow-x:clip}` schnitt den Matrix-Ueberlauf ab
+    (Repro 1440px: Wrapper 1162px, Tabelle 1497px, scrollLeft unbeweglich).
+    Fix: eigene `pm-scroll`-Wrapper-Klasse, die den Scroll-Container in ALLEN
+    Viewport-Breiten aktiv haelt."""
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    # Markup: der Wrapper der Matrix-Tabelle traegt die pm-scroll-Klasse
+    section = html[html.index('id="s-pairmatrix"') : html.index('id="pm-table"')]
+    assert 'class="table-wrap pm-scroll"' in section
+    # CSS: Regel mit hoeherer Spezifitaet als die >=1200px-Freigabe
+    # (.table-wrap.pm-scroll schlaegt .table-wrap in der Media-Query)
+    assert ".table-wrap.pm-scroll" in html
