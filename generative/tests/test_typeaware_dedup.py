@@ -133,6 +133,7 @@ def test_write_note_honors_extend_path_to_concept(tmp_path, monkeypatch):
     target = vw.write_note(d, source_file="X.pdf", dry_run=False, existing_concepts=ec, inbox_dir=inbox)
     assert "MERGE" in target.name  # Merge-Stub statt create-Dublette
     assert target.exists()
+    assert d.is_merge_stub is True  # #283: realer Schreib-Ausgang, SSoT für n_merge
 
 
 def test_write_note_extend_path_to_literature_not_merged(tmp_path, monkeypatch):
@@ -148,3 +149,4 @@ def test_write_note_extend_path_to_literature_not_merged(tmp_path, monkeypatch):
     target = vw.write_note(d, source_file="X.pdf", dry_run=False, existing_concepts=ec, inbox_dir=inbox)
     assert "MERGE" not in target.name  # keine Lit-Note als Merge-Ziel → normale create-Note
     assert target.exists()
+    assert d.is_merge_stub is False  # #283: planned "extend", aber kein realer Merge

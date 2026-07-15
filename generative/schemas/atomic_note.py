@@ -100,6 +100,12 @@ class AtomicNoteDraft:
     # nicht zuverlässig aufgelöst werden konnte (Enrichment
     # leer ODER CrossRef-Override fail-closed verworfen).
     # Schmales Frontmatter-Flag, kein Erklär-Absatz.
+    # ownership: writer=vault_writer reader=orchestrator
+    is_merge_stub: bool = False  # #283: True wenn write_note() diesen Draft als Diff-Stub zu
+    # einer bestehenden Vault-Note geschrieben hat (statt als eigene Note) — realer
+    # Schreib-Ausgang. SSoT für orchestrator.count_actual_merges (n_merge), statt der
+    # vorherigen Planner-Intent-Zählung (action == "extend"), die zustandsabhängig
+    # falsch lag (Konzept war anders geplant als es tatsächlich endete).
 
 
 # ownership (Klassen-Block, #99): alle 8 Felder werden ausschließlich von
