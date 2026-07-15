@@ -974,7 +974,12 @@ def _chart_longitudinal(log_data: dict) -> dict:
         n_pts = [len(vm[v]) if vm.get(v) else 0 for v in versions]
         datasets.append(
             {
-                "label": _PDF_LABELS.get(key, key),
+                # Multi-Perspektiven-Review 2026-07-15 U4: fuer PDFs ausserhalb der
+                # 3 registrierten _PDF_LABELS-Eintraege zeigte das Trade-off-Chart-2
+                # (Akzeptanzrate ueber Versionen) den rohen, kleingeschriebenen Key
+                # (z.B. "cobaltite-paper") -- ueber DB-Fallback-Runs inzwischen der
+                # Regelfall statt die Ausnahme. Fallback prettified statt roh.
+                "label": _PDF_LABELS.get(key) or re.sub(r"[-_]+", " ", key).strip().title(),
                 "data": data_pts,
                 "n": n_pts,
                 "color": _pdf_color(key),

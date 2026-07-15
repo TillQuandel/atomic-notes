@@ -27,3 +27,17 @@ def test_filter_badges_have_always_visible_reset_button():
     html = _build_live_html()
     assert "fbadge-reset" in html
     assert "resetAllFilters()" in html
+
+
+def test_run_filter_badge_uses_option_text_not_raw_id():
+    """U3 (Multi-Perspektiven-Review 2026-07-15): Der Lauf-Filter-Badge zeigte
+    die rohe Run-ID aus _globalFilters.run (select-value, z.B.
+    "20260713-084724") statt des sichtbaren Options-Texts ("13.07. 08:47 ·
+    Schlebbe…"). Fix: für den run-Filter wird der Options-Text
+    (selectedOptions[0].text) ins Badge übernommen."""
+    html = _build_live_html()
+    assert "selectedOptions" in html
+    assert "opt.text" in html
+    # Regressions-Waechter: das alte Verhalten (immer roher select-value `v`
+    # ohne Sonderfall fuer 'run') darf nicht wiederkehren.
+    assert "${_escHTML(labels[k])}: <strong>${_escHTML(v)}</strong>" not in html
