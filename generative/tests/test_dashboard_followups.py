@@ -178,6 +178,31 @@ def test_chart_longitudinal_n_zero_for_missing_version():
     assert ds["n"] == [1]
 
 
+# ------------------------------------------ Multi-Perspektiven-Review 2026-07-15 U4
+def test_chart_longitudinal_prettifies_unregistered_pdf_key():
+    """Trade-off-Chart-2 (Akzeptanzrate ueber Versionen, ch4/leg4) zeigte fuer PDFs
+    ausserhalb der 3 registrierten _PDF_LABELS-Eintraege (bates/kuhlthau/schlebbe)
+    den rohen, kleingeschriebenen Key im Chart-Label (z.B. "cobaltite-paper" statt
+    "Cobaltite Paper") -- inzwischen werden ueber die DB-Fallback-Runs zahlreiche
+    weitere PDFs evaluiert, fuer die dieser Fallback der Regelfall ist."""
+    runs = [{"key": "cobaltite-paper", "label": "irrelevant", "ver": "v1", "accept_pct": 50.0}]
+    from generative.eval_dashboard import _build_log_data
+
+    log_data = _build_log_data(runs)
+    out = _chart_longitudinal(log_data)
+    assert out["datasets"][0]["label"] == "Cobaltite Paper"
+
+
+def test_chart_longitudinal_keeps_registered_pdf_label():
+    """Regression: registrierte Kurzschluessel (_PDF_LABELS) bleiben unveraendert."""
+    runs = [{"key": "bates", "label": "irrelevant", "ver": "v1", "accept_pct": 50.0}]
+    from generative.eval_dashboard import _build_log_data
+
+    log_data = _build_log_data(runs)
+    out = _chart_longitudinal(log_data)
+    assert out["datasets"][0]["label"] == "Bates 2017"
+
+
 # ----------------------------------------------------- foss/generative-Trennung
 def test_is_foss_version_detects_foss_prefix():
     assert is_foss_version("foss-v0.1.1") is True

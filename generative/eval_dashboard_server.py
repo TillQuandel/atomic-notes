@@ -616,11 +616,16 @@ def build_data(
     # all_log_runs — so erscheinen nur PDFs mit echten Daten im View (sonst
     # listet das Dropdown z. B. foss-only evaluierte PDFs, die „0 Notes" ergeben,
     # solange kein foss-Modell gewählt ist). Volltitel, dedupliziert.
+    # D6 (Multi-Perspektiven-Review 2026-07-15): Sprachfilter fehlte hier — das
+    # Versions-Dropdown direkt darunter berücksichtigt ihn bereits (`if
+    # language: _pver_rows = ...`), dieselbe Einschränkung fehlte am
+    # PDF-Dropdown, das dadurch auch PDFs der jeweils anderen Sprache listete.
     _all_pdfs_opts = D._dedupe_pdf_options(
         r.get("pdf")
         for r in all_quality_rows
         if r.get("eval_version") == eval_version
         and r.get("pdf")
+        and (not language or r.get("language") == language)
         and not (_exclude_foss and D.is_foss_version(r.get("version") or r.get("pipeline_version") or ""))
     )
     # Versions-Dropdown: nur Pipeline-Versionen MIT Eval-Daten in der aktiven

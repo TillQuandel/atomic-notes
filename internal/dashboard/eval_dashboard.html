@@ -244,6 +244,10 @@ body.collapsed .theme-toggle { padding: 6px; }
   font-family: var(--f-mono); font-size: 11px; font-weight: 600;
   color: var(--ink-2); text-transform: uppercase; letter-spacing: .10em;
 }
+/* U7 (Multi-Perspektiven-Review 2026-07-15): .sub-label ist uppercase, trifft
+   aber auch die eingebettete Versionsnummer ("V0.3.143" statt "v0.3.143") --
+   Versions-Spans von der Transformation ausnehmen. */
+#kpi-ver-label, #kpi-ver-label-perf { text-transform: none; }
 .sub-meta {
   font-family: var(--f-body); font-size: 11px;
   color: var(--ink-4); font-style: italic;
@@ -1193,14 +1197,23 @@ function _renderFilterBadges() {
   const labels = { pver: 'Version', pdf: 'PDF', lang: 'Sprache', model: 'Modell', run: 'Lauf' };
   const active = Object.entries(_globalFilters)
     .filter(([k, v]) => v && v !== '__all__' && labels[k]);
-  const badges = active.map(([k, v]) =>
-    `<span class="fbadge">
-      ${_escHTML(labels[k])}: <strong>${_escHTML(v)}</strong>
+  const badges = active.map(([k, v]) => {
+    // U3 (Multi-Perspektiven-Review 2026-07-15): Lauf-Filter speichert im
+    // select-value die rohe Run-ID ("20260713-084724") -- im Badge soll der
+    // sichtbare Options-Text stehen ("13.07. 08:47 · ..."), nicht die ID.
+    let display = v;
+    if (k === 'run') {
+      const runSel = document.getElementById('global-run');
+      const opt = runSel && runSel.selectedOptions && runSel.selectedOptions[0];
+      if (opt && opt.value === v) display = opt.text;
+    }
+    return `<span class="fbadge">
+      ${_escHTML(labels[k])}: <strong>${_escHTML(display)}</strong>
       <button onclick="_clearFilter('${_escHTML(k)}')" title="Filter entfernen" aria-label="Filter ${_escHTML(labels[k])} entfernen">
         <svg width="10" height="10" viewBox="0 0 10 10" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"><path d="M2 2l6 6M8 2l-6 6"/></svg>
       </button>
-    </span>`
-  ).join('');
+    </span>`;
+  }).join('');
   // #236: Reset auch außerhalb des Empty-State (0 Treffer) erreichbar, sobald
   // mindestens ein Filter aktiv ist — vorher steckte der einzige Reset im
   // Empty-Banner (nur bei 0 Treffern sichtbar).
@@ -1824,7 +1837,15 @@ function renderCharts(d) {
         const {ctx}=chart; ctx.save(); ctx.font='600 10.5px "IBM Plex Sans"'; ctx.textAlign='left'; ctx.textBaseline='middle';
         chart.getDatasetMeta(0).data.forEach((bar,i)=>{
           const val=rawPairs[i]?.v??0; const col=barColor(rawPairs[i]);
-          ctx.fillStyle=col; ctx.fillText(_fmtDE(val)+' %', bar.x+6, bar.y);
+          // U5 (Multi-Perspektiven-Review 2026-07-15): bei n=0 (keine Eval-
+          // Basis) wirkte das aufgedruckte "100,0 %" wie ein echter Wert —
+          // dieselbe Bedingung wie barColor (n===0), zusätzlich per Sternchen
+          // im Text UND per globalAlpha gedimmt gekennzeichnet (die graue
+          // Balkenfarbe allein reicht als Signal nicht).
+          const isEmpty = (nMap[rawPairs[i]?.l]||0)===0;
+          ctx.fillStyle=col; ctx.globalAlpha=isEmpty?.55:1;
+          ctx.fillText(_fmtDE(val)+' %'+(isEmpty?'*':''), bar.x+6, bar.y);
+          ctx.globalAlpha=1;
         }); ctx.restore();
       }}]
     });
