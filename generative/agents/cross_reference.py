@@ -41,6 +41,34 @@ def _clean_wikilink(s: str) -> str:
 _WIKILINK_BLOCK_RE = re.compile(r"\[\[.*?\]\]")
 
 
+def _split_toplevel_commas(s: str) -> list[str]:
+    """Splittet an Kommas außerhalb runder Klammern.
+
+    Ein naives `s.split(",")` zerschnitt einen klammerlosen Titel mit eigenem
+    Klammer-Komma wie 'Wissenskulturen im Vergleich (Mann, Mozart & Molekuel)'
+    in Fake-Targets (#285). Ein Komma, das innerhalb einer offenen '('...')'
+    steht, gehört zum Titel — nur Kommas außerhalb jeder Klammer trennen
+    Mehrfachziele (bestehendes Knowles-Run-Verhalten).
+    """
+    segments: list[str] = []
+    depth = 0
+    current: list[str] = []
+    for ch in s:
+        if ch == "(":
+            depth += 1
+            current.append(ch)
+        elif ch == ")":
+            depth = max(0, depth - 1)
+            current.append(ch)
+        elif ch == "," and depth == 0:
+            segments.append("".join(current))
+            current = []
+        else:
+            current.append(ch)
+    segments.append("".join(current))
+    return segments
+
+
 def _clean_dup_targets(raw: str | None) -> list[str]:
     """Zerlegt ein `duplicate_path`-Feld in saubere Einzelziel-Stems.
 
@@ -61,8 +89,15 @@ def _clean_dup_targets(raw: str | None) -> list[str]:
       Verhalten für vom LLM gelieferte Roh-Listen).
 
     Grenzfall: eine bare Liste OHNE Klammern, deren Einzeltitel selbst ein Komma
-    trägt, ist nicht auflösbar und wird weiter am Komma gesplittet — das
-    Klammer-Signal ist die bewusst gewählte, konservative Disambiguierung.
+    AUSSERHALB runder Klammern trägt (z.B. "Smith, John (2020)"), ist nicht
+    auflösbar und wird weiter am Komma gesplittet — das Klammer-Signal ist die
+    bewusst gewählte, konservative Disambiguierung. Ein Titel-Komma INNERHALB
+    runder Klammern ("Titel (A, B)") wird seit #285 nicht mehr fälschlich
+    gesplittet (siehe `_split_toplevel_commas`).
+
+    Die Stem-Extraktion schneidet nur eine echte `.md`-Endung ab (reale Vault-
+    Pfade). `Path(...).stem` auf reine Titel-Strings anzuwenden zerschnitt zuvor
+    Abkürzungspunkte wie "vs.", "z. B." als vermeintliche Datei-Endung (#285).
     """
     s = (raw or "").strip()
     if not s:
@@ -73,11 +108,11 @@ def _clean_dup_targets(raw: str | None) -> list[str]:
     elif s.startswith("[[") and s.endswith("]]"):
         segments = [s]
     else:
-        segments = s.split(",")
+        segments = _split_toplevel_commas(s)
     targets: list[str] = []
     for seg in segments:
         inner = _clean_wikilink(seg).split("|", 1)[0].strip()
-        stem = Path(inner).stem if inner else ""
+        stem = Path(inner).stem if inner.lower().endswith(".md") else inner
         if stem:
             targets.append(stem)
     return targets

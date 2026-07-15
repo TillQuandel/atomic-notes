@@ -82,3 +82,31 @@ def test_clean_dup_targets_single_wikilink_with_comma_not_split():
 def test_clean_dup_targets_multiple_wikilink_blocks_split():
     assert cr._clean_dup_targets("[[A]], [[B]]") == ["A", "B"]
     assert cr._clean_dup_targets("[[A]], [[B]], [[C]]") == ["A", "B", "C"]
+
+
+# #285: ein klammerloser duplicate_path-Titel (kein Wikilink-Block, keine LLM-
+# Roh-Liste) mit einem EIGENEN Komma in Klammern wurde vom naiven s.split(",")
+# in zwei Fake-Targets zerschnitten ("... (Mann" + "Mozart & Molekuel)").
+# Kommas innerhalb runder Klammern gehören zum Titel, nicht als Trenner.
+def test_clean_dup_targets_bare_title_with_parenthetical_comma_not_split():
+    assert cr._clean_dup_targets("Wissenskulturen im Vergleich (Mann, Mozart & Molekuel)") == [
+        "Wissenskulturen im Vergleich (Mann, Mozart & Molekuel)"
+    ]
+
+
+# #285: Path(inner).stem interpretiert den letzten Punkt im String als Datei-
+# Endung und schneidet alles danach ab — bricht Titel mit Abkürzungspunkten
+# ("vs.", "z. B.") die keine echte .md-Datei-Endung tragen.
+def test_clean_dup_targets_bare_title_with_abbreviation_dot_not_truncated():
+    assert cr._clean_dup_targets("Eigenstaendiger KI-Kompetenzrahmen vs. Framework-Integration") == [
+        "Eigenstaendiger KI-Kompetenzrahmen vs. Framework-Integration"
+    ]
+    assert cr._clean_dup_targets("Fallbeispiel z. B. Bibliothekskatalog") == ["Fallbeispiel z. B. Bibliothekskatalog"]
+
+
+# Positiv-Kontrolle: echte .md-Vault-Pfade (auch mit Verzeichnis-Präfix) werden
+# weiterhin korrekt zu ihrem Datei-Stem aufgelöst — die .md-Endungs-Erkennung
+# darf durch den #285-Fix nicht verloren gehen.
+def test_clean_dup_targets_real_md_path_still_resolves_to_stem():
+    assert cr._clean_dup_targets("05-llm-wiki/some-note.md") == ["some-note"]
+    assert cr._clean_dup_targets("Foo.md, Bar.md") == ["Foo", "Bar"]
