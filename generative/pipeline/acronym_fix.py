@@ -55,6 +55,12 @@ def _short_is_valid(s: str) -> bool:
         return False
     if len(s) < 2 or len(s) > 10:
         return False
+    if "-" in s:
+        # Bindestrich-Fragmente (z.B. "KI-" als abgeschnittenes Wortende) sind
+        # keine gueltigen Short Forms — der Scanner erkennt sie sonst faelschlich
+        # als Akronym und liest ein zufaelliges Textfragment als Langform
+        # (Issue #279: H1-Titel-Korruption).
+        return False
     letters = [c for c in s if c.isalpha()]
     if not letters:
         return False
@@ -188,21 +194,38 @@ def expand_acronyms(body: str, whitelist: dict[str, str] | None = None) -> tuple
     - Wenn das Akronym bereits direkt von `(...)` gefolgt wird, skip
       (idempotent gegenüber LLM-Output der die Klammer schon gesetzt hat).
     - Nur das ERSTE Vorkommen wird modifiziert.
+    - H1-Header-Schutz: eine erste Zeile im Markdown-H1-Format (`# ...`) wird
+      NIE verändert — Insertion greift erst ab der Zeile danach (Issue #279:
+      Akronym-Fix hat H1-Titel korrumpiert, u.a. via fälschlich erkannter
+      Bindestrich-Fragmente). Notes ohne H1 verhalten sich unverändert.
     """
     if not whitelist:
         return body, []
+
+    header = ""
+    rest = body
+    newline_idx = body.find("\n")
+    first_line = body[:newline_idx] if newline_idx != -1 else body
+    if first_line.startswith("# "):
+        if newline_idx != -1:
+            header = body[: newline_idx + 1]
+            rest = body[newline_idx + 1 :]
+        else:
+            # Body besteht nur aus der H1-Zeile — kein Body-Text zum Expandieren.
+            header, rest = body, ""
+
     expanded: list[str] = []
     for acronym, expansion in whitelist.items():
-        if _already_resolved(body, acronym, expansion):
+        if _already_resolved(rest, acronym, expansion):
             continue
         pattern = re.compile(rf"\b{re.escape(acronym)}\b(?!\s*\()")
-        m = pattern.search(body)
+        m = pattern.search(rest)
         if not m:
             continue
         insert_at = m.end()
-        body = body[:insert_at] + f" ({expansion})" + body[insert_at:]
+        rest = rest[:insert_at] + f" ({expansion})" + rest[insert_at:]
         expanded.append(acronym)
-    return body, expanded
+    return header + rest, expanded
 
 
 # ---------- LLM-Fallback für globale Akronyme -----------------------------
