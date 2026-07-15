@@ -179,3 +179,31 @@ def test_zit_n_primary_reference_needs_word_boundary():
     assert len(flags) == 1 and "Sekund" in flags[0]
     body_ok = "Mueller betont Y (zit. n. Berg, S. 3)."
     assert validate_citation_attributions(body_ok, cit) == []
+
+
+# ---- #289: Stopword-artige Nicht-Nachnamen (Opus-Breitenreview, Laeufe 2-5) ----
+
+
+class TestNonSurnameStopwordFalsePositives:
+    def test_jahr_construction_not_flagged(self):
+        # "aus dem Jahr 1989" matcht AUTHOR_YEAR_RE als "Jahr 1989" (deutsche
+        # Grossschreibung von Substantiven) -- ist keine Autor-Jahr-Attribution.
+        body = "Die Studie stammt aus dem Jahr 1989 und untersucht X."
+        citation = _cm(author="Meier", year=None)
+        assert validate_citation_attributions(body, citation) == []
+
+    def test_event_location_year_not_flagged(self):
+        # "Potsdam 2019" (Ort+Jahr am Ende eines Veranstaltungsnamens) ist keine
+        # Autor-Jahr-Attribution.
+        body = "Vorgestellt beim 8. Potsdamer IScience Tag, Potsdam 2019."
+        citation = _cm(author="Meier", year=None)
+        assert validate_citation_attributions(body, citation) == []
+
+    def test_real_foreign_author_still_flagged_alongside_stopword_match(self):
+        # Konservativ: die Ausschlussliste darf einen ECHTEN Fremdautor nicht
+        # mit-unterdruecken, nur weil im selben Body auch ein Stopword-Treffer steht.
+        body = "Aus dem Jahr 1989 stammt auch Landry (2019), der etwas Falsches behauptet."
+        citation = _cm(author="Meier", year=None)
+        flags = validate_citation_attributions(body, citation)
+        assert len(flags) == 1
+        assert "Landry" in flags[0]
