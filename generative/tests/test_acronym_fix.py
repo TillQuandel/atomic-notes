@@ -233,3 +233,57 @@ def test_llm_fallback_resolve_flag_off(monkeypatch):
         extra = llm_fallback_resolve("Body mit CSCW.", {})
     assert extra == {}
     mock_call.assert_not_called()
+
+
+# ---- Issue #279: H1-Header-Korruption durch Akronym-Fix ------------------
+
+
+def test_short_invalid_hyphen_fragment():
+    """Bindestrich-Fragmente sind keine gueltigen Short Forms — der
+    Schwartz-Hearst-Scanner erkennt sonst faelschlich Textfragmente wie
+    'KI-' als Akronym und liest ein zufaelliges nachfolgendes Textstueck
+    als vermeintliche Langform (Issue #279)."""
+    assert not _short_is_valid("KI-")
+    assert not _short_is_valid("-KI")
+    assert not _short_is_valid("K-I")
+
+
+def test_short_valid_classic_acronyms_no_regression_279():
+    """Legitime Akronyme ohne Bindestrich bleiben gueltig (keine Ueber-Restriktion)."""
+    for s in ["TAM", "SEM"]:
+        assert _short_is_valid(s), f"{s!r} should remain valid"
+
+
+def test_expand_acronyms_preserves_h1_header_against_corruption():
+    """Repro Issue #279: Selbst ein legitimes Akronym ('KI'), das im H1-Titel
+    vorkommt, darf den Titel nicht veraendern — nur Body-Text nach der
+    H1-Zeile ist fair game fuer Insertion."""
+    body = "# Spannungsfeld KI-Fokus vs. Skepsis\n\nIm Studium wird KI zunehmend eingesetzt."
+    whitelist = {
+        "KI": "künstliche Intelligenz",
+        "KI-": "Einsatz im Studium und Berufsleben vorbereitet.",
+    }
+    new, expanded = expand_acronyms(body, whitelist)
+    new_lines = new.split("\n", 1)
+    assert new_lines[0] == "# Spannungsfeld KI-Fokus vs. Skepsis"
+
+
+def test_expand_acronyms_still_expands_body_after_h1():
+    """Positiv-Kontrolle: Akronym in einer Body-Zeile (nicht im H1) wird
+    weiterhin expandiert — der H1-Schutz darf die normale Funktion nicht
+    kaputt machen."""
+    body = "# Titel ohne Aenderung\n\nSEM wird in der Studie oft verwendet."
+    whitelist = {"SEM": "Structural Equation Modeling"}
+    new, expanded = expand_acronyms(body, whitelist)
+    assert new.split("\n", 1)[0] == "# Titel ohne Aenderung"
+    assert "SEM (Structural Equation Modeling) wird" in new
+    assert expanded == ["SEM"]
+
+
+def test_expand_acronyms_no_h1_unaffected():
+    """Robustheit: Body ohne H1-Header verhaelt sich wie vor dem Fix."""
+    body = "TAM wird oft verwendet."
+    whitelist = {"TAM": "Technology Acceptance Model"}
+    new, expanded = expand_acronyms(body, whitelist)
+    assert new == "TAM (Technology Acceptance Model) wird oft verwendet."
+    assert expanded == ["TAM"]
