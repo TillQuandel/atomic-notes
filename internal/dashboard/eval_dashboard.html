@@ -1589,13 +1589,25 @@ function _trendChart(points, versions, color, unit) {
     : '';
 
   // 3 Hilfslinien mit Wert-Beschriftung — mehr Kontext
-  const hairLines = [0, 0.5, 1].map(t => {
+  // Bug 3 (Multi-Perspektiven-Review 2026-07-15): vorher lief der Rohwert
+  // durch _fmtDE() (DE-Formatierung MIT Dezimalkomma, z.B. "0,03") und wurde
+  // danach per parseFloat() zurueckgeparst — parseFloat bricht am Komma ab
+  // ("0,03" -> 0), alle 3 Hilfslinien landeten bei au.fmt(0) = 3x identisch.
+  // Fix: Rohwert direkt an au.fmt (das selbst rundet); bei sehr kleinen
+  // Spannen reicht die Standard-Nachkommastellenzahl u.U. nicht zum
+  // Unterscheiden — dann Nachkommastellen schrittweise erhoehen, bis alle 3
+  // Labels sich unterscheiden (Cap bei 6 Nachkommastellen).
+  const hairVals = [0, 0.5, 1].map(t => min + t*span);
+  let hairLabels = hairVals.map(v => au.fmt(v));
+  for (let extra = 2; new Set(hairLabels).size < hairLabels.length && extra <= 6; extra++) {
+    hairLabels = hairVals.map(v => _fmtDE(v, extra) + (au.u || ''));
+  }
+  const hairLines = [0, 0.5, 1].map((t, i) => {
     const y = (padT + ih - t*ih).toFixed(1);
-    const val = _fmtDE(min + t*span);
     return `<line x1="${padL}" x2="${w-padR}" y1="${y}" y2="${y}" stroke="${hair}"/>
       <text x="${parseFloat(padL)+4}" y="${parseFloat(y)-3}"
         fill="${ink4}" font-size="9" font-family="JetBrains Mono"
-        opacity=".7">${au.fmt(parseFloat(val))}</text>`;
+        opacity=".7">${hairLabels[i]}</text>`;
   }).join('');
 
   return `<svg width="100%" viewBox="0 0 ${w} ${h}"
@@ -1978,7 +1990,18 @@ function renderCharts(d) {
         // gibt sie mit Komma statt Punkt aus (konsistent zum Tooltip oben).
         scales:{x:axisCfg({ticks:{callback:v=>_fmtDE(v)+' min', precision:1}}),y:axisCfg({grid:{display:false},ticks:{color:t.ink2,font:{size:12}}})}}});
   } else {
-    setChartEmpty('ch7'); setChartEmpty('ch8');
+    // Bug 2 (Multi-Perspektiven-Review 2026-07-15): Agent-Statistiken kommen
+    // ausschließlich aus lokalen Trace-JSONLs (.cache/runs/<run_id>.jsonl) —
+    // es gibt keine Agent-Ebene in der DB (pipeline_runs/note_evals kennen
+    // nur Run-Summen). Ohne aktiven Filter suggerierte die generische
+    // Filter-Leer-Meldung faelschlich, ein Filter sei schuld — tatsaechlich
+    // fehlen fuer aeltere/rotierte Laeufe schlicht die Traces. Bei aktivem
+    // Filter bleibt die bisherige Meldung korrekt (echte 0-Treffer-Kombination).
+    const agFiltersActive = Object.values(_globalFilters).some(v=>v && v!=='__all__');
+    const agMsg = agFiltersActive
+      ? undefined
+      : 'Agent-Statistiken benötigen lokale Lauf-Traces (.cache/runs) — für ältere/rotierte Läufe nicht verfügbar';
+    setChartEmpty('ch7', agMsg); setChartEmpty('ch8', agMsg);
   }
 }
 
