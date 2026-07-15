@@ -506,6 +506,16 @@ def build_data(
         _run_lang_safe = _run_lang if "_run_lang" in dir() else {}
         for r in _db_only.query_pipeline_runs():
             if r["run_id"] not in _jsonl_run_ids and r.get("model"):
+                # Bug 1 (Multi-Perspektiven-Review 2026-07-15): tokens_in/out/cache
+                # waren hier hartkodiert 0, obwohl pipeline_runs die Spalten
+                # tokens_input/tokens_output/tokens_cache_read gefuellt hat (v0.3.140:
+                # 12.863.095 tokens_total in der DB, Dashboard zeigte 0/"–"). DB-Best-
+                # Effort wie duration_min/cost_usd/wall_clock_s direkt darunter — nur
+                # tokens_cache_create fehlt als DB-Spalte (nur im Trace-JSONL erfasst,
+                # db.insert_run() persistiert sie nicht), bleibt daher 0.
+                _tok_in = r.get("tokens_input", 0) or 0
+                _tok_out = r.get("tokens_output", 0) or 0
+                _tok_cache_read = r.get("tokens_cache_read", 0) or 0
                 token_runs.append(
                     {
                         "run_id": r["run_id"],
@@ -517,9 +527,11 @@ def build_data(
                         # DB-gejoint (kein Waisen-Fall moeglich).
                         "db_matched": True,
                         "cost_usd": r.get("cost_usd", 0.0) or 0.0,
-                        "tokens_in": 0,
-                        "tokens_out": 0,
-                        "tokens_cache": 0,
+                        "tokens_in": _tok_in,
+                        "tokens_out": _tok_out,
+                        "tokens_cache": _tok_cache_read,
+                        "tokens_cache_read": _tok_cache_read,
+                        "tokens_cache_create": 0,
                         "duration_min": round((r.get("duration_s") or 0.0) / 60, 1),
                         "wall_clock_s": r.get("wall_clock_s", 0.0) or 0.0,
                         "calls": 0,
