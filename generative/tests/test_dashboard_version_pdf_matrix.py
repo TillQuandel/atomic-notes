@@ -118,6 +118,90 @@ def test_cell_stats_negative_sentinel_excluded():
     assert stats["median_cov"] is None
 
 
+def test_cell_stats_zero_coverage_factual_not_swallowed_by_or_fallback():
+    """D4-Anti-Pattern-Regression (Dashboard-Review 2026-07-15): eine ECHTE
+    coverage_factual=0.0 ist falsy — ein `or`-Fallback wuerde sie verschlucken
+    und faelschlich coverage_rate nehmen. 0%-Coverage-Zeilen existieren real
+    (Jockisch-Faelle). coverage_factual=0.0 MUSS als 0.0 einfliessen."""
+    rows = [
+        {
+            "pdf": "a.pdf",
+            "note_path": "n1",
+            "pipeline_version": "v1",
+            "hallucination_rate": 0.1,
+            "coverage_factual": 0.0,
+            "coverage_rate": 0.8,  # darf NICHT gewinnen
+            "timestamp": "2026-01-01T00:00:00",
+        }
+    ]
+    stats = _matrix_cell_stats(rows)
+    assert stats["median_cov"] == 0.0  # nicht 80.0
+    assert stats["min_cov"] == 0.0
+    assert stats["max_cov"] == 0.0
+
+
+def test_cell_stats_zero_coverage_factual_without_coverage_rate_counts_as_zero():
+    # coverage_factual=0.0 + coverage_rate=None: `or` wuerde die Zeile komplett
+    # verwerfen (None) — sie muss als 0.0 zaehlen.
+    rows = [
+        {
+            "pdf": "a.pdf",
+            "note_path": "n1",
+            "pipeline_version": "v1",
+            "hallucination_rate": 0.1,
+            "coverage_factual": 0.0,
+            "coverage_rate": None,
+            "timestamp": "2026-01-01T00:00:00",
+        }
+    ]
+    stats = _matrix_cell_stats(rows)
+    assert stats["median_cov"] == 0.0  # nicht None/verworfen
+
+
+def test_cell_stats_none_coverage_factual_falls_back_to_coverage_rate():
+    # Der legitime Fallback-Fall bleibt erhalten: NUR bei coverage_factual=None
+    # greift coverage_rate (v4-Zeilen schreiben coverage_factual immer NULL, #233).
+    rows = [
+        {
+            "pdf": "a.pdf",
+            "note_path": "n1",
+            "pipeline_version": "v1",
+            "hallucination_rate": 0.1,
+            "coverage_factual": None,
+            "coverage_rate": 0.8,
+            "timestamp": "2026-01-01T00:00:00",
+        }
+    ]
+    stats = _matrix_cell_stats(rows)
+    assert stats["median_cov"] == 80.0
+
+
+def test_pair_compare_zero_coverage_factual_not_swallowed_by_or_fallback():
+    """Dieselbe D4-Regression fuer den Paarvergleichs-Pfad (_pair_metric_stats):
+    cov_a muss die echte 0.0 aus coverage_factual zeigen, nicht coverage_rate."""
+
+    def _row(note, ver, cf, cr):
+        return {
+            "pdf": "Shared.pdf",
+            "note_path": note,
+            "pipeline_version": ver,
+            "hallucination_rate": 0.1,
+            "coverage_factual": cf,
+            "coverage_rate": cr,
+            "timestamp": "2026-01-01T00:00:00",
+        }
+
+    rows = [
+        _row("a1", "vA", 0.0, 0.8),  # echte 0%-Coverage, coverage_rate darf nicht gewinnen
+        _row("b1", "vB", 0.0, None),  # echte 0%-Coverage, darf nicht verworfen werden
+    ]
+    cmp = _version_pair_compare(rows, "vA", "vB")
+    cell = cmp["per_pdf"]["shared"]
+    assert cell["cov_a"] == 0.0  # nicht 80.0
+    assert cell["cov_b"] == 0.0  # nicht None
+    assert cell["cov_delta"] == 0.0
+
+
 # ── _calc_version_pdf_matrix ────────────────────────────────────────────────
 
 

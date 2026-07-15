@@ -1182,6 +1182,20 @@ def version_delta(kpi_trend: dict, metric: str) -> dict:
 #     ihre Dominanz wird ueber n/Min/Max je Zelle sichtbar statt versteckt.
 
 
+def _row_coverage(r: dict):
+    """Coverage-Wert einer Eval-Zeile: `coverage_factual`, wenn NICHT None
+    (auch bei echter 0.0!), NUR bei None Fallback auf `coverage_rate`.
+
+    D4-Anti-Pattern-Fix (Dashboard-Review 2026-07-15): das verbreitete
+    `coverage_factual or coverage_rate` verschluckt eine ECHTE 0.0 (falsy)
+    und nimmt faelschlich coverage_rate bzw. verwirft die Zeile, wenn
+    coverage_rate fehlt — 0%-Coverage-Zeilen existieren real (Jockisch-
+    Faelle). Nur fuer die neuen Matrix-/Paarvergleichs-Funktionen unten;
+    die Bestands-Stellen mit demselben Muster fixt ein separates Ticket."""
+    v = r.get("coverage_factual")
+    return v if v is not None else r.get("coverage_rate")
+
+
 def _matrix_cell_stats(rows: list[dict]) -> dict | None:
     """Median-Fehlerquote/-Belegrate + n + Min/Max-Spannweite fuer EINE (PDF,
     Version)-Zelle der Matrix.
@@ -1212,11 +1226,7 @@ def _matrix_cell_stats(rows: list[dict]) -> dict | None:
         for r in deduped
         if r.get("hallucination_rate") is not None and float(r["hallucination_rate"]) >= 0
     ]
-    cov_vals = [
-        round(float(v) * 100, 1)
-        for r in deduped
-        if (v := (r.get("coverage_factual") or r.get("coverage_rate"))) is not None and float(v) >= 0
-    ]
+    cov_vals = [round(float(v) * 100, 1) for r in deduped if (v := _row_coverage(r)) is not None and float(v) >= 0]
     return {
         "n": len(deduped),
         "median_hall": round(_median(hall_vals), 1) if hall_vals else None,
@@ -1286,11 +1296,7 @@ def _pair_metric_stats(rows: list[dict]) -> dict:
         for r in rows
         if r.get("hallucination_rate") is not None and float(r["hallucination_rate"]) >= 0
     ]
-    cov = [
-        round(float(v) * 100, 1)
-        for r in rows
-        if (v := (r.get("coverage_factual") or r.get("coverage_rate"))) is not None and float(v) >= 0
-    ]
+    cov = [round(float(v) * 100, 1) for r in rows if (v := _row_coverage(r)) is not None and float(v) >= 0]
     return {
         "hall": round(_median(hall), 1) if hall else None,
         "cov": round(_median(cov), 1) if cov else None,
