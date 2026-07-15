@@ -1424,7 +1424,13 @@ function renderKpis(kpis, thresh, kpiTrend) {
       // starr die direkte Vorversion) — im Tooltip transparent benennen, WOGEGEN
       // verglichen wird, inkl. deren n.
       const prevRef = vd.prev_version ? `Version ${vd.prev_version}${vd.prev_n != null ? ` (n=${vd.prev_n})` : ''}` : 'der vorherigen Pipeline-Version';
-      const chipHint = `Veränderung gegenüber ${prevRef}, serverseitig berechnet.${vd.reliable ? '' : ' Erst ab n≥20 in beiden Versionen gilt das Delta als belastbar — hier nicht der Fall.'}`;
+      // Statistik-Review 2026-07-15: n≥20 allein härtet nicht gegen PDF-Mix
+      // (Corpus faktisch ausgetauscht) — zwei unterschiedliche Gründe für
+      // "nicht belastbar" brauchen zwei unterschiedliche Erklärungen.
+      const unreliableMsg = vd.reason === 'pdf_mix'
+        ? ` Nicht vergleichbar: die Quell-PDFs beider Versionen überschneiden sich kaum${vd.pdf_overlap != null ? ` (nur ${_fmtDE(vd.pdf_overlap * 100, 0)} % der Notes teilen eine PDF-Quelle mit ${prevRef})` : ''} — das Delta spiegelt eher einen Corpus-Wechsel als einen echten Versions-Effekt.`
+        : ' Erst ab n≥20 in beiden Versionen gilt das Delta als belastbar — hier nicht der Fall.';
+      const chipHint = `Veränderung gegenüber ${prevRef}, serverseitig berechnet.${vd.reliable ? '' : unreliableMsg}`;
       chip = `<span class="kpi-delta ${cls} hint">${arrow} ${_fmtDE(Math.abs(dnum))}<span class="hint-pop">${chipHint}</span></span>`;
     }
     // #219-Nachbesserung Punkt 1: kein tabindex auf den 4 Hint-Triggern hier —
@@ -1482,8 +1488,13 @@ function renderKpis(kpis, thresh, kpiTrend) {
     const lowerIsBetter = ['hall','dur','tokens','cost'].includes(kd.key);
     const dClass = (dnum!=null && vd.reliable && dnum!==0) ? ((dnum>0) === lowerIsBetter ? 'dneg' : 'dpos') : '';  // 0.0 = neutral, keine Farbe
     const sign = dnum!=null && dnum>0 ? '+' : '';
+    // Statistik-Review 2026-07-15: "(n<20)" war die einzige Nicht-belastbar-
+    // Erklärung — ein PDF-Mix-Delta (n≥20, aber Corpus ausgetauscht) sah
+    // damit faelschlich wie ein Stichprobenproblem statt ein Vergleichbarkeits-
+    // problem aus.
+    const caveatSuffix = (vd && !vd.reliable) ? (vd.reason === 'pdf_mix' ? ' (PDF-Mix)' : ' (n&lt;20)') : '';
     const deltaHtml = dnum!=null
-      ? `Δ vs. ${prevVer}: <span class="${dClass}">${sign}${_fmtDE(dnum)} ${kd.u}</span>${vd.reliable ? '' : ' (n&lt;20)'}`
+      ? `Δ vs. ${prevVer}: <span class="${dClass}">${sign}${_fmtDE(dnum)} ${kd.u}</span>${caveatSuffix}`
       : `${vers.length} Pipeline-Versionen`;
     const inner = document.getElementById('spark-inner');
     if (inner) {
@@ -2289,8 +2300,13 @@ function renderInsights(d) {
     if (vd && vd.prev != null) {
       const prevVer = esc(vd.prev_version ?? vers[vers.length - 2] ?? '–');
       const nPrev = vd.prev_n ?? (kt.n || [])[(kt.n || []).length - 2];
+      // Statistik-Review 2026-07-15: "n<20" war die einzige Caveat-Erklärung —
+      // ein PDF-Mix-Delta (n≥20, aber Corpus ausgetauscht) braucht eine eigene.
+      const caveatTxt = vd.reason === 'pdf_mix'
+        ? ` <span class="caveat">(PDF-Mix — nicht vergleichbar)</span>`
+        : ` <span class="caveat">(n&lt;20 — nicht belastbar)</span>`;
       deltaTxt = ` vs. <strong>${prevVer}</strong>: ${_fmtDE(vd.prev)} % (n=${nPrev})` +
-        (vd.reliable ? '' : ` <span class="caveat">(n&lt;20 — nicht belastbar)</span>`);
+        (vd.reliable ? '' : caveatTxt);
     }
     _setInsight('ins-overview',
       `Pipeline <strong>${esc(k.kpi_version||'–')}</strong>: Fehlerquote <strong>${_fmtDE(k.avg_hall)} %</strong>, ` +

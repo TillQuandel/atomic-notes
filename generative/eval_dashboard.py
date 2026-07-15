@@ -51,6 +51,7 @@ _KEY_RE = re.compile(r"^([a-z]+)_")
 _WORDS_RE = re.compile(r"(\d[\d.]*)\s+W")
 _PAGES_RE = re.compile(r"(\d+)\s+S\.")
 _CHUNKS_RE = re.compile(r"(\d+)\s+Chunks")
+_NOTE_NS_PREFIX_RE = re.compile(r"^(?:vault|inbox|merge)__")
 
 _PDF_LABELS: dict[str, str] = {
     "bates": "Bates 2017",
@@ -571,6 +572,13 @@ def _calc_kpis(
         if latest_pver
         else quality_rows
     )
+    # Re-Eval-Dedup (Statistik-Review 2026-07-15): pro Note nur die neueste
+    # Eval-Zeile — sonst poolen hall/cov unten Anker mehrfach-evaluierter
+    # Notes mehrfach (Produktionsbeleg: 52 Zeilen / 40 distinct Notes bei
+    # v0.3.140). Ab hier ist `latest_qrows` die EINE Basis für hall, cov UND
+    # n_notes — die Kachel-n passt dadurch automatisch zur Pooling-Basis
+    # (vorher: Kachel n=40, Pooling-Basis 52 — inkonsistent).
+    latest_qrows = _dedup_latest_per_note(latest_qrows)
 
     all_versions = sorted({r["ver"] for r in all_log_runs if r.get("ver")}, key=_ver_sort_key)
 
@@ -751,6 +759,58 @@ def _distinct_notes(rows: list[dict]) -> int:
     return len({r.get("note_path") or r.get("note") or i for i, r in enumerate(rows)})
 
 
+def _note_key(r: dict, idx: int) -> str:
+    """Normalisierter Note-Schlüssel für Dedup/Identitätsvergleiche.
+
+    `note_path`/`note` mit gestripptem Namespace-Prefix (`vault__`/`inbox__`/
+    `merge__`) — eine Note kann zwischen zwei Re-Evals den Namespace wechseln
+    (Routing-Änderung/Merge), ein reiner Feldvergleich würde dieselbe Note
+    sonst als zwei Identitäten zählen (Statistik-Review 2026-07-15). Fehlt ein
+    Identifier (synthetische Rows), ist der Schlüssel der Zeilenindex —
+    konsistent mit dem Fallback in `_distinct_notes`."""
+    raw = r.get("note_path") or r.get("note")
+    if not raw:
+        return f"__row{idx}"
+    return _NOTE_NS_PREFIX_RE.sub("", str(raw))
+
+
+def _dedup_latest_per_note(rows: list[dict]) -> list[dict]:
+    """Pro (normalisierter) Note NUR die neueste Eval-Zeile.
+
+    Statistik-Review 2026-07-15 (3 unabhängige Opus-Statistiker, konvergent +
+    adversarial bestätigt): note_evals enthält mehrere Zeilen derselben Note
+    innerhalb einer pipeline_version (Re-Evals + identische Duplikat-Inserts;
+    Produktionsbeleg v0.3.140 = 52 Zeilen / 40 distinct Notes, 12 Duplikate).
+    Ungefiltert poolt jede KPI-Aggregation (`_pooled_hall_stats`, Coverage-
+    Median, `kpi_trend` im Server) Anker mehrfach-evaluierter Notes mehrfach —
+    Pseudoreplikation, ~2pp Bias auf der gepoolten Fehlerquote (oft
+    re-evaluierte Notes haben tendenziell gute Raten, die die Poolung sonst
+    nach unten ziehen).
+
+    Aufrufer MÜSSEN `rows` vorher auf eine einzelne pipeline_version
+    einschränken — der Dedup hier ist versionsblind (reine Note-Identität);
+    das Vermischen mehrerer Versionen ist Aufgabe des Callers, nicht dieser
+    Funktion.
+
+    „Neueste" = größter `timestamp`-String (ISO 8601, lexikographisch
+    sortierbar); Tie-Break `eval_id` (ebenfalls Timestamp-präfixiert), dann
+    Listenposition — rein für Determinismus bei exaktem Timestamp+eval_id-
+    Gleichstand (Rows ohne beides: die letzte in der Liste gewinnt, was zur
+    `ORDER BY timestamp`-Reihenfolge von `db.query_note_evals` passt). Rows
+    ohne Note-Identifier zählen einzeln (s. `_note_key`)."""
+    best: dict[str, tuple] = {}
+    order: list[str] = []
+    for i, r in enumerate(rows):
+        key = _note_key(r, i)
+        sort_key = (str(r.get("timestamp") or ""), str(r.get("eval_id") or ""), i)
+        prev = best.get(key)
+        if prev is None or sort_key > prev[0]:
+            if prev is None:
+                order.append(key)
+            best[key] = (sort_key, r)
+    return [best[k][1] for k in order]
+
+
 def _newest_capped_version(versions: list[str], current: str | None) -> str | None:
     """Neueste Version, die nicht NEUER als die Config-Version ist (#191);
     fällt auf die neueste vorhandene zurück, wenn ALLE Versionen Orphans sind
@@ -864,6 +924,10 @@ def _calc_pdf_table(
         # „neueste Eval-Version" zeigen (#194 P5).
         orphan = bool(vers) and _capped_latest_version(vers, current_version) is None
         at = [r for r in qrows if _row_version(r) == ver]
+        # Re-Eval-Dedup (Statistik-Review 2026-07-15): dieselbe Basis wie die
+        # KPI-Kachel (`_calc_kpis`) — sonst zeigen Kachel und per-PDF-Tabelle
+        # unterschiedliche gepoolte Raten für dieselbe Version.
+        at = _dedup_latest_per_note(at)
         n_notes = _distinct_notes(at)
         hall = _pooled_hall_pct(at)
         cov_vals = [v for r in at if (v := r.get("coverage_factual") or r.get("coverage_rate")) is not None and v >= 0]
@@ -985,6 +1049,19 @@ def _chart_longitudinal(log_data: dict) -> dict:
 
 _DELTA_MIN_N = 20  # unter N=20 kein Besser/Schlechter-Urteil (Apophenie-Schutz)
 
+# Corpus-Overlap-Guard (Statistik-Review 2026-07-15, 3 unabhängige Opus-
+# Statistiker, konvergent + adversarial bestätigt): n>=20 in beiden Versionen
+# allein härtet ein Delta NICHT gegen PDF-Mix-Artefakte. Produktionsbeleg
+# v0.3.140 -> v0.3.143: beide n>=20 (40/22 distinct Notes), aber nur 3 von 9/5
+# PDFs geteilt — von den 22 Notes der neueren Version stammen nur 8 (36 %) aus
+# einer PDF, die auch in v0.3.140 vorkommt. Das dort gemessene +2,7pp-Hall-
+# Delta ist damit größtenteils ein ausgetauschter Corpus, kein echter
+# Versions-Effekt, wurde vor diesem Fix aber als "reliable" (grün/rot) gezeigt.
+# Schwelle 50 %: unter der Hälfte notengewichteter Quellen-Überlappung ist der
+# Corpus faktisch ausgetauscht. Als Konstante konfigurierbar statt hart
+# inline verdrahtet, falls sich das in der Praxis als zu streng/lax zeigt.
+_DELTA_MIN_PDF_OVERLAP = 0.5
+
 
 def version_delta(kpi_trend: dict, metric: str) -> dict:
     """Delta der neuesten Version gegen die letzte belastbare Vorversion.
@@ -998,12 +1075,24 @@ def version_delta(kpi_trend: dict, metric: str) -> dict:
     (n=1–2), gegen die jedes Delta reliable:false wäre. Existiert KEINE frühere
     Version mit n>=_DELTA_MIN_N, greift der bisherige Fallback (direkte
     Vorversion, Chip bleibt grau/reliable:false). `prev_version`/`prev_n` machen
-    im Client-Tooltip transparent, WOGEGEN verglichen wird. `reliable` bleibt an
-    den n>=_DELTA_MIN_N-Guard in BEIDEN Versionen gebunden.
+    im Client-Tooltip transparent, WOGEGEN verglichen wird.
+
+    Statistik-Review 2026-07-15: `reliable` ist zusätzlich an den Corpus-
+    Overlap gekoppelt (`_DELTA_MIN_PDF_OVERLAP`) — der Notes-Anteil der
+    neuesten Version, dessen PDF-Quelle auch in der Vergleichsversion
+    vorkommt. `kpi_trend["pdf_notes"]` (optional, vom Server befüllt, s.
+    eval_dashboard_server.py) trägt dafür je Version ein
+    `{pdf_group_key: n_notes}`-Dict. Fehlt der Key (ältere Aufrufer/Tests ohne
+    `pdf_notes`), greift der Guard nicht — reines n>=20-Verhalten bleibt
+    rückwärtskompatibel. `reason` unterscheidet im Rückgabewert, WARUM
+    `reliable` False ist (`"n_lt_20"` vs. `"pdf_mix"`), damit der Client die
+    beiden Fälle unterschiedlich betexten kann ("n<20" vs. "nicht vergleichbar
+    (PDF-Mix)").
     """
     values = kpi_trend.get(metric) or []
     ns = kpi_trend.get("n") or []
     versions = kpi_trend.get("versions") or []
+    pdf_notes = kpi_trend.get("pdf_notes") or []
     latest = values[-1] if values else None
     n_latest = ns[-1] if ns else None
 
@@ -1013,11 +1102,14 @@ def version_delta(kpi_trend: dict, metric: str) -> dict:
     def _ver_at(i: int):
         return versions[i] if i < len(versions) else None
 
+    def _pdf_notes_at(i: int) -> dict:
+        return pdf_notes[i] if i < len(pdf_notes) and pdf_notes[i] else {}
+
     # Jüngste frühere Version mit Wert und n>=_DELTA_MIN_N suchen (rückwärts).
-    prev = prev_version = n_prev = None
+    prev = prev_version = n_prev = prev_idx = None
     for i in range(len(values) - 2, -1, -1):
         if values[i] is not None and _n_at(i) >= _DELTA_MIN_N:
-            prev, n_prev, prev_version = values[i], _n_at(i), _ver_at(i)
+            prev, n_prev, prev_version, prev_idx = values[i], _n_at(i), _ver_at(i), i
             break
     else:
         # Fallback: direkte Vorversion (bisheriges Verhalten; reliable bleibt False).
@@ -1025,9 +1117,31 @@ def version_delta(kpi_trend: dict, metric: str) -> dict:
             prev = values[-2]
             n_prev = ns[-2] if len(ns) >= 2 else None
             prev_version = _ver_at(len(values) - 2)
+            prev_idx = len(values) - 2
 
     delta = None if (latest is None or prev is None) else round(latest - prev, 4)
-    reliable = delta is not None and (n_latest or 0) >= _DELTA_MIN_N and (n_prev or 0) >= _DELTA_MIN_N
+    n_reliable = delta is not None and (n_latest or 0) >= _DELTA_MIN_N and (n_prev or 0) >= _DELTA_MIN_N
+
+    # Notengewichteter Corpus-Overlap: Anteil der Notes der NEUESTEN Version,
+    # deren PDF-Quelle auch in der Vergleichsversion (prev_idx) vorkommt.
+    pdf_overlap = None
+    if prev_idx is not None:
+        latest_pdf_notes = _pdf_notes_at(len(values) - 1)
+        prev_pdf_notes = _pdf_notes_at(prev_idx)
+        total = sum(latest_pdf_notes.values())
+        if total:
+            shared = sum(n for pdf, n in latest_pdf_notes.items() if pdf in prev_pdf_notes)
+            pdf_overlap = round(shared / total, 3)
+    pdf_ok = pdf_overlap is None or pdf_overlap >= _DELTA_MIN_PDF_OVERLAP
+
+    reliable = n_reliable and pdf_ok
+    reason = None
+    if delta is not None:
+        if not n_reliable:
+            reason = "n_lt_20"
+        elif not pdf_ok:
+            reason = "pdf_mix"
+
     return {
         "latest": latest,
         "prev": prev,
@@ -1035,6 +1149,8 @@ def version_delta(kpi_trend: dict, metric: str) -> dict:
         "reliable": reliable,
         "prev_version": prev_version,
         "prev_n": n_prev,
+        "pdf_overlap": pdf_overlap,
+        "reason": reason,
     }
 
 
