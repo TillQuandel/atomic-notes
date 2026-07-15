@@ -50,7 +50,24 @@ def _normalize(text: str) -> str:
     - Ligaturen: fi, fl → fi, fl (PyMuPDF normalisiert meist, aber sicher ist sicher)
     - Whitespace kollabieren
     - Sonderzeichen die Fuzzy stören
+    - CID-Font-Artefakte (#278): siehe unten
     """
+    # --- #278: CID-Font-Artefakt-Rueckmapping (VOR Silbentrennung/Whitespace) ---
+    # Manche eingebetteten Schriftarten (verifiziert an "Jockisch - 2010 - Das
+    # Technologieakzeptanzmodell.pdf" per PyMuPDF) mappen ihr Leerzeichen- bzw.
+    # Trennstrich-Glyph auf U+0231 ("ȱ") bzw. U+022C ("Ȭ") statt auf ASCII-Space/
+    # -Hyphen. PyMuPDF liest das buchstabengetreu -> der Text besteht praktisch nur
+    # noch aus zusammengeschriebenen Woertern ("DieȱAkzeptanzȱistȱGegenstandȱ..."),
+    # wodurch sowohl Cosine-Chunk-Matching als auch die Zitat-Fuzzy-Verifikation
+    # (_normalize_for_evidence in eval_quality_v4.py, ruft _normalize auf) an einer
+    # Quelle scheitern, die das generierende LLM korrekt gelesen hat -> False-
+    # Positive-Halluzinationen + 0% Coverage bei quellentreuen Notes (Repro-Runs
+    # 20260714-185639/-215345). Haeufigkeitsbeleg am Gesamt-PDF: U+0231 5173x,
+    # U+022C 240x -- alle anderen Nicht-ASCII-Zeichen sind Groessenordnungen
+    # seltener (<=8x) und bleiben bewusst ungefixt (keine belegte Wirkung auf das
+    # Coverage-Symptom). Trennstrich zuerst zurueckmappen, damit die bestehende
+    # Silbentrennungs-Regex direkt danach greift.
+    text = text.replace("Ȭ", "-").replace("ȱ", " ")
     # Silbentrennung am Zeilenende
     text = re.sub(r"-\s*\n\s*", "", text)
     # Normales Newline → Leerzeichen

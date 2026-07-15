@@ -67,7 +67,13 @@ _QUALITY_HISTORY = (
 # Methodik frisch evaluiert werden. quality_history.jsonl bleibt unveraendert (der
 # eval_version-Skew ist gewollt sichtbar; fairer Vor/Nach-Vergleich braucht einen
 # Re-Eval-Sweep, siehe generative/calibration/retrieval-goldset/README.md).
-EVAL_VERSION = "4.2"
+# 4.2 → 4.3 (#278): CID-Font-Artefakt-Rueckmapping in eval_common._normalize
+# (U+0231→Space, U+022C→Hyphen). Bei betroffenen PDFs (Jockisch 2010) aendern sich
+# Chunk-Texte, Embeddings, Evidence-Corpus und damit der Judge-Kontext-Pool —
+# dieselbe Methodik-Aenderungs-Klasse wie 4.1→4.2. Ohne Bump wuerde der content-
+# adressierte Cache fuer unveraenderte Notes das alte Artefakt-Ergebnis liefern
+# (stille Staleness). Bei nicht betroffenen PDFs identisches Verhalten.
+EVAL_VERSION = "4.3"
 # Eval-Judge-Cache ist content-adressiert und vom --fresh-run-Run-Salt entkoppelt:
 # eine inhaltlich unveraenderte Note wird nicht erneut evaluiert, auch wenn die uebrige
 # Pipeline frisch generiert. Versions-gescoped (kein _RUN_ID): run-unabhaengig, aber ein
