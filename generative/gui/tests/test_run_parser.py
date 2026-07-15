@@ -249,7 +249,9 @@ def test_real_not_found_error_still_emits_error_hint():
 def test_enrichment_stage_zero_marker():
     # [0/7] = optionales PDF-Enrichment (Vor-Stufe) → stage num=0.
     p = RunParser()
-    evs = p.feed("[0/7] PDF-Enrichment — keine Metadaten im Dateinamen erkannt…")
+    evs = p.feed(
+        "[0/7] PDF-Enrichment — keine eingebetteten PDF-Metadaten (Autor/Jahr) gefunden, versuche Dateiname/CrossRef…"
+    )
     assert evs[0]["type"] == "stage" and evs[0]["num"] == 0
 
 

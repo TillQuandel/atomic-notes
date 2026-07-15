@@ -298,3 +298,49 @@ def test_explicit_cli_doi_takes_precedence_over_enrich_doi(monkeypatch):
     orchestrator._run_extraction_stages(args, Path("fake.pdf"), None)
 
     assert captured.get("doi") == "10.1515/cli-doi"
+
+
+def test_enrichment_stage_message_describes_embedded_metadata_not_filename(monkeypatch, capsys):
+    """Issue #288: Die Stage-0-Meldung „keine Metadaten im Dateinamen erkannt"
+    wird durch fehlendes Author/Year im EINGEBETTETEN PDF-Info-Dict (pdf_meta)
+    ausgeloest — der Dateiname wird an dieser Stelle noch gar nicht angefasst
+    (das macht erst spaeter `pdf_enrich._parse_filename_dynamic`, auch bei
+    exakt Zotero-konformem Dateinamen). Die Meldung darf den Dateinamen nicht
+    erwaehnen/unterstellen."""
+    pc = orchestrator.pdf_chunker
+    monkeypatch.setattr(pc, "pdf_to_text", lambda *_a, **_k: "Etwas Quelltext mit Wörtern.")
+    monkeypatch.setattr(pc, "split_by_chapters", lambda *_a, **_k: [SimpleNamespace(title="Intro", text="body")])
+    # Kein Autor/Jahr im Info-Dict -> Stage 0 (PDF-Enrichment) laeuft und druckt die Meldung.
+    monkeypatch.setattr(pc, "pdf_metadata", lambda *_a, **_k: {"Pages": "1"})
+    monkeypatch.setattr(pc, "extract_overview", lambda *_a, **_k: "Überblick")
+    monkeypatch.setattr(orchestrator.acronym_fix, "extract_acronym_pairs", lambda *_a, **_k: {})
+    monkeypatch.setattr(
+        orchestrator.context_builder,
+        "build_relevance_profile",
+        lambda *_a, **_k: {"existing_concepts": [], "tag_whitelist": []},
+    )
+    monkeypatch.setattr(orchestrator.context_builder, "build_concept_links", lambda *_a, **_k: {})
+    monkeypatch.setattr(orchestrator, "ENABLE_BACKGROUND_EXTRACTOR", False)
+    monkeypatch.setattr(orchestrator.planner, "run", lambda *_a, **_k: ConceptPlan("Titel", "Summary", []))
+    monkeypatch.setattr(orchestrator.planner, "filter_hallucinated", lambda plan, _text: (plan, []))
+
+    async def _no_concepts(*_a, **_k):
+        return ([], {}, 0, [])
+
+    monkeypatch.setattr(orchestrator, "run_extractors_per_concept", _no_concepts)
+    monkeypatch.setattr(
+        orchestrator.quality,
+        "check_quality",
+        lambda **_kw: QualityReport(peer_reviewed=None, citation_count=None, retracted=False, flags=[]),
+    )
+
+    from generative.tools import pdf_enrich as pdf_enrich_module
+
+    monkeypatch.setattr(pdf_enrich_module, "enrich", lambda *_a, **_k: None)
+
+    args = SimpleNamespace(by_chapter=False, dry_run=True, doi=None, llm_fallback=False)
+    orchestrator._run_extraction_stages(args, Path("fake.pdf"), None)
+
+    out = capsys.readouterr().out
+    assert "keine Metadaten im Dateinamen erkannt" not in out
+    assert "eingebettete" in out.lower()
