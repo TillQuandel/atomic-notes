@@ -46,6 +46,33 @@ def test_to_cli_model_passthrough_openai():
     assert _to_cli_model("openai/gpt-4o") == "openai/gpt-4o"
 
 
+# --- Tool-Restriktion (#284): Extractor/Critic/Refine/... duerfen keine
+# Tools (insbesondere Websuche) nutzen -- reine Text-Completion aus dem
+# PDF-Fenster, Quellentreue-Anspruch der Pipeline. ---
+
+
+def test_build_argv_disables_built_in_tools():
+    """Kein Agent (extractor/critic/planner/verifier/cross_reference/
+    canonicalizer/background-extractor) braucht ein eingebautes Tool.
+    `--tools ""` schaltet den kompletten eingebauten Tool-Satz ab
+    (Bash/Read/Write/Edit/WebSearch/WebFetch/...)."""
+    argv = sub_backend._build_argv("anthropic/claude-opus-4-7")
+    assert "--tools" in argv
+    assert argv[argv.index("--tools") + 1] == ""
+
+
+def test_build_argv_blocks_inherited_mcp_servers():
+    """`--tools ""` deckt laut `claude -p --help` nur den eingebauten
+    Tool-Satz ab. MCP-Server aus der Umgebung des aufrufenden Nutzers
+    (z.B. Websuche-/Fetch-MCPs) werden sonst weiterhin geladen --
+    Verifikations-Call (#284) zeigte das live: trotz `--tools ""` lieferte
+    ein MCP-Websuche-Tool reale Suchergebnisse in den Prompt-Kontext.
+    `--strict-mcp-config` ohne `--mcp-config` laedt keinerlei MCP-Server."""
+    argv = sub_backend._build_argv("anthropic/claude-opus-4-7")
+    assert "--strict-mcp-config" in argv
+    assert "--mcp-config" not in argv
+
+
 # --- Subscription sync call ---
 
 

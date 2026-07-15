@@ -70,6 +70,17 @@ def _fail_fast_hint(text: str) -> str | None:
 
 
 def _build_argv(model: str) -> list[str]:
+    # #284: Extractor/Critic/Planner/Verifier/Cross-Reference/Canonicalizer/
+    # Background-Extractor arbeiten als reine Text-Completion aus dem
+    # PDF-Fenster -- kein Agent braucht ein Tool. Belegt (Lauf 4, 2026-07-14):
+    # ein Refine-Output verwies woertlich auf eine Websuche.
+    # `--tools ""` schaltet den eingebauten Tool-Satz ab (Bash/Read/Write/
+    # Edit/WebSearch/WebFetch/...), deckt laut CLI-Hilfe aber NUR den
+    # eingebauten Satz ab. Verifikations-Call zeigte live: trotz `--tools ""`
+    # laedt die CLI weiterhin MCP-Server aus der Umgebung des aufrufenden
+    # Nutzers, und ein MCP-Websuche-Tool lieferte reale Ergebnisse in den
+    # Prompt-Kontext. `--strict-mcp-config` (ohne --mcp-config) laedt daher
+    # zusaetzlich keinerlei MCP-Server.
     return [
         CLAUDE_BIN,
         "-p",
@@ -78,6 +89,9 @@ def _build_argv(model: str) -> list[str]:
         "--model",
         _to_cli_model(model),
         "--exclude-dynamic-system-prompt-sections",
+        "--tools",
+        "",
+        "--strict-mcp-config",
     ]
 
 
