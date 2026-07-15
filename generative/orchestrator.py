@@ -1007,11 +1007,16 @@ def _run_note_pipeline(
                 citation_count=quality_report.citation_count,
             )
             refined = critic.run(refined, existing_concepts=hub_concepts, concept_links=run_concept_links)
-            better = refine_accepted(refined, auto_threshold=CRITIC_AUTO_THRESHOLD)
+            better = refine_accepted(refined, draft, auto_threshold=CRITIC_AUTO_THRESHOLD)
             if better:
+                # #286: bei Score-Parität greift die Critic-Hinweis-Ausnahme aus
+                # refine_accepted() statt einer echten Score-Verbesserung — im Log
+                # sichtbar machen, damit das nicht wie ein Score-Sprung aussieht.
+                _parity_accept = refined.critic_score == draft.critic_score
+                _tag = " (Critic-Hinweis gezielt behoben, Score unverändert)" if _parity_accept else ""
                 print(
                     f"      [refine] Score {draft.critic_score}/{draft.hard_gates_pass} → "
-                    f"{refined.critic_score}/{refined.hard_gates_pass} ✓"
+                    f"{refined.critic_score}/{refined.hard_gates_pass} ✓{_tag}"
                 )
                 draft = refined
             else:

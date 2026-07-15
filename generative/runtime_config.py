@@ -202,10 +202,33 @@ def should_attempt_refine(
     return RefineDecision(False, RefineTrigger.NONE, "no_trigger")
 
 
-def refine_accepted(refined, *, auto_threshold: int) -> bool:
-    return (
-        bool(getattr(refined, "hard_gates_pass", False)) and int(getattr(refined, "critic_score", 0)) >= auto_threshold
+def refine_accepted(refined, original=None, *, auto_threshold: int) -> bool:
+    """Entscheidet ob eine überarbeitete Fassung (`refined`) das Original ersetzt.
+
+    Primärkriterium (unverändert): `refined` besteht die Hard-Gates UND erreicht
+    den Auto-Threshold — score-basiert, unabhängig vom Original.
+
+    #286-Ausnahme: Ein Refine-Versuch wird durch einen konkreten, vom Critic
+    benannten Korrekturhinweis ausgelöst (`original.revision_hint`, nicht der
+    deterministisch synthetisierte Fallback-Hint). Kommt die überarbeitete
+    Fassung dann bei GLEICHEM Score und NICHT SCHLECHTEREM Hard-Gate-Status
+    zurück, wird sie trotzdem übernommen: Score-Parität heißt hier nicht
+    Wirkungslosigkeit, weil der Score den vom Critic benannten Fehler (z.B. ein
+    Transkriptionsartefakt im Titel) offenbar gar nicht abbildet. Ohne `original`
+    (Rückwärtskompatibilität) greift ausschließlich das Primärkriterium.
+    """
+    if bool(getattr(refined, "hard_gates_pass", False)) and int(getattr(refined, "critic_score", 0)) >= auto_threshold:
+        return True
+
+    if original is None:
+        return False
+
+    has_concrete_hint = bool(getattr(original, "revision_hint", ""))
+    same_score = int(getattr(refined, "critic_score", 0)) == int(getattr(original, "critic_score", 0))
+    hard_gate_not_worse = bool(getattr(refined, "hard_gates_pass", False)) >= bool(
+        getattr(original, "hard_gates_pass", False)
     )
+    return has_concrete_hint and same_score and hard_gate_not_worse
 
 
 # ---------------------------------------------------------------------------
