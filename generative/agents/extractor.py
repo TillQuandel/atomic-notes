@@ -421,7 +421,31 @@ async def run_per_concept(
             f"      [extractor-empty] '{concept.title}' kein verwertbarer Output (raw[:120]={raw[:120]!r})",
             file=sys.stderr,
         )
-        return None
+
+        # #280-Fix: Retry-Pfad für den stummen `<!--END-->`-Fall — bisher wurde
+        # None ohne jeden zweiten Versuch zurückgegeben, im Gegensatz zum B2-
+        # Trunkierungs-Retry direkt unten. Belegt (Testlauf-Serie 2026-07-14):
+        # Planner-priorisierte Kernkonzepte fielen so stumm weg (z.B. „Amotivation",
+        # [high], Deci & Ryan). Nur außerhalb des Self-Refine-Loops (revision_hint
+        # is None), sonst Retry-Kaskade im Critic-Loop möglich — dieselbe Guard-
+        # Bedingung wie beim Trunkierungs-Retry.
+        if revision_hint is not None:
+            return None
+
+        empty_hint = (
+            "Vorheriger Versuch lieferte keine Note für dieses Konzept (stummes "
+            "<!--END--> ohne <!--NOTE-->-Block). Prüfe das Textfenster unten noch "
+            "einmal sorgfältig — auch indirekte/implizite Belegstellen zählen. Nur "
+            "wenn das Konzept WIRKLICH GAR NICHT im Text vorkommt: erneut nur "
+            "<!--END--> ausgeben, ohne Kommentar."
+        )
+        retry_prompt = (f"## Retry-Hinweis (Konzept beim ersten Versuch nicht extrahiert)\n{empty_hint}\n\n") + prompt
+        raw_retry = await call_claude_async(retry_prompt, model=MODEL_EXTRACTOR, agent="extractor")
+        items_retry, _ = parse_extractor_output(raw_retry)
+        if not items_retry:
+            print(f"      [extractor-empty-retry] '{concept.title}' auch nach Retry kein Output", file=sys.stderr)
+            return None
+        items = items_retry
 
     item = items[0]
 

@@ -310,6 +310,42 @@ def extractor_failure_exit_code(failures: list[tuple[str, str]]) -> int:
     return _EXIT_EXTRACTOR_LOSS if failures else 0
 
 
+# --- #281: Totalverlust (0 finale Notes trotz >=1 versuchtem Konzept) darf
+# nicht wie ein erfolgreicher oder legitimer 0-Konzepte-Lauf enden. Lücke im
+# bisherigen Code: extractor_failure_exit_code() sieht NUR ctx.extractor_failures
+# (harte Exceptions, z.B. Timeout nach Retries) — der stille `<!--END-->`-Drop
+# (#280, run_per_concept liefert None OHNE Exception) zählt zwar in dropped_total
+# mit, bleibt aber unterhalb dieses Siebs unsichtbar und der Lauf endete mit
+# Exit 0, obwohl >=1 Konzept versucht und 0 Notes erzeugt wurden — nicht
+# unterscheidbar von einem legitimen Konzeptmangel-Lauf (0 versucht, 0 final).
+_EXIT_TOTAL_LOSS = 4
+
+
+def total_loss_exit_code(base_exit_code: int, *, n_attempted: int, n_final: int) -> int:
+    """Hebt den Exit-Code auf `_EXIT_TOTAL_LOSS`, wenn 0 finale Notes trotz
+    >=1 versuchtem Konzept vorliegen — unabhängig davon, ob die Ursache eine
+    harte Exception war (base_exit_code bereits 3) oder ein stiller Drop
+    (base_exit_code noch 0). Totalverlust ist strenger als Teilverlust, daher
+    hat `_EXIT_TOTAL_LOSS` Vorrang vor einem bereits gesetzten 3.
+
+    `n_final == 0 and n_attempted == 0` (kein Konzept geplant/versucht) bleibt
+    unangetastet — das ist ein legitimer Konzeptmangel-Lauf, kein Ausfall.
+    """
+    if n_final == 0 and n_attempted >= 1:
+        return _EXIT_TOTAL_LOSS
+    return base_exit_code
+
+
+def total_loss_warning_line(n_attempted: int) -> str:
+    """Prominente stdout-Warnzeile für den Totalverlust-Fall (Issue #281 Fix-
+    Richtung: „prominente stdout-Warnung", nicht nur stderr-Detail)."""
+    return (
+        f"⚠️  TOTALVERLUST: {n_attempted} Konzept(e) zur Extraktion versucht, "
+        "0 Notes final erzeugt — kein Konzeptmangel, sondern ein Extraktions-"
+        "ausfall (Details siehe Fehlermeldungen)."
+    )
+
+
 def _normalize(title: str) -> str:
     """Normalisiert Titel für Dedup-Vergleich: Kleinbuchstaben, Satzzeichen entfernen."""
     import re
@@ -2467,9 +2503,15 @@ def main(argv: list[str] | None = None):
     # Prozess mit 3 beendet (unterscheidbar von hartem Abbruch=1) statt still mit 0.
     n_extract_attempted = len(drafts) + ctx.dropped_total
     exit_code = extractor_failure_exit_code(ctx.extractor_failures)
+    # #281: 0 finale Notes trotz >=1 versuchtem Konzept ist ein Totalverlust,
+    # auch wenn keine harte Exception vorlag (stiller #280-Drop) — Vorrang vor
+    # dem bisherigen exit_code, siehe total_loss_exit_code()-Docstring.
+    exit_code = total_loss_exit_code(exit_code, n_attempted=n_extract_attempted, n_final=len(drafts))
 
     if not drafts:
         print("\nKeine Konzepte extrahiert. Fertig.")
+        if exit_code == _EXIT_TOTAL_LOSS:
+            print(total_loss_warning_line(n_extract_attempted))
         for _line in format_extractor_failure_report(ctx.extractor_failures, n_extract_attempted):
             print(_line, file=sys.stderr)
         return exit_code
@@ -2483,7 +2525,15 @@ def main(argv: list[str] | None = None):
     # --- Artifact-Detector: Abwesenheits-Noten früh verwerfen (kein LLM-Call) ---
     drafts = _drop_artifacts(drafts)
     if not drafts:
+        # #281: dieselbe Totalverlust-Prüfung — hier waren die Konzepte zwar
+        # extrahiert (n_extracted >= 1), landeten aber komplett als Artefakte
+        # (Abwesenheits-Notes) statt echter Notes. n_extract_attempted ist an
+        # dieser Stelle bereits >= 1 (sonst hätte der Check oben schon
+        # zurückgekehrt), daher greift total_loss_exit_code() zuverlässig.
+        exit_code = total_loss_exit_code(exit_code, n_attempted=n_extract_attempted, n_final=len(drafts))
         print("\nAlle Drafts als Artefakte verworfen. Fertig.")
+        if exit_code == _EXIT_TOTAL_LOSS:
+            print(total_loss_warning_line(n_extract_attempted))
         for _line in format_extractor_failure_report(ctx.extractor_failures, n_extract_attempted):
             print(_line, file=sys.stderr)
         return exit_code
