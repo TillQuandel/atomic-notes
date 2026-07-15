@@ -42,6 +42,22 @@ _CALLOUT_HEADER_TEXT_RE = re.compile(r"^\[![\w-]+\][+-]?\s*(?P<text>.*)$")
 # Co-Autor-Trenner INNERHALB einer Body-Attribution ("Schlebbe & Greifeneder (2020)").
 _MATCH_NAME_SPLIT_RE = re.compile(r"\s+(?:&|und)\s+")
 _MATCH_YEAR_RE = re.compile(r"(?:19|20)\d{2}")
+# #289: Stopword-artige Nicht-Nachnamen, die AUTHOR_YEAR_RE faelschlich als Autor-
+# Jahr-Attribution matcht, weil deutsche Grossschreibung auch normale Substantive
+# und Ortsnamen erfasst. Beide Faelle belegt (Opus-Breitenreview, Laeufe 2-5):
+# "Jahr 1989" aus einer "aus dem Jahr 1989"-Konstruktion, "Potsdam 2019" als
+# Ort+Jahr am Ende eines Veranstaltungsnamens ("8. Potsdamer IScience Tag").
+# Bewusst NUR die zwei belegten Tokens -- keine spekulative Erweiterung auf
+# weitere Stopwoerter/Ortsnamen (im Zweifel bleibt das Flag stehen, siehe
+# _is_non_surname_match).
+_NON_SURNAME_TOKENS = {"Jahr", "Potsdam"}
+
+
+def _is_non_surname_match(names: list[str]) -> bool:
+    """True, wenn ALLE genannten Namen eines Treffers bekannte Nicht-Nachnamen
+    sind (#289) — konservativ per `all()`: ein Treffer mit einem echten (nicht
+    gelisteten) Namen neben einem Stopword wird weiterhin geflaggt."""
+    return bool(names) and all(n in _NON_SURNAME_TOKENS for n in names)
 
 
 def _primary_surnames(author: str | None) -> list[str]:
@@ -145,6 +161,8 @@ def validate_citation_attributions(body: str, citation: CitationMeta) -> list[st
                     flag = f"⚠️ Attribution mit ungedecktem Jahr: '{match_text}' — CitationMeta: {citation.short_label}"
                     if flag not in flags:
                         flags.append(flag)
+            elif _is_non_surname_match(names):
+                continue  # #289: bekannter Nicht-Nachname (Jahr/Ort-Konstruktion), kein Flag
             else:
                 flag = (
                     f"⚠️ Attribution ohne Quellendeckung: '{match_text}' — weder Primärautor "

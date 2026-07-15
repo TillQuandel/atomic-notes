@@ -28,9 +28,20 @@ _CLI_ALIASES: dict[str, str] = {
 
 def _to_cli_model(model: str) -> str:
     """Mappt vollständige Modell-ID auf claude-CLI-Shorthand.
-    Unbekannte Strings werden unverändert durchgereicht.
+
+    Bekannte volle IDs (`_CLI_ALIASES`) werden auf ihr CLI-Shorthand (opus/
+    sonnet/haiku) gemappt. Unbekannte "anthropic/"-präfigierte IDs (z.B. neue
+    Modellgenerationen, die noch nicht in `_CLI_ALIASES` gepflegt sind) werden
+    auf die präfixlose Form reduziert — die CLI löst z.B. "claude-sonnet-5"
+    korrekt auf, gibt für "anthropic/claude-sonnet-5" aber einen 404 zurück
+    (#287). Strings ohne "anthropic/"-Präfix (auch anderer Provider, z.B.
+    "ollama/llama3") werden unverändert durchgereicht.
     """
-    return _CLI_ALIASES.get(model, model)
+    if model in _CLI_ALIASES:
+        return _CLI_ALIASES[model]
+    if model.startswith("anthropic/"):
+        return model[len("anthropic/") :]
+    return model
 
 
 _CLI_INSTALL_HINT = (

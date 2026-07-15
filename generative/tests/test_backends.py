@@ -46,6 +46,23 @@ def test_to_cli_model_passthrough_openai():
     assert _to_cli_model("openai/gpt-4o") == "openai/gpt-4o"
 
 
+def test_to_cli_model_strips_prefix_for_unknown_anthropic_model():
+    # #287: "anthropic/claude-sonnet-5" ist (neue Modellgeneration) nicht im
+    # Alias-Dict und wurde bisher unveraendert an die CLI durchgereicht -- die
+    # CLI gibt fuer den vollen "anthropic/"-praefigierten String einen 404
+    # zurueck. Derselbe String OHNE Praefix ("claude-sonnet-5") funktioniert
+    # (Beleg Issue #287, Testlauf-Serie 2026-07-14). Fix: unbekannte
+    # "anthropic/"-IDs werden auf die praefixlose Form normalisiert statt
+    # unveraendert durchgereicht.
+    assert _to_cli_model("anthropic/claude-sonnet-5") == "claude-sonnet-5"
+
+
+def test_to_cli_model_known_alias_unaffected_by_prefix_stripping():
+    # Bekannte volle IDs muessen weiterhin auf CLI-Shorthand gemappt werden --
+    # nicht bloss auf die praefixlose Form (sonst wuerde "sonnet" verloren gehen).
+    assert _to_cli_model("anthropic/claude-sonnet-4-6") == "sonnet"
+
+
 # --- Tool-Restriktion (#284): Extractor/Critic/Refine/... duerfen keine
 # Tools (insbesondere Websuche) nutzen -- reine Text-Completion aus dem
 # PDF-Fenster, Quellentreue-Anspruch der Pipeline. ---

@@ -2087,7 +2087,10 @@ def _run_extraction_stages(
     # per eigener (unzuverlässigerer) Title-Match-Suche neu finden.
     _enrich_doi: str | None = None
     if not (_has_author and _has_year):
-        print("[0/7] PDF-Enrichment — keine Metadaten im Dateinamen erkannt…")
+        print(
+            "[0/7] PDF-Enrichment — keine eingebetteten PDF-Metadaten (Autor/Jahr) gefunden, "
+            "versuche Dateiname/CrossRef…"
+        )
         try:
             from generative.tools.pdf_enrich import enrich as _enrich
 
