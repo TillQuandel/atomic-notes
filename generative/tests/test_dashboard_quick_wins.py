@@ -60,9 +60,14 @@ def test_calc_kpis_sums_total_dropped():
     assert kpis["total_dropped"] == 5
 
 
-def test_calc_kpis_total_dropped_zero_when_field_missing():
+def test_calc_kpis_total_dropped_none_when_field_missing():
+    # D5-Korrektur (Punkt 6, Matrix-Rendering-Fix+Politur-Bündel, 2026-07-16):
+    # war vormals `== 0` -- das war selbst das Anti-Pattern, das gefixt wurde.
+    # `n_dropped` fehlt hier komplett (Primaer-/Log-Pfad, _log_run() traegt
+    # den Key nie) -- strukturell nicht ermittelbar, nicht "wirklich 0". Siehe
+    # test_dashboard_dropped_honest_unknown.py fuer die volle Bugklasse.
     kpis = _calc_kpis({}, [_log_run()], [], [])
-    assert kpis["total_dropped"] == 0
+    assert kpis["total_dropped"] is None
 
 
 # ── F5: Agent-Mapping ───────────────────────────────────────────────────────

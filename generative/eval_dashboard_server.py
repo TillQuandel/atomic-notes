@@ -282,11 +282,12 @@ def _read_calibration_data(allowed_note_paths: set | None = None, eval_version: 
                 else None,
                 # #233: coverage_factual ist die mit dem v2/v4-Umbau abgeschaffte
                 # v1.3-Metrik — seit v4 durchgehend NULL. Fallback auf
-                # coverage_rate ("Belegrate" im Dashboard), gleiches Muster wie
-                # eval_dashboard.py:595/815/883/1063.
-                "llm_cov": round(v * 100, 1)
-                if (v := r["coverage_factual"] or r["coverage_rate"]) is not None and v >= 0
-                else None,
+                # coverage_rate ("Belegrate" im Dashboard) ueber den D4-Bestands-
+                # Fix D._row_coverage (Punkt 5, Matrix-Rendering-Fix+Politur-
+                # Bündel) -- das vorherige `coverage_factual or coverage_rate`
+                # haette eine ECHTE 0.0 (falsy) verschluckt; _row_coverage prueft
+                # explizit auf None (Mapping-kompatibel, auch fuer sqlite3.Row).
+                "llm_cov": round(v * 100, 1) if (v := D._row_coverage(r)) is not None and v >= 0 else None,
                 "pdf": r["pdf"],
             }
             for r in conn.execute(
@@ -408,6 +409,16 @@ def build_data(
         _jsonl_fallback = True
 
     available_versions = _available_eval_versions(all_quality_rows)
+    # Punkt 1 (Till-Wunsch): Zeilenzahl je eval_version fuer die Dropdown-
+    # Anzeige "4.3 (n=27)" -- ungefiltert (alle Quality-Rows dieser Version),
+    # damit die Zahl unabhaengig vom aktiven PDF-/Modell-/etc.-Filter stabil
+    # bleibt (dieselbe "Dropdown-Optionen VOR allen Filtern"-Konvention wie
+    # bei _all_pdfs_opts/_all_pvers_opts unten).
+    _eval_ver_counts: dict[str, int] = {}
+    for _r in all_quality_rows:
+        _v = _r.get("eval_version")
+        if _v:
+            _eval_ver_counts[_v] = _eval_ver_counts.get(_v, 0) + 1
 
     # Default: neueste Version
     if eval_version is None or eval_version not in available_versions:
@@ -552,9 +563,35 @@ def build_data(
     # ── Dropdown-Optionen VOR allen Filtern snapshotten ──────────────
     # Smoke-/Test-Modelle aus dem Filter halten (z. B. "m", "test", "smoke-model").
     _MODEL_DENYLIST = {"m", "test", "smoke-model"}
-    _all_models_opts = sorted(
-        {m for tr in token_runs if (m := tr.get("model", "")) and m not in _MODEL_DENYLIST and "smoke" not in m.lower()}
+    # Punkt 2 (Reviews 15.07.): n-valid-Badge je Modell -- Zahl VALIDER
+    # Eval-Zeilen (hallucination_rate >= 0) je Modell (Gemini-Fehllesungs-
+    # Schutz: dort tragen alle Zeilen den bestehenden -1.0-Sentinel fuer
+    # "ungueltig", vgl. _chart_scatter/_matrix_cell_stats -- n_valid muss 0
+    # zeigen, nicht die volle aber wertlose Zeilenzahl). note_evals traegt
+    # kein eigenes "model"-Feld (das lebt in pipeline_runs) -- Join ueber
+    # run_id -> token_runs.model, derselbe Mechanismus wie der bestehende
+    # Modell-Einzelwert-Filter unten. Basis _matrix_base_rows (eval_version-
+    # skopiert, VOR pipeline_version/language/pdf/run-Filtern) statt
+    # quality_rows -- dieselbe "vor allen Filtern"-Konvention wie die
+    # Options-Liste selbst, sonst wuerde z. B. ein aktiver PDF-Filter die
+    # angezeigten Zaehler unerwartet mitverschieben.
+    _run_model_map: dict[str, str] = {tr["run_id"]: tr.get("model", "") for tr in token_runs if tr.get("run_id")}
+    _model_valid_n: dict[str, int] = {}
+    for _r in _matrix_base_rows:
+        _m = _run_model_map.get(_r.get("run_id"), "")
+        if not _m:
+            continue
+        _hall = _r.get("hallucination_rate")
+        if _hall is not None and float(_hall) >= 0:
+            _model_valid_n[_m] = _model_valid_n.get(_m, 0) + 1
+    _model_names = sorted(
+        {
+            mdl
+            for tr in token_runs
+            if (mdl := tr.get("model", "")) and mdl not in _MODEL_DENYLIST and "smoke" not in mdl.lower()
+        }
     )
+    _all_models_opts = [{"model": m, "n_valid": _model_valid_n.get(m, 0)} for m in _model_names]
 
     # ── token_runs + quality_rows + all_log_runs gemeinsam filtern ──────
     # Alle Filter auf token_runs anwenden → run_ids extrahieren → quality_rows + log_runs ebenfalls filtern
@@ -757,7 +794,7 @@ def build_data(
             hall_val = r.get("hallucination_rate")
             if hall_val is not None and float(hall_val) >= 0:
                 d2["hall"].append(float(hall_val) * 100)
-            cov = r.get("coverage_factual") or r.get("coverage_rate")
+            cov = D._row_coverage(r)
             if cov is not None and float(cov) >= 0:
                 d2["cov"].append(float(cov) * 100)
         # n = distinct Notes (nicht Eval-Instanzen), identisch zur „Evaluierte
@@ -826,6 +863,12 @@ def build_data(
         "cov": [quality_by_version[v].get("median_cov") for v in sorted_pipeline_versions],
         "n": [quality_by_version[v]["n"] for v in sorted_pipeline_versions],
         "accept": [_pooled_accept(v) for v in sorted_pipeline_versions],
+        # Punkt 4 (D3): n-Guard-Basis fuer das accept-Delta -- "n" (evaluierte
+        # Notes) ist fuer hall/cov korrekt, fuer accept aber der FALSCHE Nenner
+        # (Akzeptanzrate poolt ueber ALLE gerouteten Notes, s. _pooled_accept
+        # oben). Summe derselben (n_vault, n_total)-Paare -- SSoT, keine
+        # zweite Zaehlung.
+        "accept_n": [sum(t for _, t in accept_pairs_by_ver.get(v, [])) for v in sorted_pipeline_versions],
         "dur": [
             round(sum(dur_by_ver.get(v, [])) / len(dur_by_ver[v]), 1) if dur_by_ver.get(v) else None
             for v in sorted_pipeline_versions
@@ -851,7 +894,11 @@ def build_data(
 
     # Delta neueste-vs-Vorversion pro KPI (mit N-Guard, #36 P4)
     kpi_trend["deltas"] = {
-        m: D.version_delta(kpi_trend, m) for m in ("hall", "cov", "n", "accept", "dur", "tokens", "cost")
+        # Punkt 4 (D3): "accept" haertet auf accept_n (geroutete Notes) statt
+        # dem Default "n" (evaluierte Notes, falscher/zu kleiner Nenner fuer
+        # diese Metrik -- s. version_delta-Docstring).
+        m: D.version_delta(kpi_trend, m, n_field="accept_n" if m == "accept" else "n")
+        for m in ("hall", "cov", "n", "accept", "dur", "tokens", "cost")
     }
 
     # ── Lauf-Dropdown-Optionen (#211): immer ungefiltert, jüngste zuerst ──
@@ -909,10 +956,27 @@ def build_data(
     pair_matrix["excluded_archived_versions"] = _excluded_archived
     pair_matrix["eval_version"] = eval_version
 
+    # Nachbesserung Punkt 4 (Statistiker-Empfehlung 2026-07-16): zeigt die
+    # aktive eval_version AUSSCHLIESSLICH Re-Eval-Runs (reeval_baseline.py,
+    # pipeline_runs.pipeline_version=="reeval"), misst sie den Eval-Code-
+    # Stand des Re-Eval-Sweeps, NICHT die Erzeugungsversion der Notes
+    # (Produktionsmuster: eval_version 4.3 haengt komplett an v0.3.144, das
+    # war aber der Code-Stand beim Re-Eval-Lauf). Basis: `_matrix_base_rows`
+    # (aktive eval_version, VOR Einzelwert-Filtern -- dieselbe "ungefiltert"-
+    # Konvention wie die Matrix selbst).
+    try:
+        from generative import db as _db_reeval
+
+        _all_pipeline_runs = _db_reeval.query_pipeline_runs()
+    except Exception:
+        _all_pipeline_runs = []
+    is_reeval_series = D._is_reeval_series(_matrix_base_rows, _all_pipeline_runs)
+
     return {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "eval_version": eval_version,
-        "available_eval_versions": available_versions,
+        "is_reeval_series": is_reeval_series,
+        "available_eval_versions": [{"version": v, "n": _eval_ver_counts.get(v, 0)} for v in available_versions],
         "warnings": warnings,
         "kpis": D._calc_kpis(log_data, all_log_runs, quality_rows, token_runs),
         "pdf_table": (_pdf_table := D._calc_pdf_table(log_data, all_log_runs, quality_rows)),
@@ -992,7 +1056,7 @@ def _chart_scatter_versioned(quality_rows: list[dict]) -> dict:
 
     for r in deduped_rows:
         hall = r.get("hallucination_rate")
-        cov = r.get("coverage_factual") or r.get("coverage_rate")
+        cov = D._row_coverage(r)
         # Sentinel-Werte (-1.0 = ungültig) überspringen
         if hall is None or cov is None or float(hall) < 0 or float(cov) < 0:
             continue

@@ -647,9 +647,7 @@ def _calc_kpis(
     hall_stats = _pooled_hall_stats(latest_qrows)
     avg_hall = hall_stats["pct"] if hall_stats else None
 
-    cov_vals = [
-        v for r in latest_qrows if (v := r.get("coverage_factual") or r.get("coverage_rate")) is not None and v >= 0
-    ]
+    cov_vals = [v for r in latest_qrows if (v := _row_coverage(r)) is not None and v >= 0]
     avg_cov = round(_median(cov_vals) * 100, 1) if cov_vals else None
     total_generated = sum(r["n_total"] for r in all_log_runs)
     total_accepted = sum(r["n_vault"] for r in all_log_runs)
@@ -770,7 +768,20 @@ def _calc_kpis(
         "total_generated": total_generated,
         "total_accepted": total_accepted,
         "total_merged": total_merged,
-        "total_dropped": sum(r.get("n_dropped", 0) or 0 for r in all_log_runs),
+        # Punkt 6 (D5, Reviews 15.07.): "n_dropped" existiert strukturell NUR
+        # im DB-Fallback-Pfad (eval_dashboard_server.py, pipeline_runs-Tabelle)
+        # -- der primaere Log-Pfad (_read_all_log_runs) baut Zeilen aus
+        # [DRY-RUN]->(Vault|Inbox)-Treffern; verworfene Kandidaten (nie bis
+        # zum Draft gekommen) hinterlassen dort GAR KEINE Zeile und sind somit
+        # nicht ermittelbar, nicht nur zufaellig 0. `.get("n_dropped", 0)`
+        # gab bisher still 0 zurueck -- ununterscheidbar von "wirklich 0". Kein
+        # Log-Run traegt den Key -> None (Client zeigt "–" statt einer Zahl,
+        # die eine Genauigkeit vortaeuscht, die die Quelle nicht hat).
+        "total_dropped": (
+            sum(r.get("n_dropped", 0) or 0 for r in all_log_runs)
+            if any("n_dropped" in r for r in all_log_runs)
+            else None
+        ),
         "total_tokens": total_tokens,
         "total_dur_h": round(total_dur_s / 3600, 1),
         "cur_tokens": cur_tokens,
@@ -971,7 +982,7 @@ def _calc_pdf_table(
         at = _dedup_latest_per_note(at)
         n_notes = _distinct_notes(at)
         hall = _pooled_hall_pct(at)
-        cov_vals = [v for r in at if (v := r.get("coverage_factual") or r.get("coverage_rate")) is not None and v >= 0]
+        cov_vals = [v for r in at if (v := _row_coverage(r)) is not None and v >= 0]
         cov = round(_median(cov_vals) * 100, 1) if cov_vals else None
         runs = log_by_group.get(gk, [])
         accept, accept_ver, accept_n, n_merge = _accept_from_runs(runs, ver, current_version)
@@ -1043,7 +1054,7 @@ def _chart_scatter(quality_rows: list[dict]) -> dict:
     pdf_map: dict[str, str] = {}
     for r in quality_rows:
         hall = r.get("hallucination_rate")
-        cov = r.get("coverage_factual") or r.get("coverage_rate")
+        cov = _row_coverage(r)
         if hall is None or cov is None or float(hall) < 0 or float(cov) < 0:
             continue
         label = r.get("note") or r.get("note_title") or "?"
@@ -1109,11 +1120,21 @@ _DELTA_MIN_N = 20  # unter N=20 kein Besser/Schlechter-Urteil (Apophenie-Schutz)
 _DELTA_MIN_PDF_OVERLAP = 0.5
 
 
-def version_delta(kpi_trend: dict, metric: str) -> dict:
+def version_delta(kpi_trend: dict, metric: str, n_field: str = "n") -> dict:
     """Delta der neuesten Version gegen die letzte belastbare Vorversion.
 
     `kpi_trend["versions"]` ist aufsteigend sortiert (neueste = letzte Position),
     die Metrik-Arrays laufen parallel dazu.
+
+    Punkt 4 (D3, Matrix-Rendering-Fix+Politur-Bündel): `n_field` waehlt, welches
+    kpi_trend-Array als n>=_DELTA_MIN_N-Reliability-Guard dient (Default "n" =
+    Zahl LLM-evaluierter Notes, korrekt fuer hall/cov/dur/tokens/cost). Fuer
+    "accept" ist "n" der FALSCHE Nenner: die Akzeptanzrate poolt ueber ALLE
+    gerouteten (generierten) Notes, nicht nur die evaluierte Stichprobe -- der
+    Server ruft hier mit `n_field="accept_n"` (Summe n_total je Version,
+    dieselbe Basis wie `_pooled_accept`) auf, sonst zeigt das Delta
+    faelschlich reliable:false, obwohl es auf hunderten gerouteten Notes
+    beruht (aktuell konservativ, kein falsches Delta -- nur unnoetig grau).
 
     #196 P5: Vergleichsbasis ist die jüngste FRÜHERE Version mit einem
     vorhandenen Metrik-Wert UND n>=_DELTA_MIN_N — nicht starr die direkte
@@ -1136,7 +1157,7 @@ def version_delta(kpi_trend: dict, metric: str) -> dict:
     (PDF-Mix)").
     """
     values = kpi_trend.get(metric) or []
-    ns = kpi_trend.get("n") or []
+    ns = kpi_trend.get(n_field) or []
     versions = kpi_trend.get("versions") or []
     pdf_notes = kpi_trend.get("pdf_notes") or []
     latest = values[-1] if values else None
@@ -1200,6 +1221,31 @@ def version_delta(kpi_trend: dict, metric: str) -> dict:
     }
 
 
+def _is_reeval_series(quality_rows: list[dict], pipeline_runs: list[dict]) -> bool:
+    """True, wenn ALLE `quality_rows` (typischerweise die aktive eval_version,
+    ungefiltert -- s. `_matrix_base_rows` im Server) an einen `pipeline_runs`-
+    Eintrag mit `pipeline_version == "reeval"` haengen.
+
+    Nachbesserung Punkt 4 (Statistiker-Empfehlung 2026-07-15): unter
+    eval_version 4.3 haengen alle note_evals-Zeilen an `pipeline_version`
+    v0.3.144 -- das ist der CODE-STAND des Re-Eval-Sweeps
+    (`reeval_baseline.py`), NICHT die Erzeugungsversion der Notes. Der
+    zugehoerige Lauf in `pipeline_runs` traegt dafuer den expliziten Marker
+    `pipeline_version="reeval"` (`reeval_baseline.py`, INSERT OR IGNORE INTO
+    pipeline_runs ... VALUES (..., 'reeval', 'baseline-reeval', 'reeval', ...)`) --
+    verknuepft ueber `run_id`. Zeigt eine eval_version AUSSCHLIESSLICH solche
+    Re-Eval-Runs, misst sie den Eval-Code-Stand, nicht die Notes-Erzeugung.
+
+    Leere `quality_rows` -> False (nichts zu kennzeichnen, kein falsches
+    Positiv). Zeilen ohne matchenden `pipeline_runs`-Eintrag (fehlender/
+    unbekannter run_id) zaehlen NICHT als reeval -- nur eine explizite
+    Bestaetigung (jede Zeile matcht 'reeval') schaltet das Flag."""
+    if not quality_rows:
+        return False
+    run_to_pver = {r.get("run_id"): r.get("pipeline_version") for r in pipeline_runs if r.get("run_id")}
+    return all(run_to_pver.get(row.get("run_id")) == "reeval" for row in quality_rows)
+
+
 # ---------------------------------------------------------------------------
 # Versions×PDF-Paarvergleich (Multi-Perspektiven-Dashboard-Review 2026-07-15,
 # P1-Empfehlung aller 3 Statistiker, vom adversarialen Statistiker modifiziert)
@@ -1223,7 +1269,7 @@ def version_delta(kpi_trend: dict, metric: str) -> dict:
 #     ihre Dominanz wird ueber n/Min/Max je Zelle sichtbar statt versteckt.
 
 
-def _row_coverage(r: dict):
+def _row_coverage(r):
     """Coverage-Wert einer Eval-Zeile: `coverage_factual`, wenn NICHT None
     (auch bei echter 0.0!), NUR bei None Fallback auf `coverage_rate`.
 
@@ -1231,10 +1277,18 @@ def _row_coverage(r: dict):
     `coverage_factual or coverage_rate` verschluckt eine ECHTE 0.0 (falsy)
     und nimmt faelschlich coverage_rate bzw. verwirft die Zeile, wenn
     coverage_rate fehlt — 0%-Coverage-Zeilen existieren real (Jockisch-
-    Faelle). Nur fuer die neuen Matrix-/Paarvergleichs-Funktionen unten;
-    die Bestands-Stellen mit demselben Muster fixt ein separates Ticket."""
-    v = r.get("coverage_factual")
-    return v if v is not None else r.get("coverage_rate")
+    Faelle).
+
+    Punkt 5 (D4-Bestand, Matrix-Rendering-Fix+Politur-Bündel): urspruenglich
+    nur fuer die Matrix-/Paarvergleichs-Funktionen gedacht ("die Bestands-
+    Stellen mit demselben Muster fixt ein separates Ticket") -- jetzt SSoT
+    fuer ALLE Bestands-Stellen (siehe Aufrufer). `r` ist Mapping-kompatibel:
+    akzeptiert sowohl `dict` als auch `sqlite3.Row` (KEIN `.get()` -- Row
+    unterstuetzt das nicht; `in r.keys()` funktioniert fuer beide)."""
+    v = r["coverage_factual"] if "coverage_factual" in r.keys() else None
+    if v is not None:
+        return v
+    return r["coverage_rate"] if "coverage_rate" in r.keys() else None
 
 
 def _matrix_cell_stats(rows: list[dict]) -> dict | None:
@@ -1581,6 +1635,20 @@ def _chart_tokens_by_version(runs: list[dict]) -> dict:
 
 
 def _chart_scaling(all_log_runs: list[dict]) -> dict:
+    # Punkt 8 (#294-Nebenfund, Reviews 15.07.): `r["label"]` ist im primaeren
+    # Log-Pfad (_read_all_log_runs) `_PDF_LABELS.get(key, key)` -- fuer PDFs
+    # ausserhalb der 3 registrierten _PDF_LABELS-Eintraege (Regelfall) faellt
+    # das auf den rohen, kleingeschriebenen Log-Key zurueck (label == key).
+    # Gleiche Bugklasse + gleicher Fallback wie _chart_longitudinal (Trade-
+    # off-Chart-2, U4-Fix, s. Kommentar dort) -- NUR wenn label==key
+    # (der Fallback tatsaechlich griff) neu ableiten, sonst den vom
+    # DB-Fallback-Pfad ggf. schon besseren Label-Wert unangetastet lassen.
+    def _scaling_label(r: dict) -> str:
+        label, key = r["label"], r["key"]
+        if label != key:
+            return label
+        return _PDF_LABELS.get(key) or re.sub(r"[-_]+", " ", key).strip().title()
+
     points = [
         {
             "x": r["words"],
@@ -1588,7 +1656,7 @@ def _chart_scaling(all_log_runs: list[dict]) -> dict:
             "y_vault": r["n_vault"],
             "pages": r["pages"],
             "key": r["key"],
-            "label": r["label"],
+            "label": _scaling_label(r),
             "ver": r["ver"],
             "pct": r["accept_pct"],
         }
@@ -1609,7 +1677,7 @@ def _build_quality_chart_data(quality_rows: list[dict]) -> dict:
         pdf = r.get("pdf") or r.get("source_pdf") or "unbekannt"
         ver = r.get("version") or "unknown"
         hall = r.get("hallucination_rate")
-        cov = r.get("coverage_factual") or r.get("coverage_rate")
+        cov = _row_coverage(r)
         anch_total = r.get("anchors_total") or 0
         anch_conf = r.get("anchors_confirmed") or 0
         rows_clean.append(

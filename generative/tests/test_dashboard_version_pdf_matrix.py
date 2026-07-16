@@ -705,6 +705,15 @@ def test_html_pair_matrix_shows_version_cap_footnote():
     assert "nicht gezeigt" in block
 
 
+def test_html_pair_matrix_cap_footnote_singular_plural():
+    """Nachbesserung Punkt 5 (trivial): 'weitere Version(en)' war keine echte
+    Singular/Plural-Behandlung -- bei genau 1 uebrig gebliebenen Version stand
+    weiterhin die Klammer "(en)" da. Dieselbe Technik wie die bereits gefixte
+    Matrix-Insight-Zeile (test_pairmatrix_insight_singular_version_and_pdf_source)."""
+    block = _pairmatrix_js_block()
+    assert "n_versions_dropped === 1 ? 'weitere Version' : 'weitere Versionen'" in block
+
+
 def test_html_pair_matrix_table_has_dedicated_scroll_wrapper():
     """Till-Live-Befund am gemergten #305: die Matrix (16 Spalten, ~1500px
     Mindestbreite via nowrap/min-width) war oberhalb des 1200px-Breakpoints
@@ -723,3 +732,142 @@ def test_html_pair_matrix_table_has_dedicated_scroll_wrapper():
     # CSS: Regel mit hoeherer Spezifitaet als die >=1200px-Freigabe
     # (.table-wrap.pm-scroll schlaegt .table-wrap in der Media-Query)
     assert ".table-wrap.pm-scroll" in html
+
+
+# ── Punkt 0 (Till-Live-Befund 2026-07-16): Matrix-Rendering kaputt ─────────
+# Repro auf dem isolierten Testserver (Live-Daten read-only kopiert, eval_
+# version 4.3 = 6 PDFs x 1 Version v0.3.144): #pm-thead rendert leer, der
+# Versions-Header "v0.3.144" erscheint stattdessen ~49px tiefer, ueberlappt
+# Zeile 1 (Bates) -- Screenshot C:/tmp/buendel-verify/00-repro-vor-fix-4.3.png,
+# Computed-Style-Diagnose bestaetigt position:sticky/top:49px auf dem
+# th UND vmax-Rect-Ueberlappung mit der ersten tbody-Zeile. Ursache: die
+# >=1201px-Sticky-Regel `table.cmp thead th` (#203 P3) trifft ueber die
+# gemeinsame .cmp-Klasse auch table.pm-matrix -- der Kommentar dort
+# ("entfaellt fuer die Matrix ohnehin") war falsch, da sticky bereits ohne
+# jeden Scroll den Ausgangszustand um den top-Offset verschiebt.
+
+
+def test_html_pair_matrix_resets_sticky_thead_inside_scroll_wrapper():
+    """Fix: `.table-wrap.pm-scroll table.cmp thead th` (Spezifitaet 0,3,3)
+    setzt position/box-shadow/border-bottom explizit zurueck -- schlaegt die
+    Media-Query-Regel `table.cmp thead th` (Spezifitaet 0,1,3) unabhaengig
+    von der Regel-Reihenfolge im Stylesheet."""
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    css_start = html.index("<style>")
+    css_end = html.index("</style>")
+    css = html[css_start:css_end]
+    reset_start = css.index(".table-wrap.pm-scroll table.cmp thead th")
+    reset_block = css[reset_start : reset_start + 200]
+    assert "position: static" in reset_block
+    assert "box-shadow: none" in reset_block
+    assert "border-bottom: 1px solid var(--hair)" in reset_block
+
+
+def test_html_pair_matrix_table_does_not_force_full_width():
+    """Fix: `table.cmp { width:100% }` (Bestandsregel) stretcht bei wenigen
+    Versionen die einzige Datenspalte auf die gesamte Restbreite (riesige
+    Leerflaeche, Versions-Header klebt am rechten Rand). `.pm-matrix`
+    schrumpft stattdessen auf Inhaltsbreite -- Datenspalten ruecken links
+    neben die PDF-Spalte."""
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    assert "table.cmp.pm-matrix { width: auto; }" in html
+
+
+def test_pairmatrix_insight_singular_version_and_pdf_source():
+    """Minor-Fund: eval_version 4.3 (1 Pipeline-Version) zeigte '1 Versionen'
+    statt '1 Version'. Dieselbe Bugklasse fuer 'PDF-Quelle(n)' gleich mit
+    gefixt (identische Zeile/Technik)."""
+    block = _pairmatrix_js_block()
+    assert "versions.length === 1 ? 'Version' : 'Versionen'" in block
+    assert "pdfs.length === 1 ? 'PDF-Quelle' : 'PDF-Quellen'" in block
+
+
+# ── Nachbesserung Punkt 1 (4 externe Reviews nach PR #312, UX konvergent) ──
+# Der pauschale `thead th`-Reset oben (Punkt 0) traf auch th:first-child
+# ("Quell-PDF") -- beim Horizontal-Scroll scrollte die Kopfzelle mit dem
+# Rest des Headers weg, waehrend die per td:first-child gepinnte PDF-Namen-
+# Spalte im tbody stehen blieb: der jeweils linkeste sichtbare Versions-
+# Header landete optisch UEBER der gepinnten Spalte (Beleg:
+# C:/tmp/ux-review-312/desktop/a04-matrix-41-light-scroll400.png).
+
+
+def test_html_pair_matrix_thead_reset_excludes_first_child():
+    """Der position:static-Reset darf th:first-child NICHT mehr treffen --
+    sonst verliert die "Quell-PDF"-Kopfzelle ihre Sticky-Left-Positionierung
+    und scrollt mit den Versions-Headern weg."""
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    css_start = html.index("<style>")
+    css_end = html.index("</style>")
+    css = html[css_start:css_end]
+    reset_start = css.index(".table-wrap.pm-scroll table.cmp thead th:not(:first-child)")
+    reset_block = css[reset_start : reset_start + 220]
+    assert "position: static" in reset_block
+    assert "box-shadow: none" in reset_block
+    assert "border-bottom: 1px solid var(--hair)" in reset_block
+
+
+def test_html_pair_matrix_thead_first_child_stays_sticky_left():
+    """Fix: eigene Regel pinnt die "Quell-PDF"-Kopfzelle links -- top:auto
+    hebt das top:49px der >=1201px-Media-Query-Regel (Zeile ~495) explizit
+    auf, z-index haelt sie ueber den (jetzt statischen) Versions-Headern und
+    der generischen th:first-child/td:first-child-Regel (z-index 2)."""
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    css_start = html.index("<style>")
+    css_end = html.index("</style>")
+    css = html[css_start:css_end]
+    rule_start = css.index(".table-wrap.pm-scroll table.cmp thead th:first-child")
+    rule_block = css[rule_start : rule_start + 280]
+    assert "position: sticky" in rule_block
+    assert "left: 0" in rule_block
+    assert "top: auto" in rule_block
+    assert "background: var(--bg-card)" in rule_block
+    import re
+
+    z = re.search(r"z-index:\s*(\d+)", rule_block)
+    assert z is not None and int(z.group(1)) > 2
+
+
+# ── Nachbesserung Punkt 2 (UX-Review 16.07): Paarvergleichstabelle ohne
+# pm-scroll -- bei 1100px war die letzte Spalte "Paarung" hart abgeschnitten
+# und zentrierte Hinweiszeilen (PDF-Key-Drift) wurden mitten im Wort geclippt
+# (Beleg: C:/tmp/ux-review-312/responsive/c-drift-v0.3.140-vs-v0.3.60-1100-
+# light.png); bei 1280px nur 2px Restluft (fragil, gleiche Bugklasse wie
+# #305/Punkt 0 oberhalb 1201px).
+
+
+def test_html_pair_compare_table_wrapper_has_pm_scroll():
+    """Fix: derselbe pm-scroll-Mechanismus wie an der Matrix -- haelt den
+    Scroll-Container in ALLEN Viewport-Breiten aktiv statt sich auf die
+    fragile 2px-Restluft bei 1280px zu verlassen."""
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    section = html[html.index('id="s-pairmatrix"') : html.index('id="pm-compare-table"')]
+    assert 'class="table-wrap pm-scroll"' in section
+
+
+def test_html_pair_compare_drift_hint_moved_to_summary_not_table_row():
+    """Der laengere Drift-Hinweis darf nicht mehr Teil der zentrierten
+    <td colspan>-Zeile IN der (potenziell ueberbreiten) Tabelle sein -- er
+    lebt jetzt in `summary`, ausserhalb des Scroll-Containers, wo die
+    Section-Breite (nicht die Tabellenbreite) die Umbruchgrenze setzt."""
+    block = _pairmatrix_js_block()
+
+    body_start = block.index("body.innerHTML = rows.length")
+    body_end = block.index("</td></tr>'", body_start) + len("</td></tr>'")
+    body_stmt = block[body_start:body_end]
+    assert "maybeDrift" not in body_stmt
+    assert "Corpus vollständig ausgetauscht." in body_stmt
+
+    summary_start = block.rindex("summary.innerHTML = ")
+    summary_end = block.index(");", summary_start)
+    summary_stmt = block[summary_start:summary_end]
+    assert "maybeDrift" in summary_stmt

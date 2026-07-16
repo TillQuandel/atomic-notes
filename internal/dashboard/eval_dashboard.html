@@ -152,6 +152,19 @@ body.collapsed .nav-item .nav-label { display: none; }
 }
 .side-foot .eval-row { display: flex; align-items: center; gap: 6px; color: var(--ink-3); }
 .side-foot .ev-v { font-size: 10px; padding: 1px 5px; background: var(--tint-amber); color: var(--amber); border-radius: 2px; }
+/* Punkt 1 (Design-Iteration nach Till-Feedback): .ev-v bleibt die visuelle
+   Basis (Pill-Optik unveraendert) -- .ev-select macht daraus ein natives
+   <select>, so reduziert wie moeglich: kein Rahmen, Browser-Pfeil per
+   appearance:none entfernt, eigener kleiner Chevron (dieselbe SVG-Formel
+   wie .fselect, konsistente Chevron-Optik dashboardweit) statt Systemstil. */
+.side-foot .ev-select {
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  border: none; cursor: pointer; font-family: var(--f-mono);
+  padding-right: 14px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5'><path fill='none' stroke='%23566779' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round' d='M1 1l3 3 3-3'/></svg>");
+  background-repeat: no-repeat; background-position: right 4px center;
+}
+.side-foot .ev-select:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
 .theme-toggle {
   display: flex; align-items: center; gap: 8px; padding: 6px 8px;
   border: 1px solid var(--hair); border-radius: 3px;
@@ -224,7 +237,6 @@ body.collapsed .theme-toggle { padding: 6px; }
 /* ── Fokus (Tastatur) ─────────────────────────────────────────── */
 :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; border-radius: 3px; }
 .fselect:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
-.eval-ver-warn { margin-left: 12px; font-size: 11px; color: var(--amber); background: var(--tint-amber); border: 1px solid rgba(232,181,59,.25); border-radius: 2px; padding: 3px 10px; display: none; font-family: var(--f-mono); }
 
 /* ── Sections ──────────────────────────────────────────────────── */
 .section { padding: 28px 28px 8px; }
@@ -438,7 +450,12 @@ table.cmp th:nth-last-child(-n+2) .hint-pop,
 .spark-row-head .spark-delta { font-family: var(--f-mono); font-size: 11px; color: var(--ink-3); }
 .spark-row-head .spark-delta .dpos { color: var(--mint); font-weight: 600; }
 .spark-row-head .spark-delta .dneg { color: var(--coral); font-weight: 600; }
+/* Nachbesserung Punkt 3: kleiner Toggle am Chart-Kopf (nur Fehlerquote-
+   Kachel) -- Default AUS, s. JS `_acceptOverlayOn`. */
+.spark-overlay-toggle { display: flex; align-items: center; gap: 5px; font-family: var(--f-mono); font-size: 10.5px; color: var(--ink-3); cursor: pointer; user-select: none; white-space: nowrap; }
+.spark-overlay-toggle input { cursor: pointer; }
 .spark-chart-wrap { width: 100%; }
+.spark-overlay-caveat { font-family: var(--f-body); font-size: 11px; color: var(--ink-4); font-style: italic; margin-top: 4px; }
 /* SVG Hover-Tooltip auf Datenpunkten — Tooltip liegt als eigene Ebene über
    allen Punkten (Paarung via data-i, Klasse .on schaltet JS beim Hovern) */
 .spark-pt { cursor: crosshair; }
@@ -521,9 +538,49 @@ table.cmp td.dim { color: var(--ink-3); }
    entfaellt fuer die Matrix ohnehin (Scroll-Container waere sein
    Containing-Block, #203-P3-Begruendung). */
 .table-wrap.pm-scroll { overflow-x: auto; overflow-y: hidden; }
+/* Till-Live-Befund 2026-07-16 (Punkt 0): die >=1201px-Sticky-Regel oben
+   (`table.cmp thead th`, Zeile ~482) trifft über die gemeinsame .cmp-Klasse
+   AUCH die Matrix-Tabelle -- der Kommentar oben ("sticky-thead entfaellt fuer
+   die Matrix ohnehin") war ein Trugschluss: der Sticky-Offset (top:49px)
+   verschiebt den th-Kasten permanent 49px nach unten, auch OHNE dass je
+   gescrollt wird (die statische Ausgangsposition verletzt die top-Constraint
+   sofort, position:sticky greift dann unabhaengig vom Scroll-Zustand) --
+   sichtbar als leeres thead + ein in Zeile 1 der Kopfzeile ueberlappender
+   Versions-Header (Repro: C:/tmp/buendel-verify/00-repro-vor-fix-4.3.png).
+   Fix: fuer Tabellen im pm-scroll-Wrapper Sticky-Positionierung + ihre
+   Rand-Ersatz-Regeln (border-bottom:0 + box-shadow statt Border) explizit
+   zuruecksetzen -- Spezifitaet (0,3,3) schlaegt die Media-Query-Regel (0,1,3)
+   unabhaengig von der Regel-Reihenfolge. */
+.table-wrap.pm-scroll table.cmp thead th:not(:first-child) {
+  position: static;
+  box-shadow: none;
+  border-bottom: 1px solid var(--hair);
+}
+/* Nachbesserung Punkt 1 (UX-Review 16.07, Beleg a04-matrix-41-light-scroll400.png):
+   thead th:first-child ("Quell-PDF") darf NICHT mit auf position:static
+   zurueckgesetzt werden wie die uebrigen Versions-Header oben -- sonst
+   scrollt es beim Horizontal-Scroll mit dem restlichen Header weg, waehrend
+   die per .table-wrap.pm-scroll td:first-child (unten) links-gepinnte
+   PDF-Namen-Spalte im tbody stehen bleibt: der gerade sichtbare Versions-
+   Header landet dann optisch UEBER der gepinnten Spalte. Fix: eigene
+   Sticky-Left-Regel fuer die Header-Zelle -- top:auto hebt das top:49px der
+   Media-Query-Regel (Zeile ~495) explizit auf; z-index 3 > die generische
+   th:first-child/td:first-child-Regel (2, s.u.) und > die unbepinnten
+   Versions-Header (position:static, kein eigener Stacking-Layer). */
+.table-wrap.pm-scroll table.cmp thead th:first-child {
+  position: sticky;
+  left: 0;
+  top: auto;
+  z-index: 3;
+  background: var(--bg-card);
+  box-shadow: none;
+  border-bottom: 1px solid var(--hair);
+}
 /* Erste Spalte (PDF-Namen) beim Horizontal-Scroll fixiert — opaker
    Card-Hintergrund, sonst schiebt sich der Zellinhalt beim Scrollen
-   sichtbar darunter durch. */
+   sichtbar darunter durch. Fuer die thead-Zelle gilt die dedizierte Regel
+   oben (hoehere Spezifitaet); diese Regel bleibt fuer sie inhaltlich
+   deckungsgleich, wirkt praktisch nur noch fuer tbody td. */
 .table-wrap.pm-scroll th:first-child,
 .table-wrap.pm-scroll td:first-child { position: sticky; left: 0; background: var(--bg-card); z-index: 2; }
 /* Die Zebra-/Hover-Overlays von table.cmp sind semi-transparent (rgba) —
@@ -536,6 +593,17 @@ table.cmp td.dim { color: var(--ink-3); }
 .table-wrap.pm-scroll table.cmp tbody tr:hover td:first-child { background: var(--bg-card); }
 table.pm-matrix td, table.pm-matrix th { padding: 9px 12px; }
 table.pm-matrix td.pdf { white-space: nowrap; }
+/* Till-Live-Befund 2026-07-16 (Punkt 0): `table.cmp { width:100% }` (Zeile
+   ~490) galt bislang auch fuer die Matrix -- bei wenigen Versionen (z. B.
+   1 Spalte) stretcht der Browser die einzige Datenspalte auf fast die
+   gesamte Restbreite: riesige Leerflaeche zwischen PDF-Spalte und Werten,
+   der Versions-Header (text-align:right) klebt dadurch am rechten
+   Tabellenrand. `width:auto` laesst die Matrix auf ihre Inhaltsbreite
+   schrumpfen -- Datenspalten ruecken direkt neben die PDF-Spalte. Bei vielen
+   Versionen (16 Spalten, ~1500px) macht `width:auto` KEINEN Unterschied: die
+   Tabelle ist ohnehin breiter als der Wrapper und `.pm-scroll` scrollt sie
+   wie bisher (kein width:100%-Bedarf fuer den Scroll-Mechanismus). */
+table.cmp.pm-matrix { width: auto; }
 .pm-cell { text-align: center; min-width: 74px; line-height: 1.35; }
 .pm-cell .pm-cov { display: block; font-size: 11px; color: var(--ink-3); }
 .pm-cell .pm-n { display: block; font-size: 9.5px; color: var(--ink-4); margin-top: 1px; }
@@ -672,6 +740,23 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
   .kpis-perf { grid-template-columns: repeat(4, 1fr); }
   .kpis-perf .kpi:nth-child(4n) { border-right: 0; }
   .kpis-perf .kpi:nth-child(-n+4) { border-bottom: 1px solid var(--hair); }
+  /* U8 (Multi-Perspektiven-Review 2026-07-15): 5 Kacheln in 4 Spalten liessen
+     die 5. (letzte) allein in Zeile 2 mit 3 leeren Spalten daneben -- eine
+     sichtbare Luecke statt eines sauberen Umbruchs. Letzte Kachel spannt die
+     volle Breite, wenn sie ohnehin allein in ihrer Zeile steht (Div-Rest
+     5%4=1 -- bei einer anderen Kachelzahl in Zukunft neu pruefen, analog zu
+     den bestehenden nth-child-Regeln oben, die ebenfalls 5 Kacheln annehmen). */
+  .kpis-perf .kpi:last-child { grid-column: 1 / -1; border-right: 0; }
+  /* U9 (Multi-Perspektiven-Review 2026-07-15): das Modell-Filter brach als
+     letzte Filter-Group allein in eine neue Zeile -- kompaktere Gruppierung
+     durch engeres Padding UND schmalere Select-Maximalbreite (200px liess
+     bei 1100px 3 der 5 Groups an die Kappung stossen, ~370px Ueberschuss
+     ueber die verfuegbaren ~880px). (Punkt 1 haengt hier bewusst KEIN
+     eigenes Filter-Element mehr an, s. Design-Iteration im Eval-Version-
+     Kommentar -- das Eval-Version-Select sitzt inline in der Sidebar, nicht
+     in der Filterbar.) */
+  .filter-group { padding: 0 10px; }
+  .fselect { max-width: 150px; }
 }
 @media (max-width: 900px) {
   .strip { grid-template-columns: repeat(4,1fr); }
@@ -680,6 +765,9 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
   .kpis-quality .kpi:nth-child(-n+2) { border-bottom: 1px solid var(--hair); }
   .kpis-perf .kpi:nth-child(2n) { border-right: 0; }
   .kpis-perf .kpi:nth-child(-n+4) { border-bottom: 1px solid var(--hair); }
+  /* Dieselbe U8-Luecke bei 2 Spalten (5%2=1 -- letzte Kachel allein in
+     Zeile 3, eine Spalte leer daneben): gleicher Fix. */
+  .kpis-perf .kpi:last-child { grid-column: 1 / -1; border-right: 0; }
   .filterbar { min-height: auto; padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
   .filter-group { height: auto; padding: 4px 12px; }
 }
@@ -740,6 +828,15 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
 
   <div class="side-foot">
     <div id="sf-time">–</div>
+    <!-- Punkt 1 (Design-Iteration nach Till-Feedback): das bestehende
+         eval_version-Meta-Label wird selbst zum kompakten Inline-Select --
+         kein separates Filterbar-Element (haette das Einzeilen-Layout der
+         Filterbar gebrochen, s. Kommentar dort). Gleiche Typografie/Farbe
+         wie zuvor der reine Text (.ev-v), nur Rahmen weg + Chevron als
+         Klick-Affordanz. #pm-evalver (Matrix-Sektion) bleibt Read-only-Text
+         und folgt der Auswahl unveraendert (SSoT: beide lesen
+         d.eval_version aus derselben Antwort). -->
+    <div class="eval-row"><span>eval</span><select class="ev-v ev-select" id="sf-ev-select" onchange="onEvalVerChange()" title="Evaluierungs-Metrik-Version — wechselt die komplette Datenbasis (Fehlerquote/Belegrate/Matrix etc.)."></select></div>
     <div>auto-refresh 15 s</div>
     <button class="theme-toggle" onclick="cycleTheme()" title="Theme wechseln: System → Hell → Dunkel">
       <span class="tdot" id="theme-dot"></span>
@@ -786,7 +883,11 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
         <option value="__all__">Alle</option>
       </select>
     </div>
-    <!-- Eval-Version-Filter entfernt: nur eine eval_version aktiv (Server nutzt default = neueste) -->
+    <!-- Punkt 1: KEIN eigenes Filterbar-Element (Design-Iteration nach Till-
+         Feedback -- eine zusaetzliche Filter-Group brach das Einzeilen-
+         Layout der Filterbar bereits bei 1440px). Das Eval-Version-Select
+         sitzt stattdessen inline am bestehenden Meta-Label in der Sidebar
+         (#sf-ev-select, s. .side-foot unten). -->
 <span class="updated hint" tabindex="0" style="margin-left:auto">↻<span class="hint-pop" id="updated-at">lädt…</span></span>
   </div>
   <div class="filter-badges" id="filter-badges"></div>
@@ -1037,6 +1138,10 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     </div>
     <p class="insight" id="ins-pairmatrix"></p>
     <div class="insight" id="pm-archived-note" style="border-left-color:var(--ink-4)" hidden></div>
+    <!-- Nachbesserung Punkt 4 (Statistiker-Empfehlung 16.07): zeigt die aktive
+         eval_version AUSSCHLIESSLICH Re-Eval-Runs (reeval_baseline.py), misst
+         sie den Eval-Code-Stand, nicht die Erzeugungsversion der Notes. -->
+    <div class="insight" id="pm-reeval-note" style="border-left-color:var(--amber)" hidden></div>
 
     <!-- pm-scroll: eigener, IMMER aktiver Scroll-Container (16 Spalten passen
          in keiner Viewport-Breite — s. CSS-Kommentar an .table-wrap.pm-scroll) -->
@@ -1062,7 +1167,13 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
         </div>
       </div>
       <p class="insight" id="pm-compare-summary"></p>
-      <div class="table-wrap">
+      <!-- Nachbesserung Punkt 2 (UX-Review 16.07): pm-scroll haelt den
+           Scroll-Container in ALLEN Viewport-Breiten aktiv (analog zur
+           Matrix oben) -- ohne pm-scroll war die letzte Spalte "Paarung"
+           bei 1100px hart abgeschnitten und die >=1201px-Freigabe auf
+           overflow-x:visible liess bei 1280px nur 2px Restluft (fragil,
+           gleiche Bugklasse wie #305/Punkt 0). -->
+      <div class="table-wrap pm-scroll">
         <table class="cmp" id="pm-compare-table">
           <thead><tr>
             <th>Quell-PDF</th>
@@ -1263,9 +1374,12 @@ function _modelLabel(m) {
 }
 
 function _initGlobalModelFilter(models) {
+  // Punkt 2: models = [{model, n_valid}] (Server) -- n_valid = Zahl VALIDER
+  // Eval-Zeilen (hallucination_rate >= 0) je Modell, Gemini-Fehllesungs-
+  // Schutz (-1.0-Sentinel) zeigt hier korrekt 0 statt der vollen Zeilenzahl.
   const sel = document.getElementById('global-model'); if (!sel) return;
-  _rebuildFilterSelect(sel, models.join(','),
-    `<option value="__all__">Alle</option>` + models.map(m => `<option value="${m}">${_modelLabel(m)}</option>`).join(''),
+  _rebuildFilterSelect(sel, models.map(m=>m.model).join(','),
+    `<option value="__all__">Alle</option>` + models.map(m => `<option value="${m.model}">${_modelLabel(m.model)} (n=${m.n_valid})</option>`).join(''),
     'model');
 }
 
@@ -1358,32 +1472,64 @@ function _initGlobalPdfFilter(pdfs) {
 }
 
 /* ── Eval-Version ─────────────────────────────────────────────── */
-let _currentEvalVersion = null;
+// Punkt 1 (Till-Wunsch + Zusatzbefund 2026-07-16): das Dropdown war entfernt
+// (Kommentare "entfernt" an den frueheren Markup-/Fetch-Stellen), die Client-
+// Funktionen hier blieben aber verwaist stehen -- _getEvalVerFromUrl() wurde
+// nirgends aufgerufen, ?eval_version=4.1 in der URL hatte dadurch NIE eine
+// Wirkung (Seite zeigte unter beiden URLs dieselbe eval_version). Fix: Seed
+// aus der URL beim Boot, Dropdown-Markup + Fetch-Param unten wieder verdrahtet.
+//
+// Design-Iteration nach Till-Feedback (2026-07-16, nach erster Sichtpruefung):
+// urspruenglich als eigenes Filterbar-Element gebaut -- brach deren Einzeilen-
+// Layout bereits bei 1440px (6. Filter-Group + Warn-Badge passten nicht mehr
+// in eine Zeile). Verworfen zugunsten eines Inline-Selects am bestehenden
+// #sf-ev-select-Meta-Label in der Sidebar (kein zusaetzliches Filterbar-
+// Element mehr) -- #pm-evalver (Matrix-Sektion) bleibt Read-only-Text.
+let _currentEvalVersion = _getEvalVerFromUrl();
 function _getEvalVerFromUrl() { return new URLSearchParams(window.location.search).get('eval_version'); }
 function _setEvalVerInUrl(ver) { const u = new URL(window.location.href); u.searchParams.set('eval_version', ver); window.history.replaceState(null,'',u.toString()); }
 function onEvalVerChange() {
-  const sel = document.getElementById('eval-ver-select'); if (!sel) return;
+  const sel = document.getElementById('sf-ev-select'); if (!sel) return;
   _currentEvalVersion = sel.value; _setEvalVerInUrl(_currentEvalVersion);
   _calibShowAll = false;
   loadAndRender();
 }
 function _initEvalVerDropdown(available, selected) {
-  const sel = document.getElementById('eval-ver-select'); if (!sel) return;
-  const key = available.join(',');
-  if (sel.dataset.loaded === key && _currentEvalVersion === selected) return;
-  sel.dataset.loaded = key;
-  sel.innerHTML = available.map(v=>`<option value="${v}"${v===selected?' selected':''}>${v}</option>`).join('');
+  // available: [{version, n}] (Server, Punkt 1) -- n = Zeilenzahl je Version
+  // fuer die Dropdown-Anzeige "4.3 (n=27)".
+  const sel = document.getElementById('sf-ev-select'); if (!sel) return;
+  const key = available.map(o=>o.version).join(',');
+  // Klick-Pfad-Fund (Sichtpruefung 2026-07-16): der fruehere Early-Return
+  // ("nichts geaendert, wenn Optionsmenge+Auswahl schon passen") skippte nach
+  // einem manuellen Dropdown-Wechsel FAELSCHLICH das Auswahl-Update --
+  // onEvalVerChange() setzt _currentEvalVersion naemlich schon VOR dem Fetch
+  // auf den neuen Wert, wodurch die Bedingung beim Post-Fetch-Aufruf hier
+  // bereits erfuellt war. Rebuild (teuer, zerstoert natives Select-Fokus/
+  // Open-Fenster) nur bei geaenderter Optionsmenge; Auswahl-Sync IMMER.
+  if (sel.dataset.loaded !== key) {
+    sel.dataset.loaded = key;
+    sel.innerHTML = available.map(o=>`<option value="${o.version}"${o.version===selected?' selected':''}>${o.version} (n=${o.n})</option>`).join('');
+  } else if (sel.value !== selected) {
+    sel.value = selected;
+  }
   _currentEvalVersion = selected;
-  const warn = document.getElementById('eval-ver-warn');
-  // Klassen-Default ist display:none — '' fiele darauf zurück, explizit setzen
-  if (warn) warn.style.display = available.length > 1 ? 'inline-block' : 'none';
-  const pill = document.getElementById('sf-ev-pill');
-  if (pill) pill.textContent = selected || '–';
 }
 
 /* ── KPI Sparkline ────────────────────────────────────────────── */
 let _openKpiIdx = null;
 let _kpiData = null;
+
+// Nachbesserung Punkt 3 (Statistiker MEDIUM + UX-P3, Reviews 15./16.07 zu PR
+// #312): das Accept×Hall-Overlay staucht auf der gemeinsamen 0-100%-Achse die
+// Fehlerquoten-Serie auf ~1/3 der Chart-Hoehe (vorher hall-adaptiv) und
+// 100%-Accept-Punkte aus n=1-3-Laeufen sind optisch nicht von belastbaren
+// unterscheidbar -- Default AUS, Zustand in localStorage (analog theme-mode).
+let _acceptOverlayOn = localStorage.getItem('accept-overlay-on') === 'true';
+function _toggleAcceptOverlay(checked) {
+  _acceptOverlayOn = !!checked;
+  localStorage.setItem('accept-overlay-on', String(_acceptOverlayOn));
+  if (_kpiData) renderKpis(_kpiData.kpis, _kpiData.thresh, _kpiData.kpiTrend);
+}
 
 function _kpiTone(k, avg_hall, avg_cov, avg_accept, T) {
   if (k === 'hall') return avg_hall != null ? (avg_hall <= T.hall[0] ? 'good' : avg_hall >= T.hall[1] ? 'bad' : 'warn') : 'neutral';
@@ -1575,7 +1721,34 @@ function renderKpis(kpis, thresh, kpiTrend) {
     const vals = kpiTrend?.[kd.key] || [];
     const vers = kpiTrend?.versions || [];
     const sparkColor = toneColor(kd.tone);
-    const sparkSvg = _trendChart(vals, vers, sparkColor, kd.u);
+    // Punkt 3 (S2-C3): Akzeptanzquote als zweite Serie NEBEN der Fehlerquote
+    // -- macht Selektions-Bias sichtbar (note_evals enthaelt nur akzeptierte
+    // Notes). Nur fuer die Fehlerquote-Kachel, bestehendes Chart erweitert
+    // statt eines neuen (Spec-Vorgabe).
+    // Nachbesserung Punkt 3 (Statistiker MEDIUM + UX-P3): Overlay zuschaltbar,
+    // Default AUS (`_acceptOverlayOn`, localStorage) -- ohne Zuschalten bleibt
+    // die Achse hall-adaptiv wie vor dem PR (die gemeinsame 0-100%-Achse
+    // stauchte die Fehlerquoten-Serie auf ~1/3 der Chart-Hoehe). accept_n je
+    // Version (Punkt 4/D3, bereits im Payload) dimmt Accept-Punkte mit
+    // accept_n<20 (100%-Punkte aus n=1-3-Laeufen waren optisch nicht von
+    // belastbaren unterscheidbar).
+    const overlayAvailable = kd.key === 'hall';
+    const accVals = (overlayAvailable && _acceptOverlayOn) ? (kpiTrend?.accept || []) : null;
+    const acceptNVals = (overlayAvailable && _acceptOverlayOn) ? (kpiTrend?.accept_n || null) : null;
+    const sparkSvg = _trendChart(vals, vers, sparkColor, kd.u, accVals, 'Akzeptanzquote', acceptNVals);
+    // Legende benennt BEIDE Serien + unterschiedliche Basis (Statistik-Review
+    // 15.07: note_evals enthaelt nur AKZEPTIERTE Notes -- die Akzeptanzquote
+    // zaehlt dagegen alle gerouteten/generierten Notes, andere Grundgesamtheit).
+    const overlayToggleHtml = overlayAvailable
+      ? `<label class="spark-overlay-toggle hint">
+          <input type="checkbox" id="spark-overlay-toggle" ${_acceptOverlayOn ? 'checked' : ''} onchange="_toggleAcceptOverlay(this.checked)">
+          Accept-Overlay
+          <span class="hint-pop">Zeigt die Akzeptanzquote als zweite (gestrichelte) Serie neben der Fehlerquote -- macht sichtbar, ob ein Fehlerquoten-Delta teils Stichproben-Verschiebung statt reiner Qualitaetseffekt ist. Andere Basis: Akzeptanzquote zaehlt geroutete/generierte Notes, die Fehlerquote nur evaluierte.</span>
+        </label>`
+      : '';
+    const overlayCaveatHtml = (overlayAvailable && _acceptOverlayOn && accVals && accVals.length)
+      ? `<div class="spark-overlay-caveat">Akzeptanzquote (gestrichelt) misst auf anderer Basis als die Fehlerquote — geroutete/generierte statt evaluierte Notes. Punkte mit &lt;20 gerouteten Notes sind gedimmt.</div>`
+      : '';
     // #36 P4: Delta neueste-vs-Vorversion (server-berechnet) mit N-Guard statt
     // neueste-vs-erste. Ohne reliable (n<20 in einer der beiden Versionen) kein
     // Besser/Schlechter-Farbcode — nur neutrale Anzeige (Rausch-Schutz).
@@ -1605,9 +1778,11 @@ function renderKpis(kpis, thresh, kpiTrend) {
       inner.innerHTML = `
       <div class="spark-row-head">
         <strong>${kd.label} — Versions-Trend</strong>
+        ${overlayToggleHtml}
         <div class="spark-delta">${deltaHtml}</div>
       </div>
-      <div class="spark-chart-wrap">${sparkSvg}</div>`;
+      <div class="spark-chart-wrap">${sparkSvg}</div>
+      ${overlayCaveatHtml}`;
       // Tooltip-Sichtbarkeit: Punkt (spark-pt) und Tooltip (spark-tipg) sind
       // getrennte Ebenen (Tooltips liegen über allen Punkten) — Paarung über
       // data-i. Details am Ebenen-Aufbau in _trendChart.
@@ -1624,26 +1799,45 @@ function renderKpis(kpis, thresh, kpiTrend) {
 function _autoUnit(values, unit) {
   // Wählt sinnvolle Einheit + Formatierung dynamisch nach Wertebereich
   const max = Math.max(...values.filter(v=>v!=null));
+  // #292-LOW (Punkt 7, Matrix-Rendering-Fix+Politur-Bündel): jede fmt-Funktion
+  // nimmt jetzt einen optionalen Nachkommastellen-Parameter `d` (Default =
+  // bisheriges hartkodiertes Verhalten, s. je Zweig) -- die Eskalations-
+  // Schleife in _trendChart ruft `au.fmt(v, extra)` statt einer zweiten,
+  // unit-fremden Formel. Vorher kollidierte diese zweite Formel
+  // (`_fmtDE(v, extra) + au.u`) mit der Basis-Formatierung von "%" (die GAR
+  // keinen Suffix anhaengt) und "h" (< 1h zeigt "N min", nicht Stunden) --
+  // ein sichtbarer Inkonsistenz-/Einheiten-Sprung erst BEI Kollision.
   // Explizit übergebene Einheiten: behalte sie, formatiere nur den Wert
-  if (unit === '%')  return { u: '%',   fmt: v => _fmtDE(v) };
-  if (unit === 'h')  return { u: 'h',   fmt: v => v < 1 ? `${Math.round(v*60)} min` : _fmtDE(v)+' h' };
-  if (unit === 'M')  return { u: 'M',   fmt: v => v < 0.1 ? `${Math.round(v*1000)} k` : _fmtDE(v, 2)+' M' };
-  if (unit === 'k')  return { u: 'k',   fmt: v => v >= 1000 ? `${_fmtDE(v/1000)} M` : Math.round(v)+' k' };
+  if (unit === '%')  return { u: '%',   fmt: (v, d) => `${_fmtDE(v, d ?? 1)}%` };
+  if (unit === 'h')  return { u: 'h',   fmt: (v, d) => v < 1 ? `${_fmtDE(v*60, d ?? 0)} min` : `${_fmtDE(v, d ?? 1)} h` };
+  if (unit === 'M')  return { u: 'M',   fmt: (v, d) => v < 0.1 ? `${Math.round(v*1000)} k` : `${_fmtDE(v, d ?? 2)} M` };
+  if (unit === 'k')  return { u: 'k',   fmt: (v, d) => v >= 1000 ? `${_fmtDE(v/1000, d)} M` : `${Math.round(v)} k` };
   // Kein unit: auto-scale nach Größenordnung
-  if (max >= 1e6)    return { u: 'M',   fmt: v => _fmtDE(v/1e6, 2)+' M' };
-  if (max >= 1000)   return { u: 'k',   fmt: v => _fmtDE(v/1000)+' k' };
-  if (max < 10)      return { u: unit||'', fmt: v => _fmtDE(v, 2)+(unit||'') };
-  return               { u: unit||'', fmt: v => _fmtDE(v)+(unit||'') };
+  if (max >= 1e6)    return { u: 'M',   fmt: (v, d) => `${_fmtDE(v/1e6, d ?? 2)} M` };
+  if (max >= 1000)   return { u: 'k',   fmt: (v, d) => `${_fmtDE(v/1000, d ?? 1)} k` };
+  if (max < 10)      return { u: unit||'', fmt: (v, d) => `${_fmtDE(v, d ?? 2)}${unit||''}` };
+  return               { u: unit||'', fmt: (v, d) => `${_fmtDE(v, d ?? 1)}${unit||''}` };
 }
 
-function _trendChart(points, versions, color, unit) {
+function _trendChart(points, versions, color, unit, points2, label2, points2N) {
   const w = 900, h = 90, padL = 8, padR = 8, padT = 16, padB = 20;
   const iw = w - padL - padR, ih = h - padT - padB;
   if (!points || points.length < 2) return `<svg width="100%" viewBox="0 0 ${w} ${h}"></svg>`;
   const valid = points.filter(v => v != null);
   if (!valid.length) return `<svg width="100%" viewBox="0 0 ${w} ${h}"></svg>`;
   const au = _autoUnit(valid, unit);  // dynamische Einheit + Formatter
-  const vmax = Math.max(...valid), vmin = Math.min(...valid);
+  // Punkt 3 (S2-C3, Multi-Perspektiven-Review 2026-07-15): optionale zweite
+  // Serie (Akzeptanzquote neben Fehlerquote) -- macht den Selektions-Bias
+  // sichtbar (note_evals enthaelt nur akzeptierte Notes: sinkt die Akzeptanz-
+  // quote gleichzeitig mit einer Fehlerquoten-Aenderung, ist Letztere teils
+  // Stichproben-Verschiebung statt reiner Qualitaetseffekt). Nur gezeichnet
+  // wenn uebergeben (Default-Fall/alle anderen Kacheln unveraendert) UND
+  // dieselbe Einheit (%) hat -- eine gemeinsame Y-Achse ergibt sonst keinen
+  // Sinn. Eigene, kleinere Skala waere ein zweites Chart gewesen (Spec:
+  // "Bestehendes Chart erweitern, kein neues bauen").
+  const has2 = Array.isArray(points2) && points2.length === points.length && unit === '%';
+  const valid2 = has2 ? points2.filter(v => v != null) : [];
+  const vmax = Math.max(...valid, ...valid2), vmin = Math.min(...valid, ...valid2);
   const pad = (vmax - vmin) * 0.2 || (vmax * 0.1) || 1;
   // %-Metriken bei 100 deckeln — eine Rate kann nicht ueber 100 % (User-Feedback)
   const max = (unit === '%') ? Math.min(100, vmax + pad) : vmax + pad;
@@ -1654,6 +1848,7 @@ function _trendChart(points, versions, color, unit) {
   const ys = points.map(v => v != null ? padT + ih - ((v-min)/span)*ih : null);
   const hair = cssv('--hair'); const ink4 = cssv('--ink-3'); const card = cssv('--bg-card');
   const bg = cssv('--bg-elev');
+  const color2 = cssv('--ink-3');
 
   let d = '', first = true;
   points.forEach((v, i) => {
@@ -1675,7 +1870,13 @@ function _trendChart(points, versions, color, unit) {
     const cx = parseFloat(xs[i].toFixed(1));
     const cy = parseFloat(ys[i].toFixed(1));
     const isLast = i === n-1;
-    const label = au.fmt(v);
+    // Nachbesserung Punkt 3 (UX-P3): der Punkt-Tooltip zeigte bisher nur die
+    // Fehlerquote -- bei aktivem Overlay fehlte der Akzeptanzquoten-Wert
+    // derselben Version im Tooltip komplett (nur visuell aus dem Chart
+    // ablesbar). Zeigt jetzt beide Werte, wenn das Overlay aktiv ist.
+    const label = (has2 && points2[i] != null)
+      ? `${au.fmt(v)} / Akzeptanz ${_fmtDE(points2[i], 1)}%`
+      : au.fmt(v);
     const tipW = label.length * 7 + 16;
     const tipH = 18;
     // Horizontal: Text bleibt IMMER mittig im Kasten — an den Rändern wird die
@@ -1710,6 +1911,40 @@ function _trendChart(points, versions, color, unit) {
       + `<text x="${xs[n-1].toFixed(1)}" y="${h-3}" fill="${ink4}" font-size="9.5" text-anchor="end" font-family="JetBrains Mono">${versions[n-1] ?? ''}</text>`
     : '';
 
+  // Punkt 3: zweite Serie (gestrichelt, gedaempfte Farbe -- unterscheidbar von
+  // der Primaerlinie, ohne mit den Ampel-Toenen (good/bad/warn) zu kollidieren,
+  // die `color` je nach Metrik-Schwelle traegt). Eigene, kleinere Punkte OHNE
+  // Hover-Tooltip-Kaesten (bewusst schlank gehalten -- der Zweck ist der
+  // visuelle Trend-Vergleich, nicht ein zweiter voller Interaktionslayer).
+  let d2 = '', dots2 = '';
+  if (has2) {
+    let first2 = true;
+    points2.forEach((v, i) => {
+      if (v == null) { first2 = true; return; }
+      const y2 = padT + ih - ((v-min)/span)*ih;
+      d2 += `${first2?'M':'L'}${xs[i].toFixed(1)},${y2.toFixed(1)} `;
+      first2 = false;
+      // Nachbesserung Punkt 3 (Statistiker MEDIUM): 100%-Accept-Punkte aus
+      // n=1-3-Laeufen sahen optisch nicht anders aus als belastbare Werte --
+      // Punkte mit accept_n<20 (Punkt-4-Payload-Feld, bereits vorhanden)
+      // werden gedimmt statt gleichwertig dargestellt.
+      const n2 = Array.isArray(points2N) ? points2N[i] : null;
+      const lowN2 = n2 != null && n2 < 20;
+      dots2 += `<circle cx="${xs[i].toFixed(1)}" cy="${y2.toFixed(1)}" r="2.5" fill="${bg}" stroke="${color2}" stroke-width="1.5" opacity="${lowN2 ? 0.35 : 1}"/>`;
+    });
+  }
+  // Legende benennt BEIDE Serien (nicht nur die Zweitserie) -- ohne das war
+  // nicht erkennbar, dass die durchgezogene Linie ebenfalls Teil eines
+  // Vergleichs ist bzw. wofuer sie steht.
+  const legendBoth = has2
+    ? `<g transform="translate(${padL},4)">
+        <line x1="0" y1="0" x2="14" y2="0" stroke="${color}" stroke-width="2"/>
+        <text x="18" y="3" fill="${ink4}" font-size="8.5" font-family="JetBrains Mono">Fehlerquote</text>
+        <line x1="98" y1="0" x2="112" y2="0" stroke="${color2}" stroke-width="2" stroke-dasharray="3,2"/>
+        <text x="116" y="3" fill="${ink4}" font-size="8.5" font-family="JetBrains Mono">${_escHTML(label2||'')}</text>
+      </g>`
+    : '';
+
   // 3 Hilfslinien mit Wert-Beschriftung — mehr Kontext
   // Bug 3 (Multi-Perspektiven-Review 2026-07-15): vorher lief der Rohwert
   // durch _fmtDE() (DE-Formatierung MIT Dezimalkomma, z.B. "0,03") und wurde
@@ -1719,10 +1954,17 @@ function _trendChart(points, versions, color, unit) {
   // Spannen reicht die Standard-Nachkommastellenzahl u.U. nicht zum
   // Unterscheiden — dann Nachkommastellen schrittweise erhoehen, bis alle 3
   // Labels sich unterscheiden (Cap bei 6 Nachkommastellen).
+  // #292-LOW: Eskalation ruft au.fmt(v, extra) -- dieselbe Formatierungs-
+  // funktion wie die Basis-Anzeige, nur mit mehr Nachkommastellen. Vorher
+  // stand hier eine zweite, unit-fremde Formel (`_fmtDE(v, extra) + au.u`),
+  // die nur zufaellig zu $/generischen Einheiten passte, bei "%" den
+  // fehlenden Suffix "reparierte" (Inkonsistenz zur Basis-Anzeige direkt
+  // daneben) und bei "h" den Sprung von "N min" auf rohe Stunden-Dezimalen
+  // erzwang.
   const hairVals = [0, 0.5, 1].map(t => min + t*span);
   let hairLabels = hairVals.map(v => au.fmt(v));
   for (let extra = 2; new Set(hairLabels).size < hairLabels.length && extra <= 6; extra++) {
-    hairLabels = hairVals.map(v => _fmtDE(v, extra) + (au.u || ''));
+    hairLabels = hairVals.map(v => au.fmt(v, extra));
   }
   const hairLines = [0, 0.5, 1].map((t, i) => {
     const y = (padT + ih - t*ih).toFixed(1);
@@ -1736,9 +1978,11 @@ function _trendChart(points, versions, color, unit) {
     preserveAspectRatio="xMidYMid meet" style="display:block;overflow:visible">
     ${hairLines}
     <path d="${da}" fill="${color}" opacity=".10"/>
+    ${has2 ? `<path d="${d2}" stroke="${color2}" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-dasharray="4,3"/>${dots2}` : ''}
     <path d="${d}" stroke="${color}" stroke-width="2" fill="none" stroke-linecap="round"/>
     ${dotGroups}
     ${verLabels}
+    ${legendBoth}
   </svg>`;
 }
 
@@ -1826,7 +2070,7 @@ function renderStrip(kpis) {
     cell('Notes generiert', kpis.total_generated||'–', '', '', 'Anzahl aller von der Pipeline erzeugten Draft-Notes, über alle Läufe und Versionen.') +
     cell('Direkt Vault', kpis.total_accepted||'–', '', `/ ${pct} %`, 'Notes, die ohne manuelles Zusammenführen direkt in den Vault übernommen wurden — kumuliert über ALLE Pipeline-Versionen (nicht nur die aktuelle, siehe Kachel „Automatisch akzeptiert" oben).') +
     cell('Merge-Stubs', kpis.total_merged||0, '', '', 'Notes, die nicht neu angelegt, sondern in eine bereits bestehende Vault-Note eingefügt/ergänzt wurden.') +
-    cell('Dropped', kpis.total_dropped||0, '', '', 'Von der Pipeline komplett verworfene Konzept-Kandidaten, die es nicht einmal bis zum Draft geschafft haben. Wird nur gezählt, wenn keine Log-Dateien vorliegen und die SQLite-Datenbank als Fallback dient — sonst 0.') +
+    cell('Dropped', kpis.total_dropped != null ? kpis.total_dropped : '–', '', '', 'Von der Pipeline komplett verworfene Konzept-Kandidaten, die es nicht einmal bis zum Draft geschafft haben. Nur ermittelbar, wenn die SQLite-Datenbank als Fallback dient (pipeline_runs-Tabelle) — Log-Dateien kennen verworfene Kandidaten strukturell nicht (kein Log-Eintrag). „–" heißt „nicht ermittelbar", nicht „0".') +
     // #204 P5: "Laufzeit" hier ist Lifetime (alle Versionen) — Scope-Suffix
     // gegen die Kachel "Laufzeit (aktuell)" oben; Zahl war zudem mit Punkt
     // statt Komma formatiert (Locale-Fund an derselben Stelle mitgefixt).
@@ -1911,6 +2155,18 @@ function renderPairMatrix(d) {
     archNote.hidden = excluded.length === 0;
   }
 
+  // Nachbesserung Punkt 4 (Statistiker-Empfehlung 16.07): eval_version zeigt
+  // AUSSCHLIESSLICH Re-Eval-Runs (reeval_baseline.py, is_reeval_series vom
+  // Server) -- die Versions-Spalten der Matrix sind dann der Eval-Code-Stand
+  // des Re-Eval-Sweeps, NICHT die Erzeugungsversion der Notes.
+  const reevalNote = document.getElementById('pm-reeval-note');
+  if (reevalNote) {
+    reevalNote.textContent = d.is_reeval_series
+      ? 'Re-Eval-Serie: Werte messen den Eval-Stand, nicht die Erzeugungsversion der Notes.'
+      : '';
+    reevalNote.hidden = !d.is_reeval_series;
+  }
+
   const thead = document.getElementById('pm-thead');
   const tbody = document.getElementById('pm-body');
   if (!versions.length || !pdfs.length) {
@@ -1943,11 +2199,22 @@ function renderPairMatrix(d) {
   // Cap-Fussnote (adversariale Abnahme, Befund 3): der 15er-Cap (+ n>=3-
   // Schwelle) droppt Versionen still — analog excluded_archived_versions
   // als Disclosure ausweisen statt Versionen kommentarlos verschwinden zu lassen.
+  // Nachbesserung Punkt 5 (trivial): "Version(en)" war keine echte Singular/
+  // Plural-Behandlung -- bei genau 1 gedroppter Version stand weiterhin die
+  // Klammer "(en)" da. Dieselbe Technik wie die bereits gefixte
+  // Matrix-Insight-Zeile (1 Version / PDF-Quelle, s.u.).
+  const dropWord = pm.n_versions_dropped === 1 ? 'weitere Version' : 'weitere Versionen';
   const dropNote = (pm.n_versions_dropped || 0) > 0
-    ? ` · ${pm.n_versions_dropped} weitere Version(en) mit Eval-Daten nicht gezeigt (Top-15-Deckelung, min. n≥3 je Version — die neueste immer dabei).`
+    ? ` · ${pm.n_versions_dropped} ${dropWord} mit Eval-Daten nicht gezeigt (Top-15-Deckelung, min. n≥3 je Version — die neueste immer dabei).`
     : '';
+  // Till-Live-Befund 2026-07-16 (Punkt 0, Minor): Singular/Plural -- bei
+  // eval_version 4.3 (1 Pipeline-Version) stand hier "1 Versionen". Dieselbe
+  // Bugklasse trifft "PDF-Quellen" bei einer gefilterten Einzel-PDF-Ansicht
+  // gleich mit -- selbe Zeile, selbe Technik, hier direkt mitgefixt.
+  const pdfWord = pdfs.length === 1 ? 'PDF-Quelle' : 'PDF-Quellen';
+  const verWord = versions.length === 1 ? 'Version' : 'Versionen';
   _setInsight('ins-pairmatrix',
-    `${pdfs.length} PDF-Quellen × ${versions.length} Versionen${dropNote ? '' : '.'}${dropNote} Zellwert = Median über deduplizierte Notes ` +
+    `${pdfs.length} ${pdfWord} × ${versions.length} ${verWord}${dropNote ? '' : '.'}${dropNote} Zellwert = Median über deduplizierte Notes ` +
     `(neueste Zeile je Note, keine Pseudoreplikation) — Fehlerquote oben, Belegrate darunter, n je Zelle. ` +
     `<span class="caveat">Zellen mit n&lt;3 sind gedimmt, aber nicht versteckt — Tooltip zeigt Min–Max-Spanne.</span>`);
 
@@ -2022,12 +2289,21 @@ function renderPairCompare(d) {
   // Seiten ist im Bestand oft PDF-Key-Drift — dieselbe Quelle unter zwei
   // Gruppen-Keys (z. B. bates-2017 vs. bates-information-behavior, #194/#202).
   // Darauf hinweisen statt nur "kein Delta" zu sagen.
+  // Nachbesserung Punkt 2 (UX-Review 16.07, Beleg
+  // c-drift-v0.3.140-vs-v0.3.60-1100-light.png): der Drift-Hinweis lebte
+  // bisher ALS TEIL der zentrierten <td colspan>-Zeile INNERHALB der Tabelle
+  // -- deren Spaltenbreiten (9 Header-th, unabhaengig vom leeren tbody)
+  // machen die Tabelle regelmaessig breiter als der sichtbare Wrapper (bei
+  // 1100px), der zentrierte Text wurde dadurch mitten im Wort abgeschnitten.
+  // Fix: der laengere Drift-Hinweis wandert in `summary` -- AUSSERHALB des
+  // Scroll-Containers, volle (nicht ueberbreite) Section-Breite; die
+  // In-Table-Meldung bleibt kurz genug, um nie clippen zu muessen.
   const maybeDrift = !cmp.common_pdfs.length && (cmp.only_a.length || cmp.only_b.length)
-    ? '<br><span style="color:var(--ink-4)">Hinweis: möglicherweise PDF-Key-Drift — dieselbe Quelle kann unter verschiedenen Keys geführt sein (#194/#202); siehe die Listen unten.</span>'
+    ? ' <span class="caveat">Hinweis: möglicherweise PDF-Key-Drift — dieselbe Quelle kann unter verschiedenen Keys geführt sein (#194/#202); siehe die Listen unten.</span>'
     : '';
   body.innerHTML = rows.length ? rows.join('') : (
     '<tr><td colspan="9" style="padding:1.5rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">' +
-    'Keine gemeinsamen PDF-Quellen zwischen diesen Versionen — Corpus vollständig ausgetauscht, kein Delta berechenbar.' + maybeDrift + '</td></tr>'
+    'Keine gemeinsamen PDF-Quellen — Corpus vollständig ausgetauscht.</td></tr>'
   );
 
   const ov = cmp.overall;
@@ -2040,7 +2316,7 @@ function renderPairCompare(d) {
   summary.innerHTML = `<strong>${ov.n_common_pdfs} von ${ov.n_pdfs_a}/${ov.n_pdfs_b}</strong> PDFs gemeinsam (${_escHTML(lo)} vs. ${_escHTML(hi)})${overlapTxt}. ` +
     (ov.hall_delta != null
       ? `Gesamt-Delta Fehlerquote über die Schnittmenge (gepoolt, ankergewichtet): ${deltaTd(ov.hall_delta, true)} — ${_fmtDE(ov.hall_a)} % → ${_fmtDE(ov.hall_b)} % (n=${ov.n_notes_a}/${ov.n_notes_b} Notes, Zeilen-Basis).`
-      : '<span class="caveat">Keine gemeinsame PDF-Quelle — kein Gesamt-Delta berechenbar.</span>');
+      : '<span class="caveat">Keine gemeinsame PDF-Quelle — kein Gesamt-Delta berechenbar.</span>' + maybeDrift);
 
   const onlyParts = [];
   if (cmp.only_a.length) onlyParts.push(`nur in ${_escHTML(lo)}: ${cmp.only_a.map(k => _escHTML(pdfLabel(k))).join(', ')}`);
@@ -2682,7 +2958,10 @@ function renderInsights(d) {
 function _renderWithData(d) {
   if(!d) return; window._lastData=d;
   const t = C();
-  // Eval-Version-Dropdown entfernt — Server nutzt default (neueste eval_version)
+  // Punkt 1: eval_version-Dropdown -- synct _currentEvalVersion mit dem vom
+  // Server AUFGELOESTEN Wert (z. B. wenn die URL keine/eine ungueltige
+  // Version trug und der Server auf die neueste gefallen ist).
+  if (d.available_eval_versions?.length) _initEvalVerDropdown(d.available_eval_versions, d.eval_version);
   // Dropdowns: immer mit ALLEN Optionen befüllen (vor globalem Filter)
   if (d.all_pvers?.length)   _initGlobalPverFilter(d.all_pvers);
   if (d.all_pdfs?.length)    _initGlobalPdfFilter(d.all_pdfs);
@@ -2781,8 +3060,11 @@ async function loadAndRender(manual = true) {
   // hat (Nachbesserung #204/#221 P-a).
   if (manual && window._lastData) document.querySelector('.main')?.classList.add('refreshing');
   try {
-    // Eval-Version-Filter entfernt: nie aus URL/State setzen → Server nutzt default (neueste)
     const p = new URLSearchParams();
+    // Punkt 1: eval_version durchreichen -- gilt auch fuer den 15s-Auto-
+    // Refresh (derselbe Code-Pfad, manual=false), damit ein aktiver Auswahl
+    // die Version beim Poll nicht zurueck auf den Server-Default kippt.
+    if (_currentEvalVersion) p.set('eval_version', _currentEvalVersion);
     if (_globalFilters.lang  && _globalFilters.lang  !== '__all__') p.set('language',         _globalFilters.lang);
     if (_globalFilters.model && _globalFilters.model !== '__all__') p.set('model',             _globalFilters.model);
     if (_globalFilters.pdf   && _globalFilters.pdf   !== '__all__') p.set('pdf',               _globalFilters.pdf);
