@@ -769,6 +769,10 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
 
   <div class="side-foot">
     <div id="sf-time">–</div>
+    <!-- Punkt 1: persistente Kopfzeilen-Anzeige der aktiven eval_version,
+         analog #pm-evalver in der Matrix-Sektion (konsistent per SSoT:
+         beide lesen d.eval_version aus derselben Antwort). -->
+    <div class="eval-row"><span>eval</span><span class="ev-v" id="sf-ev-pill">–</span></div>
     <div>auto-refresh 15 s</div>
     <button class="theme-toggle" onclick="cycleTheme()" title="Theme wechseln: System → Hell → Dunkel">
       <span class="tdot" id="theme-dot"></span>
@@ -815,7 +819,15 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
         <option value="__all__">Alle</option>
       </select>
     </div>
-    <!-- Eval-Version-Filter entfernt: nur eine eval_version aktiv (Server nutzt default = neueste) -->
+    <!-- Punkt 1 (Till-Wunsch + Zusatzbefund 2026-07-16): Dropdown-Wiederaufbau
+         -- Optionen kommen aus available_eval_versions (Server), Default =
+         neueste. n je Option per _initEvalVerDropdown (siehe <script> unten). -->
+    <div class="filter-group">
+      <span class="filter-label">Eval-Version</span>
+      <select class="fselect" id="eval-ver-select" onchange="onEvalVerChange()" title="Evaluierungs-Metrik-Version — nicht die Pipeline-Version oben. Wechselt die komplette Datenbasis (Fehlerquote/Belegrate/Matrix etc.).">
+      </select>
+      <span class="eval-ver-warn" id="eval-ver-warn" title="Es gibt Eval-Daten unter mehreren eval_versions — nur die hier gewählte fließt in Kacheln/Charts ein.">weitere Versionen verfügbar</span>
+    </div>
 <span class="updated hint" tabindex="0" style="margin-left:auto">↻<span class="hint-pop" id="updated-at">lädt…</span></span>
   </div>
   <div class="filter-badges" id="filter-badges"></div>
@@ -1387,7 +1399,13 @@ function _initGlobalPdfFilter(pdfs) {
 }
 
 /* ── Eval-Version ─────────────────────────────────────────────── */
-let _currentEvalVersion = null;
+// Punkt 1 (Till-Wunsch + Zusatzbefund 2026-07-16): das Dropdown war entfernt
+// (Kommentare "entfernt" an den frueheren Markup-/Fetch-Stellen), die Client-
+// Funktionen hier blieben aber verwaist stehen -- _getEvalVerFromUrl() wurde
+// nirgends aufgerufen, ?eval_version=4.1 in der URL hatte dadurch NIE eine
+// Wirkung (Seite zeigte unter beiden URLs dieselbe eval_version). Fix: Seed
+// aus der URL beim Boot, Dropdown-Markup + Fetch-Param unten wieder verdrahtet.
+let _currentEvalVersion = _getEvalVerFromUrl();
 function _getEvalVerFromUrl() { return new URLSearchParams(window.location.search).get('eval_version'); }
 function _setEvalVerInUrl(ver) { const u = new URL(window.location.href); u.searchParams.set('eval_version', ver); window.history.replaceState(null,'',u.toString()); }
 function onEvalVerChange() {
@@ -1397,11 +1415,24 @@ function onEvalVerChange() {
   loadAndRender();
 }
 function _initEvalVerDropdown(available, selected) {
+  // available: [{version, n}] (Server, Punkt 1) -- n = Zeilenzahl je Version
+  // fuer die Dropdown-Anzeige "4.3 (n=27)".
   const sel = document.getElementById('eval-ver-select'); if (!sel) return;
-  const key = available.join(',');
-  if (sel.dataset.loaded === key && _currentEvalVersion === selected) return;
-  sel.dataset.loaded = key;
-  sel.innerHTML = available.map(v=>`<option value="${v}"${v===selected?' selected':''}>${v}</option>`).join('');
+  const key = available.map(o=>o.version).join(',');
+  // Klick-Pfad-Fund (Sichtpruefung 2026-07-16): der fruehere Early-Return
+  // ("nichts geaendert, wenn Optionsmenge+Auswahl schon passen") skippte nach
+  // einem manuellen Dropdown-Wechsel FAELSCHLICH auch pill/warn-Update --
+  // onEvalVerChange() setzt _currentEvalVersion naemlich schon VOR dem Fetch
+  // auf den neuen Wert, wodurch die Bedingung beim Post-Fetch-Aufruf hier
+  // bereits erfuellt war (sf-ev-pill blieb auf dem alten Wert stehen).
+  // Rebuild (teuer, zerstoert natives Select-Fokus/Open-Fenster) nur bei
+  // geaenderter Optionsmenge; Auswahl-Sync + pill/warn IMMER aktualisieren.
+  if (sel.dataset.loaded !== key) {
+    sel.dataset.loaded = key;
+    sel.innerHTML = available.map(o=>`<option value="${o.version}"${o.version===selected?' selected':''}>${o.version} (n=${o.n})</option>`).join('');
+  } else if (sel.value !== selected) {
+    sel.value = selected;
+  }
   _currentEvalVersion = selected;
   const warn = document.getElementById('eval-ver-warn');
   // Klassen-Default ist display:none — '' fiele darauf zurück, explizit setzen
@@ -2717,7 +2748,10 @@ function renderInsights(d) {
 function _renderWithData(d) {
   if(!d) return; window._lastData=d;
   const t = C();
-  // Eval-Version-Dropdown entfernt — Server nutzt default (neueste eval_version)
+  // Punkt 1: eval_version-Dropdown -- synct _currentEvalVersion mit dem vom
+  // Server AUFGELOESTEN Wert (z. B. wenn die URL keine/eine ungueltige
+  // Version trug und der Server auf die neueste gefallen ist).
+  if (d.available_eval_versions?.length) _initEvalVerDropdown(d.available_eval_versions, d.eval_version);
   // Dropdowns: immer mit ALLEN Optionen befüllen (vor globalem Filter)
   if (d.all_pvers?.length)   _initGlobalPverFilter(d.all_pvers);
   if (d.all_pdfs?.length)    _initGlobalPdfFilter(d.all_pdfs);
@@ -2816,8 +2850,11 @@ async function loadAndRender(manual = true) {
   // hat (Nachbesserung #204/#221 P-a).
   if (manual && window._lastData) document.querySelector('.main')?.classList.add('refreshing');
   try {
-    // Eval-Version-Filter entfernt: nie aus URL/State setzen → Server nutzt default (neueste)
     const p = new URLSearchParams();
+    // Punkt 1: eval_version durchreichen -- gilt auch fuer den 15s-Auto-
+    // Refresh (derselbe Code-Pfad, manual=false), damit ein aktiver Auswahl
+    // die Version beim Poll nicht zurueck auf den Server-Default kippt.
+    if (_currentEvalVersion) p.set('eval_version', _currentEvalVersion);
     if (_globalFilters.lang  && _globalFilters.lang  !== '__all__') p.set('language',         _globalFilters.lang);
     if (_globalFilters.model && _globalFilters.model !== '__all__') p.set('model',             _globalFilters.model);
     if (_globalFilters.pdf   && _globalFilters.pdf   !== '__all__') p.set('pdf',               _globalFilters.pdf);

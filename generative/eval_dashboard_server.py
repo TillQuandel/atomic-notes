@@ -408,6 +408,16 @@ def build_data(
         _jsonl_fallback = True
 
     available_versions = _available_eval_versions(all_quality_rows)
+    # Punkt 1 (Till-Wunsch): Zeilenzahl je eval_version fuer die Dropdown-
+    # Anzeige "4.3 (n=27)" -- ungefiltert (alle Quality-Rows dieser Version),
+    # damit die Zahl unabhaengig vom aktiven PDF-/Modell-/etc.-Filter stabil
+    # bleibt (dieselbe "Dropdown-Optionen VOR allen Filtern"-Konvention wie
+    # bei _all_pdfs_opts/_all_pvers_opts unten).
+    _eval_ver_counts: dict[str, int] = {}
+    for _r in all_quality_rows:
+        _v = _r.get("eval_version")
+        if _v:
+            _eval_ver_counts[_v] = _eval_ver_counts.get(_v, 0) + 1
 
     # Default: neueste Version
     if eval_version is None or eval_version not in available_versions:
@@ -912,7 +922,7 @@ def build_data(
     return {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "eval_version": eval_version,
-        "available_eval_versions": available_versions,
+        "available_eval_versions": [{"version": v, "n": _eval_ver_counts.get(v, 0)} for v in available_versions],
         "warnings": warnings,
         "kpis": D._calc_kpis(log_data, all_log_runs, quality_rows, token_runs),
         "pdf_table": (_pdf_table := D._calc_pdf_table(log_data, all_log_runs, quality_rows)),
