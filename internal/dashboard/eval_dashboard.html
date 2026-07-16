@@ -152,6 +152,19 @@ body.collapsed .nav-item .nav-label { display: none; }
 }
 .side-foot .eval-row { display: flex; align-items: center; gap: 6px; color: var(--ink-3); }
 .side-foot .ev-v { font-size: 10px; padding: 1px 5px; background: var(--tint-amber); color: var(--amber); border-radius: 2px; }
+/* Punkt 1 (Design-Iteration nach Till-Feedback): .ev-v bleibt die visuelle
+   Basis (Pill-Optik unveraendert) -- .ev-select macht daraus ein natives
+   <select>, so reduziert wie moeglich: kein Rahmen, Browser-Pfeil per
+   appearance:none entfernt, eigener kleiner Chevron (dieselbe SVG-Formel
+   wie .fselect, konsistente Chevron-Optik dashboardweit) statt Systemstil. */
+.side-foot .ev-select {
+  appearance: none; -webkit-appearance: none; -moz-appearance: none;
+  border: none; cursor: pointer; font-family: var(--f-mono);
+  padding-right: 14px;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='8' height='5'><path fill='none' stroke='%23566779' stroke-width='1.3' stroke-linecap='round' stroke-linejoin='round' d='M1 1l3 3 3-3'/></svg>");
+  background-repeat: no-repeat; background-position: right 4px center;
+}
+.side-foot .ev-select:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
 .theme-toggle {
   display: flex; align-items: center; gap: 8px; padding: 6px 8px;
   border: 1px solid var(--hair); border-radius: 3px;
@@ -224,7 +237,6 @@ body.collapsed .theme-toggle { padding: 6px; }
 /* ── Fokus (Tastatur) ─────────────────────────────────────────── */
 :focus-visible { outline: 2px solid var(--amber); outline-offset: 2px; border-radius: 3px; }
 .fselect:focus-visible { outline: 2px solid var(--amber); outline-offset: 1px; }
-.eval-ver-warn { margin-left: 12px; font-size: 11px; color: var(--amber); background: var(--tint-amber); border: 1px solid rgba(232,181,59,.25); border-radius: 2px; padding: 3px 10px; display: none; font-family: var(--f-mono); }
 
 /* ── Sections ──────────────────────────────────────────────────── */
 .section { padding: 28px 28px 8px; }
@@ -769,10 +781,15 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
 
   <div class="side-foot">
     <div id="sf-time">–</div>
-    <!-- Punkt 1: persistente Kopfzeilen-Anzeige der aktiven eval_version,
-         analog #pm-evalver in der Matrix-Sektion (konsistent per SSoT:
-         beide lesen d.eval_version aus derselben Antwort). -->
-    <div class="eval-row"><span>eval</span><span class="ev-v" id="sf-ev-pill">–</span></div>
+    <!-- Punkt 1 (Design-Iteration nach Till-Feedback): das bestehende
+         eval_version-Meta-Label wird selbst zum kompakten Inline-Select --
+         kein separates Filterbar-Element (haette das Einzeilen-Layout der
+         Filterbar gebrochen, s. Kommentar dort). Gleiche Typografie/Farbe
+         wie zuvor der reine Text (.ev-v), nur Rahmen weg + Chevron als
+         Klick-Affordanz. #pm-evalver (Matrix-Sektion) bleibt Read-only-Text
+         und folgt der Auswahl unveraendert (SSoT: beide lesen
+         d.eval_version aus derselben Antwort). -->
+    <div class="eval-row"><span>eval</span><select class="ev-v ev-select" id="sf-ev-select" onchange="onEvalVerChange()" title="Evaluierungs-Metrik-Version — wechselt die komplette Datenbasis (Fehlerquote/Belegrate/Matrix etc.)."></select></div>
     <div>auto-refresh 15 s</div>
     <button class="theme-toggle" onclick="cycleTheme()" title="Theme wechseln: System → Hell → Dunkel">
       <span class="tdot" id="theme-dot"></span>
@@ -819,15 +836,11 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
         <option value="__all__">Alle</option>
       </select>
     </div>
-    <!-- Punkt 1 (Till-Wunsch + Zusatzbefund 2026-07-16): Dropdown-Wiederaufbau
-         -- Optionen kommen aus available_eval_versions (Server), Default =
-         neueste. n je Option per _initEvalVerDropdown (siehe <script> unten). -->
-    <div class="filter-group">
-      <span class="filter-label">Eval-Version</span>
-      <select class="fselect" id="eval-ver-select" onchange="onEvalVerChange()" title="Evaluierungs-Metrik-Version — nicht die Pipeline-Version oben. Wechselt die komplette Datenbasis (Fehlerquote/Belegrate/Matrix etc.).">
-      </select>
-      <span class="eval-ver-warn" id="eval-ver-warn" title="Es gibt Eval-Daten unter mehreren eval_versions — nur die hier gewählte fließt in Kacheln/Charts ein.">weitere Versionen verfügbar</span>
-    </div>
+    <!-- Punkt 1: KEIN eigenes Filterbar-Element (Design-Iteration nach Till-
+         Feedback -- eine zusaetzliche Filter-Group brach das Einzeilen-
+         Layout der Filterbar bereits bei 1440px). Das Eval-Version-Select
+         sitzt stattdessen inline am bestehenden Meta-Label in der Sidebar
+         (#sf-ev-select, s. .side-foot unten). -->
 <span class="updated hint" tabindex="0" style="margin-left:auto">↻<span class="hint-pop" id="updated-at">lädt…</span></span>
   </div>
   <div class="filter-badges" id="filter-badges"></div>
@@ -1408,11 +1421,18 @@ function _initGlobalPdfFilter(pdfs) {
 // nirgends aufgerufen, ?eval_version=4.1 in der URL hatte dadurch NIE eine
 // Wirkung (Seite zeigte unter beiden URLs dieselbe eval_version). Fix: Seed
 // aus der URL beim Boot, Dropdown-Markup + Fetch-Param unten wieder verdrahtet.
+//
+// Design-Iteration nach Till-Feedback (2026-07-16, nach erster Sichtpruefung):
+// urspruenglich als eigenes Filterbar-Element gebaut -- brach deren Einzeilen-
+// Layout bereits bei 1440px (6. Filter-Group + Warn-Badge passten nicht mehr
+// in eine Zeile). Verworfen zugunsten eines Inline-Selects am bestehenden
+// #sf-ev-select-Meta-Label in der Sidebar (kein zusaetzliches Filterbar-
+// Element mehr) -- #pm-evalver (Matrix-Sektion) bleibt Read-only-Text.
 let _currentEvalVersion = _getEvalVerFromUrl();
 function _getEvalVerFromUrl() { return new URLSearchParams(window.location.search).get('eval_version'); }
 function _setEvalVerInUrl(ver) { const u = new URL(window.location.href); u.searchParams.set('eval_version', ver); window.history.replaceState(null,'',u.toString()); }
 function onEvalVerChange() {
-  const sel = document.getElementById('eval-ver-select'); if (!sel) return;
+  const sel = document.getElementById('sf-ev-select'); if (!sel) return;
   _currentEvalVersion = sel.value; _setEvalVerInUrl(_currentEvalVersion);
   _calibShowAll = false;
   loadAndRender();
@@ -1420,16 +1440,15 @@ function onEvalVerChange() {
 function _initEvalVerDropdown(available, selected) {
   // available: [{version, n}] (Server, Punkt 1) -- n = Zeilenzahl je Version
   // fuer die Dropdown-Anzeige "4.3 (n=27)".
-  const sel = document.getElementById('eval-ver-select'); if (!sel) return;
+  const sel = document.getElementById('sf-ev-select'); if (!sel) return;
   const key = available.map(o=>o.version).join(',');
   // Klick-Pfad-Fund (Sichtpruefung 2026-07-16): der fruehere Early-Return
   // ("nichts geaendert, wenn Optionsmenge+Auswahl schon passen") skippte nach
-  // einem manuellen Dropdown-Wechsel FAELSCHLICH auch pill/warn-Update --
+  // einem manuellen Dropdown-Wechsel FAELSCHLICH das Auswahl-Update --
   // onEvalVerChange() setzt _currentEvalVersion naemlich schon VOR dem Fetch
   // auf den neuen Wert, wodurch die Bedingung beim Post-Fetch-Aufruf hier
-  // bereits erfuellt war (sf-ev-pill blieb auf dem alten Wert stehen).
-  // Rebuild (teuer, zerstoert natives Select-Fokus/Open-Fenster) nur bei
-  // geaenderter Optionsmenge; Auswahl-Sync + pill/warn IMMER aktualisieren.
+  // bereits erfuellt war. Rebuild (teuer, zerstoert natives Select-Fokus/
+  // Open-Fenster) nur bei geaenderter Optionsmenge; Auswahl-Sync IMMER.
   if (sel.dataset.loaded !== key) {
     sel.dataset.loaded = key;
     sel.innerHTML = available.map(o=>`<option value="${o.version}"${o.version===selected?' selected':''}>${o.version} (n=${o.n})</option>`).join('');
@@ -1437,11 +1456,6 @@ function _initEvalVerDropdown(available, selected) {
     sel.value = selected;
   }
   _currentEvalVersion = selected;
-  const warn = document.getElementById('eval-ver-warn');
-  // Klassen-Default ist display:none — '' fiele darauf zurück, explizit setzen
-  if (warn) warn.style.display = available.length > 1 ? 'inline-block' : 'none';
-  const pill = document.getElementById('sf-ev-pill');
-  if (pill) pill.textContent = selected || '–';
 }
 
 /* ── KPI Sparkline ────────────────────────────────────────────── */

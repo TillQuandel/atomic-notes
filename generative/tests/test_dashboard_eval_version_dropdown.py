@@ -3,10 +3,18 @@
 Befund: Das Dashboard defaultete unveränderlich auf die neueste eval_version
 (4.3). Der URL-Param `?eval_version=4.1` wirkte im Browser NICHT — der
 Client-Fetch von `/data.json` reichte ihn nie durch (Kommentar im Bestand:
-"Eval-Version-Filter entfernt: nie aus URL/State setzen"). Fix: Dropdown in
-der Filterbar (Optionen aus `available_eval_versions`, inkl. Zeilenzahl je
-Version für die Anzeige "4.3 (n=27)"), das den `eval_version`-Param in JEDEN
-`/data.json`-Fetch übernimmt (inkl. 15s-Auto-Refresh).
+"Eval-Version-Filter entfernt: nie aus URL/State setzen"). Fix: Select, das
+den `eval_version`-Param in JEDEN `/data.json`-Fetch übernimmt (inkl.
+15s-Auto-Refresh), Optionen aus `available_eval_versions` inkl. Zeilenzahl
+je Version für die Anzeige "4.3 (n=27)".
+
+Design-Iteration (Till-Feedback nach erster Sichtprüfung 2026-07-16): initial
+als eigenes Filterbar-Element gebaut — brach deren Einzeilen-Layout bereits
+bei 1440px (6. Filter-Group + Warn-Badge passten nicht mehr in eine Zeile).
+Verworfen zugunsten eines Inline-Selects am bestehenden eval_version-Meta-
+Label in der Sidebar (#sf-ev-select) — kein zusätzliches Filterbar-Element
+mehr, #pm-evalver (Matrix-Sektion) bleibt Read-only-Text und folgt der
+Auswahl unverändert.
 
 `internal/dashboard/eval_dashboard.html` enthält ein bewusstes NUL-Byte —
 Zugriff ausschließlich über `_build_live_html()`/`Path.read_text(encoding=
@@ -92,15 +100,30 @@ def test_eval_version_query_param_selects_requested_version(monkeypatch):
 # ── Frontend-Anker (_build_live_html-Muster, kein bash grep/sed auf dem NUL-Byte) ──
 
 
-def test_html_filterbar_has_eval_version_select():
+def test_html_filterbar_has_no_eval_version_element():
+    """Design-Iteration: das Eval-Version-Select ist bewusst KEIN Filterbar-
+    Element (haette deren Einzeilen-Layout gebrochen, s. Modulkommentar).
+    Regressionswaechter gegen ein Wieder-Einfuegen dort."""
     from generative.eval_dashboard_server import _build_live_html
 
     html = _build_live_html()
-    filterbar = html[html.index('<div class="filterbar">') : html.index("</div>", html.index('id="global-model"'))]
     section = html[html.index('<div class="filterbar">') : html.index('id="filter-badges"')]
-    assert 'id="eval-ver-select"' in section
-    assert 'onchange="onEvalVerChange()"' in section
-    assert filterbar  # Filterbar-Ausschnitt nicht leer (Sanity)
+    # Substring-Check auf das ELEMENT (id="..."), nicht auf den blossen Namen
+    # -- der Abschnitt enthaelt einen erklaerenden Kommentar, der "sf-ev-
+    # select" als Verweis nennt (wohin das Feature gezogen wurde).
+    assert "onEvalVerChange" not in section
+    assert 'id="sf-ev-select"' not in section
+
+
+def test_html_sidebar_has_inline_eval_version_select():
+    """Fix: das bestehende eval_version-Meta-Label in der Sidebar (Punkt 1)
+    wird selbst zum Select -- kompakt, kein separates Filterbar-Element."""
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    side_foot = html[html.index('class="side-foot"') : html.index("</aside>")]
+    assert 'id="sf-ev-select"' in side_foot
+    assert 'onchange="onEvalVerChange()"' in side_foot
 
 
 def test_html_load_and_render_passes_current_eval_version_to_fetch():
@@ -137,25 +160,16 @@ def test_html_render_with_data_wires_eval_ver_dropdown_from_payload():
     assert "_initEvalVerDropdown(d.available_eval_versions, d.eval_version)" in block
 
 
-def test_html_side_foot_shows_persistent_eval_version_pill():
-    from generative.eval_dashboard_server import _build_live_html
-
-    html = _build_live_html()
-    side_foot = html[html.index('class="side-foot"') : html.index("</aside>")]
-    assert 'id="sf-ev-pill"' in side_foot
-
-
-# ── Sichtpruefungs-Fund 2026-07-16: sf-ev-pill blieb nach manuellem ────────
-# Dropdown-Wechsel auf dem alten Wert stehen (Klick-Pfad 4.3 -> 4.1 zeigte
-# "eval 4.3" statt "eval 4.1"). Ursache: onEvalVerChange() setzt
-# _currentEvalVersion schon VOR dem Fetch auf den neuen Wert -- der
+# ── Sichtpruefungs-Fund 2026-07-16: sf-ev-select-Wert blieb nach manuellem ─
+# Dropdown-Wechsel auf dem alten Wert stehen. Ursache: onEvalVerChange()
+# setzt _currentEvalVersion schon VOR dem Fetch auf den neuen Wert -- der
 # Post-Fetch-Early-Return in _initEvalVerDropdown ("nichts geaendert, wenn
 # Optionsmenge+_currentEvalVersion===selected schon passen") griff dadurch
 # faelschlich auch beim ERSTEN Render nach einem echten Wechsel. Test fuehrt
 # die echte JS-Funktion in Node aus (kein Nachbau der Logik), simuliert genau
 # diese Abfolge: Aufruf 1 (Erstladung 4.3) -> Aufruf 2 mit selected="4.1"
 # (Wechsel, _currentEvalVersion vorab auf "4.1" gesetzt wie onEvalVerChange
-# es tut) -- die Pill MUSS "4.1" zeigen, nicht "4.3" (stale).
+# es tut) -- sel.value MUSS "4.1" zeigen, nicht "4.3" (stale).
 
 
 def _extract_js_function(text: str, name: str) -> str:
@@ -175,7 +189,7 @@ def _extract_js_function(text: str, name: str) -> str:
     return text[start : i + 1]
 
 
-def test_eval_ver_pill_updates_after_manual_switch_with_unchanged_option_set():
+def test_eval_ver_select_value_updates_after_manual_switch_with_unchanged_option_set():
     import json
     import shutil
     import subprocess
@@ -191,13 +205,9 @@ def test_eval_ver_pill_updates_after_manual_switch_with_unchanged_option_set():
 
     available = [{"version": "4.1", "n": 515}, {"version": "4.3", "n": 27}]
     script = f"""
-    // Minimal-DOM-Stub: nur die von _initEvalVerDropdown angefassten Elemente.
-    function makeEl() {{ return {{ dataset: {{}}, innerHTML: '', value: '', style: {{}}, textContent: '' }}; }}
-    const els = {{
-      'eval-ver-select': makeEl(),
-      'eval-ver-warn': makeEl(),
-      'sf-ev-pill': makeEl(),
-    }};
+    // Minimal-DOM-Stub: nur das von _initEvalVerDropdown angefasste Element.
+    function makeEl() {{ return {{ dataset: {{}}, innerHTML: '', value: '' }}; }}
+    const els = {{ 'sf-ev-select': makeEl() }};
     global.document = {{ getElementById: (id) => els[id] || null }};
     let _currentEvalVersion = null;
     {fn}
@@ -205,14 +215,13 @@ def test_eval_ver_pill_updates_after_manual_switch_with_unchanged_option_set():
     // Aufruf 1: Erstladung, Server liefert Default 4.3.
     _initEvalVerDropdown({json.dumps(available)}, '4.3');
     // Aufruf 2: onEvalVerChange() haette VORHER _currentEvalVersion='4.1' gesetzt
-    // (Dropdown-Wert vom Nutzer geaendert) -- Optionsmenge bleibt UNVERAENDERT.
+    // (Select-Wert vom Nutzer geaendert) -- Optionsmenge bleibt UNVERAENDERT.
     _currentEvalVersion = '4.1';
     _initEvalVerDropdown({json.dumps(available)}, '4.1');
 
-    process.stdout.write(JSON.stringify({{ pill: els['sf-ev-pill'].textContent, selectValue: els['eval-ver-select'].value }}));
+    process.stdout.write(JSON.stringify({{ selectValue: els['sf-ev-select'].value }}));
     """
     result = subprocess.run([node, "-e", script], capture_output=True, text=True, timeout=30)
     assert result.returncode == 0, f"node stderr: {result.stderr}"
     out = json.loads(result.stdout)
-    assert out["pill"] == "4.1", f"Pill blieb stale: {out}"
-    assert out["selectValue"] == "4.1"
+    assert out["selectValue"] == "4.1", f"Select-Wert blieb stale: {out}"
