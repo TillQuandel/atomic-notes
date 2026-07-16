@@ -1158,7 +1158,13 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
         </div>
       </div>
       <p class="insight" id="pm-compare-summary"></p>
-      <div class="table-wrap">
+      <!-- Nachbesserung Punkt 2 (UX-Review 16.07): pm-scroll haelt den
+           Scroll-Container in ALLEN Viewport-Breiten aktiv (analog zur
+           Matrix oben) -- ohne pm-scroll war die letzte Spalte "Paarung"
+           bei 1100px hart abgeschnitten und die >=1201px-Freigabe auf
+           overflow-x:visible liess bei 1280px nur 2px Restluft (fragil,
+           gleiche Bugklasse wie #305/Punkt 0). -->
+      <div class="table-wrap pm-scroll">
         <table class="cmp" id="pm-compare-table">
           <thead><tr>
             <th>Quell-PDF</th>
@@ -2209,12 +2215,21 @@ function renderPairCompare(d) {
   // Seiten ist im Bestand oft PDF-Key-Drift — dieselbe Quelle unter zwei
   // Gruppen-Keys (z. B. bates-2017 vs. bates-information-behavior, #194/#202).
   // Darauf hinweisen statt nur "kein Delta" zu sagen.
+  // Nachbesserung Punkt 2 (UX-Review 16.07, Beleg
+  // c-drift-v0.3.140-vs-v0.3.60-1100-light.png): der Drift-Hinweis lebte
+  // bisher ALS TEIL der zentrierten <td colspan>-Zeile INNERHALB der Tabelle
+  // -- deren Spaltenbreiten (9 Header-th, unabhaengig vom leeren tbody)
+  // machen die Tabelle regelmaessig breiter als der sichtbare Wrapper (bei
+  // 1100px), der zentrierte Text wurde dadurch mitten im Wort abgeschnitten.
+  // Fix: der laengere Drift-Hinweis wandert in `summary` -- AUSSERHALB des
+  // Scroll-Containers, volle (nicht ueberbreite) Section-Breite; die
+  // In-Table-Meldung bleibt kurz genug, um nie clippen zu muessen.
   const maybeDrift = !cmp.common_pdfs.length && (cmp.only_a.length || cmp.only_b.length)
-    ? '<br><span style="color:var(--ink-4)">Hinweis: möglicherweise PDF-Key-Drift — dieselbe Quelle kann unter verschiedenen Keys geführt sein (#194/#202); siehe die Listen unten.</span>'
+    ? ' <span class="caveat">Hinweis: möglicherweise PDF-Key-Drift — dieselbe Quelle kann unter verschiedenen Keys geführt sein (#194/#202); siehe die Listen unten.</span>'
     : '';
   body.innerHTML = rows.length ? rows.join('') : (
     '<tr><td colspan="9" style="padding:1.5rem;text-align:center;color:var(--ink-4);font-family:var(--f-mono);font-size:12px">' +
-    'Keine gemeinsamen PDF-Quellen zwischen diesen Versionen — Corpus vollständig ausgetauscht, kein Delta berechenbar.' + maybeDrift + '</td></tr>'
+    'Keine gemeinsamen PDF-Quellen — Corpus vollständig ausgetauscht.</td></tr>'
   );
 
   const ov = cmp.overall;
@@ -2227,7 +2242,7 @@ function renderPairCompare(d) {
   summary.innerHTML = `<strong>${ov.n_common_pdfs} von ${ov.n_pdfs_a}/${ov.n_pdfs_b}</strong> PDFs gemeinsam (${_escHTML(lo)} vs. ${_escHTML(hi)})${overlapTxt}. ` +
     (ov.hall_delta != null
       ? `Gesamt-Delta Fehlerquote über die Schnittmenge (gepoolt, ankergewichtet): ${deltaTd(ov.hall_delta, true)} — ${_fmtDE(ov.hall_a)} % → ${_fmtDE(ov.hall_b)} % (n=${ov.n_notes_a}/${ov.n_notes_b} Notes, Zeilen-Basis).`
-      : '<span class="caveat">Keine gemeinsame PDF-Quelle — kein Gesamt-Delta berechenbar.</span>');
+      : '<span class="caveat">Keine gemeinsame PDF-Quelle — kein Gesamt-Delta berechenbar.</span>' + maybeDrift);
 
   const onlyParts = [];
   if (cmp.only_a.length) onlyParts.push(`nur in ${_escHTML(lo)}: ${cmp.only_a.map(k => _escHTML(pdfLabel(k))).join(', ')}`);

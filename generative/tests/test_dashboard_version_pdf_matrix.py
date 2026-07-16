@@ -833,3 +833,41 @@ def test_html_pair_matrix_thead_first_child_stays_sticky_left():
 
     z = re.search(r"z-index:\s*(\d+)", rule_block)
     assert z is not None and int(z.group(1)) > 2
+
+
+# ── Nachbesserung Punkt 2 (UX-Review 16.07): Paarvergleichstabelle ohne
+# pm-scroll -- bei 1100px war die letzte Spalte "Paarung" hart abgeschnitten
+# und zentrierte Hinweiszeilen (PDF-Key-Drift) wurden mitten im Wort geclippt
+# (Beleg: C:/tmp/ux-review-312/responsive/c-drift-v0.3.140-vs-v0.3.60-1100-
+# light.png); bei 1280px nur 2px Restluft (fragil, gleiche Bugklasse wie
+# #305/Punkt 0 oberhalb 1201px).
+
+
+def test_html_pair_compare_table_wrapper_has_pm_scroll():
+    """Fix: derselbe pm-scroll-Mechanismus wie an der Matrix -- haelt den
+    Scroll-Container in ALLEN Viewport-Breiten aktiv statt sich auf die
+    fragile 2px-Restluft bei 1280px zu verlassen."""
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    section = html[html.index('id="s-pairmatrix"') : html.index('id="pm-compare-table"')]
+    assert 'class="table-wrap pm-scroll"' in section
+
+
+def test_html_pair_compare_drift_hint_moved_to_summary_not_table_row():
+    """Der laengere Drift-Hinweis darf nicht mehr Teil der zentrierten
+    <td colspan>-Zeile IN der (potenziell ueberbreiten) Tabelle sein -- er
+    lebt jetzt in `summary`, ausserhalb des Scroll-Containers, wo die
+    Section-Breite (nicht die Tabellenbreite) die Umbruchgrenze setzt."""
+    block = _pairmatrix_js_block()
+
+    body_start = block.index("body.innerHTML = rows.length")
+    body_end = block.index("</td></tr>'", body_start) + len("</td></tr>'")
+    body_stmt = block[body_start:body_end]
+    assert "maybeDrift" not in body_stmt
+    assert "Corpus vollständig ausgetauscht." in body_stmt
+
+    summary_start = block.rindex("summary.innerHTML = ")
+    summary_end = block.index(");", summary_start)
+    summary_stmt = block[summary_start:summary_end]
+    assert "maybeDrift" in summary_stmt
