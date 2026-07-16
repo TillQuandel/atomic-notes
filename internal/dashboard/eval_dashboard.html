@@ -713,6 +713,23 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
   .kpis-perf { grid-template-columns: repeat(4, 1fr); }
   .kpis-perf .kpi:nth-child(4n) { border-right: 0; }
   .kpis-perf .kpi:nth-child(-n+4) { border-bottom: 1px solid var(--hair); }
+  /* U8 (Multi-Perspektiven-Review 2026-07-15): 5 Kacheln in 4 Spalten liessen
+     die 5. (letzte) allein in Zeile 2 mit 3 leeren Spalten daneben -- eine
+     sichtbare Luecke statt eines sauberen Umbruchs. Letzte Kachel spannt die
+     volle Breite, wenn sie ohnehin allein in ihrer Zeile steht (Div-Rest
+     5%4=1 -- bei einer anderen Kachelzahl in Zukunft neu pruefen, analog zu
+     den bestehenden nth-child-Regeln oben, die ebenfalls 5 Kacheln annehmen). */
+  .kpis-perf .kpi:last-child { grid-column: 1 / -1; border-right: 0; }
+  /* U9 (Multi-Perspektiven-Review 2026-07-15): das Modell-Filter brach als
+     letzte Filter-Group allein in eine neue Zeile -- kompaktere Gruppierung
+     durch engeres Padding UND schmalere Select-Maximalbreite (200px liess
+     bei 1100px 3 der 5 Groups an die Kappung stossen, ~370px Ueberschuss
+     ueber die verfuegbaren ~880px). (Punkt 1 haengt hier bewusst KEIN
+     eigenes Filter-Element mehr an, s. Design-Iteration im Eval-Version-
+     Kommentar -- das Eval-Version-Select sitzt inline in der Sidebar, nicht
+     in der Filterbar.) */
+  .filter-group { padding: 0 10px; }
+  .fselect { max-width: 150px; }
 }
 @media (max-width: 900px) {
   .strip { grid-template-columns: repeat(4,1fr); }
@@ -721,6 +738,9 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
   .kpis-quality .kpi:nth-child(-n+2) { border-bottom: 1px solid var(--hair); }
   .kpis-perf .kpi:nth-child(2n) { border-right: 0; }
   .kpis-perf .kpi:nth-child(-n+4) { border-bottom: 1px solid var(--hair); }
+  /* Dieselbe U8-Luecke bei 2 Spalten (5%2=1 -- letzte Kachel allein in
+     Zeile 3, eine Spalte leer daneben): gleicher Fix. */
+  .kpis-perf .kpi:last-child { grid-column: 1 / -1; border-right: 0; }
   .filterbar { min-height: auto; padding: 12px 16px; flex-wrap: wrap; gap: 8px; }
   .filter-group { height: auto; padding: 4px 12px; }
 }
