@@ -563,9 +563,35 @@ def build_data(
     # ── Dropdown-Optionen VOR allen Filtern snapshotten ──────────────
     # Smoke-/Test-Modelle aus dem Filter halten (z. B. "m", "test", "smoke-model").
     _MODEL_DENYLIST = {"m", "test", "smoke-model"}
-    _all_models_opts = sorted(
-        {m for tr in token_runs if (m := tr.get("model", "")) and m not in _MODEL_DENYLIST and "smoke" not in m.lower()}
+    # Punkt 2 (Reviews 15.07.): n-valid-Badge je Modell -- Zahl VALIDER
+    # Eval-Zeilen (hallucination_rate >= 0) je Modell (Gemini-Fehllesungs-
+    # Schutz: dort tragen alle Zeilen den bestehenden -1.0-Sentinel fuer
+    # "ungueltig", vgl. _chart_scatter/_matrix_cell_stats -- n_valid muss 0
+    # zeigen, nicht die volle aber wertlose Zeilenzahl). note_evals traegt
+    # kein eigenes "model"-Feld (das lebt in pipeline_runs) -- Join ueber
+    # run_id -> token_runs.model, derselbe Mechanismus wie der bestehende
+    # Modell-Einzelwert-Filter unten. Basis _matrix_base_rows (eval_version-
+    # skopiert, VOR pipeline_version/language/pdf/run-Filtern) statt
+    # quality_rows -- dieselbe "vor allen Filtern"-Konvention wie die
+    # Options-Liste selbst, sonst wuerde z. B. ein aktiver PDF-Filter die
+    # angezeigten Zaehler unerwartet mitverschieben.
+    _run_model_map: dict[str, str] = {tr["run_id"]: tr.get("model", "") for tr in token_runs if tr.get("run_id")}
+    _model_valid_n: dict[str, int] = {}
+    for _r in _matrix_base_rows:
+        _m = _run_model_map.get(_r.get("run_id"), "")
+        if not _m:
+            continue
+        _hall = _r.get("hallucination_rate")
+        if _hall is not None and float(_hall) >= 0:
+            _model_valid_n[_m] = _model_valid_n.get(_m, 0) + 1
+    _model_names = sorted(
+        {
+            mdl
+            for tr in token_runs
+            if (mdl := tr.get("model", "")) and mdl not in _MODEL_DENYLIST and "smoke" not in mdl.lower()
+        }
     )
+    _all_models_opts = [{"model": m, "n_valid": _model_valid_n.get(m, 0)} for m in _model_names]
 
     # ── token_runs + quality_rows + all_log_runs gemeinsam filtern ──────
     # Alle Filter auf token_runs anwenden → run_ids extrahieren → quality_rows + log_runs ebenfalls filtern
