@@ -1527,7 +1527,9 @@ function onEvalVerChange() {
   loadAndRender();
 }
 function _initEvalVerDropdown(available, selected) {
-  // available: [{version, n}] (Server, Punkt 1) -- n = Zeilenzahl je Version
+  // available: [{version, n}] (Server, Punkt 1) -- n = Notes-Zahl je Version
+  // (nicht Zeilenzahl: Re-Eval-Wiederholungssweeps schreiben mehrere Zeilen
+  // je Note, Till-Go 2026-07-16 -- s. Server-Kommentar bei _eval_ver_counts)
   // fuer die Dropdown-Anzeige "4.3 (n=27)".
   const sel = document.getElementById('sf-ev-select'); if (!sel) return;
   const key = available.map(o=>o.version).join(',');
@@ -2194,7 +2196,7 @@ function renderPairMatrix(d) {
   const reevalNote = document.getElementById('pm-reeval-note');
   if (reevalNote) {
     reevalNote.textContent = d.is_reeval_series
-      ? 'Re-Eval-Serie: Werte messen den Eval-Stand, nicht die Erzeugungsversion der Notes.'
+      ? 'Re-Eval-Serie: Werte messen den Eval-Stand, nicht die Erzeugungsversion der Notes. Werte = Pool über N Wiederholungsmessungen je Note.'
       : '';
     reevalNote.hidden = !d.is_reeval_series;
   }
@@ -2219,7 +2221,14 @@ function renderPairMatrix(d) {
       const hallCls = c.median_hall != null ? (c.median_hall <= T.hall[0] ? 'good-t' : c.median_hall >= T.hall[1] ? 'bad-t' : 'warn-t') : '';
       const hasSpread = c.min_hall != null && c.max_hall != null && c.min_hall !== c.max_hall;
       const spreadTxt = hasSpread ? ` · Spanne ${_fmtDE(c.min_hall)}–${_fmtDE(c.max_hall)} % (Min–Max über die ${c.n} Notes)` : '';
-      const title = `n=${c.n} Note(n)${spreadTxt}${lowN ? ' · unter n=3 — Wert mit Vorsicht lesen, kann von einer Einzelzeile dominiert sein' : ''}`;
+      // Repeat-Sweep-Pooling (Till-Go 2026-07-16): Zellen mit gepoolten Notes
+      // (Re-Eval-Wiederholungsgruppe, s. D._pool_repeat_rows) zeigen zusaetzlich
+      // die Zahl der Wiederholungsmessungen + deren Spannweite in pp.
+      const hasPooled = (c.n_pooled || 0) > 0;
+      const poolTxt = hasPooled
+        ? ` · ${c.n_pooled} Note(n) gepoolt über ${c.pooled_n_measurements} Wiederholungsmessungen (Spannweite ${_fmtDE(c.pooled_hall_min)}–${_fmtDE(c.pooled_hall_max)} pp)`
+        : '';
+      const title = `n=${c.n} Note(n)${spreadTxt}${poolTxt}${lowN ? ' · unter n=3 — Wert mit Vorsicht lesen, kann von einer Einzelzeile dominiert sein' : ''}`;
       return `<td class="pm-cell${lowN ? ' pm-low-n' : ''}" title="${_escHTML(title)}">` +
         `<span class="${hallCls}">${c.median_hall != null ? _fmtDE(c.median_hall) + '%' : '–'}</span>` +
         `<span class="pm-cov">${c.median_cov != null ? _fmtDE(c.median_cov) + '%' : '–'}</span>` +
@@ -2650,6 +2659,7 @@ function _renderNoteDrawer(p, stale) {
     ${stale ? `<div class="nd-stale">Note ist nicht mehr im aktuellen Filter/Datensatz — Werte vom letzten Stand.</div>` : ''}
     <div class="nd-kv">Fehlerquote <strong>${_fmtDE(p.x)} %</strong> · Belegrate <strong>${_fmtDE(p.y)} %</strong></div>
     <div class="nd-kv">PDF <strong>${_escHTML(p.pdf_label||p.pdf||'–')}</strong> · Pipeline <strong>${_escHTML(p.version||'–')}</strong> · Eval <strong>${_escHTML(p.eval_version||'–')}</strong></div>
+    ${p.repeat_pooled ? `<div class="nd-kv">Gepoolt über <strong>${p.n_measurements}</strong> Wiederholungsmessungen · Spannweite <strong>${_fmtDE(p.hall_min)}–${_fmtDE(p.hall_max)} %</strong></div>` : ''}
     ${p.run_id ? `<div class="nd-kv">Run <strong>${_escHTML(p.run_id)}</strong></div>` : ''}
     <div class="nd-kv"><a href="${obsUrl}">In Obsidian öffnen</a> · <span title="Dateiname zum Suchen/Kopieren">${_escHTML(fileName)}</span></div>`;
   d.hidden = false;
@@ -2744,7 +2754,7 @@ function renderScatter(scat, T, merged) {
         // Rest als Fußzeile — vorher stapelten 5–7 Einträge und verdeckten bis zur
         // Hälfte des Charts inkl. IDEAL-Zone (#204 Punkt 6)
         filter:(item,i,arr)=>{ _ch2TipTotal = arr.length; return i < 3; },
-        callbacks:{label:ctx=>{const p=ctx.raw;return [p.label||'',`${p.pdf_label||''} · v: ${p.version}`,`Fehler: ${_fmtDE(p.x)} % · Belegrate: ${_fmtDE(p.y)} %`];},
+        callbacks:{label:ctx=>{const p=ctx.raw;const lines=[p.label||'',`${p.pdf_label||''} · v: ${p.version}`,`Fehler: ${_fmtDE(p.x)} % · Belegrate: ${_fmtDE(p.y)} %`];if(p.repeat_pooled)lines.push(`${p.n_measurements} Messungen · Spannweite ${_fmtDE(p.hall_min)}–${_fmtDE(p.hall_max)} pp`);return lines;},
           footer:()=>_ch2TipTotal>3?`… +${_ch2TipTotal-3} weitere — Klick auf Punkt für Details`:''}},
         // Threshold-Linie Fehlerquote 15 % (Schwelle „schlecht") — semantische
         // Farbe nur an Threshold-Stelle (chartjs-plugin-annotation)

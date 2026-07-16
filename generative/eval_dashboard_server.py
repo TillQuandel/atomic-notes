@@ -408,17 +408,42 @@ def build_data(
         all_quality_rows = D._read_quality_history()
         _jsonl_fallback = True
 
+    # Re-Eval-Wiederholungssweeps (reeval_baseline.py --repeat) markieren ihren
+    # Lauf in pipeline_runs mit pipeline_version in {"reeval","reeval-repeat"}
+    # (D._REEVAL_PIPELINE_VERSIONS) statt in note_evals selbst -- Fetch hier,
+    # EINMALIG ganz oben: sowohl is_reeval_series (weiter unten) als auch JEDE
+    # Pooling-faehige Aggregation (kpi_trend, D._calc_kpis, D._calc_pdf_table,
+    # _chart_scatter_versioned, D.build_version_pdf_matrix -- alle ueber
+    # D._dedup_latest_per_note(rows, pipeline_runs=...)) brauchen denselben
+    # run_id -> pipeline_version-Join (Till-Go 2026-07-16). Vorher wurde das
+    # nur fuer is_reeval_series spaeter im Funktionskoerper geholt.
+    try:
+        from generative import db as _db_reeval
+
+        _all_pipeline_runs = _db_reeval.query_pipeline_runs()
+    except Exception:
+        _all_pipeline_runs = []
+
     available_versions = _available_eval_versions(all_quality_rows)
-    # Punkt 1 (Till-Wunsch): Zeilenzahl je eval_version fuer die Dropdown-
+    # Punkt 1 (Till-Wunsch): Notes-Zahl je eval_version fuer die Dropdown-
     # Anzeige "4.3 (n=27)" -- ungefiltert (alle Quality-Rows dieser Version),
     # damit die Zahl unabhaengig vom aktiven PDF-/Modell-/etc.-Filter stabil
     # bleibt (dieselbe "Dropdown-Optionen VOR allen Filtern"-Konvention wie
     # bei _all_pdfs_opts/_all_pvers_opts unten).
-    _eval_ver_counts: dict[str, int] = {}
+    # Notes-Zaehlung statt Zeilen-Zaehlung (Till-Go 2026-07-16, Badge-Entscheid):
+    # Re-Eval-Wiederholungssweeps schreiben MEHRERE Zeilen je Note (81 Zeilen /
+    # 27 Notes bei eval_version 4.3) -- eine Zeilenzaehlung liesse das Badge
+    # "4.3 (n=81)" zeigen, inkonsistent zu JEDER anderen n-Anzeige im Dashboard
+    # (KPI-Kachel n_notes, Matrix-Zellen-n, per-PDF-Tabelle -- SSoT-Konvention
+    # "n = distinct Notes, nie Eval-Instanzen", s. `D._distinct_notes`-Docstring).
+    # Einzige konsistente Wahl: dieselbe SSoT-Funktion, keine zweite
+    # "Notes vs. Messungen"-Doppelanzeige nur an dieser einen Stelle.
+    _eval_ver_rows: dict[str, list[dict]] = {}
     for _r in all_quality_rows:
         _v = _r.get("eval_version")
         if _v:
-            _eval_ver_counts[_v] = _eval_ver_counts.get(_v, 0) + 1
+            _eval_ver_rows.setdefault(_v, []).append(_r)
+    _eval_ver_counts: dict[str, int] = {_v: D._distinct_notes(_rs) for _v, _rs in _eval_ver_rows.items()}
 
     # Default: neueste Version
     if eval_version is None or eval_version not in available_versions:
@@ -789,7 +814,10 @@ def build_data(
         # (_calc_kpis), per-PDF-Tabelle und diese Sparkline dieselbe Basis
         # teilen (Produktionsbeleg: 52 Zeilen / 40 distinct Notes bei
         # v0.3.140, gepoolte Rate sonst um ~2pp nach unten verzerrt).
-        d2["rows"] = D._dedup_latest_per_note(d2["rows"])
+        # Repeat-Sweep-Pooling (Till-Go 2026-07-16): `_all_pipeline_runs`
+        # aktiviert zusaetzlich das Poolen echter Wiederholungsmessungen
+        # (s. `D._dedup_latest_per_note`-Docstring) statt sie zu verwerfen.
+        d2["rows"] = D._dedup_latest_per_note(d2["rows"], _all_pipeline_runs)
         for r in d2["rows"]:
             hall_val = r.get("hallucination_rate")
             if hall_val is not None and float(hall_val) >= 0:
@@ -952,7 +980,7 @@ def build_data(
         {v for r in _matrix_base_rows if (v := (r.get("version") or r.get("pipeline_version"))) in _archived_vers},
         key=D._ver_sort_key,
     )
-    pair_matrix = D.build_version_pdf_matrix(_matrix_rows)
+    pair_matrix = D.build_version_pdf_matrix(_matrix_rows, pipeline_runs=_all_pipeline_runs)
     pair_matrix["excluded_archived_versions"] = _excluded_archived
     pair_matrix["eval_version"] = eval_version
 
@@ -963,13 +991,9 @@ def build_data(
     # (Produktionsmuster: eval_version 4.3 haengt komplett an v0.3.144, das
     # war aber der Code-Stand beim Re-Eval-Lauf). Basis: `_matrix_base_rows`
     # (aktive eval_version, VOR Einzelwert-Filtern -- dieselbe "ungefiltert"-
-    # Konvention wie die Matrix selbst).
-    try:
-        from generative import db as _db_reeval
-
-        _all_pipeline_runs = _db_reeval.query_pipeline_runs()
-    except Exception:
-        _all_pipeline_runs = []
+    # Konvention wie die Matrix selbst). `_all_pipeline_runs` bereits ganz
+    # oben in build_data() geholt (Wiederverwendung fuer die Pooling-
+    # Aggregationen, s. Kommentar dort).
     is_reeval_series = D._is_reeval_series(_matrix_base_rows, _all_pipeline_runs)
 
     return {
@@ -978,10 +1002,12 @@ def build_data(
         "is_reeval_series": is_reeval_series,
         "available_eval_versions": [{"version": v, "n": _eval_ver_counts.get(v, 0)} for v in available_versions],
         "warnings": warnings,
-        "kpis": D._calc_kpis(log_data, all_log_runs, quality_rows, token_runs),
-        "pdf_table": (_pdf_table := D._calc_pdf_table(log_data, all_log_runs, quality_rows)),
+        "kpis": D._calc_kpis(log_data, all_log_runs, quality_rows, token_runs, pipeline_runs=_all_pipeline_runs),
+        "pdf_table": (
+            _pdf_table := D._calc_pdf_table(log_data, all_log_runs, quality_rows, pipeline_runs=_all_pipeline_runs)
+        ),
         "accept": D._chart_acceptance(_pdf_table),
-        "scatter": _chart_scatter_versioned(quality_rows),
+        "scatter": _chart_scatter_versioned(quality_rows, _all_pipeline_runs),
         "long": D._chart_longitudinal(log_data),
         "tokens": D._chart_tokens_by_version(token_runs),
         "scaling": D._chart_scaling(all_log_runs),
@@ -1031,7 +1057,7 @@ def _vault_name() -> str:
         return ""
 
 
-def _chart_scatter_versioned(quality_rows: list[dict]) -> dict:
+def _chart_scatter_versioned(quality_rows: list[dict], pipeline_runs: list[dict] | None = None) -> dict:
     """Scatter-Daten mit Version-Info fuer den Version-Filter.
 
     Re-Eval-Dedup (Nachbesserung adversariale Kontrolle #293): pro
@@ -1042,11 +1068,17 @@ def _chart_scatter_versioned(quality_rows: list[dict]) -> dict:
     doppelt (z. B. "Asynchronous E-Learning" bei x=0,0 UND x=29,4) — die
     "Instanzen vs. distinct"-Bugklasse (#194). Gruppierung JE Version, nicht
     global: dieselbe Note in zwei Versionen bleibt zwei Punkte (der
-    Versions-Filter des Scatters vergleicht Versionen)."""
+    Versions-Filter des Scatters vergleicht Versionen).
+
+    `pipeline_runs` (optional, Till-Go 2026-07-16): an `_dedup_latest_per_note`
+    durchgereicht — Notes mit einer echten Re-Eval-Wiederholungsgruppe werden
+    zu einem Punkt gepoolt (`repeat_pooled`/`n_measurements`/`hall_min`/
+    `hall_max` landen dafuer im Punkt, s. unten) statt auf die neueste
+    Einzelmessung gekappt."""
     by_ver: dict[str, list[dict]] = {}
     for r in quality_rows:
         by_ver.setdefault(r.get("version") or r.get("pipeline_version") or "unbekannt", []).append(r)
-    deduped_rows = [r for rows in by_ver.values() for r in D._dedup_latest_per_note(rows)]
+    deduped_rows = [r for rows in by_ver.values() for r in D._dedup_latest_per_note(rows, pipeline_runs)]
 
     points: list[dict] = []
     pdf_map: dict[str, str] = {}
@@ -1079,6 +1111,13 @@ def _chart_scatter_versioned(quality_rows: list[dict]) -> dict:
                 # Drill-Down-Drawer: Identifikation + Refresh-Persistenz-Key
                 "run_id": r.get("run_id", ""),
                 "eval_version": r.get("eval_version", ""),
+                # Repeat-Sweep-Transparenz (Till-Go 2026-07-16): note-level
+                # Pool-Metadaten fuer Tooltip/Drawer, wenn diese Note aus einer
+                # echten Re-Eval-Wiederholungsgruppe gepoolt wurde.
+                "repeat_pooled": bool(r.get("repeat_pooled", False)),
+                "n_measurements": r.get("n_measurements"),
+                "hall_min": r.get("hall_min"),
+                "hall_max": r.get("hall_max"),
             }
         )
 
