@@ -1672,7 +1672,12 @@ function renderKpis(kpis, thresh, kpiTrend) {
     const vals = kpiTrend?.[kd.key] || [];
     const vers = kpiTrend?.versions || [];
     const sparkColor = toneColor(kd.tone);
-    const sparkSvg = _trendChart(vals, vers, sparkColor, kd.u);
+    // Punkt 3 (S2-C3): Akzeptanzquote als zweite Serie NEBEN der Fehlerquote
+    // -- macht Selektions-Bias sichtbar (note_evals enthaelt nur akzeptierte
+    // Notes). Nur fuer die Fehlerquote-Kachel, bestehendes Chart erweitert
+    // statt eines neuen (Spec-Vorgabe).
+    const accVals = kd.key === 'hall' ? (kpiTrend?.accept || []) : null;
+    const sparkSvg = _trendChart(vals, vers, sparkColor, kd.u, accVals, 'Akzeptanzquote');
     // #36 P4: Delta neueste-vs-Vorversion (server-berechnet) mit N-Guard statt
     // neueste-vs-erste. Ohne reliable (n<20 in einer der beiden Versionen) kein
     // Besser/Schlechter-Farbcode — nur neutrale Anzeige (Rausch-Schutz).
@@ -1741,14 +1746,25 @@ function _autoUnit(values, unit) {
   return               { u: unit||'', fmt: (v, d) => `${_fmtDE(v, d ?? 1)}${unit||''}` };
 }
 
-function _trendChart(points, versions, color, unit) {
+function _trendChart(points, versions, color, unit, points2, label2) {
   const w = 900, h = 90, padL = 8, padR = 8, padT = 16, padB = 20;
   const iw = w - padL - padR, ih = h - padT - padB;
   if (!points || points.length < 2) return `<svg width="100%" viewBox="0 0 ${w} ${h}"></svg>`;
   const valid = points.filter(v => v != null);
   if (!valid.length) return `<svg width="100%" viewBox="0 0 ${w} ${h}"></svg>`;
   const au = _autoUnit(valid, unit);  // dynamische Einheit + Formatter
-  const vmax = Math.max(...valid), vmin = Math.min(...valid);
+  // Punkt 3 (S2-C3, Multi-Perspektiven-Review 2026-07-15): optionale zweite
+  // Serie (Akzeptanzquote neben Fehlerquote) -- macht den Selektions-Bias
+  // sichtbar (note_evals enthaelt nur akzeptierte Notes: sinkt die Akzeptanz-
+  // quote gleichzeitig mit einer Fehlerquoten-Aenderung, ist Letztere teils
+  // Stichproben-Verschiebung statt reiner Qualitaetseffekt). Nur gezeichnet
+  // wenn uebergeben (Default-Fall/alle anderen Kacheln unveraendert) UND
+  // dieselbe Einheit (%) hat -- eine gemeinsame Y-Achse ergibt sonst keinen
+  // Sinn. Eigene, kleinere Skala waere ein zweites Chart gewesen (Spec:
+  // "Bestehendes Chart erweitern, kein neues bauen").
+  const has2 = Array.isArray(points2) && points2.length === points.length && unit === '%';
+  const valid2 = has2 ? points2.filter(v => v != null) : [];
+  const vmax = Math.max(...valid, ...valid2), vmin = Math.min(...valid, ...valid2);
   const pad = (vmax - vmin) * 0.2 || (vmax * 0.1) || 1;
   // %-Metriken bei 100 deckeln — eine Rate kann nicht ueber 100 % (User-Feedback)
   const max = (unit === '%') ? Math.min(100, vmax + pad) : vmax + pad;
@@ -1759,6 +1775,7 @@ function _trendChart(points, versions, color, unit) {
   const ys = points.map(v => v != null ? padT + ih - ((v-min)/span)*ih : null);
   const hair = cssv('--hair'); const ink4 = cssv('--ink-3'); const card = cssv('--bg-card');
   const bg = cssv('--bg-elev');
+  const color2 = cssv('--ink-3');
 
   let d = '', first = true;
   points.forEach((v, i) => {
@@ -1815,6 +1832,29 @@ function _trendChart(points, versions, color, unit) {
       + `<text x="${xs[n-1].toFixed(1)}" y="${h-3}" fill="${ink4}" font-size="9.5" text-anchor="end" font-family="JetBrains Mono">${versions[n-1] ?? ''}</text>`
     : '';
 
+  // Punkt 3: zweite Serie (gestrichelt, gedaempfte Farbe -- unterscheidbar von
+  // der Primaerlinie, ohne mit den Ampel-Toenen (good/bad/warn) zu kollidieren,
+  // die `color` je nach Metrik-Schwelle traegt). Eigene, kleinere Punkte OHNE
+  // Hover-Tooltip-Kaesten (bewusst schlank gehalten -- der Zweck ist der
+  // visuelle Trend-Vergleich, nicht ein zweiter voller Interaktionslayer).
+  let d2 = '', dots2 = '';
+  if (has2) {
+    let first2 = true;
+    points2.forEach((v, i) => {
+      if (v == null) { first2 = true; return; }
+      const y2 = padT + ih - ((v-min)/span)*ih;
+      d2 += `${first2?'M':'L'}${xs[i].toFixed(1)},${y2.toFixed(1)} `;
+      first2 = false;
+      dots2 += `<circle cx="${xs[i].toFixed(1)}" cy="${y2.toFixed(1)}" r="2.5" fill="${bg}" stroke="${color2}" stroke-width="1.5"/>`;
+    });
+  }
+  const legend2 = has2
+    ? `<g transform="translate(${padL},4)">
+        <line x1="0" y1="0" x2="14" y2="0" stroke="${color2}" stroke-width="2" stroke-dasharray="3,2"/>
+        <text x="18" y="3" fill="${ink4}" font-size="8.5" font-family="JetBrains Mono">${_escHTML(label2||'')}</text>
+      </g>`
+    : '';
+
   // 3 Hilfslinien mit Wert-Beschriftung — mehr Kontext
   // Bug 3 (Multi-Perspektiven-Review 2026-07-15): vorher lief der Rohwert
   // durch _fmtDE() (DE-Formatierung MIT Dezimalkomma, z.B. "0,03") und wurde
@@ -1848,9 +1888,11 @@ function _trendChart(points, versions, color, unit) {
     preserveAspectRatio="xMidYMid meet" style="display:block;overflow:visible">
     ${hairLines}
     <path d="${da}" fill="${color}" opacity=".10"/>
+    ${has2 ? `<path d="${d2}" stroke="${color2}" stroke-width="1.6" fill="none" stroke-linecap="round" stroke-dasharray="4,3"/>${dots2}` : ''}
     <path d="${d}" stroke="${color}" stroke-width="2" fill="none" stroke-linecap="round"/>
     ${dotGroups}
     ${verLabels}
+    ${legend2}
   </svg>`;
 }
 
