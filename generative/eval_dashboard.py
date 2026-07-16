@@ -1107,11 +1107,21 @@ _DELTA_MIN_N = 20  # unter N=20 kein Besser/Schlechter-Urteil (Apophenie-Schutz)
 _DELTA_MIN_PDF_OVERLAP = 0.5
 
 
-def version_delta(kpi_trend: dict, metric: str) -> dict:
+def version_delta(kpi_trend: dict, metric: str, n_field: str = "n") -> dict:
     """Delta der neuesten Version gegen die letzte belastbare Vorversion.
 
     `kpi_trend["versions"]` ist aufsteigend sortiert (neueste = letzte Position),
     die Metrik-Arrays laufen parallel dazu.
+
+    Punkt 4 (D3, Matrix-Rendering-Fix+Politur-Bündel): `n_field` waehlt, welches
+    kpi_trend-Array als n>=_DELTA_MIN_N-Reliability-Guard dient (Default "n" =
+    Zahl LLM-evaluierter Notes, korrekt fuer hall/cov/dur/tokens/cost). Fuer
+    "accept" ist "n" der FALSCHE Nenner: die Akzeptanzrate poolt ueber ALLE
+    gerouteten (generierten) Notes, nicht nur die evaluierte Stichprobe -- der
+    Server ruft hier mit `n_field="accept_n"` (Summe n_total je Version,
+    dieselbe Basis wie `_pooled_accept`) auf, sonst zeigt das Delta
+    faelschlich reliable:false, obwohl es auf hunderten gerouteten Notes
+    beruht (aktuell konservativ, kein falsches Delta -- nur unnoetig grau).
 
     #196 P5: Vergleichsbasis ist die jüngste FRÜHERE Version mit einem
     vorhandenen Metrik-Wert UND n>=_DELTA_MIN_N — nicht starr die direkte
@@ -1134,7 +1144,7 @@ def version_delta(kpi_trend: dict, metric: str) -> dict:
     (PDF-Mix)").
     """
     values = kpi_trend.get(metric) or []
-    ns = kpi_trend.get("n") or []
+    ns = kpi_trend.get(n_field) or []
     versions = kpi_trend.get("versions") or []
     pdf_notes = kpi_trend.get("pdf_notes") or []
     latest = values[-1] if values else None

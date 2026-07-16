@@ -837,6 +837,12 @@ def build_data(
         "cov": [quality_by_version[v].get("median_cov") for v in sorted_pipeline_versions],
         "n": [quality_by_version[v]["n"] for v in sorted_pipeline_versions],
         "accept": [_pooled_accept(v) for v in sorted_pipeline_versions],
+        # Punkt 4 (D3): n-Guard-Basis fuer das accept-Delta -- "n" (evaluierte
+        # Notes) ist fuer hall/cov korrekt, fuer accept aber der FALSCHE Nenner
+        # (Akzeptanzrate poolt ueber ALLE gerouteten Notes, s. _pooled_accept
+        # oben). Summe derselben (n_vault, n_total)-Paare -- SSoT, keine
+        # zweite Zaehlung.
+        "accept_n": [sum(t for _, t in accept_pairs_by_ver.get(v, [])) for v in sorted_pipeline_versions],
         "dur": [
             round(sum(dur_by_ver.get(v, [])) / len(dur_by_ver[v]), 1) if dur_by_ver.get(v) else None
             for v in sorted_pipeline_versions
@@ -862,7 +868,11 @@ def build_data(
 
     # Delta neueste-vs-Vorversion pro KPI (mit N-Guard, #36 P4)
     kpi_trend["deltas"] = {
-        m: D.version_delta(kpi_trend, m) for m in ("hall", "cov", "n", "accept", "dur", "tokens", "cost")
+        # Punkt 4 (D3): "accept" haertet auf accept_n (geroutete Notes) statt
+        # dem Default "n" (evaluierte Notes, falscher/zu kleiner Nenner fuer
+        # diese Metrik -- s. version_delta-Docstring).
+        m: D.version_delta(kpi_trend, m, n_field="accept_n" if m == "accept" else "n")
+        for m in ("hall", "cov", "n", "accept", "dur", "tokens", "cost")
     }
 
     # ── Lauf-Dropdown-Optionen (#211): immer ungefiltert, jüngste zuerst ──
