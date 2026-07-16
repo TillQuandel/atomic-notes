@@ -282,11 +282,12 @@ def _read_calibration_data(allowed_note_paths: set | None = None, eval_version: 
                 else None,
                 # #233: coverage_factual ist die mit dem v2/v4-Umbau abgeschaffte
                 # v1.3-Metrik — seit v4 durchgehend NULL. Fallback auf
-                # coverage_rate ("Belegrate" im Dashboard), gleiches Muster wie
-                # eval_dashboard.py:595/815/883/1063.
-                "llm_cov": round(v * 100, 1)
-                if (v := r["coverage_factual"] or r["coverage_rate"]) is not None and v >= 0
-                else None,
+                # coverage_rate ("Belegrate" im Dashboard) ueber den D4-Bestands-
+                # Fix D._row_coverage (Punkt 5, Matrix-Rendering-Fix+Politur-
+                # Bündel) -- das vorherige `coverage_factual or coverage_rate`
+                # haette eine ECHTE 0.0 (falsy) verschluckt; _row_coverage prueft
+                # explizit auf None (Mapping-kompatibel, auch fuer sqlite3.Row).
+                "llm_cov": round(v * 100, 1) if (v := D._row_coverage(r)) is not None and v >= 0 else None,
                 "pdf": r["pdf"],
             }
             for r in conn.execute(
@@ -767,7 +768,7 @@ def build_data(
             hall_val = r.get("hallucination_rate")
             if hall_val is not None and float(hall_val) >= 0:
                 d2["hall"].append(float(hall_val) * 100)
-            cov = r.get("coverage_factual") or r.get("coverage_rate")
+            cov = D._row_coverage(r)
             if cov is not None and float(cov) >= 0:
                 d2["cov"].append(float(cov) * 100)
         # n = distinct Notes (nicht Eval-Instanzen), identisch zur „Evaluierte
@@ -1002,7 +1003,7 @@ def _chart_scatter_versioned(quality_rows: list[dict]) -> dict:
 
     for r in deduped_rows:
         hall = r.get("hallucination_rate")
-        cov = r.get("coverage_factual") or r.get("coverage_rate")
+        cov = D._row_coverage(r)
         # Sentinel-Werte (-1.0 = ungültig) überspringen
         if hall is None or cov is None or float(hall) < 0 or float(cov) < 0:
             continue

@@ -647,9 +647,7 @@ def _calc_kpis(
     hall_stats = _pooled_hall_stats(latest_qrows)
     avg_hall = hall_stats["pct"] if hall_stats else None
 
-    cov_vals = [
-        v for r in latest_qrows if (v := r.get("coverage_factual") or r.get("coverage_rate")) is not None and v >= 0
-    ]
+    cov_vals = [v for r in latest_qrows if (v := _row_coverage(r)) is not None and v >= 0]
     avg_cov = round(_median(cov_vals) * 100, 1) if cov_vals else None
     total_generated = sum(r["n_total"] for r in all_log_runs)
     total_accepted = sum(r["n_vault"] for r in all_log_runs)
@@ -971,7 +969,7 @@ def _calc_pdf_table(
         at = _dedup_latest_per_note(at)
         n_notes = _distinct_notes(at)
         hall = _pooled_hall_pct(at)
-        cov_vals = [v for r in at if (v := r.get("coverage_factual") or r.get("coverage_rate")) is not None and v >= 0]
+        cov_vals = [v for r in at if (v := _row_coverage(r)) is not None and v >= 0]
         cov = round(_median(cov_vals) * 100, 1) if cov_vals else None
         runs = log_by_group.get(gk, [])
         accept, accept_ver, accept_n, n_merge = _accept_from_runs(runs, ver, current_version)
@@ -1043,7 +1041,7 @@ def _chart_scatter(quality_rows: list[dict]) -> dict:
     pdf_map: dict[str, str] = {}
     for r in quality_rows:
         hall = r.get("hallucination_rate")
-        cov = r.get("coverage_factual") or r.get("coverage_rate")
+        cov = _row_coverage(r)
         if hall is None or cov is None or float(hall) < 0 or float(cov) < 0:
             continue
         label = r.get("note") or r.get("note_title") or "?"
@@ -1223,7 +1221,7 @@ def version_delta(kpi_trend: dict, metric: str) -> dict:
 #     ihre Dominanz wird ueber n/Min/Max je Zelle sichtbar statt versteckt.
 
 
-def _row_coverage(r: dict):
+def _row_coverage(r):
     """Coverage-Wert einer Eval-Zeile: `coverage_factual`, wenn NICHT None
     (auch bei echter 0.0!), NUR bei None Fallback auf `coverage_rate`.
 
@@ -1231,10 +1229,18 @@ def _row_coverage(r: dict):
     `coverage_factual or coverage_rate` verschluckt eine ECHTE 0.0 (falsy)
     und nimmt faelschlich coverage_rate bzw. verwirft die Zeile, wenn
     coverage_rate fehlt — 0%-Coverage-Zeilen existieren real (Jockisch-
-    Faelle). Nur fuer die neuen Matrix-/Paarvergleichs-Funktionen unten;
-    die Bestands-Stellen mit demselben Muster fixt ein separates Ticket."""
-    v = r.get("coverage_factual")
-    return v if v is not None else r.get("coverage_rate")
+    Faelle).
+
+    Punkt 5 (D4-Bestand, Matrix-Rendering-Fix+Politur-Bündel): urspruenglich
+    nur fuer die Matrix-/Paarvergleichs-Funktionen gedacht ("die Bestands-
+    Stellen mit demselben Muster fixt ein separates Ticket") -- jetzt SSoT
+    fuer ALLE Bestands-Stellen (siehe Aufrufer). `r` ist Mapping-kompatibel:
+    akzeptiert sowohl `dict` als auch `sqlite3.Row` (KEIN `.get()` -- Row
+    unterstuetzt das nicht; `in r.keys()` funktioniert fuer beide)."""
+    v = r["coverage_factual"] if "coverage_factual" in r.keys() else None
+    if v is not None:
+        return v
+    return r["coverage_rate"] if "coverage_rate" in r.keys() else None
 
 
 def _matrix_cell_stats(rows: list[dict]) -> dict | None:
@@ -1609,7 +1615,7 @@ def _build_quality_chart_data(quality_rows: list[dict]) -> dict:
         pdf = r.get("pdf") or r.get("source_pdf") or "unbekannt"
         ver = r.get("version") or "unknown"
         hall = r.get("hallucination_rate")
-        cov = r.get("coverage_factual") or r.get("coverage_rate")
+        cov = _row_coverage(r)
         anch_total = r.get("anchors_total") or 0
         anch_conf = r.get("anchors_confirmed") or 0
         rows_clean.append(
