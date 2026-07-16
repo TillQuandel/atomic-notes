@@ -598,6 +598,7 @@ def _calc_kpis(
     quality_rows: list[dict],
     token_runs: list[dict],
     current_version: str | None = None,
+    pipeline_runs: list[dict] | None = None,
 ) -> dict:
     # KPIs = aktuelle Pipeline-Version (config-verankert, #191), nicht höchste
     # Nummer und nicht Durchschnitt aller Versionen. Einmal auflösen — auch
@@ -619,7 +620,11 @@ def _calc_kpis(
     # v0.3.140). Ab hier ist `latest_qrows` die EINE Basis für hall, cov UND
     # n_notes — die Kachel-n passt dadurch automatisch zur Pooling-Basis
     # (vorher: Kachel n=40, Pooling-Basis 52 — inkonsistent).
-    latest_qrows = _dedup_latest_per_note(latest_qrows)
+    # `pipeline_runs` (Till-Go 2026-07-16): poolt echte Re-Eval-Wiederholungs-
+    # gruppen statt sie auf die neueste Messung zu kappen (s.
+    # `_dedup_latest_per_note`-Docstring) — n_notes bleibt Notes-Zahl, nicht
+    # Messungen-Zahl.
+    latest_qrows = _dedup_latest_per_note(latest_qrows, pipeline_runs)
 
     all_versions = sorted({r["ver"] for r in all_log_runs if r.get("ver")}, key=_ver_sort_key)
 
@@ -826,8 +831,86 @@ def _note_key(r: dict, idx: int) -> str:
     return _NOTE_NS_PREFIX_RE.sub("", str(raw))
 
 
-def _dedup_latest_per_note(rows: list[dict]) -> list[dict]:
-    """Pro (normalisierter) Note NUR die neueste Eval-Zeile.
+def _pool_repeat_rows(rows: list[dict]) -> dict:
+    """Poolt >=2 Re-Eval-Wiederholungsmessungen DERSELBEN Note zu einer
+    synthetischen Zeile (Till-Go 2026-07-16, Trendfähigkeits-Studie).
+
+    Kontext: `reeval_baseline.py --repeat` misst dieselbe Note mehrfach unter
+    derselben eval_version (JSONL-Feld `repeat_sweep: true`; DB-Marker
+    `pipeline_runs.pipeline_version` in `_REEVAL_PIPELINE_VERSIONS` — Konstante
+    weiter unten im Modul, Versions×PDF-Matrix-Abschnitt). Ungepoolt ließ der
+    bisherige „neueste-Zeile-gewinnt"-Dedup (`_dedup_latest_per_note`) die
+    Kopfzahl mit jedem neuen Sweep springen, weil er 2 von 3 echten Messungen
+    stillschweigend verwarf, statt sie zum stabilen Referenzwert zu poolen
+    (Produktionsbeleg 2026-07-16, eval_version 4.3: 14/400, 10/400, 16/400 auf
+    den 3 Sweeps — gepoolt 40/1200 = 3,3 %, Latest-Wins zeigte zuletzt 4,0 %).
+
+    hallucination_rate: Anker-Pool (Σ anchors_hallucinated / Σ anchors_total
+    über die Gruppe), sofern ALLE Zeilen Roh-Counts tragen — identische
+    Alles-oder-nichts-Regel wie `_pooled_hall_stats` (dessen th==0-Fallback
+    hier mitgilt, da die Funktion direkt aufgerufen wird). Sonst noten-
+    gewichtetes Mittel der gültigen Raten (Fallback, dieselbe Semantik).
+
+    coverage_factual/coverage_rate: notengewichtetes Mittel der gültigen Werte
+    (`_row_coverage`, Sentinel -1.0 ausgeschlossen) — note_evals hat KEINE
+    Roh-Counts für Coverage (kein claims_total/claims_supported in der
+    DB-Zeile, nur die fertige Rate; dieselbe Einschränkung dokumentiert
+    `_version_pair_compare`s `_cov_mean`), ein Anker-Pool ist hier also
+    strukturell nicht möglich.
+
+    Neue Metadaten:
+      n_measurements  Zahl gepoolter Zeilen (>=2, s. Aufrufer-Vertrag unten)
+      hall_min/hall_max  Spannweite der EINZELNEN Messraten in Prozent (nur
+                         gesetzt, wenn mindestens eine gültige Rate vorliegt)
+      repeat_pooled   True — Marker für Client-Tooltip + Downstream-Code
+
+    Alle übrigen Felder (note_path, pdf, run_id, eval_version, pipeline_
+    version, timestamp, eval_id, language, ...) werden von der zeitlich
+    jüngsten Zeile der Gruppe übernommen (`timestamp`/`eval_id` bestimmen so
+    weiterhin den Tie-Break in `_dedup_latest_per_note`, als träte die
+    Pool-Zeile an der Position ihrer jüngsten Messung an).
+
+    Aufrufer-Pflicht: `rows` sind >=2 Zeilen DERSELBEN Note, ALLE aus der
+    Re-Eval-Familie (von `_dedup_latest_per_note` bereits vorgefiltert) — bei
+    genau 1 Zeile gibt es nichts zu poolen (Aufrufer behandelt diesen Fall
+    separat, s. dort)."""
+    latest = max(rows, key=lambda r: (str(r.get("timestamp") or ""), str(r.get("eval_id") or "")))
+    pooled = dict(latest)
+
+    rate_rows = [r for r in rows if r.get("hallucination_rate") is not None and float(r["hallucination_rate"]) >= 0]
+    hall_stats = _pooled_hall_stats(rows)
+    if hall_stats:
+        pooled["hallucination_rate"] = hall_stats["pct"] / 100
+        if hall_stats["anchors_total"] is not None:
+            pooled["anchors_total"] = hall_stats["anchors_total"]
+            pooled["anchors_hallucinated"] = sum(r["anchors_hallucinated"] for r in rate_rows)
+        else:
+            pooled["anchors_total"] = None
+            pooled["anchors_hallucinated"] = None
+        hall_pcts = [float(r["hallucination_rate"]) * 100 for r in rate_rows]
+        pooled["hall_min"] = round(min(hall_pcts), 1)
+        pooled["hall_max"] = round(max(hall_pcts), 1)
+    else:
+        pooled["hallucination_rate"] = None
+        pooled["anchors_total"] = None
+        pooled["anchors_hallucinated"] = None
+        pooled["hall_min"] = None
+        pooled["hall_max"] = None
+
+    cov_vals = [float(v) for r in rows if (v := _row_coverage(r)) is not None and float(v) >= 0]
+    cov_mean = round(sum(cov_vals) / len(cov_vals), 4) if cov_vals else None
+    pooled["coverage_factual"] = cov_mean
+    pooled["coverage_rate"] = cov_mean
+
+    pooled["n_measurements"] = len(rows)
+    pooled["repeat_pooled"] = True
+    return pooled
+
+
+def _dedup_latest_per_note(rows: list[dict], pipeline_runs: list[dict] | None = None) -> list[dict]:
+    """Pro (normalisierter) Note NUR die neueste Eval-Zeile — außer bei einer
+    echten Re-Eval-Wiederholungsgruppe (s. `pipeline_runs`-Parameter unten):
+    die wird stattdessen gepoolt (Till-Go 2026-07-16, `_pool_repeat_rows`).
 
     Statistik-Review 2026-07-15 (3 unabhängige Opus-Statistiker, konvergent +
     adversarial bestätigt): note_evals enthält mehrere Zeilen derselben Note
@@ -849,18 +932,60 @@ def _dedup_latest_per_note(rows: list[dict]) -> list[dict]:
     Listenposition — rein für Determinismus bei exaktem Timestamp+eval_id-
     Gleichstand (Rows ohne beides: die letzte in der Liste gewinnt, was zur
     `ORDER BY timestamp`-Reihenfolge von `db.query_note_evals` passt). Rows
-    ohne Note-Identifier zählen einzeln (s. `_note_key`)."""
-    best: dict[str, tuple] = {}
+    ohne Note-Identifier zählen einzeln (s. `_note_key`).
+
+    `pipeline_runs` (optional, Till-Go 2026-07-16): mit gesetztem Parameter
+    werden pro Note die Zeilen, deren `run_id` an einen `pipeline_runs`-
+    Eintrag mit `pipeline_version` in `_REEVAL_PIPELINE_VERSIONS` hängt
+    (reeval_baseline.py --repeat-Wiederholungssweeps), bei >=2 Treffern zu
+    EINER synthetischen Pool-Zeile zusammengefasst (`_pool_repeat_rows`) und
+    treten DANACH normal gegen die übrigen Zeilen derselben Note im Latest-
+    Wins-Vergleich an (Mischfall: Pool-Zeile vs. normale Zeile(n) — die
+    jüngere gewinnt, wie zwischen zwei normalen Zeilen). Bleibt für eine Note
+    nur eine einzelne Re-Eval-Zeile (kein echtes Wiederholungspaar), wird
+    NICHT gepoolt — sie nimmt unverändert am Latest-Wins-Vergleich teil.
+    Ohne `pipeline_runs` (Default None — bestehende Aufrufer/Tests) ist das
+    Verhalten byte-identisch zu vorher: ohne diese Zusatzinfo kann keine Zeile
+    als Re-Eval-Familie erkannt werden, der #293-Vertrag für normale
+    Mehrfachzeilen (Re-Evals/Duplikat-Inserts außerhalb der Re-Eval-Familie)
+    bleibt unverändert bestehen (Latest-Wins)."""
+    reeval_run_ids = (
+        {
+            r["run_id"]
+            for r in pipeline_runs
+            if r.get("run_id") and r.get("pipeline_version") in _REEVAL_PIPELINE_VERSIONS
+        }
+        if pipeline_runs
+        else set()
+    )
+
+    groups: dict[str, list[tuple[int, dict]]] = {}
     order: list[str] = []
     for i, r in enumerate(rows):
         key = _note_key(r, i)
-        sort_key = (str(r.get("timestamp") or ""), str(r.get("eval_id") or ""), i)
-        prev = best.get(key)
-        if prev is None or sort_key > prev[0]:
-            if prev is None:
-                order.append(key)
-            best[key] = (sort_key, r)
-    return [best[k][1] for k in order]
+        if key not in groups:
+            order.append(key)
+            groups[key] = []
+        groups[key].append((i, r))
+
+    def _item_sort_key(item: tuple[int, dict]) -> tuple:
+        i, r = item
+        return (str(r.get("timestamp") or ""), str(r.get("eval_id") or ""), i)
+
+    out = []
+    for key in order:
+        items = groups[key]
+        reeval_items = [it for it in items if it[1].get("run_id") in reeval_run_ids]
+        rest_items = [it for it in items if it[1].get("run_id") not in reeval_run_ids]
+        candidates = list(rest_items)
+        if len(reeval_items) >= 2:
+            pool_i, _ = max(reeval_items, key=_item_sort_key)
+            candidates.append((pool_i, _pool_repeat_rows([it[1] for it in reeval_items])))
+        else:
+            candidates.extend(reeval_items)
+        _, best_row = max(candidates, key=_item_sort_key)
+        out.append(best_row)
+    return out
 
 
 def _newest_capped_version(versions: list[str], current: str | None) -> str | None:
@@ -904,6 +1029,7 @@ def _calc_pdf_table(
     all_log_runs: list[dict],
     quality_rows: list[dict],
     current_version: str | None = None,
+    pipeline_runs: list[dict] | None = None,
 ) -> list[dict]:
     """Eine Zeile je kanonischer Quell-PDF, EINE Datengrundlage (#194).
 
@@ -978,8 +1104,9 @@ def _calc_pdf_table(
         at = [r for r in qrows if _row_version(r) == ver]
         # Re-Eval-Dedup (Statistik-Review 2026-07-15): dieselbe Basis wie die
         # KPI-Kachel (`_calc_kpis`) — sonst zeigen Kachel und per-PDF-Tabelle
-        # unterschiedliche gepoolte Raten für dieselbe Version.
-        at = _dedup_latest_per_note(at)
+        # unterschiedliche gepoolte Raten für dieselbe Version. `pipeline_runs`
+        # (Till-Go 2026-07-16): dieselbe Repeat-Sweep-Poolung wie die Kachel.
+        at = _dedup_latest_per_note(at, pipeline_runs)
         n_notes = _distinct_notes(at)
         hall = _pooled_hall_pct(at)
         cov_vals = [v for r in at if (v := _row_coverage(r)) is not None and v >= 0]
@@ -1302,7 +1429,7 @@ def _row_coverage(r):
     return r["coverage_rate"] if "coverage_rate" in r.keys() else None
 
 
-def _matrix_cell_stats(rows: list[dict]) -> dict | None:
+def _matrix_cell_stats(rows: list[dict], pipeline_runs: list[dict] | None = None) -> dict | None:
     """Median-Fehlerquote/-Belegrate + n + Min/Max-Spannweite fuer EINE (PDF,
     Version)-Zelle der Matrix.
 
@@ -1323,8 +1450,14 @@ def _matrix_cell_stats(rows: list[dict]) -> dict | None:
     (keine Daten — Client zeigt eine leere Zelle). Existieren Zeilen, aber
     keine traegt eine gueltige Fehlerquote/Belegrate, bleibt `n` gesetzt und
     nur `median_hall`/`median_cov` sind None ("–" im Client).
-    """
-    deduped = _dedup_latest_per_note(rows)
+
+    `pipeline_runs` (optional, Till-Go 2026-07-16): an `_dedup_latest_per_note`
+    durchgereicht — Notes mit einer echten Re-Eval-Wiederholungsgruppe werden
+    gepoolt statt auf die neueste Messung gekappt. `n_pooled`/
+    `pooled_n_measurements`/`pooled_hall_min`/`pooled_hall_max` fassen die
+    gepoolten Notes DIESER Zelle für den Client-Tooltip zusammen (0/None,
+    wenn keine Note in der Zelle gepoolt ist)."""
+    deduped = _dedup_latest_per_note(rows, pipeline_runs)
     if not deduped:
         return None
     hall_vals = [
@@ -1333,6 +1466,9 @@ def _matrix_cell_stats(rows: list[dict]) -> dict | None:
         if r.get("hallucination_rate") is not None and float(r["hallucination_rate"]) >= 0
     ]
     cov_vals = [round(float(v) * 100, 1) for r in deduped if (v := _row_coverage(r)) is not None and float(v) >= 0]
+    pooled_rows = [r for r in deduped if r.get("repeat_pooled")]
+    pooled_mins = [r["hall_min"] for r in pooled_rows if r.get("hall_min") is not None]
+    pooled_maxs = [r["hall_max"] for r in pooled_rows if r.get("hall_max") is not None]
     return {
         "n": len(deduped),
         "median_hall": round(_median(hall_vals), 1) if hall_vals else None,
@@ -1341,6 +1477,10 @@ def _matrix_cell_stats(rows: list[dict]) -> dict | None:
         "median_cov": round(_median(cov_vals), 1) if cov_vals else None,
         "min_cov": min(cov_vals) if cov_vals else None,
         "max_cov": max(cov_vals) if cov_vals else None,
+        "n_pooled": len(pooled_rows),
+        "pooled_n_measurements": max((r.get("n_measurements") or 0) for r in pooled_rows) if pooled_rows else None,
+        "pooled_hall_min": min(pooled_mins) if pooled_mins else None,
+        "pooled_hall_max": max(pooled_maxs) if pooled_maxs else None,
     }
 
 
@@ -1348,7 +1488,9 @@ _MATRIX_VERSION_LIMIT = 15  # dieselbe Deckelung wie das bestehende Versions-Dro
 _MATRIX_VERSION_MIN_N = 3  # ... und dieselbe n>=3-Schwelle (SSoT: `_top_versions`)
 
 
-def _calc_version_pdf_matrix(quality_rows: list[dict], versions: list[str] | None = None) -> dict:
+def _calc_version_pdf_matrix(
+    quality_rows: list[dict], versions: list[str] | None = None, pipeline_runs: list[dict] | None = None
+) -> dict:
     """Rohdaten der Versions×PDF-Matrix: eine Zelle je (PDF, Pipeline-Version).
 
     `quality_rows` MUSS bereits auf eine einzelne eval_version eingeschraenkt
@@ -1396,7 +1538,9 @@ def _calc_version_pdf_matrix(quality_rows: list[dict], versions: list[str] | Non
     for gk in sorted(groups):
         rows = groups[gk]
         pdfs_out.append({"key": gk, "label": _label_for_group(gk, rows)})
-        cells[gk] = {ver: _matrix_cell_stats([r for r in rows if _row_version(r) == ver]) for ver in versions}
+        cells[gk] = {
+            ver: _matrix_cell_stats([r for r in rows if _row_version(r) == ver], pipeline_runs) for ver in versions
+        }
 
     return {
         "versions": versions,
@@ -1438,7 +1582,9 @@ def _real_note_key(r: dict, idx: int) -> str | None:
     return _note_key(r, idx)
 
 
-def _version_pair_compare(quality_rows: list[dict], version_a: str, version_b: str) -> dict:
+def _version_pair_compare(
+    quality_rows: list[dict], version_a: str, version_b: str, pipeline_runs: list[dict] | None = None
+) -> dict:
     """Versions-Paarvergleich mit Schnittmengen-Regel (Spezifikation #1):
     Deltas rechnen NUR ueber PDFs, die in BEIDEN Versionen vorkommen — ein
     Vergleich ueber den vollen (moeglicherweise ausgetauschten) Corpus ist
@@ -1475,8 +1621,8 @@ def _version_pair_compare(quality_rows: list[dict], version_a: str, version_b: s
     `version_b` intern je Version (nicht global) — `_dedup_latest_per_note`s
     Vertrag verlangt Aufruf pro einzelner Pipeline-Version.
     """
-    rows_a = _dedup_latest_per_note([r for r in quality_rows if _row_version(r) == version_a])
-    rows_b = _dedup_latest_per_note([r for r in quality_rows if _row_version(r) == version_b])
+    rows_a = _dedup_latest_per_note([r for r in quality_rows if _row_version(r) == version_a], pipeline_runs)
+    rows_b = _dedup_latest_per_note([r for r in quality_rows if _row_version(r) == version_b], pipeline_runs)
 
     def _pdf_map(rows: list[dict]) -> dict[str, list[dict]]:
         m: dict[str, list[dict]] = {}
@@ -1570,7 +1716,7 @@ def _version_pair_compare(quality_rows: list[dict], version_a: str, version_b: s
     }
 
 
-def build_version_pdf_matrix(quality_rows: list[dict]) -> dict:
+def build_version_pdf_matrix(quality_rows: list[dict], pipeline_runs: list[dict] | None = None) -> dict:
     """Server-Fassade: Matrix-Zellen + paarweise Versions-Vergleiche fuer JEDE
     Kombination der in der Matrix gezeigten Versionen (aufsteigend sortiert,
     also `version_a` immer die aeltere, `version_b` die juengere Seite eines
@@ -1583,13 +1729,16 @@ def build_version_pdf_matrix(quality_rows: list[dict]) -> dict:
     `_MATRIX_VERSION_LIMIT` (15) gedeckelt — bis zu 15·14/2 = 105 Paare, pro
     Paar nur eine Handvoll Zeilen zu verarbeiten (lokaler Dashboard-Server,
     kein Performance-Problem).
+
+    `pipeline_runs` (optional, Till-Go 2026-07-16): an `_calc_version_pdf_matrix`
+    und `_version_pair_compare` durchgereicht (Repeat-Sweep-Poolung, s. dort).
     """
-    matrix = _calc_version_pdf_matrix(quality_rows)
+    matrix = _calc_version_pdf_matrix(quality_rows, pipeline_runs=pipeline_runs)
     versions = matrix["versions"]
     compare: dict[str, dict] = {}
     for i, va in enumerate(versions):
         for vb in versions[i + 1 :]:
-            compare[f"{va}|{vb}"] = _version_pair_compare(quality_rows, va, vb)
+            compare[f"{va}|{vb}"] = _version_pair_compare(quality_rows, va, vb, pipeline_runs=pipeline_runs)
     matrix["compare"] = compare
     return matrix
 
