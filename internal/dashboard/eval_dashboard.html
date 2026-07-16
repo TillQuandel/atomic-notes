@@ -450,7 +450,12 @@ table.cmp th:nth-last-child(-n+2) .hint-pop,
 .spark-row-head .spark-delta { font-family: var(--f-mono); font-size: 11px; color: var(--ink-3); }
 .spark-row-head .spark-delta .dpos { color: var(--mint); font-weight: 600; }
 .spark-row-head .spark-delta .dneg { color: var(--coral); font-weight: 600; }
+/* Nachbesserung Punkt 3: kleiner Toggle am Chart-Kopf (nur Fehlerquote-
+   Kachel) -- Default AUS, s. JS `_acceptOverlayOn`. */
+.spark-overlay-toggle { display: flex; align-items: center; gap: 5px; font-family: var(--f-mono); font-size: 10.5px; color: var(--ink-3); cursor: pointer; user-select: none; white-space: nowrap; }
+.spark-overlay-toggle input { cursor: pointer; }
 .spark-chart-wrap { width: 100%; }
+.spark-overlay-caveat { font-family: var(--f-body); font-size: 11px; color: var(--ink-4); font-style: italic; margin-top: 4px; }
 /* SVG Hover-Tooltip auf Datenpunkten — Tooltip liegt als eigene Ebene über
    allen Punkten (Paarung via data-i, Klasse .on schaltet JS beim Hovern) */
 .spark-pt { cursor: crosshair; }
@@ -1514,6 +1519,18 @@ function _initEvalVerDropdown(available, selected) {
 let _openKpiIdx = null;
 let _kpiData = null;
 
+// Nachbesserung Punkt 3 (Statistiker MEDIUM + UX-P3, Reviews 15./16.07 zu PR
+// #312): das Accept×Hall-Overlay staucht auf der gemeinsamen 0-100%-Achse die
+// Fehlerquoten-Serie auf ~1/3 der Chart-Hoehe (vorher hall-adaptiv) und
+// 100%-Accept-Punkte aus n=1-3-Laeufen sind optisch nicht von belastbaren
+// unterscheidbar -- Default AUS, Zustand in localStorage (analog theme-mode).
+let _acceptOverlayOn = localStorage.getItem('accept-overlay-on') === 'true';
+function _toggleAcceptOverlay(checked) {
+  _acceptOverlayOn = !!checked;
+  localStorage.setItem('accept-overlay-on', String(_acceptOverlayOn));
+  if (_kpiData) renderKpis(_kpiData.kpis, _kpiData.thresh, _kpiData.kpiTrend);
+}
+
 function _kpiTone(k, avg_hall, avg_cov, avg_accept, T) {
   if (k === 'hall') return avg_hall != null ? (avg_hall <= T.hall[0] ? 'good' : avg_hall >= T.hall[1] ? 'bad' : 'warn') : 'neutral';
   if (k === 'cov')  return avg_cov  != null ? (avg_cov  >= T.cov[0]  ? 'good' : avg_cov  <= T.cov[1]  ? 'bad' : 'warn') : 'neutral';
@@ -1708,8 +1725,30 @@ function renderKpis(kpis, thresh, kpiTrend) {
     // -- macht Selektions-Bias sichtbar (note_evals enthaelt nur akzeptierte
     // Notes). Nur fuer die Fehlerquote-Kachel, bestehendes Chart erweitert
     // statt eines neuen (Spec-Vorgabe).
-    const accVals = kd.key === 'hall' ? (kpiTrend?.accept || []) : null;
-    const sparkSvg = _trendChart(vals, vers, sparkColor, kd.u, accVals, 'Akzeptanzquote');
+    // Nachbesserung Punkt 3 (Statistiker MEDIUM + UX-P3): Overlay zuschaltbar,
+    // Default AUS (`_acceptOverlayOn`, localStorage) -- ohne Zuschalten bleibt
+    // die Achse hall-adaptiv wie vor dem PR (die gemeinsame 0-100%-Achse
+    // stauchte die Fehlerquoten-Serie auf ~1/3 der Chart-Hoehe). accept_n je
+    // Version (Punkt 4/D3, bereits im Payload) dimmt Accept-Punkte mit
+    // accept_n<20 (100%-Punkte aus n=1-3-Laeufen waren optisch nicht von
+    // belastbaren unterscheidbar).
+    const overlayAvailable = kd.key === 'hall';
+    const accVals = (overlayAvailable && _acceptOverlayOn) ? (kpiTrend?.accept || []) : null;
+    const acceptNVals = (overlayAvailable && _acceptOverlayOn) ? (kpiTrend?.accept_n || null) : null;
+    const sparkSvg = _trendChart(vals, vers, sparkColor, kd.u, accVals, 'Akzeptanzquote', acceptNVals);
+    // Legende benennt BEIDE Serien + unterschiedliche Basis (Statistik-Review
+    // 15.07: note_evals enthaelt nur AKZEPTIERTE Notes -- die Akzeptanzquote
+    // zaehlt dagegen alle gerouteten/generierten Notes, andere Grundgesamtheit).
+    const overlayToggleHtml = overlayAvailable
+      ? `<label class="spark-overlay-toggle hint">
+          <input type="checkbox" id="spark-overlay-toggle" ${_acceptOverlayOn ? 'checked' : ''} onchange="_toggleAcceptOverlay(this.checked)">
+          Accept-Overlay
+          <span class="hint-pop">Zeigt die Akzeptanzquote als zweite (gestrichelte) Serie neben der Fehlerquote -- macht sichtbar, ob ein Fehlerquoten-Delta teils Stichproben-Verschiebung statt reiner Qualitaetseffekt ist. Andere Basis: Akzeptanzquote zaehlt geroutete/generierte Notes, die Fehlerquote nur evaluierte.</span>
+        </label>`
+      : '';
+    const overlayCaveatHtml = (overlayAvailable && _acceptOverlayOn && accVals && accVals.length)
+      ? `<div class="spark-overlay-caveat">Akzeptanzquote (gestrichelt) misst auf anderer Basis als die Fehlerquote — geroutete/generierte statt evaluierte Notes. Punkte mit &lt;20 gerouteten Notes sind gedimmt.</div>`
+      : '';
     // #36 P4: Delta neueste-vs-Vorversion (server-berechnet) mit N-Guard statt
     // neueste-vs-erste. Ohne reliable (n<20 in einer der beiden Versionen) kein
     // Besser/Schlechter-Farbcode — nur neutrale Anzeige (Rausch-Schutz).
@@ -1739,9 +1778,11 @@ function renderKpis(kpis, thresh, kpiTrend) {
       inner.innerHTML = `
       <div class="spark-row-head">
         <strong>${kd.label} — Versions-Trend</strong>
+        ${overlayToggleHtml}
         <div class="spark-delta">${deltaHtml}</div>
       </div>
-      <div class="spark-chart-wrap">${sparkSvg}</div>`;
+      <div class="spark-chart-wrap">${sparkSvg}</div>
+      ${overlayCaveatHtml}`;
       // Tooltip-Sichtbarkeit: Punkt (spark-pt) und Tooltip (spark-tipg) sind
       // getrennte Ebenen (Tooltips liegen über allen Punkten) — Paarung über
       // data-i. Details am Ebenen-Aufbau in _trendChart.
@@ -1778,7 +1819,7 @@ function _autoUnit(values, unit) {
   return               { u: unit||'', fmt: (v, d) => `${_fmtDE(v, d ?? 1)}${unit||''}` };
 }
 
-function _trendChart(points, versions, color, unit, points2, label2) {
+function _trendChart(points, versions, color, unit, points2, label2, points2N) {
   const w = 900, h = 90, padL = 8, padR = 8, padT = 16, padB = 20;
   const iw = w - padL - padR, ih = h - padT - padB;
   if (!points || points.length < 2) return `<svg width="100%" viewBox="0 0 ${w} ${h}"></svg>`;
@@ -1829,7 +1870,13 @@ function _trendChart(points, versions, color, unit, points2, label2) {
     const cx = parseFloat(xs[i].toFixed(1));
     const cy = parseFloat(ys[i].toFixed(1));
     const isLast = i === n-1;
-    const label = au.fmt(v);
+    // Nachbesserung Punkt 3 (UX-P3): der Punkt-Tooltip zeigte bisher nur die
+    // Fehlerquote -- bei aktivem Overlay fehlte der Akzeptanzquoten-Wert
+    // derselben Version im Tooltip komplett (nur visuell aus dem Chart
+    // ablesbar). Zeigt jetzt beide Werte, wenn das Overlay aktiv ist.
+    const label = (has2 && points2[i] != null)
+      ? `${au.fmt(v)} / Akzeptanz ${_fmtDE(points2[i], 1)}%`
+      : au.fmt(v);
     const tipW = label.length * 7 + 16;
     const tipH = 18;
     // Horizontal: Text bleibt IMMER mittig im Kasten — an den Rändern wird die
@@ -1877,13 +1924,24 @@ function _trendChart(points, versions, color, unit, points2, label2) {
       const y2 = padT + ih - ((v-min)/span)*ih;
       d2 += `${first2?'M':'L'}${xs[i].toFixed(1)},${y2.toFixed(1)} `;
       first2 = false;
-      dots2 += `<circle cx="${xs[i].toFixed(1)}" cy="${y2.toFixed(1)}" r="2.5" fill="${bg}" stroke="${color2}" stroke-width="1.5"/>`;
+      // Nachbesserung Punkt 3 (Statistiker MEDIUM): 100%-Accept-Punkte aus
+      // n=1-3-Laeufen sahen optisch nicht anders aus als belastbare Werte --
+      // Punkte mit accept_n<20 (Punkt-4-Payload-Feld, bereits vorhanden)
+      // werden gedimmt statt gleichwertig dargestellt.
+      const n2 = Array.isArray(points2N) ? points2N[i] : null;
+      const lowN2 = n2 != null && n2 < 20;
+      dots2 += `<circle cx="${xs[i].toFixed(1)}" cy="${y2.toFixed(1)}" r="2.5" fill="${bg}" stroke="${color2}" stroke-width="1.5" opacity="${lowN2 ? 0.35 : 1}"/>`;
     });
   }
-  const legend2 = has2
+  // Legende benennt BEIDE Serien (nicht nur die Zweitserie) -- ohne das war
+  // nicht erkennbar, dass die durchgezogene Linie ebenfalls Teil eines
+  // Vergleichs ist bzw. wofuer sie steht.
+  const legendBoth = has2
     ? `<g transform="translate(${padL},4)">
-        <line x1="0" y1="0" x2="14" y2="0" stroke="${color2}" stroke-width="2" stroke-dasharray="3,2"/>
-        <text x="18" y="3" fill="${ink4}" font-size="8.5" font-family="JetBrains Mono">${_escHTML(label2||'')}</text>
+        <line x1="0" y1="0" x2="14" y2="0" stroke="${color}" stroke-width="2"/>
+        <text x="18" y="3" fill="${ink4}" font-size="8.5" font-family="JetBrains Mono">Fehlerquote</text>
+        <line x1="98" y1="0" x2="112" y2="0" stroke="${color2}" stroke-width="2" stroke-dasharray="3,2"/>
+        <text x="116" y="3" fill="${ink4}" font-size="8.5" font-family="JetBrains Mono">${_escHTML(label2||'')}</text>
       </g>`
     : '';
 
@@ -1924,7 +1982,7 @@ function _trendChart(points, versions, color, unit, points2, label2) {
     <path d="${d}" stroke="${color}" stroke-width="2" fill="none" stroke-linecap="round"/>
     ${dotGroups}
     ${verLabels}
-    ${legend2}
+    ${legendBoth}
   </svg>`;
 }
 
