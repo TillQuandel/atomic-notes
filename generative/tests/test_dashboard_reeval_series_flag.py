@@ -70,6 +70,32 @@ def test_is_reeval_series_false_when_row_has_no_run_id():
     assert _is_reeval_series(rows, pipeline_runs) is False
 
 
+def test_is_reeval_series_true_when_every_row_maps_to_reeval_repeat_marker():
+    """--repeat-Wiederholungs-Sweeps (reeval_baseline.py) tragen den Marker
+    'reeval-repeat' statt 'reeval' (eigenes Run-Label, damit die Rauschanalyse
+    Wiederholungsgruppen unterscheiden kann). Dieselbe Diagnose (Zeilen
+    messen den Eval-Code-Stand des Sweeps, nicht die Notes-Erzeugungsversion)
+    gilt fuer Repeat-Sweeps gleichermassen -- das Flag darf nicht stumm
+    ausbleiben, nur weil der Marker nicht exakt 'reeval' lautet."""
+    rows = [{"run_id": "r1"}, {"run_id": "r2"}]
+    pipeline_runs = [
+        {"run_id": "r1", "pipeline_version": "reeval-repeat"},
+        {"run_id": "r2", "pipeline_version": "reeval-repeat"},
+    ]
+    assert _is_reeval_series(rows, pipeline_runs) is True
+
+
+def test_is_reeval_series_true_when_mixed_reeval_and_reeval_repeat_markers():
+    """Ein normaler Re-Eval-Sweep und ein Repeat-Sweep zusammen sind beide
+    'reeval-like' -- kein normaler Generierungslauf mischt sich rein."""
+    rows = [{"run_id": "r1"}, {"run_id": "r2"}]
+    pipeline_runs = [
+        {"run_id": "r1", "pipeline_version": "reeval"},
+        {"run_id": "r2", "pipeline_version": "reeval-repeat"},
+    ]
+    assert _is_reeval_series(rows, pipeline_runs) is True
+
+
 # ── Server-Integration: build_data() liefert is_reeval_series ─────────────
 
 
@@ -114,6 +140,19 @@ def test_build_data_flags_pure_reeval_eval_version(monkeypatch):
     ]
     pipeline_runs = [
         {"run_id": "reeval-run-1", "pipeline_version": "reeval", "pdf_source": "baseline-reeval"},
+    ]
+    data = _patched_build_data(monkeypatch, evals, pipeline_runs)
+    assert data["is_reeval_series"] is True
+
+
+def test_build_data_flags_pure_repeat_sweep_eval_version(monkeypatch):
+    """--repeat-Variante von test_build_data_flags_pure_reeval_eval_version:
+    alle Zeilen haengen an einem Repeat-Sweep-Run ('reeval-repeat')."""
+    evals = [
+        _dbrow(f"n{i}", "v0.3.144", "a.pdf", 0.1, f"2026-07-16T00:00:{i:02d}", run_id="repeat-run-1") for i in range(3)
+    ]
+    pipeline_runs = [
+        {"run_id": "repeat-run-1", "pipeline_version": "reeval-repeat", "pdf_source": "baseline-reeval"},
     ]
     data = _patched_build_data(monkeypatch, evals, pipeline_runs)
     assert data["is_reeval_series"] is True

@@ -1221,10 +1221,21 @@ def version_delta(kpi_trend: dict, metric: str, n_field: str = "n") -> dict:
     }
 
 
+# pipeline_runs.pipeline_version-Marker fuer Re-Eval-Sweeps (reeval_baseline.py):
+# 'reeval' fuer normale Sweeps, 'reeval-repeat' fuer --repeat-Wiederholungs-
+# Sweeps (eigenes Run-Label, damit die Rauschanalyse Wiederholungsgruppen
+# unterscheiden kann, s. reeval_baseline.py). Beide sind fuer diese Funktion
+# gleichwertig "reeval-like" -- dieselbe Diagnose (Zeilen messen den
+# Eval-Code-Stand des Sweeps, nicht die Notes-Erzeugungsversion) gilt fuer
+# Repeat-Sweeps genauso wie fuer normale Re-Eval-Sweeps.
+_REEVAL_PIPELINE_VERSIONS = {"reeval", "reeval-repeat"}
+
+
 def _is_reeval_series(quality_rows: list[dict], pipeline_runs: list[dict]) -> bool:
     """True, wenn ALLE `quality_rows` (typischerweise die aktive eval_version,
     ungefiltert -- s. `_matrix_base_rows` im Server) an einen `pipeline_runs`-
-    Eintrag mit `pipeline_version == "reeval"` haengen.
+    Eintrag mit `pipeline_version` in `_REEVAL_PIPELINE_VERSIONS`
+    ("reeval"/"reeval-repeat") haengen.
 
     Nachbesserung Punkt 4 (Statistiker-Empfehlung 2026-07-15): unter
     eval_version 4.3 haengen alle note_evals-Zeilen an `pipeline_version`
@@ -1239,11 +1250,11 @@ def _is_reeval_series(quality_rows: list[dict], pipeline_runs: list[dict]) -> bo
     Leere `quality_rows` -> False (nichts zu kennzeichnen, kein falsches
     Positiv). Zeilen ohne matchenden `pipeline_runs`-Eintrag (fehlender/
     unbekannter run_id) zaehlen NICHT als reeval -- nur eine explizite
-    Bestaetigung (jede Zeile matcht 'reeval') schaltet das Flag."""
+    Bestaetigung (jede Zeile matcht einen der beiden Marker) schaltet das Flag."""
     if not quality_rows:
         return False
     run_to_pver = {r.get("run_id"): r.get("pipeline_version") for r in pipeline_runs if r.get("run_id")}
-    return all(run_to_pver.get(row.get("run_id")) == "reeval" for row in quality_rows)
+    return all(run_to_pver.get(row.get("run_id")) in _REEVAL_PIPELINE_VERSIONS for row in quality_rows)
 
 
 # ---------------------------------------------------------------------------
