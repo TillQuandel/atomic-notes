@@ -8,8 +8,26 @@ Resume-fähig: überspringt Notes die bereits mit der aktuellen EVAL_VERSION
 Versionsbumps hinweg — Notes mit nur älteren eval_version-Zeilen werden erneut
 evaluiert, die alten Zeilen bleiben unverändert erhalten (#232-Re-Eval-Sweep).
 
+--repeat: Wiederholungs-Sweep fuer Eval-Rausch-Messungen (Trendfaehigkeits-
+Studie 2026-07-16: bisherige "Wiederholungen" trafen den content-adressierten
+Judge-Cache und lieferten byte-identische Ergebnisse statt einer echten
+zweiten Messung). Wirkt additiv:
+  (a) Der Resume-Skip (`_already_done`) wird ignoriert — eine Note mit
+      bereits vorhandener aktueller-EVAL_VERSION-Zeile wird TROTZDEM erneut
+      evaluiert. Nichts wird ueberschrieben.
+  (b) `eval_note(..., no_cache=True)` erzwingt eine echte Judge-Neuberechnung.
+      Das ist die einzige Wiederverwendungs-Ebene, die dieses Skript
+      durchlaeuft: der Re-Eval-Hash-Guard (`_eq.find_cached_eval`) wird
+      ausschliesslich von orchestrator.py Stage 8 konsultiert, nie von hier
+      (reeval_baseline.py uebergibt eval_note() nie einen content_hash).
+  (c) Neue Zeilen werden mit `repeat_sweep: true` markiert (quality_history.
+      jsonl) und der Run in pipeline_runs mit pipeline_version='reeval-repeat'
+      (statt 'reeval') registriert, damit die Rauschanalyse Wiederholungs-
+      gruppen sicher findet.
+Ohne --repeat ist das Verhalten unveraendert.
+
 Verwendung:
-  python reeval_baseline.py [--dry-run] [--baseline-dir PFAD]
+  python reeval_baseline.py [--dry-run] [--baseline-dir PFAD] [--repeat]
 """
 
 from __future__ import annotations
@@ -160,6 +178,14 @@ def main(argv: list[str] | None = None) -> None:
         help="Ueberschreibt BASELINE_DIR (Default: ROOT-relativ, .cache/eval/baseline neben diesem Skript). "
         "Fuer Funktionsnachweise aus einem isolierten Worktree ohne eigenes .cache.",
     )
+    ap.add_argument(
+        "--repeat",
+        action="store_true",
+        help="Wiederholungs-Sweep fuer Eval-Rausch-Messungen: ignoriert den Resume-Skip (additiv, "
+        "nichts wird ueberschrieben) UND erzwingt echte Judge-Neuberechnung (no_cache=True statt "
+        "Cache-Treffer). Neue Zeilen bekommen repeat_sweep=true; der Run wird in pipeline_runs als "
+        "'reeval-repeat' statt 'reeval' gefuehrt.",
+    )
     args = ap.parse_args(argv)
 
     baseline_dir = args.baseline_dir if args.baseline_dir is not None else BASELINE_DIR
@@ -189,6 +215,11 @@ def main(argv: list[str] | None = None) -> None:
     # Reeval-Run in pipeline_runs eintragen damit FK-Constraints erfüllt sind
     from generative.agents.base import _RUN_ID as _reeval_run_id
 
+    # --repeat: eigenes Run-Label statt 'reeval', damit die Rauschanalyse
+    # Wiederholungsgruppen ueber pipeline_runs.pipeline_version sicher findet
+    # (join note_evals.run_id -> pipeline_runs.run_id). Additiv, keine neue Spalte.
+    reeval_pipeline_version = "reeval-repeat" if args.repeat else "reeval"
+
     if not args.dry_run:
         with _db.get_db() as _conn_init:
             _conn_init.execute(
@@ -196,16 +227,17 @@ def main(argv: list[str] | None = None) -> None:
                 INSERT OR IGNORE INTO pipeline_runs
                 (run_id, timestamp, pipeline_version, pdf_source, pdf_key, pdf_label,
                  n_generated, n_vault, n_inbox, fully_cached)
-                VALUES (?, datetime('now'), 'reeval', 'baseline-reeval', 'reeval', 'Re-Eval Baseline',
+                VALUES (?, datetime('now'), ?, 'baseline-reeval', 'reeval', 'Re-Eval Baseline',
                         ?, 0, 0, 0)
             """,
-                (_reeval_run_id, len(notes)),
+                (_reeval_run_id, reeval_pipeline_version, len(notes)),
             )
-        print(f"  Reeval-Run ID: {_reeval_run_id}\n")
+        run_label = " (Repeat-Sweep)" if args.repeat else ""
+        print(f"  Reeval-Run ID: {_reeval_run_id}{run_label}\n")
 
     with _db.get_db() as conn:
         for i, (note_path, pdf_path, folder) in enumerate(notes, 1):
-            if _already_done(note_path.name, conn):
+            if not args.repeat and _already_done(note_path.name, conn):
                 print(f"  [{i:2}/{len(notes)}] skip (bereits v{_eq.EVAL_VERSION}): {note_path.name[:55]}")
                 skip += 1
                 continue
@@ -217,8 +249,10 @@ def main(argv: list[str] | None = None) -> None:
                 continue
 
             try:
-                result = _eq.eval_note(note_path, pdf_path)
+                result = _eq.eval_note(note_path, pdf_path, no_cache=args.repeat)
                 if "error" not in result:
+                    if args.repeat:
+                        result["repeat_sweep"] = True
                     _eq.save_result(result)
                     done += 1
                     hall = result.get("hallucination_rate", -1)
@@ -231,7 +265,7 @@ def main(argv: list[str] | None = None) -> None:
                 print(f"       → EXCEPTION: {e}")
                 errors += 1
 
-    mode = "[dry-run] " if args.dry_run else ""
+    mode = ("[dry-run] " if args.dry_run else "") + ("[repeat] " if args.repeat else "")
     print(f"\n{mode}Fertig: {done} neu evaluiert, {skip} übersprungen, {errors} Fehler")
 
     if not args.dry_run:
