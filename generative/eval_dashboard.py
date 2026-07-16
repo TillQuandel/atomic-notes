@@ -1610,6 +1610,20 @@ def _chart_tokens_by_version(runs: list[dict]) -> dict:
 
 
 def _chart_scaling(all_log_runs: list[dict]) -> dict:
+    # Punkt 8 (#294-Nebenfund, Reviews 15.07.): `r["label"]` ist im primaeren
+    # Log-Pfad (_read_all_log_runs) `_PDF_LABELS.get(key, key)` -- fuer PDFs
+    # ausserhalb der 3 registrierten _PDF_LABELS-Eintraege (Regelfall) faellt
+    # das auf den rohen, kleingeschriebenen Log-Key zurueck (label == key).
+    # Gleiche Bugklasse + gleicher Fallback wie _chart_longitudinal (Trade-
+    # off-Chart-2, U4-Fix, s. Kommentar dort) -- NUR wenn label==key
+    # (der Fallback tatsaechlich griff) neu ableiten, sonst den vom
+    # DB-Fallback-Pfad ggf. schon besseren Label-Wert unangetastet lassen.
+    def _scaling_label(r: dict) -> str:
+        label, key = r["label"], r["key"]
+        if label != key:
+            return label
+        return _PDF_LABELS.get(key) or re.sub(r"[-_]+", " ", key).strip().title()
+
     points = [
         {
             "x": r["words"],
@@ -1617,7 +1631,7 @@ def _chart_scaling(all_log_runs: list[dict]) -> dict:
             "y_vault": r["n_vault"],
             "pages": r["pages"],
             "key": r["key"],
-            "label": r["label"],
+            "label": _scaling_label(r),
             "ver": r["ver"],
             "pct": r["accept_pct"],
         }
