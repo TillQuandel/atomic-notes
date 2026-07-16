@@ -2119,8 +2119,13 @@ function renderPairMatrix(d) {
   // Cap-Fussnote (adversariale Abnahme, Befund 3): der 15er-Cap (+ n>=3-
   // Schwelle) droppt Versionen still — analog excluded_archived_versions
   // als Disclosure ausweisen statt Versionen kommentarlos verschwinden zu lassen.
+  // Nachbesserung Punkt 5 (trivial): "Version(en)" war keine echte Singular/
+  // Plural-Behandlung -- bei genau 1 gedroppter Version stand weiterhin die
+  // Klammer "(en)" da. Dieselbe Technik wie die bereits gefixte
+  // Matrix-Insight-Zeile (1 Version / PDF-Quelle, s.u.).
+  const dropWord = pm.n_versions_dropped === 1 ? 'weitere Version' : 'weitere Versionen';
   const dropNote = (pm.n_versions_dropped || 0) > 0
-    ? ` · ${pm.n_versions_dropped} weitere Version(en) mit Eval-Daten nicht gezeigt (Top-15-Deckelung, min. n≥3 je Version — die neueste immer dabei).`
+    ? ` · ${pm.n_versions_dropped} ${dropWord} mit Eval-Daten nicht gezeigt (Top-15-Deckelung, min. n≥3 je Version — die neueste immer dabei).`
     : '';
   // Till-Live-Befund 2026-07-16 (Punkt 0, Minor): Singular/Plural -- bei
   // eval_version 4.3 (1 Pipeline-Version) stand hier "1 Versionen". Dieselbe

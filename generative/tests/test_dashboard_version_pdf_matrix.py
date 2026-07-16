@@ -705,6 +705,15 @@ def test_html_pair_matrix_shows_version_cap_footnote():
     assert "nicht gezeigt" in block
 
 
+def test_html_pair_matrix_cap_footnote_singular_plural():
+    """Nachbesserung Punkt 5 (trivial): 'weitere Version(en)' war keine echte
+    Singular/Plural-Behandlung -- bei genau 1 uebrig gebliebenen Version stand
+    weiterhin die Klammer "(en)" da. Dieselbe Technik wie die bereits gefixte
+    Matrix-Insight-Zeile (test_pairmatrix_insight_singular_version_and_pdf_source)."""
+    block = _pairmatrix_js_block()
+    assert "n_versions_dropped === 1 ? 'weitere Version' : 'weitere Versionen'" in block
+
+
 def test_html_pair_matrix_table_has_dedicated_scroll_wrapper():
     """Till-Live-Befund am gemergten #305: die Matrix (16 Spalten, ~1500px
     Mindestbreite via nowrap/min-width) war oberhalb des 1200px-Breakpoints
