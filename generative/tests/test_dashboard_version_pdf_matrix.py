@@ -775,3 +775,52 @@ def test_pairmatrix_insight_singular_version_and_pdf_source():
     block = _pairmatrix_js_block()
     assert "versions.length === 1 ? 'Version' : 'Versionen'" in block
     assert "pdfs.length === 1 ? 'PDF-Quelle' : 'PDF-Quellen'" in block
+
+
+# ── Nachbesserung Punkt 1 (4 externe Reviews nach PR #312, UX konvergent) ──
+# Der pauschale `thead th`-Reset oben (Punkt 0) traf auch th:first-child
+# ("Quell-PDF") -- beim Horizontal-Scroll scrollte die Kopfzelle mit dem
+# Rest des Headers weg, waehrend die per td:first-child gepinnte PDF-Namen-
+# Spalte im tbody stehen blieb: der jeweils linkeste sichtbare Versions-
+# Header landete optisch UEBER der gepinnten Spalte (Beleg:
+# C:/tmp/ux-review-312/desktop/a04-matrix-41-light-scroll400.png).
+
+
+def test_html_pair_matrix_thead_reset_excludes_first_child():
+    """Der position:static-Reset darf th:first-child NICHT mehr treffen --
+    sonst verliert die "Quell-PDF"-Kopfzelle ihre Sticky-Left-Positionierung
+    und scrollt mit den Versions-Headern weg."""
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    css_start = html.index("<style>")
+    css_end = html.index("</style>")
+    css = html[css_start:css_end]
+    reset_start = css.index(".table-wrap.pm-scroll table.cmp thead th:not(:first-child)")
+    reset_block = css[reset_start : reset_start + 220]
+    assert "position: static" in reset_block
+    assert "box-shadow: none" in reset_block
+    assert "border-bottom: 1px solid var(--hair)" in reset_block
+
+
+def test_html_pair_matrix_thead_first_child_stays_sticky_left():
+    """Fix: eigene Regel pinnt die "Quell-PDF"-Kopfzelle links -- top:auto
+    hebt das top:49px der >=1201px-Media-Query-Regel (Zeile ~495) explizit
+    auf, z-index haelt sie ueber den (jetzt statischen) Versions-Headern und
+    der generischen th:first-child/td:first-child-Regel (z-index 2)."""
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    css_start = html.index("<style>")
+    css_end = html.index("</style>")
+    css = html[css_start:css_end]
+    rule_start = css.index(".table-wrap.pm-scroll table.cmp thead th:first-child")
+    rule_block = css[rule_start : rule_start + 280]
+    assert "position: sticky" in rule_block
+    assert "left: 0" in rule_block
+    assert "top: auto" in rule_block
+    assert "background: var(--bg-card)" in rule_block
+    import re
+
+    z = re.search(r"z-index:\s*(\d+)", rule_block)
+    assert z is not None and int(z.group(1)) > 2

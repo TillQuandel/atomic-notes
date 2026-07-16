@@ -546,14 +546,36 @@ table.cmp td.dim { color: var(--ink-3); }
    Rand-Ersatz-Regeln (border-bottom:0 + box-shadow statt Border) explizit
    zuruecksetzen -- Spezifitaet (0,3,3) schlaegt die Media-Query-Regel (0,1,3)
    unabhaengig von der Regel-Reihenfolge. */
-.table-wrap.pm-scroll table.cmp thead th {
+.table-wrap.pm-scroll table.cmp thead th:not(:first-child) {
   position: static;
+  box-shadow: none;
+  border-bottom: 1px solid var(--hair);
+}
+/* Nachbesserung Punkt 1 (UX-Review 16.07, Beleg a04-matrix-41-light-scroll400.png):
+   thead th:first-child ("Quell-PDF") darf NICHT mit auf position:static
+   zurueckgesetzt werden wie die uebrigen Versions-Header oben -- sonst
+   scrollt es beim Horizontal-Scroll mit dem restlichen Header weg, waehrend
+   die per .table-wrap.pm-scroll td:first-child (unten) links-gepinnte
+   PDF-Namen-Spalte im tbody stehen bleibt: der gerade sichtbare Versions-
+   Header landet dann optisch UEBER der gepinnten Spalte. Fix: eigene
+   Sticky-Left-Regel fuer die Header-Zelle -- top:auto hebt das top:49px der
+   Media-Query-Regel (Zeile ~495) explizit auf; z-index 3 > die generische
+   th:first-child/td:first-child-Regel (2, s.u.) und > die unbepinnten
+   Versions-Header (position:static, kein eigener Stacking-Layer). */
+.table-wrap.pm-scroll table.cmp thead th:first-child {
+  position: sticky;
+  left: 0;
+  top: auto;
+  z-index: 3;
+  background: var(--bg-card);
   box-shadow: none;
   border-bottom: 1px solid var(--hair);
 }
 /* Erste Spalte (PDF-Namen) beim Horizontal-Scroll fixiert — opaker
    Card-Hintergrund, sonst schiebt sich der Zellinhalt beim Scrollen
-   sichtbar darunter durch. */
+   sichtbar darunter durch. Fuer die thead-Zelle gilt die dedizierte Regel
+   oben (hoehere Spezifitaet); diese Regel bleibt fuer sie inhaltlich
+   deckungsgleich, wirkt praktisch nur noch fuer tbody td. */
 .table-wrap.pm-scroll th:first-child,
 .table-wrap.pm-scroll td:first-child { position: sticky; left: 0; background: var(--bg-card); z-index: 2; }
 /* Die Zebra-/Hover-Overlays von table.cmp sind semi-transparent (rgba) —
