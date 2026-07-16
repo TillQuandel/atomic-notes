@@ -339,6 +339,42 @@ def _pdf_matches(filter_value: str | None, *candidates: str | None) -> bool:
 _UNNAMED = "(unbenannt)"
 
 
+# Belegte Drift-Aliase: Roh-Strings, die trotz Autor-Jahr-Slug-Logik (oben)
+# NICHT automatisch auf denselben Schlüssel fallen, weil die Bestandsdaten
+# eine abweichende Segmentzahl/Wortwahl für dieselbe Quelle tragen (PR
+# „pdf_key-Kanonisierung", U6-Befund UX-Review + B3-Befund Statistiker-Abnahme
+# PR #305). Jeder Eintrag ist mit einem DB-Beleg aus `atomic_analytics.db`/
+# `quality_history.jsonl` dokumentiert (PR-Body) — kein geratener Merge zweier
+# echter Quellen (Prinzip „bei Unsicherheit nicht zusammenführen").
+_PDF_GROUP_ALIASES: dict[str, str] = {
+    # "Bates - Information Behavior.pdf" (note_evals.pdf ab v0.3.143, bestätigt
+    # in eval_version 4.1 UND 4.3) hat "2017" verloren -> eigener Slug
+    # "bates-information-behavior" statt "bates-2017". Beleg: thematische
+    # Note-Überschneidung mit der bates-2017-Gruppe (Berrypicking,
+    # Least-Effort-Prinzip, Follow-the-Information/Bates' Disciplinary
+    # Heuristic, Geschichte des Feldes — deckungsgleich mit `_PDF_META["bates"]`).
+    "bates-information-behavior": "bates-2017",
+    # Bare "Bates" (note_evals.pdf, eval_version 1.3, Testlauf
+    # test-20260519-120000) — derselbe run_id trägt in pipeline_runs
+    # pdf_source="Bates - 2017 - Information Behavior.pdf" (DB-Join, kein
+    # Konjekt aus Dateinamen-Ähnlichkeit).
+    "bates": "bates-2017",
+    # "rl-information-seeking-quantum.pdf" (v0.3.34) ist ein früher interner
+    # Dateiname derselben Quelle wie "Jaiswal - 2020 - Reinforcement
+    # Learning-driven Information Seeking A Quantum Probabilistic....pdf"
+    # (v0.3.39). Beleg: identischer Note-Titel "Information Seeking als
+    # Reinforcement-Learning-Task.md" in beiden Runs + explizite Zitation
+    # "Jaiswal et al. 2020" im rl-...-Lauf selbst.
+    "rl-information-seeking-quantum": "jaiswal-2020",
+    # "cobaltite-paper.pdf" (v0.3.51/54) vs. "Dhanasekhar - 2025 - Coexistence
+    # of magnetic and dielectric glassy states in alternating kagome and.pdf"
+    # (v0.3.56/58). Beleg: identischer Note-Titel "AC magnetization
+    # studies.md" in beiden Runs, durchgängig dieselbe Verbindung
+    # (LuBaCo4O7/Kinetic Arrest/Dielectric-Magnetic Glassy State).
+    "cobaltite-paper": "dhanasekhar-2025",
+}
+
+
 def _pdf_group_key(raw: str | None) -> str:
     """Kanonischer Gruppen-Schlüssel für eine PDF-Quelle (SSoT mit dem PDF-Filter/
     -Dropdown, #202/#194).
@@ -350,8 +386,13 @@ def _pdf_group_key(raw: str | None) -> str:
     Segment-Präfix-Vergleich (`_pdf_matches`), der eine Autor-Variante
     transitiv über zwei Jahrgänge brücken würde. Kebab-Keys ohne „ - "-Struktur
     (Log-Namensraum, z. B. „test-short") bleiben vollständig erhalten.
+
+    Anschließend `_PDF_GROUP_ALIASES`-Lookup (s. oben): belegte Drift-Varianten,
+    die die Autor-Jahr-Slug-Logik NICHT erkennt (abweichende Segmentzahl/
+    Wortwahl derselben Quelle), fallen auf ihren kanonischen Key.
     """
-    return _pdf_slug(_pdf_filter_key(str(raw or "").replace(".pdf", "").strip()))
+    key = _pdf_slug(_pdf_filter_key(str(raw or "").replace(".pdf", "").strip()))
+    return _PDF_GROUP_ALIASES.get(key, key)
 
 
 def _dedupe_pdf_options(labels) -> list[str]:

@@ -15,7 +15,7 @@ Präfix-Matching in beide Richtungen (``_pdf_matches``).
 
 from __future__ import annotations
 
-from generative.eval_dashboard import _dedupe_pdf_options, _pdf_matches, _pdf_slug
+from generative.eval_dashboard import _dedupe_pdf_options, _pdf_group_key, _pdf_matches, _pdf_slug
 
 # ── _pdf_slug: Kanonisierung über Namensräume ───────────────────────────────
 
@@ -98,6 +98,23 @@ def test_dedupe_collapses_kebab_variant_into_full_title():
     assert opts == ["Bates - 2017 - Information Behavior"]
 
 
+def test_dedupe_collapses_all_three_bates_drift_variants():
+    # Realer Bestand (U6-Befund UX-Review 2026-07-15, PR pdf_key-Kanonisierung):
+    # bare "Bates" (eval_version 1.3, Testlauf test-20260519-120000), Kebab-Key
+    # und Volltitel waren schon vor diesem Fix eine Gruppe -- NEU dazu kommt die
+    # "2017"-Missing-Year-Drift-Variante (note_evals.pdf ab v0.3.143/eval 4.3).
+    # Vorher bis zu 3 "Bates"-Eintraege nebeneinander im Dropdown, jetzt einer.
+    opts = _dedupe_pdf_options(
+        [
+            "Bates",
+            "bates-2017.pdf",
+            "Bates - 2017 - Information Behavior.pdf",
+            "Bates - Information Behavior.pdf",
+        ]
+    )
+    assert opts == ["Bates - 2017 - Information Behavior"]
+
+
 def test_dedupe_keeps_distinct_years_separate():
     # Regressions-Wächter: Kanonisierung darf verschiedene Quellen nicht mischen.
     opts = _dedupe_pdf_options(
@@ -110,6 +127,57 @@ def test_dedupe_keeps_distinct_years_separate():
         "Beutelspacher - 2014 - Erfassung von Informationskompetenz",
         "Beutelspacher - 2022 - Information Literacy as a Fundamental Skill",
     ]
+
+
+# ── _pdf_group_key: belegte Drift-Aliase (PR pdf_key-Kanonisierung) ─────────
+# Autor-Jahr-Slug (_pdf_filter_key) kollabiert nur Strukturvarianten mit
+# gleicher Segmentzahl -- eine Quelle, deren Rohstring das Jahr verliert
+# ("Bates - Information Behavior.pdf" statt "... - 2017 - ..."), bekommt sonst
+# einen eigenen Slug. Jeder Alias unten ist mit einem DB-Beleg dokumentiert
+# (run_id-Join bzw. exakte Note-Titel-Überschneidung, s. PR-Body).
+
+
+def test_group_key_collapses_missing_year_drift_variant():
+    # "Bates - Information Behavior.pdf" (note_evals.pdf ab v0.3.143, bestätigt
+    # in eval_version 4.1 UND 4.3) hat "2017" verloren -> eigener Slug
+    # "bates-information-behavior" statt "bates-2017". B3-Befund (Opus-
+    # Statistiker-Abnahme PR #305): dadurch verlor _version_pair_compare Bates
+    # aus common_pdfs für jedes v0.3.143-vs-alt-Paar.
+    assert _pdf_group_key("Bates - Information Behavior.pdf") == _pdf_group_key(
+        "Bates - 2017 - Information Behavior.pdf"
+    )
+    assert _pdf_group_key("Bates - Information Behavior.pdf") == "bates-2017"
+
+
+def test_group_key_collapses_bare_author_drift_variant():
+    # Bare "Bates" (note_evals.pdf, eval_version 1.3, Testlauf
+    # test-20260519-120000) -- derselbe run_id trägt in pipeline_runs
+    # pdf_source="Bates - 2017 - Information Behavior.pdf" (DB-Join-Beleg,
+    # kein Konjekt).
+    assert _pdf_group_key("Bates") == "bates-2017"
+
+
+def test_group_key_keeps_unrelated_similar_author_separate():
+    # Regressions-Wächter: der Alias darf keine andere Quelle einziehen --
+    # "Batesworth" ist kein Präfix-/Alias-Treffer für "Bates".
+    assert _pdf_group_key("Batesworth - 2020 - Something.pdf") != "bates-2017"
+
+
+def test_group_key_collapses_rl_information_seeking_quantum_alias():
+    # "rl-information-seeking-quantum.pdf" (v0.3.34) ist ein früher interner
+    # Dateiname derselben Quelle wie "Jaiswal - 2020 - Reinforcement
+    # Learning-driven Information Seeking A Quantum Probabilistic....pdf"
+    # (v0.3.39): identischer Note-Titel "Information Seeking als
+    # Reinforcement-Learning-Task.md" in beiden Runs (DB-Beleg, s. PR-Body).
+    assert _pdf_group_key("rl-information-seeking-quantum.pdf") == "jaiswal-2020"
+
+
+def test_group_key_collapses_cobaltite_paper_alias():
+    # "cobaltite-paper.pdf" (v0.3.51/54) vs. "Dhanasekhar - 2025 - Coexistence
+    # of magnetic and dielectric glassy states in alternating kagome and.pdf"
+    # (v0.3.56/58): identischer Note-Titel "AC magnetization studies.md" in
+    # beiden Runs (DB-Beleg, s. PR-Body).
+    assert _pdf_group_key("cobaltite-paper.pdf") == "dhanasekhar-2025"
 
 
 # ── build_data-Integration: Filter-Kaskade überbrückt Label-Drift ───────────
