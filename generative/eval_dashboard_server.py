@@ -956,9 +956,26 @@ def build_data(
     pair_matrix["excluded_archived_versions"] = _excluded_archived
     pair_matrix["eval_version"] = eval_version
 
+    # Nachbesserung Punkt 4 (Statistiker-Empfehlung 2026-07-16): zeigt die
+    # aktive eval_version AUSSCHLIESSLICH Re-Eval-Runs (reeval_baseline.py,
+    # pipeline_runs.pipeline_version=="reeval"), misst sie den Eval-Code-
+    # Stand des Re-Eval-Sweeps, NICHT die Erzeugungsversion der Notes
+    # (Produktionsmuster: eval_version 4.3 haengt komplett an v0.3.144, das
+    # war aber der Code-Stand beim Re-Eval-Lauf). Basis: `_matrix_base_rows`
+    # (aktive eval_version, VOR Einzelwert-Filtern -- dieselbe "ungefiltert"-
+    # Konvention wie die Matrix selbst).
+    try:
+        from generative import db as _db_reeval
+
+        _all_pipeline_runs = _db_reeval.query_pipeline_runs()
+    except Exception:
+        _all_pipeline_runs = []
+    is_reeval_series = D._is_reeval_series(_matrix_base_rows, _all_pipeline_runs)
+
     return {
         "generated_at": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
         "eval_version": eval_version,
+        "is_reeval_series": is_reeval_series,
         "available_eval_versions": [{"version": v, "n": _eval_ver_counts.get(v, 0)} for v in available_versions],
         "warnings": warnings,
         "kpis": D._calc_kpis(log_data, all_log_runs, quality_rows, token_runs),

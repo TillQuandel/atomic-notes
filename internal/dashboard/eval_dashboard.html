@@ -1133,6 +1133,10 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     </div>
     <p class="insight" id="ins-pairmatrix"></p>
     <div class="insight" id="pm-archived-note" style="border-left-color:var(--ink-4)" hidden></div>
+    <!-- Nachbesserung Punkt 4 (Statistiker-Empfehlung 16.07): zeigt die aktive
+         eval_version AUSSCHLIESSLICH Re-Eval-Runs (reeval_baseline.py), misst
+         sie den Eval-Code-Stand, nicht die Erzeugungsversion der Notes. -->
+    <div class="insight" id="pm-reeval-note" style="border-left-color:var(--amber)" hidden></div>
 
     <!-- pm-scroll: eigener, IMMER aktiver Scroll-Container (16 Spalten passen
          in keiner Viewport-Breite — s. CSS-Kommentar an .table-wrap.pm-scroll) -->
@@ -2091,6 +2095,18 @@ function renderPairMatrix(d) {
         `bestehender Archiv-Mechanismus #193): ${excluded.map(_escHTML).join(', ')}.`
       : '';
     archNote.hidden = excluded.length === 0;
+  }
+
+  // Nachbesserung Punkt 4 (Statistiker-Empfehlung 16.07): eval_version zeigt
+  // AUSSCHLIESSLICH Re-Eval-Runs (reeval_baseline.py, is_reeval_series vom
+  // Server) -- die Versions-Spalten der Matrix sind dann der Eval-Code-Stand
+  // des Re-Eval-Sweeps, NICHT die Erzeugungsversion der Notes.
+  const reevalNote = document.getElementById('pm-reeval-note');
+  if (reevalNote) {
+    reevalNote.textContent = d.is_reeval_series
+      ? 'Re-Eval-Serie: Werte messen den Eval-Stand, nicht die Erzeugungsversion der Notes.'
+      : '';
+    reevalNote.hidden = !d.is_reeval_series;
   }
 
   const thead = document.getElementById('pm-thead');
