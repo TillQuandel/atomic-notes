@@ -723,3 +723,55 @@ def test_html_pair_matrix_table_has_dedicated_scroll_wrapper():
     # CSS: Regel mit hoeherer Spezifitaet als die >=1200px-Freigabe
     # (.table-wrap.pm-scroll schlaegt .table-wrap in der Media-Query)
     assert ".table-wrap.pm-scroll" in html
+
+
+# ── Punkt 0 (Till-Live-Befund 2026-07-16): Matrix-Rendering kaputt ─────────
+# Repro auf dem isolierten Testserver (Live-Daten read-only kopiert, eval_
+# version 4.3 = 6 PDFs x 1 Version v0.3.144): #pm-thead rendert leer, der
+# Versions-Header "v0.3.144" erscheint stattdessen ~49px tiefer, ueberlappt
+# Zeile 1 (Bates) -- Screenshot C:/tmp/buendel-verify/00-repro-vor-fix-4.3.png,
+# Computed-Style-Diagnose bestaetigt position:sticky/top:49px auf dem
+# th UND vmax-Rect-Ueberlappung mit der ersten tbody-Zeile. Ursache: die
+# >=1201px-Sticky-Regel `table.cmp thead th` (#203 P3) trifft ueber die
+# gemeinsame .cmp-Klasse auch table.pm-matrix -- der Kommentar dort
+# ("entfaellt fuer die Matrix ohnehin") war falsch, da sticky bereits ohne
+# jeden Scroll den Ausgangszustand um den top-Offset verschiebt.
+
+
+def test_html_pair_matrix_resets_sticky_thead_inside_scroll_wrapper():
+    """Fix: `.table-wrap.pm-scroll table.cmp thead th` (Spezifitaet 0,3,3)
+    setzt position/box-shadow/border-bottom explizit zurueck -- schlaegt die
+    Media-Query-Regel `table.cmp thead th` (Spezifitaet 0,1,3) unabhaengig
+    von der Regel-Reihenfolge im Stylesheet."""
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    css_start = html.index("<style>")
+    css_end = html.index("</style>")
+    css = html[css_start:css_end]
+    reset_start = css.index(".table-wrap.pm-scroll table.cmp thead th")
+    reset_block = css[reset_start : reset_start + 200]
+    assert "position: static" in reset_block
+    assert "box-shadow: none" in reset_block
+    assert "border-bottom: 1px solid var(--hair)" in reset_block
+
+
+def test_html_pair_matrix_table_does_not_force_full_width():
+    """Fix: `table.cmp { width:100% }` (Bestandsregel) stretcht bei wenigen
+    Versionen die einzige Datenspalte auf die gesamte Restbreite (riesige
+    Leerflaeche, Versions-Header klebt am rechten Rand). `.pm-matrix`
+    schrumpft stattdessen auf Inhaltsbreite -- Datenspalten ruecken links
+    neben die PDF-Spalte."""
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    assert "table.cmp.pm-matrix { width: auto; }" in html
+
+
+def test_pairmatrix_insight_singular_version_and_pdf_source():
+    """Minor-Fund: eval_version 4.3 (1 Pipeline-Version) zeigte '1 Versionen'
+    statt '1 Version'. Dieselbe Bugklasse fuer 'PDF-Quelle(n)' gleich mit
+    gefixt (identische Zeile/Technik)."""
+    block = _pairmatrix_js_block()
+    assert "versions.length === 1 ? 'Version' : 'Versionen'" in block
+    assert "pdfs.length === 1 ? 'PDF-Quelle' : 'PDF-Quellen'" in block

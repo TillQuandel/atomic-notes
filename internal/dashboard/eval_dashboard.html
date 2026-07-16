@@ -521,6 +521,24 @@ table.cmp td.dim { color: var(--ink-3); }
    entfaellt fuer die Matrix ohnehin (Scroll-Container waere sein
    Containing-Block, #203-P3-Begruendung). */
 .table-wrap.pm-scroll { overflow-x: auto; overflow-y: hidden; }
+/* Till-Live-Befund 2026-07-16 (Punkt 0): die >=1201px-Sticky-Regel oben
+   (`table.cmp thead th`, Zeile ~482) trifft über die gemeinsame .cmp-Klasse
+   AUCH die Matrix-Tabelle -- der Kommentar oben ("sticky-thead entfaellt fuer
+   die Matrix ohnehin") war ein Trugschluss: der Sticky-Offset (top:49px)
+   verschiebt den th-Kasten permanent 49px nach unten, auch OHNE dass je
+   gescrollt wird (die statische Ausgangsposition verletzt die top-Constraint
+   sofort, position:sticky greift dann unabhaengig vom Scroll-Zustand) --
+   sichtbar als leeres thead + ein in Zeile 1 der Kopfzeile ueberlappender
+   Versions-Header (Repro: C:/tmp/buendel-verify/00-repro-vor-fix-4.3.png).
+   Fix: fuer Tabellen im pm-scroll-Wrapper Sticky-Positionierung + ihre
+   Rand-Ersatz-Regeln (border-bottom:0 + box-shadow statt Border) explizit
+   zuruecksetzen -- Spezifitaet (0,3,3) schlaegt die Media-Query-Regel (0,1,3)
+   unabhaengig von der Regel-Reihenfolge. */
+.table-wrap.pm-scroll table.cmp thead th {
+  position: static;
+  box-shadow: none;
+  border-bottom: 1px solid var(--hair);
+}
 /* Erste Spalte (PDF-Namen) beim Horizontal-Scroll fixiert — opaker
    Card-Hintergrund, sonst schiebt sich der Zellinhalt beim Scrollen
    sichtbar darunter durch. */
@@ -536,6 +554,17 @@ table.cmp td.dim { color: var(--ink-3); }
 .table-wrap.pm-scroll table.cmp tbody tr:hover td:first-child { background: var(--bg-card); }
 table.pm-matrix td, table.pm-matrix th { padding: 9px 12px; }
 table.pm-matrix td.pdf { white-space: nowrap; }
+/* Till-Live-Befund 2026-07-16 (Punkt 0): `table.cmp { width:100% }` (Zeile
+   ~490) galt bislang auch fuer die Matrix -- bei wenigen Versionen (z. B.
+   1 Spalte) stretcht der Browser die einzige Datenspalte auf fast die
+   gesamte Restbreite: riesige Leerflaeche zwischen PDF-Spalte und Werten,
+   der Versions-Header (text-align:right) klebt dadurch am rechten
+   Tabellenrand. `width:auto` laesst die Matrix auf ihre Inhaltsbreite
+   schrumpfen -- Datenspalten ruecken direkt neben die PDF-Spalte. Bei vielen
+   Versionen (16 Spalten, ~1500px) macht `width:auto` KEINEN Unterschied: die
+   Tabelle ist ohnehin breiter als der Wrapper und `.pm-scroll` scrollt sie
+   wie bisher (kein width:100%-Bedarf fuer den Scroll-Mechanismus). */
+table.cmp.pm-matrix { width: auto; }
 .pm-cell { text-align: center; min-width: 74px; line-height: 1.35; }
 .pm-cell .pm-cov { display: block; font-size: 11px; color: var(--ink-3); }
 .pm-cell .pm-n { display: block; font-size: 9.5px; color: var(--ink-4); margin-top: 1px; }
@@ -1946,8 +1975,14 @@ function renderPairMatrix(d) {
   const dropNote = (pm.n_versions_dropped || 0) > 0
     ? ` · ${pm.n_versions_dropped} weitere Version(en) mit Eval-Daten nicht gezeigt (Top-15-Deckelung, min. n≥3 je Version — die neueste immer dabei).`
     : '';
+  // Till-Live-Befund 2026-07-16 (Punkt 0, Minor): Singular/Plural -- bei
+  // eval_version 4.3 (1 Pipeline-Version) stand hier "1 Versionen". Dieselbe
+  // Bugklasse trifft "PDF-Quellen" bei einer gefilterten Einzel-PDF-Ansicht
+  // gleich mit -- selbe Zeile, selbe Technik, hier direkt mitgefixt.
+  const pdfWord = pdfs.length === 1 ? 'PDF-Quelle' : 'PDF-Quellen';
+  const verWord = versions.length === 1 ? 'Version' : 'Versionen';
   _setInsight('ins-pairmatrix',
-    `${pdfs.length} PDF-Quellen × ${versions.length} Versionen${dropNote ? '' : '.'}${dropNote} Zellwert = Median über deduplizierte Notes ` +
+    `${pdfs.length} ${pdfWord} × ${versions.length} ${verWord}${dropNote ? '' : '.'}${dropNote} Zellwert = Median über deduplizierte Notes ` +
     `(neueste Zeile je Note, keine Pseudoreplikation) — Fehlerquote oben, Belegrate darunter, n je Zelle. ` +
     `<span class="caveat">Zellen mit n&lt;3 sind gedimmt, aber nicht versteckt — Tooltip zeigt Min–Max-Spanne.</span>`);
 
