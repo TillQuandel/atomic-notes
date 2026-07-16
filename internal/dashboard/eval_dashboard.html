@@ -1684,16 +1684,24 @@ function renderKpis(kpis, thresh, kpiTrend) {
 function _autoUnit(values, unit) {
   // Wählt sinnvolle Einheit + Formatierung dynamisch nach Wertebereich
   const max = Math.max(...values.filter(v=>v!=null));
+  // #292-LOW (Punkt 7, Matrix-Rendering-Fix+Politur-Bündel): jede fmt-Funktion
+  // nimmt jetzt einen optionalen Nachkommastellen-Parameter `d` (Default =
+  // bisheriges hartkodiertes Verhalten, s. je Zweig) -- die Eskalations-
+  // Schleife in _trendChart ruft `au.fmt(v, extra)` statt einer zweiten,
+  // unit-fremden Formel. Vorher kollidierte diese zweite Formel
+  // (`_fmtDE(v, extra) + au.u`) mit der Basis-Formatierung von "%" (die GAR
+  // keinen Suffix anhaengt) und "h" (< 1h zeigt "N min", nicht Stunden) --
+  // ein sichtbarer Inkonsistenz-/Einheiten-Sprung erst BEI Kollision.
   // Explizit übergebene Einheiten: behalte sie, formatiere nur den Wert
-  if (unit === '%')  return { u: '%',   fmt: v => _fmtDE(v) };
-  if (unit === 'h')  return { u: 'h',   fmt: v => v < 1 ? `${Math.round(v*60)} min` : _fmtDE(v)+' h' };
-  if (unit === 'M')  return { u: 'M',   fmt: v => v < 0.1 ? `${Math.round(v*1000)} k` : _fmtDE(v, 2)+' M' };
-  if (unit === 'k')  return { u: 'k',   fmt: v => v >= 1000 ? `${_fmtDE(v/1000)} M` : Math.round(v)+' k' };
+  if (unit === '%')  return { u: '%',   fmt: (v, d) => `${_fmtDE(v, d ?? 1)}%` };
+  if (unit === 'h')  return { u: 'h',   fmt: (v, d) => v < 1 ? `${_fmtDE(v*60, d ?? 0)} min` : `${_fmtDE(v, d ?? 1)} h` };
+  if (unit === 'M')  return { u: 'M',   fmt: (v, d) => v < 0.1 ? `${Math.round(v*1000)} k` : `${_fmtDE(v, d ?? 2)} M` };
+  if (unit === 'k')  return { u: 'k',   fmt: (v, d) => v >= 1000 ? `${_fmtDE(v/1000, d)} M` : `${Math.round(v)} k` };
   // Kein unit: auto-scale nach Größenordnung
-  if (max >= 1e6)    return { u: 'M',   fmt: v => _fmtDE(v/1e6, 2)+' M' };
-  if (max >= 1000)   return { u: 'k',   fmt: v => _fmtDE(v/1000)+' k' };
-  if (max < 10)      return { u: unit||'', fmt: v => _fmtDE(v, 2)+(unit||'') };
-  return               { u: unit||'', fmt: v => _fmtDE(v)+(unit||'') };
+  if (max >= 1e6)    return { u: 'M',   fmt: (v, d) => `${_fmtDE(v/1e6, d ?? 2)} M` };
+  if (max >= 1000)   return { u: 'k',   fmt: (v, d) => `${_fmtDE(v/1000, d ?? 1)} k` };
+  if (max < 10)      return { u: unit||'', fmt: (v, d) => `${_fmtDE(v, d ?? 2)}${unit||''}` };
+  return               { u: unit||'', fmt: (v, d) => `${_fmtDE(v, d ?? 1)}${unit||''}` };
 }
 
 function _trendChart(points, versions, color, unit) {
@@ -1779,10 +1787,17 @@ function _trendChart(points, versions, color, unit) {
   // Spannen reicht die Standard-Nachkommastellenzahl u.U. nicht zum
   // Unterscheiden — dann Nachkommastellen schrittweise erhoehen, bis alle 3
   // Labels sich unterscheiden (Cap bei 6 Nachkommastellen).
+  // #292-LOW: Eskalation ruft au.fmt(v, extra) -- dieselbe Formatierungs-
+  // funktion wie die Basis-Anzeige, nur mit mehr Nachkommastellen. Vorher
+  // stand hier eine zweite, unit-fremde Formel (`_fmtDE(v, extra) + au.u`),
+  // die nur zufaellig zu $/generischen Einheiten passte, bei "%" den
+  // fehlenden Suffix "reparierte" (Inkonsistenz zur Basis-Anzeige direkt
+  // daneben) und bei "h" den Sprung von "N min" auf rohe Stunden-Dezimalen
+  // erzwang.
   const hairVals = [0, 0.5, 1].map(t => min + t*span);
   let hairLabels = hairVals.map(v => au.fmt(v));
   for (let extra = 2; new Set(hairLabels).size < hairLabels.length && extra <= 6; extra++) {
-    hairLabels = hairVals.map(v => _fmtDE(v, extra) + (au.u || ''));
+    hairLabels = hairVals.map(v => au.fmt(v, extra));
   }
   const hairLines = [0, 0.5, 1].map((t, i) => {
     const y = (padT + ih - t*ih).toFixed(1);
