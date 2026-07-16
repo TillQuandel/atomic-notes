@@ -46,7 +46,9 @@ logs a `[n/7]` banner:
 7. **Vault writer** — writes notes (or, with `--dry-run`, previews a diff).
 
 Post-pipeline (optional, logged as `[8/8]`): **quality eval** — faithfulness eval
-that can be deferred to `reeval_baseline.py`.
+that can be deferred to `reeval_baseline.py`. Full methodology, metric
+definitions, cache/versioning behavior, and known limitations (maintainer-facing,
+German): [docs/evaluation.md](docs/evaluation.md).
 
 Optional export: `--export-format` renders each note (plus a combined document)
 to `json`, `portable-md`, `obsidian-md`, or pandoc/typst-based formats
