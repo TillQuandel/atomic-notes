@@ -175,9 +175,38 @@ body.collapsed .nav-item .nav-label { display: none; }
 .theme-toggle:hover { color: var(--ink-1); border-color: var(--hair-strong); }
 .theme-toggle .tdot { width: 8px; height: 8px; border-radius: 50%; background: var(--ink-3); }
 body.collapsed .side-foot { padding: 14px 10px; align-items: center; }
-body.collapsed .side-foot > *:not(.theme-toggle) { display: none; }
+body.collapsed .side-foot > *:not(.theme-toggle):not(.sf-collapsed-hint) { display: none; }
 body.collapsed .theme-toggle > *:not(.tdot) { display: none; }
 body.collapsed .theme-toggle { padding: 6px; }
+
+/* Till-Entscheid 2026-07-16: das ↻-Hover-Icon oben rechts in der Filterbar-
+   Zeile entfaellt (SSoT fuer den Zeitstempel ist die Sidebar). Bei
+   eingeklappter Sidebar sind die vollen Meta-Zeilen (Zeit/eval/Refresh)
+   oben aber versteckt -- Ersatz hier: kompaktes ↻-Symbol im Fuss, zentriert
+   wie die collapsed Nav-Icons, mit Hover/Focus-Tooltip (gleiche hint/hint-
+   pop-Mechanik). Tooltip absichtlich linksbuendig statt zentriert +
+   .side auf overflow:visible -- die 52px schmale Sidebar wuerde einen
+   zentrierten Tooltip sonst links am Fensterrand UND am eigenen
+   overflow:hidden abschneiden; vertikal bleibt die Standardrichtung
+   (oeffnet nach oben) unveraendert richtig, weil der Fuss ganz unten sitzt.
+   z-index 2 zusaetzlich noetig -- kein reines Clipping-Problem, per
+   Playwright-Screenshot-Vergleich (mit/ohne diese Zeile) gefunden: .side
+   (position:sticky) und .main (position:relative) sind beides "positionierte
+   Nachfahren mit Stack-Level 0" von .app -- ohne eigenen z-index gewinnt bei
+   Ties die DOM-Reihenfolge, und .main steht NACH .side im Markup. Der
+   .hint-pop-eigene z-index:30 wirkt nur INNERHALB von .side's Stacking-
+   Context und kann das nicht aufholen -- ohne diese Zeile ueberdeckten die
+   KPI-Kacheln in .main den ausserhalb der 52px liegenden Tooltip-Teil
+   (elementFromPoint zeigt hier wegen .hint-pop { pointer-events:none }
+   IMMER die Kachel, egal ob der Tooltip visuell obenauf liegt -- Nachweis
+   lief daher rein visuell per Screenshot, nicht per Hit-Test).
+   2 reicht (kleiner als .filterbar z-index:10, verhindert Kollision dort). */
+body.collapsed .side { overflow: visible; z-index: 2; }
+.sf-collapsed-hint { display: none; }
+body.collapsed .sf-collapsed-hint {
+  display: block; font-size: 15px; line-height: 1; color: var(--ink-3);
+}
+body.collapsed .sf-collapsed-hint .hint-pop { left: 0; right: auto; transform: none; }
 
 /* ── Main ──────────────────────────────────────────────────────── */
 .main { min-width: 0; min-height: 100vh; position: relative; }
@@ -394,15 +423,9 @@ body.collapsed .theme-toggle { padding: 6px; }
 .row .panel:last-child .hint-pop,
 table.cmp th:last-child .hint-pop,
 table.cmp th:nth-last-child(-n+2) .hint-pop,
-#calib-strip > div:last-child .hint-pop,
-.updated.hint .hint-pop {
+#calib-strip > div:last-child .hint-pop {
   left: auto; right: 0; transform: none;
 }
-/* .updated sitzt ganz oben in der Filterleiste — ein nach oben oeffnender
-   Tooltip (Standardrichtung oben) wuerde ueber den Viewport-Rand
-   hinausragen, weil darueber kein Platz mehr ist. Hier stattdessen nach
-   unten oeffnen. */
-.updated.hint .hint-pop { bottom: auto; top: calc(100% + 8px); }
 
 /* KPI spark row — außerhalb des kpis-Grid, animiert */
 .spark-row {
@@ -827,6 +850,12 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
   </nav>
 
   <div class="side-foot">
+    <!-- Till-Entscheid 2026-07-16: Ersatz fuer das entfernte ↻-Icon oben in
+         der Filterbar -- per CSS nur sichtbar wenn body.collapsed, zeigt
+         Datenstand/Refresh/eval_version kompakt im Tooltip, weil die vollen
+         Zeilen unten dann versteckt sind (s. body.collapsed .side-foot >
+         *:not(...) oben). -->
+    <span class="sf-collapsed-hint hint" tabindex="0">↻<span class="hint-pop" id="sf-collapsed-info">lädt…</span></span>
     <div id="sf-time">–</div>
     <!-- Punkt 1 (Design-Iteration nach Till-Feedback): das bestehende
          eval_version-Meta-Label wird selbst zum kompakten Inline-Select --
@@ -887,8 +916,11 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
          Feedback -- eine zusaetzliche Filter-Group brach das Einzeilen-
          Layout der Filterbar bereits bei 1440px). Das Eval-Version-Select
          sitzt stattdessen inline am bestehenden Meta-Label in der Sidebar
-         (#sf-ev-select, s. .side-foot unten). -->
-<span class="updated hint" tabindex="0" style="margin-left:auto">↻<span class="hint-pop" id="updated-at">lädt…</span></span>
+         (#sf-ev-select, s. .side-foot unten). Till-Entscheid 2026-07-16: das
+         ↻-Hover-Icon, das hier frueher stand, entfaellt ebenfalls komplett --
+         Zeitstempel/Refresh/eval_version nur noch in der Sidebar (expanded:
+         volle Meta-Zeilen; collapsed: ↻ im Sidebar-Fuss, s.
+         .sf-collapsed-hint dort). -->
   </div>
   <div class="filter-badges" id="filter-badges"></div>
   <div class="empty-banner" id="empty-banner" hidden>
@@ -2970,7 +3002,10 @@ function _renderWithData(d) {
   if (d.all_runs?.length)    _initGlobalRunFilter(d.all_runs);
   const sfTime=document.getElementById('sf-time'); if(sfTime) sfTime.textContent=d.generated_at||'–';
   const footTime=document.getElementById('foot-time'); if(footTime) footTime.textContent=d.generated_at||'–';
-  const updated=document.getElementById('updated-at'); if(updated) updated.textContent='Zuletzt aktualisiert: '+(d.generated_at||'–').slice(11)+' · lädt automatisch alle 15 s neu';
+  // Punkt 1 (Till-Entscheid 2026-07-16): Kopfzeilen-Icon entfernt -- Ziel ist
+  // jetzt ausschliesslich der collapsed Sidebar-Fuss-Tooltip (sf-time oben
+  // bleibt fuer den expanded Zustand unveraendert bestehen, SSoT).
+  const sfCollapsed=document.getElementById('sf-collapsed-info'); if(sfCollapsed) sfCollapsed.textContent='Datenstand: '+(d.generated_at||'–')+' · auto-refresh 15 s · eval '+(d.eval_version||'–');
   // Loading-Skeletons entfernen
   document.querySelectorAll('.chart-body.loading').forEach(el=>el.classList.remove('loading'));
   // #204 P8a: Refresh-Dimmung (Filterwechsel/15s-Poll) wieder aufheben
