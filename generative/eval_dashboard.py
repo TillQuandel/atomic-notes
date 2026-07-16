@@ -768,7 +768,20 @@ def _calc_kpis(
         "total_generated": total_generated,
         "total_accepted": total_accepted,
         "total_merged": total_merged,
-        "total_dropped": sum(r.get("n_dropped", 0) or 0 for r in all_log_runs),
+        # Punkt 6 (D5, Reviews 15.07.): "n_dropped" existiert strukturell NUR
+        # im DB-Fallback-Pfad (eval_dashboard_server.py, pipeline_runs-Tabelle)
+        # -- der primaere Log-Pfad (_read_all_log_runs) baut Zeilen aus
+        # [DRY-RUN]->(Vault|Inbox)-Treffern; verworfene Kandidaten (nie bis
+        # zum Draft gekommen) hinterlassen dort GAR KEINE Zeile und sind somit
+        # nicht ermittelbar, nicht nur zufaellig 0. `.get("n_dropped", 0)`
+        # gab bisher still 0 zurueck -- ununterscheidbar von "wirklich 0". Kein
+        # Log-Run traegt den Key -> None (Client zeigt "–" statt einer Zahl,
+        # die eine Genauigkeit vortaeuscht, die die Quelle nicht hat).
+        "total_dropped": (
+            sum(r.get("n_dropped", 0) or 0 for r in all_log_runs)
+            if any("n_dropped" in r for r in all_log_runs)
+            else None
+        ),
         "total_tokens": total_tokens,
         "total_dur_h": round(total_dur_s / 3600, 1),
         "cur_tokens": cur_tokens,

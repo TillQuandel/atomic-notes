@@ -1886,7 +1886,7 @@ function renderStrip(kpis) {
     cell('Notes generiert', kpis.total_generated||'–', '', '', 'Anzahl aller von der Pipeline erzeugten Draft-Notes, über alle Läufe und Versionen.') +
     cell('Direkt Vault', kpis.total_accepted||'–', '', `/ ${pct} %`, 'Notes, die ohne manuelles Zusammenführen direkt in den Vault übernommen wurden — kumuliert über ALLE Pipeline-Versionen (nicht nur die aktuelle, siehe Kachel „Automatisch akzeptiert" oben).') +
     cell('Merge-Stubs', kpis.total_merged||0, '', '', 'Notes, die nicht neu angelegt, sondern in eine bereits bestehende Vault-Note eingefügt/ergänzt wurden.') +
-    cell('Dropped', kpis.total_dropped||0, '', '', 'Von der Pipeline komplett verworfene Konzept-Kandidaten, die es nicht einmal bis zum Draft geschafft haben. Wird nur gezählt, wenn keine Log-Dateien vorliegen und die SQLite-Datenbank als Fallback dient — sonst 0.') +
+    cell('Dropped', kpis.total_dropped != null ? kpis.total_dropped : '–', '', '', 'Von der Pipeline komplett verworfene Konzept-Kandidaten, die es nicht einmal bis zum Draft geschafft haben. Nur ermittelbar, wenn die SQLite-Datenbank als Fallback dient (pipeline_runs-Tabelle) — Log-Dateien kennen verworfene Kandidaten strukturell nicht (kein Log-Eintrag). „–" heißt „nicht ermittelbar", nicht „0".') +
     // #204 P5: "Laufzeit" hier ist Lifetime (alle Versionen) — Scope-Suffix
     // gegen die Kachel "Laufzeit (aktuell)" oben; Zahl war zudem mit Punkt
     // statt Komma formatiert (Locale-Fund an derselben Stelle mitgefixt).
