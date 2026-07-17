@@ -345,6 +345,7 @@ async def run_per_concept(
     background_context: list[str] | None = None,
     related_mentions: list[str] | None = None,
     current_draft_body: str | None = None,
+    retry_empty: bool = True,
 ) -> AtomicNoteDraft | None:
     """Extrahiere genau eine Note für ein konkretes Konzept aus den relevanten
     Textstellen (gesammelt via pdf_chunker.concept_text_window).
@@ -353,6 +354,14 @@ async def run_per_concept(
 
     Bei Self-Refine (Milestone 3.6): revision_hint vom Critic wird dem Prompt vorangestellt
     als zusätzliches Constraint. Cache-Miss garantiert (anderer Prompt).
+
+    retry_empty=False (#308): unterdrückt den #280-Retry bei stummem `<!--END-->`
+    -- ein einzelner Call, sofort `None` bei leerem Output. Genutzt vom
+    Fenster-Rescue im Orchestrator (`orchestrator._run_rescue_with_sem`), der
+    selbst schon einen Zusatz-Call mit deutlich größerem Fenster ausführt und
+    dabei nicht noch einen internen Zweit-Retry auf demselben (bereits
+    expandierten) Fenster anhängen soll (Kostendeckelung: max. 1 Zusatz-Call
+    pro Konzept statt bis zu 2).
     """
     if not concept_text.strip():
         return None
@@ -428,8 +437,9 @@ async def run_per_concept(
         # Planner-priorisierte Kernkonzepte fielen so stumm weg (z.B. „Amotivation",
         # [high], Deci & Ryan). Nur außerhalb des Self-Refine-Loops (revision_hint
         # is None), sonst Retry-Kaskade im Critic-Loop möglich — dieselbe Guard-
-        # Bedingung wie beim Trunkierungs-Retry.
-        if revision_hint is not None:
+        # Bedingung wie beim Trunkierungs-Retry. #308: retry_empty=False (Rescue-
+        # Call vom Orchestrator) überspringt diesen Retry ebenfalls.
+        if revision_hint is not None or not retry_empty:
             return None
 
         empty_hint = (
