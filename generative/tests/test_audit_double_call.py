@@ -323,6 +323,9 @@ EXPECTED_RESULT = {
         },
     ],
     "quality_flags": ["audit_overridden", "judge_uneinig", "retrieval_low_cosine"],
+    # #306: additives Diagnostik-Feld, None weil das Fixture-PDF reiner ASCII-Text
+    # ist (kein CID-Verdacht) -- kein Einfluss auf Raten/Labels oben.
+    "pdf_text_suspect_cid": None,
     "llm_usage": {"calls": 2, "input_tokens": 14, "output_tokens": 14, "cached_calls": 0},
     # model_config wird nicht als eigenes Literal dupliziert (eval_note hat dafuer
     # keinen Override-Parameter wie pipeline_version) -- stattdessen direkter Bezug
