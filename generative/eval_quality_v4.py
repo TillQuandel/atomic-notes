@@ -35,7 +35,7 @@ except ImportError:
     sys.exit("rapidfuzz fehlt: pip install rapidfuzz")
 
 from generative.agents import base
-from generative.config import AGENT_VERSION, MODEL_OPUS, MODEL_CONFIG, QUALITY_HISTORY
+from generative.config import AGENT_VERSION, MODEL_JUDGE, MODEL_CONFIG, QUALITY_HISTORY
 from decision_engine import ClaimDecision, ClaimInput, DEFAULT_CONFIG, Label, determine_decision
 from decision_engine.aggregation import aggregate as aggregate_decisions
 from decision_engine.models import QualityFlag
@@ -655,7 +655,7 @@ TEXT:
 """
     repaired = base.call_llm_full(
         prompt,
-        model=MODEL_OPUS,
+        model=MODEL_JUDGE,
         agent="eval_quality_v3_json_repair",
         use_cache=use_cache,
         cache_namespace=EVAL_CACHE_NAMESPACE,
@@ -730,7 +730,7 @@ def _call_judge(
         prompt = _build_prompt(note_title, batch, variant=variant)
         result = base.call_llm_full(
             prompt,
-            model=MODEL_OPUS,
+            model=MODEL_JUDGE,
             agent=f"eval_quality_v3_{variant}",
             use_cache=use_cache,
             cache_namespace=EVAL_CACHE_NAMESPACE,
