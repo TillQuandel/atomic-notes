@@ -146,9 +146,13 @@ def bind_figures_to_drafts(figures: list[TaggedFigure], drafts: list[AtomicNoteD
     # ambiguous-Skips HATTEN Matches, dann waere der Namespace-Verdacht irrefuehrend.
     # Kein Verhaltens-Change, nur Sichtbarkeit.
     if figures and not report.bound and all(s.reason == "no_match" for s in report.skipped):
+        # #332: neutrale Formulierung -- diese Funktion kennt den Aufrufkontext
+        # (--load-drafts vs. --fresh-run) nicht und darf ihn daher nicht als
+        # Ursache unterstellen (Kok-Beleg, Coverage-Serie 2: 0 Anker-Matches trat
+        # auch mit --fresh-run auf).
         print(
-            f"figure_alt: {len(figures)} Kandidaten, 0 Anker-Matches — bei --load-drafts aus "
-            "älterer Pipeline-Version können Anker- und Label-Namespace divergieren",
+            f"figure_alt: {len(figures)} Kandidaten, 0 Anker-Matches — "
+            "Bilder ohne zuordenbare Anker werden übersprungen",
             file=sys.stderr,
         )
 

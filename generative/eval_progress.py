@@ -12,6 +12,7 @@ import argparse
 import json
 
 from generative.config import CACHE_DIR
+from generative.eval_common import coverage_value
 
 _HISTORY = CACHE_DIR / "quality_history.jsonl"
 
@@ -60,7 +61,11 @@ def print_table(records: list[dict]) -> None:
         unc = r.get("anchors_uncertain", 0)
         hall = r.get("anchors_hallucinated", 0)
         h_rate = r.get("hallucination_rate", 0)
-        cov_f = r.get("coverage_factual", r.get("coverage_rate", 0))
+        # #316: coverage_value() faellt bei explizitem coverage_factual=None korrekt
+        # auf coverage_rate zurueck (dict.get(..., default) tut das NICHT). `or 0`
+        # hier bewusst NICHT verwendet (verschluckt echte 0.0) -- expliziter None-Check.
+        cov_f = coverage_value(r)
+        cov_f = 0 if cov_f is None else cov_f
         src_cov = r.get("source_coverage", 0)
         tok = r.get("tokens_total", 0)
         zeit = r.get("wall_time_s", 0)

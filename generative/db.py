@@ -294,7 +294,10 @@ def query_kpi_trend(path: Path = DB_PATH, eval_version: str | None = None) -> di
                 pipeline_version,
                 COUNT(*)                          AS n,
                 AVG(hallucination_rate)           AS avg_hall,
-                AVG(coverage_factual)             AS avg_cov,
+                -- #316: coverage_factual ist seit eval_version 4.x strukturell immer
+                -- NULL (abgeschaffte v1.3-Metrik, #233) -- COALESCE faellt auf
+                -- coverage_rate zurueck, greift NUR bei SQL-NULL (nicht bei 0.0).
+                AVG(COALESCE(coverage_factual, coverage_rate)) AS avg_cov,
                 SUM(CASE WHEN acceptance_status='vault' THEN 1 ELSE 0 END) * 100.0
                     / COUNT(*)                    AS accept_rate,
                 SUM(tokens_total) / 1e6           AS tokens_m,

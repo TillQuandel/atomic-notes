@@ -38,7 +38,7 @@ from generative.agents import base
 from generative.config import AGENT_VERSION, MODEL_JUDGE, MODEL_CONFIG, QUALITY_HISTORY
 from decision_engine import ClaimDecision, ClaimInput, DEFAULT_CONFIG, Label, determine_decision
 from decision_engine.aggregation import aggregate as aggregate_decisions
-from decision_engine.models import QualityFlag
+from decision_engine.models import QualityFlag, normalize_decision_source
 from generative.eval_common import (
     TOP_K,
     Chunk,
@@ -682,7 +682,8 @@ TEXT:
     repaired = base.call_llm_full(
         prompt,
         model=MODEL_JUDGE,
-        agent="eval_quality_v3_json_repair",
+        # #319: v4-Judge, nicht v3 -- Label war Altlast aus dem v3-Vorgaenger.
+        agent="eval_quality_v4_json_repair",
         use_cache=use_cache,
         cache_namespace=EVAL_CACHE_NAMESPACE,
     )
@@ -757,7 +758,8 @@ def _call_judge(
         result = base.call_llm_full(
             prompt,
             model=MODEL_JUDGE,
-            agent=f"eval_quality_v3_{variant}",
+            # #319: v4-Judge, nicht v3 -- Label war Altlast aus dem v3-Vorgaenger.
+            agent=f"eval_quality_v4_{variant}",
             use_cache=use_cache,
             cache_namespace=EVAL_CACHE_NAMESPACE,
         )
@@ -989,7 +991,10 @@ def _aggregate(
         ClaimDecision(
             Label(score["label"]),
             frozenset(QualityFlag(flag) for flag in score["quality_flags"] if flag in _ENGINE_FLAG_VALUES),
-            score.get("decision_source", "primary"),
+            # #318: normalisiert den historischen Legacy-Wert "audit" auf das aktuelle
+            # Vokabular ("audit_override") -- betrifft nur re-aggregierte/gelesene
+            # Bestandsdaten, keine Mutation der JSONL/DB.
+            normalize_decision_source(score.get("decision_source", "primary")),
         )
         for score in claim_scores
     ]

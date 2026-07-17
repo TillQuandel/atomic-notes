@@ -1846,8 +1846,11 @@ def _build_quality_chart_data(quality_rows: list[dict]) -> dict:
                 "pdf": pdf,
                 "pdf_short": _pdf_short_name(pdf),
                 "version": ver,
-                "hall": round(float(hall) * 100, 1) if hall is not None else None,
-                "cov": round(float(cov) * 100, 1) if cov is not None else None,
+                # #315: derselbe `>= 0`-Guard wie in `_chart_scatter`/`_chart_scatter_versioned`
+                # -- der -1.0-Sentinel (ungueltiger Lauf) darf nicht als -100.0 in die
+                # Slope-Mediane einsickern.
+                "hall": round(float(hall) * 100, 1) if hall is not None and float(hall) >= 0 else None,
+                "cov": round(float(cov) * 100, 1) if cov is not None and float(cov) >= 0 else None,
                 "anchors_confirmed": anch_conf,
                 "anchors_total": anch_total,
                 "tokens_input": r.get("tokens_input", 0) or 0,

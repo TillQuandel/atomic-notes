@@ -91,6 +91,21 @@ class ClaimDecision:
     source: str  # "primary" | "audit_override" | "system" | "downgrade"
 
 
+# #318: historische eval_version=4.1-Zeilen tragen decision_source="audit" (67
+# JSONL-Zeilen, Eval-Doku-Audit #313) -- ein Namensstand vor einem frueheren
+# decision_engine-Refactor. Kein Code-Pfad schreibt diesen Wert mehr; Leser die
+# nach decision_source filtern/gruppieren muessen ihn trotzdem kennen. KEINE
+# Mutation der Bestandsdaten -- nur Lese-Seiten-Normalisierung.
+DECISION_SOURCE_ALIASES: dict[str, str] = {"audit": "audit_override"}
+
+
+def normalize_decision_source(value: str) -> str:
+    """Normalisiert einen GELESENEN `decision_source`-Wert auf das aktuelle
+    Vokabular (#318). Legacy-Alias "audit" -> "audit_override"; alle anderen
+    Werte (inkl. unbekannte) unveraendert durchgereicht."""
+    return DECISION_SOURCE_ALIASES.get(value, value)
+
+
 @dataclass(frozen=True)
 class Metric:
     """Rate-Metrik mit Validity-Flag. value=-1.0 sentinel wenn nicht messbar."""
