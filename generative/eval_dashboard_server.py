@@ -774,6 +774,12 @@ def build_data(
                 "n_inbox": 0,
                 "n_dropped": 0,
                 "pdfs": set(),
+                # #314: geroutete Notes je kanonischem PDF-Gruppen-Schluessel
+                # (SSoT mit D._pdf_group_key) -- Basis fuer den Corpus-
+                # Overlap-Guard in D.version_delta() ueber den VOLLEN Routing-
+                # Corpus statt nur der Eval-Stichprobe (s. kpi_trend["pdf_notes"]
+                # unten).
+                "pdf_n_total": {},
             }
         runs_by_version[ver]["n_runs"] += 1
         runs_by_version[ver]["n_total"] += r["n_total"]
@@ -782,6 +788,10 @@ def build_data(
         runs_by_version[ver]["n_inbox"] += r.get("n_inbox", 0)
         runs_by_version[ver]["n_dropped"] += r.get("n_dropped", 0)
         runs_by_version[ver]["pdfs"].add(r["key"])
+        _gk = D._pdf_group_key(r.get("label") or r["key"]) or r["key"]
+        runs_by_version[ver]["pdf_n_total"][_gk] = runs_by_version[ver]["pdf_n_total"].get(_gk, 0) + (
+            r.get("n_total") or 0
+        )
     # Sets zu Listen konvertieren (JSON-serialisierbar)
     for ver in runs_by_version:
         runs_by_version[ver]["pdfs"] = list(runs_by_version[ver]["pdfs"])
@@ -907,9 +917,20 @@ def build_data(
         "cost": [
             round(sum(cost_by_ver.get(v, [])), 4) if cost_by_ver.get(v) else None for v in sorted_pipeline_versions
         ],
-        # pdf_notes (Statistik-Review 2026-07-15, Fix 2): {pdf_group_key: n_notes}
-        # je Version — Basis für den Corpus-Overlap-Guard in D.version_delta().
-        "pdf_notes": [quality_by_version[v].get("pdf_notes", {}) for v in sorted_pipeline_versions],
+        # pdf_notes (#314-Fix): Basis fuer den Corpus-Overlap-Guard in
+        # D.version_delta() ist der volle ROUTING-Corpus (runs_by_version,
+        # {pdf_group_key: n_total} je Version), n_total-gewichtet -- vorher kam
+        # dieselbe Struktur aus quality_by_version[v]["pdf_notes"] (nur die
+        # EVALUIERTEN Notes). Das konnte eine Version mit tatsaechlich
+        # ausgetauschtem Routing-Corpus faelschlich als "reliable" ausweisen,
+        # sobald die kleine Eval-Stichprobe zufaellig eine gemeinsame PDF traf
+        # (Issue #314). quality_by_version[v]["pdf_notes"] bleibt als separate,
+        # weiterhin korrekte Eval-Notes-Statistik im quality_by_version-Export
+        # bestehen -- nur dieser Guard-Input wechselt die Grundgesamtheit.
+        # Versionen ganz ohne Routing-Logs liefern hier ein leeres Dict ->
+        # version_delta() faellt mangels Daten auf reines n>=20-Verhalten
+        # zurueck (`total=0` -> `pdf_overlap=None`, s. dortiger Guard).
+        "pdf_notes": [runs_by_version.get(v, {}).get("pdf_n_total", {}) for v in sorted_pipeline_versions],
     }
     # Kosten pro akzeptierter Note je Version (#196 P2): nur für API-Runs mit
     # Pricing aussagekräftig — subscription-Läufe kosten 0 (compute_cost_per_call)

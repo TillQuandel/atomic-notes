@@ -151,10 +151,31 @@ def _eval(note, ver, pdf, hall, ts, total=10, hallucinated=0):
     }
 
 
+def _log_run(key, ver, n_total, n_vault=None, label=None):
+    """Minimaler Routing-Log-Run (Feldform von `D._read_all_log_runs()`)."""
+    n_vault = n_total if n_vault is None else n_vault
+    return {
+        "key": key,
+        "label": label or key,
+        "ver": ver,
+        "n_total": n_total,
+        "n_vault": n_vault,
+        "accept_pct": round(100 * n_vault / n_total, 1) if n_total else 0.0,
+        "words": None,  # D._chart_scaling() filtert None-words heraus (kein Datenpunkt)
+    }
+
+
 def test_build_data_flags_pdf_mix_delta_via_kpi_trend(monkeypatch):
-    """End-to-End: build_data() -> quality_by_version -> kpi_trend["pdf_notes"]
-    -> version_delta() erkennt einen weitgehend ausgetauschten Corpus, obwohl
-    n>=20 in beiden Versionen (Produktionsmuster v0.3.140 -> v0.3.143)."""
+    """End-to-End: build_data() -> runs_by_version (Routing-Corpus) ->
+    kpi_trend["pdf_notes"] -> version_delta() erkennt einen weitgehend
+    ausgetauschten Corpus, obwohl n>=20 in beiden Versionen (Produktionsmuster
+    v0.3.140 -> v0.3.143).
+
+    #314-Fix: `pdf_notes` kommt jetzt aus dem ROUTING-Corpus (`runs_by_version`),
+    nicht mehr aus den Eval-Zeilen -- die Routing-Log-Runs unten spiegeln
+    deshalb dieselbe PDF-Verteilung wie die Eval-Stichprobe (20/5 bzw. 3/19),
+    damit dasselbe Produktionsmuster weiterhin end-to-end abgedeckt bleibt.
+    """
     from generative import config as _cfg
     from generative import db as _gdb
     from generative import eval_dashboard as D
@@ -172,10 +193,17 @@ def test_build_data_flags_pdf_mix_delta_via_kpi_trend(monkeypatch):
     for i in range(19):
         evals.append(_eval(f"only143-{i}.md", "v0.3.143", "Only143.pdf", 0.5, f"2026-06-11T00:00:{i:02d}", 10, 5))
 
+    log_runs = [
+        _log_run("shared", "v0.3.140", 20),
+        _log_run("only140", "v0.3.140", 5),
+        _log_run("shared", "v0.3.143", 3),
+        _log_run("only143", "v0.3.143", 19),
+    ]
+
     monkeypatch.setattr(_cfg, "AGENT_VERSION", "v0.3.143")
     monkeypatch.setattr(_gdb, "query_pipeline_runs", lambda *a, **k: [])
     monkeypatch.setattr(_gdb, "query_note_evals", lambda *a, **k: evals)
-    monkeypatch.setattr(D, "_read_all_log_runs", lambda: [])
+    monkeypatch.setattr(D, "_read_all_log_runs", lambda: log_runs)
     monkeypatch.setattr(D, "_read_token_runs", lambda: [])
 
     data = S.build_data()
@@ -186,3 +214,79 @@ def test_build_data_flags_pdf_mix_delta_via_kpi_trend(monkeypatch):
     assert vd["reliable"] is False
     assert vd["reason"] == "pdf_mix"
     assert vd["pdf_overlap"] == pytest.approx(3 / 22, abs=0.001)
+
+
+def test_build_data_uses_routing_corpus_not_eval_sample_for_overlap(monkeypatch):
+    """Issue #314 -- Kernbefund: Der Overlap-Guard mass bisher an den
+    EVALUIERTEN Zeilen, nicht am vollen gerouteten Corpus. Konstruktion aus
+    dem Issue: Der geroutete Corpus ist zwischen v1 und v2 komplett disjunkt
+    (verschiedene PDFs, je >=20 Notes -> accept_n-Guard allein wuerde
+    reliable=True zulassen), waehrend die wenigen ausgewerteten Notes rein
+    zufaellig dieselbe PDF-Quelle treffen ("Shared.pdf" in beiden Versionen).
+
+    Vor dem Fix haette der eval-basierte Overlap 100 % gezeigt (beide
+    Eval-Stichproben liegen komplett auf "Shared.pdf") -> reliable=True,
+    obwohl der tatsaechlich gerouteten Corpus ausgetauscht wurde. Nach dem Fix
+    muss der Guard auf dem Routing-Corpus rechnen und den Mix erkennen."""
+    from generative import config as _cfg
+    from generative import db as _gdb
+    from generative import eval_dashboard as D
+    from generative import eval_dashboard_server as S
+
+    evals = []
+    for i in range(10):
+        evals.append(_eval(f"a-{i}.md", "v1", "Shared.pdf", 0.0, f"2026-06-01T00:00:{i:02d}"))
+    for i in range(10):
+        evals.append(_eval(f"b-{i}.md", "v2", "Shared.pdf", 0.5, f"2026-06-10T00:00:{i:02d}", 10, 5))
+
+    # Routing-Corpus: v1 routet ausschliesslich "OnlyV1", v2 ausschliesslich
+    # "OnlyV2" -- disjunkt. "Shared.pdf" kommt im Routing GAR NICHT vor (z. B.
+    # weil die Eval-Notes aus einem separaten Nachtest stammen).
+    log_runs = [
+        _log_run("onlyv1", "v1", 25),
+        _log_run("onlyv2", "v2", 25),
+    ]
+
+    monkeypatch.setattr(_cfg, "AGENT_VERSION", "v2")
+    monkeypatch.setattr(_gdb, "query_pipeline_runs", lambda *a, **k: [])
+    monkeypatch.setattr(_gdb, "query_note_evals", lambda *a, **k: evals)
+    monkeypatch.setattr(D, "_read_all_log_runs", lambda: log_runs)
+    monkeypatch.setattr(D, "_read_token_runs", lambda: [])
+
+    data = S.build_data()
+    kt = data["kpi_trend"]
+    assert kt["versions"] == ["v1", "v2"]
+    assert kt["accept_n"] == [25, 25]  # accept_n-Guard allein liesse reliable=True zu
+    vd = kt["deltas"]["accept"]
+    assert vd["pdf_overlap"] == 0.0
+    assert vd["reliable"] is False
+    assert vd["reason"] == "pdf_mix"
+
+
+def test_build_data_no_routing_logs_falls_back_to_n_guard_only(monkeypatch):
+    """Fehlen fuer eine Version komplett die Routing-Logs (z. B. archivierte
+    Alt-Bestaende), kann der Overlap-Guard die Grundgesamtheit nicht pruefen --
+    er greift dann nicht (`pdf_overlap=None`), dasselbe Fail-open-Verhalten
+    wie beim vollstaendig fehlenden `pdf_notes`-Key (Rueckwaertskompat.)."""
+    from generative import config as _cfg
+    from generative import db as _gdb
+    from generative import eval_dashboard as D
+    from generative import eval_dashboard_server as S
+
+    evals = []
+    for i in range(25):
+        evals.append(_eval(f"a-{i}.md", "v1", "Shared.pdf", 0.0, f"2026-06-01T00:00:{i:02d}"))
+    for i in range(22):
+        evals.append(_eval(f"b-{i}.md", "v2", "Only.pdf", 0.5, f"2026-06-10T00:00:{i:02d}", 10, 5))
+
+    monkeypatch.setattr(_cfg, "AGENT_VERSION", "v2")
+    monkeypatch.setattr(_gdb, "query_pipeline_runs", lambda *a, **k: [])
+    monkeypatch.setattr(_gdb, "query_note_evals", lambda *a, **k: evals)
+    monkeypatch.setattr(D, "_read_all_log_runs", lambda: [])  # kein Routing-Corpus ueberhaupt
+    monkeypatch.setattr(D, "_read_token_runs", lambda: [])
+
+    data = S.build_data()
+    kt = data["kpi_trend"]
+    vd = kt["deltas"]["hall"]
+    assert vd["pdf_overlap"] is None
+    assert vd["reliable"] is True  # n>=20 in beiden, Guard greift mangels Routing-Daten nicht
