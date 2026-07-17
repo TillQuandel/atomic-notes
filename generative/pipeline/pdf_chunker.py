@@ -341,6 +341,182 @@ def assess_text_quality(text: str) -> TextQuality:
     )
 
 
+def _iter_word_windows(n_words: int, window_words: int, stride: int | None = None):
+    """Wort-Index-Fenster `(start, end)`, 50%-Stride per Default.
+
+    Geteilte Sliding-Window-Geometrie zwischen `concept_text_window`s
+    lexikalischem Scorer und dem #127-Fallback (`semantic_concept_window`) —
+    beide sollen exakt dieselben Fenstergrenzen sehen, kein zweites
+    Chunking-Schema für denselben Volltext.
+    """
+    stride = stride if stride is not None else max(1, window_words // 2)
+    start = 0
+    while start < n_words:
+        end = min(start + window_words, n_words)
+        yield start, end
+        if end >= n_words:
+            break
+        start += stride
+
+
+def _page_at_word_map(full_text: str) -> list[str | None]:
+    """Seiten-Marker (`[S. N]`) pro Wort-Index — Vorarbeit für den Snippet-Bau
+    in `concept_text_window` UND `semantic_concept_window` (#127). Nur
+    line-isolierte Pipeline-Marker (`\\n\\n[S. N]\\n\\n` aus pages_to_marked_text)
+    zählen als Seitenanfang — Inline-Quellenverweise im Fließtext nicht (siehe
+    `concept_text_window`-Docstring für die volle Begründung)."""
+    _real_markers = [(m.start(), m.group(1)) for m in re.finditer(r"(?m)^[ \t]*\[S\.\s*(\d+)\][ \t]*$", full_text)]
+    page_at_word: list[str | None] = []
+    _cur_page: str | None = None
+    _mi = 0
+    for _tok in re.finditer(r"\S+", full_text):
+        while _mi < len(_real_markers) and _real_markers[_mi][0] <= _tok.start():
+            _cur_page = _real_markers[_mi][1]
+            _mi += 1
+        page_at_word.append(_cur_page)
+    return page_at_word
+
+
+def _prefix_page_marker(snippet: str, page: str | None) -> str:
+    """Stellt einem markerlosen Snippet seinen gültigen Seitenmarker voran
+    (s. `_page_at_word_map`) — sonst erbt die Downstream-Seitenableitung
+    (Extractor-LLM, Verifier, Renderer) die Seite eines früheren Snippets."""
+    if page is not None and not snippet.lstrip().startswith("[S."):
+        return f"[S. {page}] {snippet}"
+    return snippet
+
+
+# #127: Satz-Embeddings pro (Volltext, window_words) gecacht — mehrere in
+# Stage 5 lexikalisch leer gebliebene Konzepte DESSELBEN Laufs (z.B. alle drei
+# Top-Konzepte eines fast-Profils) teilen sich EIN Batch-Encode statt es pro
+# Konzept zu wiederholen. Gleiches Muster wie planner._SENT_EMB_CACHE.
+_WINDOW_SENT_CACHE: dict[tuple[int, int, int], tuple] = {}
+_WINDOW_SENT_CACHE_MAX = 8
+
+
+def _window_sentence_embeddings(full_text: str, words: list[str], window_words: int):
+    """(spans, window_texts, sentences, sentence_embeddings) für die
+    Sliding-Window-Fenster von `words`.
+
+    Satz-Ebene statt Fenster-Mittelwert: Kalibrierung #127 zeigt, dass
+    Mean-Pooling über ein ganzes 400-Wort-Fenster den Score eines einzelnen
+    treffenden Satzes verwässert (Fenster enthält 10-15 Sätze, nur einer
+    trägt den Konzeptbezug) — ein reales Rettungsfall-Beispiel („Andragogik“
+    auf der Knowles-Quelle) lag im Fenster-Mittel bei 0.43, auf Satzebene aber
+    deutlich über der Schwelle. Damit bleibt `TITLE_PRESENCE_COSINE_THRESHOLD`
+    (kalibriert für genau diese Satz-MAX-Methodik in
+    `planner._default_semantic_presence`) gültig wiederverwendbar.
+
+    Sätze aus überlappenden Fenstern (50%-Stride) werden dedupliziert (Wert =
+    Text), bevor EIN `model.encode()`-Call über alle eindeutigen Sätze läuft
+    — sonst würde der Overlap-Bereich doppelt encodet.
+
+    Wirft bei fehlendem/kaputtem Embedding-Modell — Aufrufer fängt ab
+    (fail-closed, #127 ist ein reiner Rettungskanal, keine Pflichtstufe).
+    """
+    key = (len(full_text), hash(full_text), window_words)
+    cached = _WINDOW_SENT_CACHE.get(key)
+    if cached is not None:
+        return cached
+
+    from generative.embeddings import _sentences, _model
+    import numpy as np
+
+    spans = list(_iter_word_windows(len(words), window_words))
+    window_texts = [" ".join(words[s:e]) for s, e in spans]
+
+    uniq_sentences: list[str] = []
+    seen: set[str] = set()
+    for wtext in window_texts:
+        for s2 in _sentences(wtext):
+            if len(s2) > 15 and s2 not in seen:
+                seen.add(s2)
+                uniq_sentences.append(s2)
+
+    if uniq_sentences:
+        sent_embs = np.asarray(
+            _model().encode(uniq_sentences, show_progress_bar=False, normalize_embeddings=True, batch_size=64)
+        )
+    else:
+        sent_embs = np.zeros((0, _model().get_sentence_embedding_dimension()))
+
+    result = (spans, window_texts, uniq_sentences, sent_embs)
+    if len(_WINDOW_SENT_CACHE) >= _WINDOW_SENT_CACHE_MAX:
+        _WINDOW_SENT_CACHE.pop(next(iter(_WINDOW_SENT_CACHE)))
+    _WINDOW_SENT_CACHE[key] = result
+    return result
+
+
+def semantic_concept_window(
+    full_text: str,
+    title: str,
+    threshold: float,
+    window_words: int = 400,
+    max_chars: int = 8000,
+) -> tuple[str, float]:
+    """#127: semantischer Fallback für `concept_text_window()` bei lexikalisch
+    leerem Ergebnis.
+
+    Der Stage-5-Skip (orchestrator.run_extractors_per_concept) ist rein
+    lexikalisch und sprachblind: ein deutscher Planner-Titel auf einer
+    englischen Quelle hat 0 Token-Overlap, obwohl dasselbe Konzept
+    `planner.filter_hallucinated`s #66-Rettungsanker (semantische Präsenz,
+    multilinguales MiniLM) bereits passiert haben kann — die beiden Checks
+    laufen auf demselben Volltext, aber nur Stage 4 hat einen semantischen
+    Kanal. Dieser Fallback bietet denselben Kanal auch hier an: MAX-Cosine
+    zwischen Titel-Embedding und Satz-Embeddings (multilinguales MiniLM,
+    `generative.embeddings`) — exakt dieselbe Methodik + Schwelle
+    (`TITLE_PRESENCE_COSINE_THRESHOLD`) wie #66, damit der kalibrierte Wert
+    gültig bleibt (siehe `_window_sentence_embeddings`-Docstring für den
+    Kalibrierungsbefund, der Fenster-Mittelwert statt Satz-MAX verwarf).
+    Das Ergebnisfenster für den Extraktor-Kontext ist trotzdem eines der
+    SELBEN Sliding-Window-Fenster wie der lexikalische Scorer
+    (`_iter_word_windows`) — kein zweites Chunking-Schema; es wird das erste
+    Fenster (Dokumentreihenfolge) gewählt, das den Treffer-Satz enthält.
+
+    Anders als `_default_semantic_presence` (reiner OR-Kanal in Stage 4,
+    fail-OPEN) muss dieser Fallback FAIL-CLOSED sein: das Ergebnis wird
+    direkt als Extraktor-Kontext weiterverwendet, nicht nur als binäres
+    Keep/Reject-Signal — ein Encoding-Fehler darf keinen unkontrollierten
+    Volltext-Ausschnitt durchreichen.
+
+    Returns: (bestes Fenster mit Seitenmarker, höchste Cosine). Leerer String
+    wenn kein Satz die Schwelle erreicht ODER das Embedding-Modell nicht
+    verfügbar ist/das Encoding scheitert (Score dann bestmöglich, sonst 0.0)
+    — der Aufrufer behält in diesem Fall den bisherigen `[skip]`.
+    """
+    if not title.strip() or not full_text.strip():
+        return "", 0.0
+    words = full_text.split()
+    if not words:
+        return "", 0.0
+
+    try:
+        from generative.embeddings import embed_title
+
+        spans, window_texts, sentences, sent_embs = _window_sentence_embeddings(full_text, words, window_words)
+        if not sentences:
+            return "", 0.0
+        te = embed_title(title)
+        sims = sent_embs.dot(te)
+        best_i = int(sims.argmax())
+        best_score = float(sims[best_i])
+    except Exception:
+        return "", 0.0
+
+    if best_score < threshold:
+        return "", max(best_score, 0.0)
+
+    best_sentence = sentences[best_i]
+    page_at_word = _page_at_word_map(full_text)
+    for (s, _e), wtext in zip(spans, window_texts):
+        if best_sentence in wtext:
+            return _prefix_page_marker(wtext, page_at_word[s])[:max_chars], best_score
+    # Sollte nicht eintreten (Treffer-Satz stammt aus genau diesen Fenstern) —
+    # fail-closed statt eines Fensters ohne nachvollziehbaren Bezug.
+    return "", best_score
+
+
 def concept_text_window(full_text: str, search_terms: list[str], window_words: int = 400, max_chars: int = 8000) -> str:
     """Sliding-Window Co-Occurrence Ranking — wählt die thematisch dichtesten
     Fenster aus dem Volltext (Option D, Gemini-Review 2026-05-17).
@@ -371,26 +547,14 @@ def concept_text_window(full_text: str, search_terms: list[str], window_words: i
     if not words:
         return ""
 
-    # Seite pro Wort-Index tracken: damit ein selektiertes Fenster, das mitten auf
-    # einer Seite beginnt (der `[S. N]`-Marker stand am Seitenanfang, vor dem
-    # Fenster), seinen korrekten Marker vorangestellt bekommt. Sonst erbt die
-    # Downstream-Seitenableitung ("letzter [S. N]-Marker vor der Fundstelle":
-    # Extractor-LLM, Verifier, Renderer) die Seite eines früheren Snippets →
-    # falsche Fußnoten-Seite (#4 Anker-Clustering, Merrill-Run 2026-06-24).
-    # NUR line-isolierte Pipeline-Marker (`\n\n[S. N]\n\n` aus pages_to_marked_text)
-    # zählen als Seitenanfang — Inline-Quellenverweise wie „vgl. [S. 12]" im
-    # Fließtext NICHT (sonst erbt Folgetext die zitierte statt der echten Seite;
-    # Codex-Review 2026-06-24). re.finditer(r"\S+") liefert dieselbe Token-Folge
-    # wie full_text.split() oben, plus Positionen fürs Marker-Mapping.
-    _real_markers = [(m.start(), m.group(1)) for m in re.finditer(r"(?m)^[ \t]*\[S\.\s*(\d+)\][ \t]*$", full_text)]
-    page_at_word: list[str | None] = []
-    _cur_page: str | None = None
-    _mi = 0
-    for _tok in re.finditer(r"\S+", full_text):
-        while _mi < len(_real_markers) and _real_markers[_mi][0] <= _tok.start():
-            _cur_page = _real_markers[_mi][1]
-            _mi += 1
-        page_at_word.append(_cur_page)
+    # Seite pro Wort-Index tracken (s. `_page_at_word_map`): damit ein
+    # selektiertes Fenster, das mitten auf einer Seite beginnt (der `[S. N]`-
+    # Marker stand am Seitenanfang, vor dem Fenster), seinen korrekten Marker
+    # vorangestellt bekommt. Sonst erbt die Downstream-Seitenableitung
+    # ("letzter [S. N]-Marker vor der Fundstelle": Extractor-LLM, Verifier,
+    # Renderer) die Seite eines früheren Snippets → falsche Fußnoten-Seite
+    # (#4 Anker-Clustering, Merrill-Run 2026-06-24).
+    page_at_word = _page_at_word_map(full_text)
 
     # Title normalisieren auf gleiche Whitespace-Form wie `chunk` (single-space-join)
     # — sonst matcht z.B. "Multi-Agent\n\nSystem" nicht im normalisierten Chunk.
@@ -400,11 +564,8 @@ def concept_text_window(full_text: str, search_terms: list[str], window_words: i
     title_re = re.compile(re.escape(title), re.IGNORECASE) if title else None
     token_res = [re.compile(r"\b" + re.escape(t) + r"\b", re.IGNORECASE) for t in tokens]
 
-    stride = max(1, window_words // 2)
     scored: list[tuple[int, int, int]] = []  # (score, start_word, end_word)
-    start = 0
-    while start < len(words):
-        end = min(start + window_words, len(words))
+    for start, end in _iter_word_windows(len(words), window_words):
         chunk = " ".join(words[start:end])
         score = 0
         if title_re:
@@ -414,9 +575,6 @@ def concept_text_window(full_text: str, search_terms: list[str], window_words: i
                 score += 1
         if score > 0:
             scored.append((score, start, end))
-        if end >= len(words):
-            break
-        start += stride
 
     if not scored:
         return ""
@@ -456,11 +614,7 @@ def concept_text_window(full_text: str, search_terms: list[str], window_words: i
     # Overhead ist aber vernachlässigbar gegen das ohnehin unterausgenutzte Budget.
     snippets: list[str] = []
     for s, e in merged:
-        snip = " ".join(words[s:e])
-        page = page_at_word[s]
-        if page is not None and not snip.lstrip().startswith("[S."):
-            snip = f"[S. {page}] {snip}"
-        snippets.append(snip)
+        snippets.append(_prefix_page_marker(" ".join(words[s:e]), page_at_word[s]))
     return "\n\n[...]\n\n".join(snippets)
 
 

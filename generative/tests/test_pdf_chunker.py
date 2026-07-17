@@ -9,8 +9,17 @@ dort en passant vorkommen — Hiatt 2026-05-10 ADKAR-Eval-Bug. Siehe
 from __future__ import annotations
 import re
 
+import numpy as np
+import pytest
 
-from generative.pipeline.pdf_chunker import drop_frontmatter_pages, page_range_of_text, concept_text_window
+from generative import embeddings
+from generative.pipeline import pdf_chunker as pdf_chunker_module
+from generative.pipeline.pdf_chunker import (
+    drop_frontmatter_pages,
+    page_range_of_text,
+    concept_text_window,
+    semantic_concept_window,
+)
 
 
 # ---- drop_frontmatter_pages ---------------------------------------------
@@ -521,3 +530,136 @@ def test_pdf_metadata_missing_pdfinfo_binary_returns_empty(monkeypatch, tmp_path
 
     monkeypatch.setattr(_pc.subprocess, "run", _raise_not_found)
     assert _pc.pdf_metadata(tmp_path / "x.pdf") == {}
+
+
+# ---- semantic_concept_window: Issue #127 --------------------------------
+# Deterministisches Fake-Modell statt echtem sentence-transformers-Load (Muster
+# aus test_embed_body_lru.py/test_redundant_sibling_flag.py): jeder registrierte
+# Text bekommt eine orthogonale Basisrichtung -> Cosine ist exakt 1.0 bei
+# Text-Gleichheit, sonst 0.0. Reicht für Argmax-/Schwellen-/Cache-Verhalten;
+# realistische Zwischenwerte sind Sache der Kalibrierung (PR-Body), nicht der
+# Unit-Tests. WICHTIG: eine EINZIGE Instanz pro Test (nicht pro `_model()`-
+# Aufruf neu bauen) — sonst reseten sich `_index` zwischen dem Satz-Batch-Call
+# und dem separaten Titel-Call und Text A aus Call 1 kollidiert mit Text B aus
+# Call 2 (beide bekommen Index 0 in ihrer je eigenen Instanz).
+
+
+class _OneHotModel:
+    def __init__(self, counter: dict, dim: int = 64):
+        self._counter = counter
+        self._dim = dim
+        self._index: dict[str, int] = {}
+
+    def get_sentence_embedding_dimension(self):
+        return self._dim
+
+    def _vec(self, text: str):
+        if text not in self._index:
+            self._index[text] = len(self._index)
+        v = np.zeros(self._dim)
+        v[self._index[text] % self._dim] = 1.0
+        return v
+
+    def encode(self, texts, show_progress_bar=False, normalize_embeddings=True, batch_size=64):
+        self._counter["encode_calls"] = self._counter.get("encode_calls", 0) + 1
+        if len(texts) > 1:
+            self._counter["batch_calls"] = self._counter.get("batch_calls", 0) + 1
+        return np.array([self._vec(t) for t in texts])
+
+
+def _clear_window_sent_cache():
+    pdf_chunker_module._WINDOW_SENT_CACHE.clear()
+
+
+def test_semantic_window_rescues_matching_sentence(monkeypatch):
+    """Titel-Text ist exakt einer der Sätze im Volltext (Cosine 1.0 im
+    One-Hot-Fake) -> Fenster mit diesem Satz wird zurückgegeben, Score 1.0."""
+    _clear_window_sent_cache()
+    model = _OneHotModel({})
+    monkeypatch.setattr(embeddings, "_model", lambda: model)
+
+    full_text = "Andragogik ist ein Modell des Lernens. Ein unbeteiligter zweiter Satz ueber etwas anderes."
+    window, score = semantic_concept_window(full_text, "Andragogik ist ein Modell des Lernens.", threshold=0.5)
+
+    assert score == 1.0
+    assert "Andragogik ist ein Modell des Lernens." in window
+
+
+def test_semantic_window_below_threshold_returns_empty(monkeypatch):
+    """Kein Satz erreicht die Schwelle (One-Hot: 0.0 für alle Nicht-Treffer,
+    da Titel und Sätze disjunkte Basisrichtungen bekommen) -> leerer String,
+    aber der beste (hier: 0.0) Score wird fürs Logging zurückgegeben --
+    fail-closed, kein Crash."""
+    _clear_window_sent_cache()
+    model = _OneHotModel({})
+    monkeypatch.setattr(embeddings, "_model", lambda: model)
+
+    full_text = "Voellig unabhaengiger Satz eins. Und noch ein zweiter Satz ohne Bezug."
+    window, score = semantic_concept_window(full_text, "Ein Titel der nirgends vorkommt", threshold=0.5)
+
+    assert window == ""
+    assert score == 0.0
+
+
+def test_semantic_window_caches_across_concepts_same_fulltext(monkeypatch):
+    """Zwei Konzepte, DERSELBE full_text -> der teure Satz-Batch-Call
+    (`_window_sentence_embeddings`) läuft nur EINMAL (Cache-Treffer beim
+    zweiten Aufruf) -- mehrere in Stage 5 leer gebliebene Konzepte eines
+    Laufs teilen sich die Fenster-Sätze. Die separaten (billigen) Ein-Text-
+    Titel-Calls zählen hier bewusst nicht mit (`batch_calls` statt
+    `encode_calls`)."""
+    _clear_window_sent_cache()
+    counter: dict = {}
+    model = _OneHotModel(counter)
+    monkeypatch.setattr(embeddings, "_model", lambda: model)
+
+    full_text = "Ein Satz ueber Andragogik. Ein zweiter Satz ueber Paedagogik."
+    semantic_concept_window(full_text, "Ein Satz ueber Andragogik.", threshold=0.99)
+    semantic_concept_window(full_text, "Ein zweiter Satz ueber Paedagogik.", threshold=0.99)
+
+    assert counter["batch_calls"] == 1
+
+
+def test_semantic_window_fails_closed_on_model_error(monkeypatch):
+    """Embedding-Modell nicht ladbar/kaputt -> ("", 0.0) statt Crash oder
+    unkontrolliertem Rettungs-Fenster (#127 muss fail-closed sein, anders als
+    der fail-open `_default_semantic_presence`-Kanal in Stage 4)."""
+    _clear_window_sent_cache()
+
+    def _broken_model():
+        raise RuntimeError("Modell-Load fehlgeschlagen (simuliert)")
+
+    monkeypatch.setattr(embeddings, "_model", _broken_model)
+
+    window, score = semantic_concept_window("Irgendein Volltext.", "Irgendein Titel", threshold=0.5)
+    assert window == ""
+    assert score == 0.0
+
+
+def test_semantic_window_empty_title_or_text_short_circuits(monkeypatch):
+    """Leerer Titel/Volltext -> sofort ("", 0.0), kein Modell-Zugriff nötig."""
+    _clear_window_sent_cache()
+    counter: dict = {}
+    monkeypatch.setattr(embeddings, "_model", lambda: _OneHotModel(counter))
+
+    assert semantic_concept_window("Ein Volltext.", "   ", threshold=0.5) == ("", 0.0)
+    assert semantic_concept_window("   ", "Ein Titel", threshold=0.5) == ("", 0.0)
+    assert "encode_calls" not in counter
+
+
+@pytest.mark.slow
+def test_semantic_window_real_model_crosslingual_rescue():
+    """Echtes Embedding-Modell, kein Mock (Default-Pfad-Validierung, analog
+    test_real_embeddings_default_path in test_redundant_sibling_flag.py):
+    deutscher Titel auf englischem Fließtext ohne jeden lexikalischen
+    Overlap -- die Kernsituation aus Issue #127."""
+    pdf_chunker_module._WINDOW_SENT_CACHE.clear()
+    full_text = (
+        "This chapter explains how adults direct their own education. "
+        "Self-directed learning means the individual takes the initiative "
+        "in diagnosing needs, formulating goals, and evaluating outcomes. "
+        "Completely unrelated filler about kitchen appliances and warranty terms follows here."
+    )
+    window, score = semantic_concept_window(full_text, "Selbstgesteuertes Lernen", threshold=0.5)
+    assert score >= 0.5
+    assert "self-directed" in window.lower() or "initiative" in window.lower()
