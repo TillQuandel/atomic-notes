@@ -1,5 +1,6 @@
 import os
 import re
+import warnings
 from pathlib import Path
 from dotenv import load_dotenv
 
@@ -46,14 +47,33 @@ PHOENIX_VENV = Path(os.environ.get("ATOMIC_AGENT_PHOENIX_VENV", str(SCRIPTS_DIR.
 CLAUDE_BIN = "claude"
 
 # Modell-Routing: Sonnet als Default (A/B-Test 2026-05-20: niedrigere Halluzinationsrate als Opus,
-# 3x günstiger per API, gleiche Note-Anzahl). Opus per ENV überschreibbar für Vergleichstests.
-MODEL_OPUS = os.getenv("ATOMIC_AGENT_MODEL_OPUS", "anthropic/claude-sonnet-4-6")
+# 3x günstiger per API, gleiche Note-Anzahl).
+#
+# #317: Hauptslot heißt MODEL_MAIN (vorher irreführend MODEL_OPUS — der Default war/ist real
+# Sonnet, nicht Opus). Prioritätsreihenfolge: ATOMIC_AGENT_MODEL_MAIN > ATOMIC_AGENT_MODEL_OPUS
+# (deprecated Alias) > Default — bestehende .env-Dateien mit ATOMIC_AGENT_MODEL_OPUS
+# funktionieren unverändert weiter.
+if os.getenv("ATOMIC_AGENT_MODEL_OPUS") is not None:
+    warnings.warn(
+        "ATOMIC_AGENT_MODEL_OPUS ist deprecated (#317) — nutze ATOMIC_AGENT_MODEL_MAIN.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
+MODEL_MAIN = os.getenv("ATOMIC_AGENT_MODEL_MAIN", os.getenv("ATOMIC_AGENT_MODEL_OPUS", "anthropic/claude-sonnet-4-6"))
+# Deprecated Alias — nutze MODEL_MAIN (#317). Bleibt für Rückwärtskompatibilität bestehen
+# (Code/Configs, die noch MODEL_OPUS importieren bzw. ATOMIC_AGENT_MODEL_OPUS setzen).
+MODEL_OPUS = MODEL_MAIN
 MODEL_HAIKU = os.getenv("ATOMIC_AGENT_MODEL_HAIKU", "anthropic/claude-haiku-4-5-20251001")
 
-# Pro-Agent Mapping (siehe Plan Milestone 2.1)
-MODEL_PLANNER = MODEL_OPUS
-MODEL_EXTRACTOR = MODEL_OPUS
-MODEL_EXTENDER = MODEL_OPUS  # Backlog v1.1
+# Eval-Judge-Modell (eval_quality_v4.py) — separat von MODEL_MAIN wählbar, Default = MODEL_MAIN.
+# #317: lief vorher hart auf MODEL_OPUS (= Sonnet); der Name suggerierte fälschlich Opus als
+# tatsächliches Judge-Modell.
+MODEL_JUDGE = os.getenv("ATOMIC_AGENT_MODEL_JUDGE", MODEL_MAIN)
+
+# Pro-Agent Mapping (siehe Plan Milestone 2.1) — je Rolle per ENV überschreibbar (#317).
+MODEL_PLANNER = os.getenv("ATOMIC_AGENT_MODEL_PLANNER", MODEL_MAIN)
+MODEL_EXTRACTOR = os.getenv("ATOMIC_AGENT_MODEL_EXTRACTOR", MODEL_MAIN)
+MODEL_EXTENDER = os.getenv("ATOMIC_AGENT_MODEL_EXTENDER", MODEL_MAIN)  # Backlog v1.1
 MODEL_VERIFIER = MODEL_HAIKU
 MODEL_CROSS_REF = MODEL_HAIKU
 MODEL_CRITIC = MODEL_HAIKU
@@ -218,8 +238,9 @@ ER_HUB_GENERIC_TOKENS = frozenset(
         "principle",
     }
 )
-# Canonicalization-Modell: Body-Merge ist kreativ-synthetische Aufgabe → Opus
-MODEL_CANONICALIZER = MODEL_OPUS
+# Canonicalization-Modell: Body-Merge ist kreativ-synthetische Aufgabe → Hauptslot,
+# per ENV überschreibbar (#317).
+MODEL_CANONICALIZER = os.getenv("ATOMIC_AGENT_MODEL_CANONICALIZER", MODEL_MAIN)
 
 # LLM-Dedup (Stage 2.5): Haiku-Batch-Call für ambiguous Zone (0.3 ≤ cosine < ER_BODY_COSINE_THRESHOLD).
 # Paare die Stage-1-Blocking passiert haben aber zu geringe Body-Cosine für Auto-Cluster

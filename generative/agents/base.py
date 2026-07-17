@@ -15,7 +15,7 @@ from contextlib import contextmanager as _contextmanager
 from dataclasses import dataclass
 from typing import Optional
 
-from generative.config import MODEL_OPUS, CACHE_DIR, BACKEND
+from generative.config import MODEL_MAIN, CACHE_DIR, BACKEND
 
 # Re-Export für Backwards-Compat — Agenten importieren aus agents.base
 from generative.agents.tracing import trace_event, trace_run_start, set_tracing_backend, flush_tracing  # noqa: F401
@@ -246,7 +246,7 @@ def _annotate_llm_span(span, result: "CallResult", *, cache_hit: bool = False, e
         span.set_status(_OtelStatus(_OtelStatusCode.ERROR, error))
 
 
-def call_claude(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown", use_cache: bool = True) -> str:
+def call_claude(prompt: str, *, model: str = MODEL_MAIN, agent: str = "unknown", use_cache: bool = True) -> str:
     """Synchroner Aufruf. Gibt nur den Text zurück (Backwards-Compat)."""
     return call_claude_full(prompt, model=model, agent=agent, use_cache=use_cache).text
 
@@ -254,7 +254,7 @@ def call_claude(prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown",
 def call_claude_full(
     prompt: str,
     *,
-    model: str = MODEL_OPUS,
+    model: str = MODEL_MAIN,
     agent: str = "unknown",
     use_cache: bool = True,
     cache_namespace: str | None = None,
@@ -301,7 +301,7 @@ def call_claude_full(
 
 
 async def call_claude_async(
-    prompt: str, *, model: str = MODEL_OPUS, agent: str = "unknown", use_cache: bool = True
+    prompt: str, *, model: str = MODEL_MAIN, agent: str = "unknown", use_cache: bool = True
 ) -> str:
     return (await call_claude_full_async(prompt, model=model, agent=agent, use_cache=use_cache)).text
 
@@ -309,7 +309,7 @@ async def call_claude_async(
 async def call_claude_full_async(
     prompt: str,
     *,
-    model: str = MODEL_OPUS,
+    model: str = MODEL_MAIN,
     agent: str = "unknown",
     use_cache: bool = True,
     cache_prefix: str | None = None,

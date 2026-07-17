@@ -47,7 +47,7 @@ litellm uses `provider/model` strings. Set them in `.env`, or leave them comment
 to inherit the defaults from `config.py` (sonnet for the heavy slot, haiku for the
 light stages):
 
-| Provider | `ATOMIC_AGENT_MODEL_OPUS` (heavy slot) example | Extra setup |
+| Provider | `ATOMIC_AGENT_MODEL_MAIN` (heavy slot) example | Extra setup |
 |----------|-----------------------------------------------|-------------|
 | Anthropic | `anthropic/claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
 | OpenAI | `openai/gpt-4o` | `OPENAI_API_KEY` |
@@ -55,6 +55,18 @@ light stages):
 
 See the [litellm provider list](https://docs.litellm.ai/docs/providers) for the
 full set of supported providers and exact model strings.
+
+### Model roles (#317)
+
+`config.py` defines one main slot (`MODEL_MAIN`, env `ATOMIC_AGENT_MODEL_MAIN`) that
+planner/extractor/extender/canonicalizer default to, plus a separate slot for the eval
+judge (`MODEL_JUDGE`, env `ATOMIC_AGENT_MODEL_JUDGE`, defaults to `MODEL_MAIN`). Each
+role can be overridden independently via `ATOMIC_AGENT_MODEL_PLANNER` /
+`ATOMIC_AGENT_MODEL_EXTRACTOR` / `ATOMIC_AGENT_MODEL_EXTENDER` /
+`ATOMIC_AGENT_MODEL_CANONICALIZER`. `ATOMIC_AGENT_MODEL_OPUS` (and the `MODEL_OPUS`
+constant) is a deprecated alias for the main slot, kept for backward compatibility —
+new setups should use `ATOMIC_AGENT_MODEL_MAIN`. Priority when both are set:
+`ATOMIC_AGENT_MODEL_MAIN` > `ATOMIC_AGENT_MODEL_OPUS` > default.
 
 Failure behavior: if the `claude` CLI is missing, not logged in, or the rate window
 is exhausted (429), the pipeline fails fast with an actionable message (install/login

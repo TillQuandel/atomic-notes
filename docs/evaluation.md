@@ -37,7 +37,7 @@ flowchart TD
     CLAIMS --> RETRIEVAL
     RETRIEVAL --> RESCUE["F1/F2 Retrieval-Rescue (#232)"]
     RESCUE --> POOL[Kontext-Pool, dedupliziert]
-    POOL --> JUDGE["LLM-Judge primary\nMODEL_OPUS-Konstante"]
+    POOL --> JUDGE["LLM-Judge primary\nMODEL_JUDGE-Konstante"]
     JUDGE --> EVIDENCE["Evidence-Verifikation\nrapidfuzz token_set_ratio >= 0.90"]
     EVCORPUS --> EVIDENCE
     EVIDENCE --> AUDITCHECK{Audit-Trigger?}
@@ -91,7 +91,9 @@ Prompt-Aufbau: `_prompt_header`/`_build_prompt` (`eval_quality_v4.py:512-626`). 
 
 Dazu zwei **System-Labels**, die kein Judge-Urteil sind (`lib/decision_engine/models.py:21-25`): `retrieval_or_parse_uncertain` (Cosine des Top-Treffers < `RETRIEVAL_LOW_COSINE=0.4`, terminale System-Regel, `lib/decision_engine/rules.py:62-69`) und `parse_error` (Judge-Output nicht parsebar, terminale Regel `rules.py:55-59`, mit einem Claude-Reparatur-Call als Rettungsversuch, `_repair_json_with_claude`, `eval_quality_v4.py:643-663`).
 
-**Modell:** `MODEL_OPUS`-Konstante (`generative/config.py:50`) — Default (ohne `ATOMIC_AGENT_MODEL_OPUS`-Override) ist **`anthropic/claude-sonnet-4-6`**, nicht Opus. Historisch: A/B-Test 2026-05-20 fand niedrigere Halluzinationsrate + 3× günstiger bei gleicher Note-Anzahl gegenüber Opus (`config.py:48-49`), der Name blieb aus Rückwärtskompatibilität. Planner/Extractor der Generierungs-Pipeline nutzen zufällig dieselbe Konstante — aus dem im Eval-Ergebnis gespeicherten `model_config`-Feld (`eval_quality_v4.py:1045`, Snapshot von `MODEL_CONFIG`) lässt sich das Judge-Modell selbst **nicht** ablesen (der Judge-Call setzt `model=MODEL_OPUS` direkt, `eval_quality_v4.py:733`, ohne eigenen Eintrag in `MODEL_CONFIG`, `config.py:235-242`).
+**Modell:** `MODEL_JUDGE`-Konstante (`generative/config.py`, Env `ATOMIC_AGENT_MODEL_JUDGE`) — Default ist `MODEL_MAIN` (Env `ATOMIC_AGENT_MODEL_MAIN`), welches wiederum auf **`anthropic/claude-sonnet-4-6`** defaultet, nicht Opus. Historisch: A/B-Test 2026-05-20 fand niedrigere Halluzinationsrate + 3× günstiger bei gleicher Note-Anzahl gegenüber Opus (`config.py`). Vor #317 hieß der Hauptslot irreführend `MODEL_OPUS` und der Judge-Call hing fest an dieser Konstante — seit #317 hat der Judge einen eigenen, unabhängig überschreibbaren Slot (`ATOMIC_AGENT_MODEL_JUDGE`, unabhängig von Planner/Extractor/Extender/Canonicalizer wählbar), und `MODEL_OPUS`/`ATOMIC_AGENT_MODEL_OPUS` existieren nur noch als deprecated Alias auf `MODEL_MAIN` für Rückwärtskompatibilität.
+
+**Verifikation, wo der Judge-Modellstring landet (#317):** das im Eval-Ergebnis gespeicherte `model_config`-Feld (`eval_quality_v4.py:1045`, Snapshot von `MODEL_CONFIG`, `config.py`) hat weiterhin **keinen** eigenen `judge`-Eintrag — der Judge-Call ist dort nicht sichtbar (unverändert durch #317, bewusst keine Schemaänderung an `quality_history.jsonl`). Der tatsächlich verwendete Modellstring wird aber unabhängig davon korrekt aufgezeichnet: jeder LLM-Call (inkl. Judge- und JSON-Reparatur-Call, die explizit `model=MODEL_JUDGE` übergeben) schreibt sein reales, aufgelöstes Modell in die Call-Trace (`.cache/runs/<run-id>.jsonl`, Feld `"model"`, `generative/agents/base.py::_trace`) — der irreführende Konstantenname landete dort also nie, nur der echte String.
 
 ### Evidence-Fuzzy-Verifikation
 
