@@ -126,6 +126,44 @@ def test_all_models_still_excludes_denylisted_smoke_models(monkeypatch):
     assert models == {"anthropic/claude-opus-4-7"}
 
 
+# ── #320: valide Zeilen ohne run_id-Match zu einem Modell ──────────────────
+
+
+def test_models_unmatched_n_counts_valid_rows_without_run_id_match(monkeypatch):
+    """Zeile n2 haengt an run_id "r-orphan", zu der es KEINEN token_run gibt
+    (kein DB-Join moeglich) -- sie zaehlt in KEINER Modell-Option, muss aber
+    in models_unmatched_n auftauchen (Statistiker-Review-Bilanz: 479 valide
+    Zeilen = 442 mit Modell-Zuordnung + 37 ohne)."""
+    pipeline_runs = [_pipeline_run("r-claude", "anthropic/claude-sonnet-4-6")]
+    token_runs = [_token_run("r-claude")]
+    evals = [
+        _eval_row("n1", "r-claude", 0.1, "2026-01-01T00:00:01"),
+        _eval_row("n2", "r-orphan", 0.2, "2026-01-01T00:00:02"),
+    ]
+    data = _patched_build_data(monkeypatch, evals, pipeline_runs, token_runs)
+    assert data["models_unmatched_n"] == 1
+    by_model = {o["model"]: o["n_valid"] for o in data["all_models"]}
+    assert by_model["anthropic/claude-sonnet-4-6"] == 1
+
+
+def test_models_unmatched_n_excludes_invalid_sentinel_rows(monkeypatch):
+    """Der -1.0-Sentinel (ungueltige Zeile) darf models_unmatched_n NICHT
+    erhoehen -- dieselbe Validitaetsregel wie n_valid je Modell."""
+    pipeline_runs: list[dict] = []
+    token_runs: list[dict] = []
+    evals = [_eval_row("n1", "r-orphan", -1.0, "2026-01-01T00:00:01")]
+    data = _patched_build_data(monkeypatch, evals, pipeline_runs, token_runs)
+    assert data["models_unmatched_n"] == 0
+
+
+def test_models_unmatched_n_zero_when_all_valid_rows_matched(monkeypatch):
+    pipeline_runs = [_pipeline_run("r1", "anthropic/claude-haiku-4-5")]
+    token_runs = [_token_run("r1")]
+    evals = [_eval_row("n1", "r1", 0.1, "2026-01-01T00:00:01")]
+    data = _patched_build_data(monkeypatch, evals, pipeline_runs, token_runs)
+    assert data["models_unmatched_n"] == 0
+
+
 # ── Frontend-Anker: Dropdown zeigt "(n=X)", value bleibt der Modellname ────
 
 
@@ -138,3 +176,20 @@ def test_html_model_filter_shows_n_valid_badge_in_option_label():
     block = html[start:end]
     assert "m.model" in block
     assert "m.n_valid" in block
+
+
+def test_html_model_unmatched_hint_markup_and_wiring():
+    """#320: Hint-Span existiert (initial hidden), _initGlobalModelFilter
+    schaltet ihn ueber models_unmatched_n frei, und der Aufruf reicht das Feld
+    aus dem Server-Payload durch."""
+    from generative.eval_dashboard_server import _build_live_html
+
+    html = _build_live_html()
+    assert 'id="model-unmatched-hint"' in html
+    assert 'class="hint" id="model-unmatched-hint" tabindex="0" hidden' in html
+    start = html.index("function _initGlobalModelFilter")
+    end = html.index("\n}", start)
+    block = html[start:end]
+    assert "unmatchedN" in block
+    assert "model-unmatched-hint" in block
+    assert "d.models_unmatched_n" in html

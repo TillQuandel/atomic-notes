@@ -908,6 +908,13 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     </div>
     <div class="filter-group">
       <span class="filter-label">Modell</span>
+      <!-- #320: valide Eval-Zeilen ohne run_id-Match zu einem Modell zaehlen in
+           KEINER der Dropdown-Optionen unten mit -- ohne diesen Hinweis ist die
+           Luecke unsichtbar (Summe ueber alle Modell-Filter < Gesamtzahl
+           evaluierter Notes). Zahl kommt direkt aus d.models_unmatched_n
+           (Server-Payload), keine Neuberechnung im Client. Nur sichtbar
+           (hidden entfernt), wenn die Zahl > 0 ist -- s. _initGlobalModelFilter. -->
+      <span class="hint" id="model-unmatched-hint" tabindex="0" hidden>*<span class="hint-pop"></span></span>
       <select class="fselect" id="global-model" onchange="onGlobalFilterChange()">
         <option value="__all__">Alle</option>
       </select>
@@ -1405,7 +1412,7 @@ function _modelLabel(m) {
   return m;
 }
 
-function _initGlobalModelFilter(models) {
+function _initGlobalModelFilter(models, unmatchedN) {
   // Punkt 2: models = [{model, n_valid}] (Server) -- n_valid = Zahl VALIDER
   // Eval-Zeilen (hallucination_rate >= 0) je Modell, Gemini-Fehllesungs-
   // Schutz (-1.0-Sentinel) zeigt hier korrekt 0 statt der vollen Zeilenzahl.
@@ -1413,6 +1420,17 @@ function _initGlobalModelFilter(models) {
   _rebuildFilterSelect(sel, models.map(m=>m.model).join(','),
     `<option value="__all__">Alle</option>` + models.map(m => `<option value="${m.model}">${_modelLabel(m.model)} (n=${m.n_valid})</option>`).join(''),
     'model');
+  // #320: N valide Zeilen ohne run_id-Match zu einem Modell zaehlen in keiner
+  // Option oben -- Badge macht die Luecke am Dropdown selbst sichtbar.
+  const hintEl = document.getElementById('model-unmatched-hint');
+  if (hintEl) {
+    const n = unmatchedN || 0;
+    hintEl.hidden = n <= 0;
+    if (n > 0) {
+      const pop = hintEl.querySelector('.hint-pop');
+      if (pop) pop.textContent = `${n} Zeile${n===1?'':'n'} ohne Modell-Zuordnung (kein run_id-Match zu einem Pipeline-Lauf) — zählen in keiner der Modell-Optionen oben mit.`;
+    }
+  }
 }
 
 function _initGlobalRunFilter(runs) {
@@ -3008,7 +3026,7 @@ function _renderWithData(d) {
   if (d.all_pvers?.length)   _initGlobalPverFilter(d.all_pvers);
   if (d.all_pdfs?.length)    _initGlobalPdfFilter(d.all_pdfs);
   if (d.all_langs?.length)   _initGlobalLangFilter(d.all_langs);
-  if (d.all_models?.length)  _initGlobalModelFilter(d.all_models);
+  if (d.all_models?.length || d.models_unmatched_n) _initGlobalModelFilter(d.all_models||[], d.models_unmatched_n||0);
   if (d.all_runs?.length)    _initGlobalRunFilter(d.all_runs);
   const sfTime=document.getElementById('sf-time'); if(sfTime) sfTime.textContent=d.generated_at||'–';
   const footTime=document.getElementById('foot-time'); if(footTime) footTime.textContent=d.generated_at||'–';
