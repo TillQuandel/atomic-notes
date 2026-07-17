@@ -15,6 +15,12 @@
 
 :root {
   --bg: #0b1120; --bg-elev: #111827; --bg-card: #141e2e;
+  /* #321: vorberechnete opake Zebra-/Hover-Mischfarben fuer die sticky
+     PDF-Spalte der Matrix (s. .table-wrap.pm-scroll ... td:first-child unten)
+     -- --bg-card + die jeweilige rgba-Tint-Deckkraft von table.cmp
+     tbody tr:nth-child(even)/:hover td, arithmetisch vorgemischt (kein
+     color-mix() noetig, Werte aendern sich nur mit den Basisfarben oben). */
+  --bg-card-zebra: #182131; --bg-card-hover: #1c2635;
   --ink-1: #f0f4f8; --ink-2: #c4cdd9; --ink-3: #8fa3b8;
   --ink-4: #7e92a6; --ink-5: #3d4f60;
   --amber: #e8b53b; --coral: #e07a5f; --mint: #6dbf8c;
@@ -36,6 +42,8 @@
 }
 body.light {
   --bg: #f4f1eb; --bg-elev: #ece7dc; --bg-card: #ffffff;
+  /* #321: s. :root -- gleiche Mischrechnung mit den Light-Basisfarben. */
+  --bg-card-zebra: #fbfbfb; --bg-card-hover: #f7f7f7;
   --ink-1: #0d0d0d; --ink-2: #333333; --ink-3: #5c5c5c;
   --ink-4: #6b6b6b; --ink-5: #cccccc;
   --amber: #855900; --coral: #a8391e; --mint: #1e7a45;
@@ -608,12 +616,20 @@ table.cmp td.dim { color: var(--ink-3); }
 .table-wrap.pm-scroll td:first-child { position: sticky; left: 0; background: var(--bg-card); z-index: 2; }
 /* Die Zebra-/Hover-Overlays von table.cmp sind semi-transparent (rgba) —
    in der sticky-Spalte scheinen sonst die darunter durchgescrollten Zellen
-   durch. Die Light-Zebra-Regel `body.light table.cmp ... td` (0,3,4)
-   schlaegt die Regel oben (0,3,1), darum hier mit hoeherer Spezifitaet
-   (0,5,4) opak halten. Bewusster Trade-off: der 1,5–3,5%-Tint (Zebra/Hover)
-   entfaellt nur in dieser einen Spalte. */
-.table-wrap.pm-scroll table.cmp tbody tr:nth-child(even) td:first-child,
-.table-wrap.pm-scroll table.cmp tbody tr:hover td:first-child { background: var(--bg-card); }
+   durch. Vorher (bis #321): beide Zustaende deckend auf var(--bg-card)
+   zurueckgesetzt -- sichtbare Naht zur Zeile (Zebra-Tint fehlte in genau
+   dieser Spalte) und Hover erfasste die PDF-Zelle nie (Screenshots
+   C:/tmp/ux-review-312/desktop/a05, a07). Fix: vorberechnete OPAKE
+   Zebra-/Hover-Mischfarben (--bg-card-zebra/--bg-card-hover, s. :root/
+   body.light oben -- --bg-card + dieselbe rgba-Tint-Deckkraft wie die
+   Basisregeln unten arithmetisch vorgemischt) statt des generischen
+   var(--bg-card). Spezifitaet (0,5,4) schlaegt weiterhin die Light-Zebra-
+   Regel `body.light table.cmp ... td` (0,3,4). Hover-Selektor bewusst NACH
+   dem Zebra-Selektor notiert (gleiche Spezifitaet, Kaskade entscheidet) --
+   dieselbe Reihenfolge wie die Basisregeln unten, damit Hover bei
+   zebra+hover weiterhin gewinnt. */
+.table-wrap.pm-scroll table.cmp tbody tr:nth-child(even) td:first-child { background: var(--bg-card-zebra); }
+.table-wrap.pm-scroll table.cmp tbody tr:hover td:first-child { background: var(--bg-card-hover); }
 table.pm-matrix td, table.pm-matrix th { padding: 9px 12px; }
 table.pm-matrix td.pdf { white-space: nowrap; }
 /* Till-Live-Befund 2026-07-16 (Punkt 0): `table.cmp { width:100% }` (Zeile
