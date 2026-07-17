@@ -53,6 +53,11 @@ from generative.eval_common import (
     extract_claims,
     wilson_ci,
 )
+from generative.eval_text_quality import (
+    QUALITY_FLAG_CID_SUSPECT,
+    CidSuspectResult,
+    detect_cid_suspect,
+)
 from generative.embeddings import _model, cosine
 from generative.pipeline.pdf_chunker import anchor_page_numbers
 
@@ -73,6 +78,11 @@ _QUALITY_HISTORY = (
 # dieselbe Methodik-Aenderungs-Klasse wie 4.1→4.2. Ohne Bump wuerde der content-
 # adressierte Cache fuer unveraenderte Notes das alte Artefakt-Ergebnis liefern
 # (stille Staleness). Bei nicht betroffenen PDFs identisches Verhalten.
+# Kein Bump fuer #306 (generische CID-Verdachts-Warnung, siehe eval_text_quality.py):
+# das Flag ist rein additiv (neues Feld `pdf_text_suspect_cid` + optionaler
+# quality_flags-Eintrag "cid_font_suspect"), aendert weder Chunk-Texte/Embeddings/
+# Evidence-Corpus noch irgendeine Rate/ein Label. Bit-identisches Messverhalten
+# bei identischem Input -> kein Cache-Invalidierungsgrund.
 EVAL_VERSION = "4.3"
 # Eval-Judge-Cache ist content-adressiert und vom --fresh-run-Run-Salt entkoppelt:
 # eine inhaltlich unveraenderte Note wird nicht erneut evaluiert, auch wenn die uebrige
@@ -235,6 +245,7 @@ class _PdfArtifacts:
     chunks: list[Chunk]
     full_text: str
     sentences: list[str]
+    cid_suspect: CidSuspectResult | None = None
 
 
 _PDF_ARTIFACTS_CACHE: dict[tuple[str, int, int], _PdfArtifacts] = {}
@@ -263,10 +274,25 @@ def _pdf_artifacts(pdf_path: Path) -> _PdfArtifacts:
         page_numbers = anchor_page_numbers(pdf_path, len(doc))
         sentence_pairs = _pdf_sentences(doc, page_numbers)
         full_text = " ".join(_extract_page_text(doc, page) for page in range(1, len(doc) + 1))
+    # #306: generische CID-Font-/Korruptions-Erkennung (Nicht-ASCII-Haeufigkeitsprofil
+    # des extrahierten Volltexts). Reine Diagnostik -- verifiziert/aendert nichts an
+    # full_text/chunks/sentences, siehe eval_text_quality.py fuer die Heuristik.
+    cid_suspect = detect_cid_suspect(full_text)
+    if cid_suspect is not None:
+        print(
+            f"  [WARNUNG] CID-Font-Verdacht in {pdf_path.name}: Codepoint "
+            f"{cid_suspect.codepoint} dominiert Nicht-ASCII-Zeichen "
+            f"({cid_suspect.count}x, {cid_suspect.ratio:.1%} aller Zeichen) -- "
+            f"moeglicherweise ein defekter eingebetteter Font (Muster wie #278). "
+            f"Halluzinationsrate/Coverage dieser PDF ggf. mit Vorsicht interpretieren; "
+            f"siehe result['pdf_text_suspect_cid'].",
+            file=sys.stderr,
+        )
     artifacts = _PdfArtifacts(
         chunks=_chunks_from_sentences(sentence_pairs),
         full_text=full_text,
         sentences=[sentence for sentence, _ in sentence_pairs],
+        cid_suspect=cid_suspect,
     )
     _PDF_ARTIFACTS_CACHE[key] = artifacts
     return artifacts
@@ -939,6 +965,7 @@ def _empty_result(
         "pdf_chunks_total": 0,
         "claim_scores": [],
         "quality_flags": [],
+        "pdf_text_suspect_cid": None,
         "llm_usage": {"calls": 0, "input_tokens": 0, "output_tokens": 0, "cached_calls": 0},
     }
 
@@ -954,6 +981,7 @@ def _aggregate(
     llm_meta: dict[str, Any],
     *,
     content_hash: str | None = None,
+    cid_suspect: CidSuspectResult | None = None,
 ) -> dict:
     total = len(claim_scores)
     counts = Counter(score["label"] for score in claim_scores)
@@ -978,6 +1006,10 @@ def _aggregate(
     )
     if parse_error_count:
         quality_flags = sorted(set(quality_flags) | {"parse_errors_present"})
+    # #306: reine Diagnostik-Warnung -- KEIN Einfluss auf error/rate_valid/Labels
+    # unten, nur ein zusaetzlicher quality_flags-Eintrag + das additive Detail-Feld.
+    if cid_suspect is not None:
+        quality_flags = sorted(set(quality_flags) | {QUALITY_FLAG_CID_SUSPECT})
 
     error = None
     # CODEX-PATTERN: Einzelne Parse-Errors entwerten nicht den ganzen Lauf; erst ab
@@ -1036,6 +1068,9 @@ def _aggregate(
         "pdf_chunks_total": len(chunks),
         "claim_scores": claim_scores,
         "quality_flags": quality_flags,
+        # #306: additives Diagnostik-Feld, None wenn kein CID-Verdacht. Kein Bezug zu
+        # obigen Raten/Labels -- siehe Kommentar am cid_suspect-Parameter oben.
+        "pdf_text_suspect_cid": cid_suspect.as_dict() if cid_suspect is not None else None,
         "llm_usage": {
             "calls": llm_meta.get("calls", 0),
             "input_tokens": llm_meta.get("input_tokens", 0),
@@ -1152,6 +1187,7 @@ def eval_note(
         claim_scores,
         llm_meta,
         content_hash=content_hash,
+        cid_suspect=artifacts.cid_suspect,
     )
 
 
