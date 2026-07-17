@@ -178,6 +178,9 @@ def _background_extractor_by_chapter_skip_line(gate_enabled: bool) -> str | None
     return "[4.5/7] Background-Extractor: übersprungen im --by-chapter-Modus (bewusst — Kosten pro Kapitel)"
 
 
+_RESCUE_WINDOW_WORDS = 1200  # #308: Fenster-Rescue-Größe (3x window_words=400)
+
+
 async def run_extractors_per_concept(
     full_text: str,
     concept_plan: ConceptPlan,
@@ -193,6 +196,12 @@ async def run_extractors_per_concept(
     Konzepte mit action='skip' werden übersprungen. Konzepte ohne Treffer im Volltext
     werden vor dem LLM-Call verworfen (zusätzlicher Halluzinations-Schutz neben
     planner.filter_hallucinated).
+
+    #308: Bleibt ein Konzept nach Erst-Call UND #280-Retry (beide auf dem 400-
+    Wort-Fenster) leer, folgt genau EIN Rescue-Versuch mit deutlich größerem
+    Fenster (_RESCUE_WINDOW_WORDS) statt eines weiteren Retries auf demselben
+    Fenster. Rettet der Rescue das Konzept, zählt es normal zu `drafts` (kein
+    dropped-Event); bleibt es leer, weiterhin `dropped`/`empty_extraction`.
 
     max_concurrent_calls: aus RuntimeConfig gespeist (#101); None → Legacy-Fallback
     auf die feste Konstante MAX_CONCURRENT_CALLS.
@@ -220,24 +229,42 @@ async def run_extractors_per_concept(
                 related_mentions=related_mentions,
             )
 
+    async def _run_rescue_with_sem(concept, ctext):
+        # #308: retry_empty=False -- der interne #280-Retry (gleiche Fenster-
+        # größe) wäre hier sinnlos, der Rescue liefert bereits ein deutlich
+        # größeres Fenster. Deckelt die Rescue-Kosten auf genau 1 Zusatz-Call
+        # statt bis zu 2 (Erst-Call + interner Retry).
+        async with sem:
+            bg = (background_map or {}).get(concept.title)
+            return await extractor.run_per_concept(
+                concept=concept,
+                concept_text=ctext,
+                existing_concepts=existing_concepts,
+                citation=citation,
+                tag_whitelist=tag_whitelist,
+                background_context=bg,
+                related_mentions=related_mentions,
+                retry_empty=False,
+            )
+
+    def _search_terms(c) -> list[str]:
+        # Search-Terms: Konzept-Titel + ggf. Aliase aus Title (Kuhlthau, ISP, …)
+        # Heuristisch: Tokens des Titels die nicht Stoppwörter sind
+        from generative.agents.cross_reference import _tokens
+
+        terms = [c.title]
+        terms.extend(t for t in _tokens(c.title) if len(t) >= 4)
+        return terms
+
     tasks: list = []
     concept_for_idx: list = []  # parallele Liste für besseres Logging
     contexts: list = []  # parallele Liste mit (concept, ctext) für concept_map
     for c in concept_plan.concepts:
         if c.action == "skip" or c.origin == "secondary_mention":
             continue
-        # Search-Terms: Konzept-Titel + ggf. Aliase aus Title (Kuhlthau, ISP, …)
-        search_terms = [c.title]
-        # Heuristisch: Tokens des Titels die nicht Stoppwörter sind
-        from generative.agents.cross_reference import _tokens
-
-        search_terms.extend(t for t in _tokens(c.title) if len(t) >= 4)
-        # Fenster sammeln
-        from generative.pipeline.pdf_chunker import concept_text_window
-
-        # window_words=400 = neue Option-D-Semantik (Fenster-Größe für Sliding-Window-Scoring),
-        # nicht mehr ±expansion wie vor 2026-05-17.
-        ctext = concept_text_window(full_text, search_terms, window_words=400)
+        # Fenster sammeln. window_words=400 = neue Option-D-Semantik (Fenster-
+        # Größe für Sliding-Window-Scoring), nicht mehr ±expansion wie vor 2026-05-17.
+        ctext = pdf_chunker.concept_text_window(full_text, _search_terms(c), window_words=400)
         if not ctext.strip():
             print(f"      [skip] '{c.title}' nicht im Volltext gefunden (Halluzinations-Schutz)", file=sys.stderr)
             # #197 Nachbesserung: bisher stummer Pre-Call-Drop (Konzept nicht im
@@ -254,6 +281,7 @@ async def run_extractors_per_concept(
     drafts: list[AtomicNoteDraft] = []
     concept_map: dict = {}  # draft.title -> (concept, ctext)
     failures: list[tuple[str, str]] = []  # #210: (title, error) nur für harte Call-Ausfälle
+    empty_idx: list[int] = []  # #308: r is None -> Kandidaten für den Fenster-Rescue unten
     for i, r in enumerate(results):
         if isinstance(r, Exception):
             print(f"  [WARN] Extractor '{concept_for_idx[i]}' fehlgeschlagen: {r}", file=sys.stderr)
@@ -265,14 +293,62 @@ async def run_extractors_per_concept(
             )
             failures.append((concept_for_idx[i], str(r)))
         elif r is None:
-            # #197 Nachbesserung: leere Extraktion → Funnel-Event (vorher nur
-            # von run_per_concept als [extractor-empty] auf stderr geloggt).
-            _trace_stage_outcome(concept_for_idx[i], "extractor", "dropped", drop_reason="empty_extraction")
+            # #308: noch nicht droppen -- ggf. per Fenster-Rescue rettbar (s.u.).
+            empty_idx.append(i)
         else:
             r.refine_key = contexts[i][0].title  # plan title als stabiler Fallback-Key (Bug #5)
             drafts.append(r)
             concept_map[r.title] = contexts[i]
             concept_map[contexts[i][0].title] = contexts[i]  # plan title als zusätzlicher Key
+
+    # #308: Root-Cause von #280/#297 -- der Planner weist Konzepten Chunks zu,
+    # die die Belegstelle nicht enthalten bzw. das 400-Wort-Fenster trifft sie
+    # nicht ausreichend; der #280-Retry (innerhalb extractor.run_per_concept)
+    # lief bisher auf demselben Fenster und verdoppelte nur die Token-Kosten
+    # des Fehlversuchs. Fix: genau EIN Rescue-Versuch pro noch offenem Konzept
+    # mit deutlich größerem Fenster (verdreifacht: 400 → 1200 Wörter) -- kein
+    # Loop, max. 1 Zusatz-Call.
+    rescued: set[int] = set()
+    if empty_idx:
+        rescue_tasks = []
+        rescue_meta: list[tuple[int, object, str]] = []  # (idx, concept, expanded_ctext)
+        for i in empty_idx:
+            c, old_ctext = contexts[i]
+            expanded_ctext = pdf_chunker.concept_text_window(
+                full_text, _search_terms(c), window_words=_RESCUE_WINDOW_WORDS
+            )
+            if not expanded_ctext.strip() or expanded_ctext == old_ctext:
+                # Größeres Fenster liefert nichts Neues (z.B. sehr kurzes
+                # Dokument) -> ein dritter Call wäre garantiert derselbe
+                # Fehlschlag, kein Call.
+                continue
+            rescue_meta.append((i, c, expanded_ctext))
+            rescue_tasks.append(_run_rescue_with_sem(c, expanded_ctext))
+
+        if rescue_tasks:
+            rescue_results = await asyncio.gather(*rescue_tasks, return_exceptions=True)
+            for (i, c, expanded_ctext), rr in zip(rescue_meta, rescue_results):
+                title = concept_for_idx[i]
+                if isinstance(rr, Exception) or rr is None:
+                    print(
+                        f"      [extractor-window-rescue-failed] '{title}' auch mit expandiertem Fenster kein Output",
+                        file=sys.stderr,
+                    )
+                    continue
+                print(f"      [extractor-window-rescue] '{title}' mit expandiertem Fenster gerettet", file=sys.stderr)
+                rr.refine_key = c.title
+                drafts.append(rr)
+                concept_map[rr.title] = (c, expanded_ctext)
+                concept_map[c.title] = (c, expanded_ctext)
+                rescued.add(i)
+
+    for i in empty_idx:
+        if i in rescued:
+            continue
+        # #197 Nachbesserung: leere Extraktion → Funnel-Event (vorher nur
+        # von run_per_concept als [extractor-empty] auf stderr geloggt).
+        _trace_stage_outcome(concept_for_idx[i], "extractor", "dropped", drop_reason="empty_extraction")
+
     dropped = len(tasks) - len(drafts)
     if dropped:
         print(f"      [extractor-empty] {dropped}/{len(tasks)} Konzepte stumm weggefallen", file=sys.stderr)
