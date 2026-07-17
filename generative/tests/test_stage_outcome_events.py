@@ -313,12 +313,23 @@ def _concept(title: str) -> ConceptItem:
 
 def test_run_extractors_empty_ctext_emits_stage_outcome(monkeypatch, tmp_path):
     """Konzept nicht im Volltext gefunden (`if not ctext.strip(): continue`) —
-    fiel bisher stumm vor jeder Event-Instrumentierung weg."""
+    fiel bisher stumm vor jeder Event-Instrumentierung weg.
+
+    #127: der lexikalische Skip fragt seither zusätzlich einen semantischen
+    Fallback (`semantic_window_fn`) — hier per No-Op-Fake auf leer gehalten,
+    damit dieser Test weiterhin ohne echtes Embedding-Modell läuft (das
+    Rettungskanal-Verhalten selbst ist in test_stage5_semantic_fallback.py
+    dediziert getestet). Der Titel ist auch semantisch themenfremd, ein
+    echter Fallback würde also ohnehin leer bleiben."""
     read = _capture(monkeypatch, tmp_path)
     plan = ConceptPlan(source_title="T", source_summary="S", concepts=[_concept("Xyzzy Plughversion Frobnicate")])
     full_text = "Der schnelle braune Fuchs springt über den faulen Hund."  # kein Titel-Token enthalten
 
-    asyncio.run(orch.run_extractors_per_concept(full_text, plan, existing_concepts={}))
+    asyncio.run(
+        orch.run_extractors_per_concept(
+            full_text, plan, existing_concepts={}, semantic_window_fn=lambda text, title: ("", 0.0)
+        )
+    )
 
     events = read()
     assert len(events) == 1

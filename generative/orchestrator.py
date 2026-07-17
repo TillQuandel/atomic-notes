@@ -110,6 +110,7 @@ from generative.config import (
     MAX_PAGES_SHORT_DOC,
     REDUNDANT_SIBLING_COSINE_THRESHOLD,
     ENABLE_FAITHFULNESS_GATE,
+    TITLE_PRESENCE_COSINE_THRESHOLD,
     is_maintainer,
 )
 from generative.runtime_config import (
@@ -190,12 +191,22 @@ async def run_extractors_per_concept(
     background_map: dict[str, list[str]] | None = None,
     related_mentions: list[str] | None = None,
     max_concurrent_calls: int | None = None,
+    semantic_window_fn=None,
 ) -> tuple[list[AtomicNoteDraft], dict, int, list[tuple[str, str]]]:
     """Pro Konzept ein Extractor-Call mit den relevanten Textstellen aus ALLEN Chunks.
 
     Konzepte mit action='skip' werden übersprungen. Konzepte ohne Treffer im Volltext
     werden vor dem LLM-Call verworfen (zusätzlicher Halluzinations-Schutz neben
     planner.filter_hallucinated).
+
+    #127: Bleibt der lexikalische Fenster-Scan (`pdf_chunker.concept_text_window`)
+    leer, wird VOR dem endgültigen [skip] ein semantischer Fallback versucht
+    (`pdf_chunker.semantic_concept_window` per Default) — derselbe cross-linguale
+    Rettungskanal wie `planner.filter_hallucinated` (#66), hier auf Fenster- statt
+    Satz-Ebene, weil das Ergebnis direkt als Extraktor-Kontext dient. Fail-closed:
+    rettet nur bei Cosine ≥ TITLE_PRESENCE_COSINE_THRESHOLD, sonst bleibt der Skip.
+    `semantic_window_fn(full_text, title) -> (fenster, cosine)` ist injizierbar
+    (deterministische Tests ohne ML-Modell-Load, vgl. filter_hallucinated).
 
     #308: Bleibt ein Konzept nach Erst-Call UND #280-Retry (beide auf dem 400-
     Wort-Fenster) leer, folgt genau EIN Rescue-Versuch mit deutlich größerem
@@ -256,6 +267,10 @@ async def run_extractors_per_concept(
         terms.extend(t for t in _tokens(c.title) if len(t) >= 4)
         return terms
 
+    sem_window_fn = semantic_window_fn or (
+        lambda text, title: pdf_chunker.semantic_concept_window(text, title, TITLE_PRESENCE_COSINE_THRESHOLD)
+    )
+
     tasks: list = []
     concept_for_idx: list = []  # parallele Liste für besseres Logging
     contexts: list = []  # parallele Liste mit (concept, ctext) für concept_map
@@ -266,13 +281,25 @@ async def run_extractors_per_concept(
         # Größe für Sliding-Window-Scoring), nicht mehr ±expansion wie vor 2026-05-17.
         ctext = pdf_chunker.concept_text_window(full_text, _search_terms(c), window_words=400)
         if not ctext.strip():
-            print(f"      [skip] '{c.title}' nicht im Volltext gefunden (Halluzinations-Schutz)", file=sys.stderr)
-            # #197 Nachbesserung: bisher stummer Pre-Call-Drop (Konzept nicht im
-            # Volltext) → Funnel-Event. Konfliktfrei zu #216 (das diesen Block nicht anfasst).
-            _trace_stage_outcome(
-                c.title, "extractor", "dropped", drop_reason="empty_extraction", detail="not in fulltext"
-            )
-            continue
+            # #127: lexikalischer Scan ist sprachblind (deutscher Planner-Titel
+            # auf englischer Quelle -> 0 Token-Overlap) -- VOR dem endgültigen
+            # Skip denselben semantischen Rettungskanal wie #66 anbieten.
+            rescued_ctext, rescue_score = sem_window_fn(full_text, c.title)
+            if rescued_ctext.strip():
+                print(
+                    f"      [semantic-window-fallback] '{c.title}' lexikalisch nicht gefunden, "
+                    f"semantisch gerettet (cosine={rescue_score:.2f})",
+                    file=sys.stderr,
+                )
+                ctext = rescued_ctext
+            else:
+                print(f"      [skip] '{c.title}' nicht im Volltext gefunden (Halluzinations-Schutz)", file=sys.stderr)
+                # #197 Nachbesserung: bisher stummer Pre-Call-Drop (Konzept nicht im
+                # Volltext) → Funnel-Event. Konfliktfrei zu #216 (das diesen Block nicht anfasst).
+                _trace_stage_outcome(
+                    c.title, "extractor", "dropped", drop_reason="empty_extraction", detail="not in fulltext"
+                )
+                continue
         tasks.append(_run_with_sem(c, ctext))
         concept_for_idx.append(c.title)
         contexts.append((c, ctext))
