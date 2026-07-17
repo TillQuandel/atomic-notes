@@ -78,6 +78,33 @@ def _normalize(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
+# Coverage-Fallback (#316) -- geteilter Helper fuer Bestands-Stellen AUSSERHALB
+# des Dashboards (eval_progress.py, orchestrator.py, db.py::query_kpi_trend).
+# Dashboard-eigene Stellen fixt bereits eval_dashboard.py::_row_coverage
+# (separates, aelteres Ticket) -- dieselbe Logik, kein Import zwischen beiden
+# Modulen (eval_common ist bewusst dependency-frei von eval_dashboard).
+# ---------------------------------------------------------------------------
+
+
+def coverage_value(row) -> float | None:
+    """Coverage-Wert einer Eval-Zeile: `coverage_factual`, wenn NICHT `None`
+    (auch bei echter 0.0!), NUR bei `None` Fallback auf `coverage_rate`.
+
+    Anti-Pattern-Fix: `row.get("coverage_factual", row.get("coverage_rate", 0))`
+    faellt bei einem explizit gespeicherten `None`-Wert NICHT zurueck --
+    `dict.get`s Default greift nur bei fehlendem Key, nicht bei vorhandenem Key
+    mit `None`-Wert (#316). Mapping-kompatibel: akzeptiert sowohl `dict` als
+    auch `sqlite3.Row` (KEIN `.get()` -- Row unterstuetzt das nicht; `in
+    row.keys()` funktioniert fuer beide).
+    """
+    keys = row.keys()
+    v = row["coverage_factual"] if "coverage_factual" in keys else None
+    if v is not None:
+        return v
+    return row["coverage_rate"] if "coverage_rate" in keys else None
+
+
+# ---------------------------------------------------------------------------
 # Wilson-Konfidenzintervall (aus eval_quality.py / v1)
 # ---------------------------------------------------------------------------
 

@@ -348,3 +348,71 @@ def test_orchestrator_migrates_existing_db_missing_abort_reason_column(tmp_path)
     finally:
         conn2.close()
     assert "abort_reason" in cols
+
+
+def test_query_kpi_trend_avg_cov_falls_back_to_coverage_rate_when_factual_null(tmp_path):
+    """#316: `AVG(coverage_factual)` ohne Fallback liefert NULL fuer avg_cov, sobald
+    `coverage_factual` NULL ist -- strukturell der Fall fuer JEDE eval_version=4.x-
+    Zeile (#233, coverage_factual seit v4 abgeschafft). Fix: `COALESCE(coverage_factual,
+    coverage_rate)`.
+
+    RED vor dem Fix: avg_cov ist None. GREEN: avg_cov == 0.7 (coverage_rate)."""
+    from generative import db
+
+    path = tmp_path / "test.db"
+    db.init_db(path)
+    with db.get_db(path) as conn:
+        db.insert_run(conn, {"run_id": "r1", "pipeline_version": "v1"})
+        db.insert_eval(
+            conn,
+            {
+                "eval_id": "e1",
+                "run_id": "r1",
+                "note_path": "n1",
+                "acceptance_status": "vault",
+                "hallucination_rate": 0.1,
+                "coverage_factual": None,
+                "coverage_rate": 0.7,
+                "tokens_total": 100,
+                "wall_time_s": 1.0,
+                "pipeline_version": "v1",
+                "pdf": "a.pdf",
+                "eval_version": "4.1",
+            },
+        )
+
+    trend = db.query_kpi_trend(path)
+    assert len(trend) == 1
+    assert trend[0]["avg_cov"] == 0.7
+
+
+def test_query_kpi_trend_avg_cov_real_zero_coverage_factual_not_swallowed(tmp_path):
+    """COALESCE darf eine echte 0.0 in coverage_factual nicht durch coverage_rate
+    ersetzen -- COALESCE greift NUR bei SQL-NULL, nicht bei 0.0 (anders als ein
+    Python `or`-Fallback), also bereits korrekt -- Regressionsschutz."""
+    from generative import db
+
+    path = tmp_path / "test.db"
+    db.init_db(path)
+    with db.get_db(path) as conn:
+        db.insert_run(conn, {"run_id": "r1", "pipeline_version": "v1"})
+        db.insert_eval(
+            conn,
+            {
+                "eval_id": "e1",
+                "run_id": "r1",
+                "note_path": "n1",
+                "acceptance_status": "vault",
+                "hallucination_rate": 0.1,
+                "coverage_factual": 0.0,
+                "coverage_rate": 0.9,
+                "tokens_total": 100,
+                "wall_time_s": 1.0,
+                "pipeline_version": "v1",
+                "pdf": "a.pdf",
+                "eval_version": "1.3",
+            },
+        )
+
+    trend = db.query_kpi_trend(path)
+    assert trend[0]["avg_cov"] == 0.0

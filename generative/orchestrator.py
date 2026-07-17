@@ -1652,6 +1652,28 @@ def dry_run_eval_targets(written: list[tuple[Path, bool]], cache_note_dir: Path)
     return files
 
 
+def _stage8_report_averages(eval_results: list[dict]) -> tuple[float | None, float | None]:
+    """Mittlere Halluzinationsrate + Coverage aus Stage-8-Eval-Resultaten fuer den
+    Run-Ende-Print. `None, None` wenn keine gueltige Halluzinationsrate vorliegt
+    (Aufrufer druckt dann nichts, wie zuvor).
+
+    #316: `r.get("coverage_factual", r.get("coverage_rate", -1.0)) >= 0` crasht mit
+    TypeError, sobald `coverage_factual` explizit als `None` gespeichert ist (der
+    Normalfall seit eval_version 4.x, #233) -- `dict.get`s Default greift nur bei
+    fehlendem Key. `coverage_value()` (eval_common.py) behandelt beide Faelle
+    gleich und faellt korrekt auf `coverage_rate` zurueck.
+    """
+    from generative.eval_common import coverage_value
+
+    hall_rates = [r["hallucination_rate"] for r in eval_results if "hallucination_rate" in r and r["hallucination_rate"] >= 0]
+    cov_rates = [v for r in eval_results if (v := coverage_value(r)) is not None and v >= 0]
+    if not hall_rates:
+        return None, None
+    avg_hall = sum(hall_rates) / len(hall_rates)
+    avg_cov = sum(cov_rates) / len(cov_rates) if cov_rates else 0.0
+    return avg_hall, avg_cov
+
+
 def run_stage8_eval(
     note_files: list[Path],
     source_path: Path,
@@ -3199,19 +3221,8 @@ def main(argv: list[str] | None = None):
         )
 
         if eval_results:
-            hall_rates = [
-                r["hallucination_rate"]
-                for r in eval_results
-                if "hallucination_rate" in r and r["hallucination_rate"] >= 0
-            ]
-            cov_rates = [
-                r.get("coverage_factual", r.get("coverage_rate", 0.0))
-                for r in eval_results
-                if r.get("coverage_factual", r.get("coverage_rate", -1.0)) >= 0
-            ]
-            if hall_rates:
-                avg_hall = sum(hall_rates) / len(hall_rates)
-                avg_cov = sum(cov_rates) / len(cov_rates) if cov_rates else 0.0
+            avg_hall, avg_cov = _stage8_report_averages(eval_results)
+            if avg_hall is not None:
                 print(f"      Ø Halluzinationsrate: {avg_hall:.1%}  |  Ø Coverage (faktisch): {avg_cov:.1%}")
                 reused_note = f"  (+{_reused_count} wiederverwendet, Hash-Guard)" if _reused_count else ""
                 print(f"      {_evaluated_count} Notes → .cache/quality_history.jsonl{reused_note}")
