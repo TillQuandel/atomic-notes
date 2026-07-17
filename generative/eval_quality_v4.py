@@ -682,7 +682,8 @@ TEXT:
     repaired = base.call_llm_full(
         prompt,
         model=MODEL_JUDGE,
-        agent="eval_quality_v3_json_repair",
+        # #319: v4-Judge, nicht v3 -- Label war Altlast aus dem v3-Vorgaenger.
+        agent="eval_quality_v4_json_repair",
         use_cache=use_cache,
         cache_namespace=EVAL_CACHE_NAMESPACE,
     )
@@ -757,7 +758,8 @@ def _call_judge(
         result = base.call_llm_full(
             prompt,
             model=MODEL_JUDGE,
-            agent=f"eval_quality_v3_{variant}",
+            # #319: v4-Judge, nicht v3 -- Label war Altlast aus dem v3-Vorgaenger.
+            agent=f"eval_quality_v4_{variant}",
             use_cache=use_cache,
             cache_namespace=EVAL_CACHE_NAMESPACE,
         )
