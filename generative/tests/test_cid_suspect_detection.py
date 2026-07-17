@@ -48,6 +48,26 @@ CLEAN_UMLAUT_TEXT = (
     "Ueberpruefung mehrerer Softwareloesungen fuer oeffentliche Behoerden. "
 ) * 60
 
+# Adversarialer Fund am #306-PR: ein statistik-lastiger Absatz mit haeufiger
+# griechischer Koeffizienten-Notation (α, β, χ²) triggerte OHNE die
+# Schriftblock-Ausnahme faelschlich (empirisch CidSuspectResult(U+03B1,
+# ratio 1,93 %) bei 0,5 %-Schwelle -- dieser Absatz liegt mit 1,16 % Alpha-
+# Anteil in derselben Groessenordnung). Griechisch ist in Statistik-/
+# Klassik-/Linguistik-Fachtexten ein legitimes, haeufiges Muster.
+GREEK_STATISTICS_PARAGRAPH = (
+    "Der Regressionskoeffizient α lag bei α=0,42 (SE=0,08), der Interaktionsterm β "
+    "erreichte β=0,17. Das globale Modell zeigt einen signifikanten χ²-Test "
+    "(χ²(3)=14,2, p<0,01). Wie schon bei Aristoteles diskutiert, "
+    "bleibt die Deutung von α und β kontextabhaengig. "
+) * 40
+
+# Kyrillischer Absatz (Slawistik-/Osteuropa-Literaturangaben) -- derselbe
+# Schriftblock-Ausnahme-Fall wie Griechisch, andere Sprache.
+CYRILLIC_PARAGRAPH = (
+    "Известный лингвист отметил, что данный термин восходит к древнерусскому "
+    "языку и часто встречается в академической литературе по славистике. "
+) * 40
+
 
 class TestDetectCidSuspect:
     def test_synthetic_jockisch_profile_triggers_flag(self):
@@ -85,6 +105,24 @@ class TestDetectCidSuspect:
 
     def test_empty_text_returns_none(self):
         assert detect_cid_suspect("") is None
+
+    def test_greek_statistics_paragraph_does_not_trigger(self):
+        # False-Positive-Regressionstest (adversarialer Fund): Griechisch (Greek
+        # and Coptic, U+0370-U+03FF) ist ein etablierter Schriftblock, keine
+        # CID-Korruption -- trotz Alpha-Anteil deutlich ueber der 0,5%-Schwelle.
+        assert detect_cid_suspect(GREEK_STATISTICS_PARAGRAPH) is None
+
+    def test_cyrillic_paragraph_does_not_trigger(self):
+        # Wie oben, fuer Kyrillisch (U+0400-U+04FF).
+        assert detect_cid_suspect(CYRILLIC_PARAGRAPH) is None
+
+    def test_jockisch_pattern_still_triggers_despite_script_exclusion(self):
+        # Regressionsschutz: die Schriftblock-Ausnahme (Griechisch/Kyrillisch)
+        # darf das eigentliche Jockisch-Muster (Latin Extended-B, U+0231) nicht
+        # mit-ausnehmen -- Latin Extended-B ist kein etablierter Schriftblock.
+        result = detect_cid_suspect(JOCKISCH_LIKE_TEXT)
+        assert result is not None
+        assert result.codepoint == "U+0231"
 
 
 # ---------------------------------------------------------------------------
