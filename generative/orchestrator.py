@@ -1665,7 +1665,9 @@ def _stage8_report_averages(eval_results: list[dict]) -> tuple[float | None, flo
     """
     from generative.eval_common import coverage_value
 
-    hall_rates = [r["hallucination_rate"] for r in eval_results if "hallucination_rate" in r and r["hallucination_rate"] >= 0]
+    hall_rates = [
+        r["hallucination_rate"] for r in eval_results if "hallucination_rate" in r and r["hallucination_rate"] >= 0
+    ]
     cov_rates = [v for r in eval_results if (v := coverage_value(r)) is not None and v >= 0]
     if not hall_rates:
         return None, None

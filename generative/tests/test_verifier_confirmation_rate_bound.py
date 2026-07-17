@@ -51,8 +51,7 @@ def test_confirmation_rate_never_exceeds_one_when_body_sync_adds_anchors(tmp_pat
         synthesis_confidence="medium",
     )
     chunk_text = (
-        "[S. 3] Diese Formulierung erscheint identisch im Originaltext. "
-        "Mehr Kontext fuer die Marker-Erkennung."
+        "[S. 3] Diese Formulierung erscheint identisch im Originaltext. Mehr Kontext fuer die Marker-Erkennung."
     )
 
     verifier.run(draft, chunk_text=chunk_text)
