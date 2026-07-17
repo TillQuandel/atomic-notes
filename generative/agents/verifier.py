@@ -123,6 +123,16 @@ def sync_anchors_from_body(draft: AtomicNoteDraft) -> AtomicNoteDraft:
 
 
 def _log_anchor_stats(title: str, total_in: int, final_anchors: list) -> None:
+    # #331: confirmation_rate konnte > 100 % werden, weil `confirmed` (gezaehlt aus
+    # final_anchors, NACH dem Lauf) durch `total_in` (Momentaufnahme VOR dem Lauf)
+    # geteilt wurde. `_run_inner()` haengt an JEDEM Ausgang ueber
+    # sync_anchors_from_body() neue, bereits bestaetigte Anker an -- Zaehler und
+    # Nenner bezogen sich dadurch auf unterschiedliche Mengen, auch ohne Refine-
+    # Zyklus (empirisch belegt: Coverage-Serie 2, Lauf 5/Kok, confirmation_rate=3.0
+    # OHNE Refine). Fix: Nenner = dieselbe Menge wie der Zaehler (len(final_anchors)),
+    # `total_in` bleibt als separates Feld fuer Transparenz erhalten. Rate ist damit
+    # mathematisch garantiert <= 1.0.
+    total_final = len(final_anchors)
     confirmed = sum(1 for a in final_anchors if a.page or a.fuzzy_page)
     trace_event(
         "verifier",
@@ -131,7 +141,7 @@ def _log_anchor_stats(title: str, total_in: int, final_anchors: list) -> None:
             "title": title,
             "total_in": total_in,
             "confirmed": confirmed,
-            "confirmation_rate": round(confirmed / total_in, 3) if total_in > 0 else 0.0,
+            "confirmation_rate": round(confirmed / total_final, 3) if total_final > 0 else 0.0,
         },
     )
 
