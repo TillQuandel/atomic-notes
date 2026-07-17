@@ -773,6 +773,19 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
 ::-webkit-scrollbar-thumb { background: var(--hair-strong); border-radius: 5px; border: 2px solid var(--bg); }
 
 /* ── Responsive ─────────────────────────────────────────────────── */
+/* #324: die Filterbar-Kompakt-Styles (U9 unten) galten bislang nur bis zur
+   1200er-Schwelle -- der naechste Breakpoint (min-width: 1201px, Matrix-
+   Sticky-Regel oben) hat eine andere Zustaendigkeit. Dazwischen (1201–
+   ~1430px) blieb die volle unkompaktierte Breite aktiv: bei 1280px brach
+   "Modell" als letzte Filter-Group allein in Zeile 2 um (Screenshot
+   a-top-1280-light.png). Eigene, breitere Media-Query statt die Schwelle
+   der KPI-Grid-Regeln (kpis-perf, Block darunter) anzuheben -- die sind von
+   der Luecke nicht betroffen, eine gemeinsame Schwelle waere unnoetige
+   Fernwirkung auf eine unbeteiligte Ansicht. */
+@media (max-width: 1440px) {
+  .filter-group { padding: 0 10px; }
+  .fselect { max-width: 150px; }
+}
 @media (max-width: 1200px) {
   /* .kpis-quality hat bereits 4 Spalten (siehe Basis-Regel oben) — passt
      hier ohne Änderung in eine Zeile, kein Umbruch, kein extra Rand nötig. */
@@ -790,12 +803,9 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
      letzte Filter-Group allein in eine neue Zeile -- kompaktere Gruppierung
      durch engeres Padding UND schmalere Select-Maximalbreite (200px liess
      bei 1100px 3 der 5 Groups an die Kappung stossen, ~370px Ueberschuss
-     ueber die verfuegbaren ~880px). (Punkt 1 haengt hier bewusst KEIN
-     eigenes Filter-Element mehr an, s. Design-Iteration im Eval-Version-
-     Kommentar -- das Eval-Version-Select sitzt inline in der Sidebar, nicht
-     in der Filterbar.) */
-  .filter-group { padding: 0 10px; }
-  .fselect { max-width: 150px; }
+     ueber die verfuegbaren ~880px). Kompakt-Styles selbst jetzt in der
+     breiteren @media (max-width: 1440px) oben (#324, schliesst die
+     1201–1430px-Luecke) -- hier nur noch der historische Befund-Kontext. */
 }
 @media (max-width: 900px) {
   .strip { grid-template-columns: repeat(4,1fr); }
