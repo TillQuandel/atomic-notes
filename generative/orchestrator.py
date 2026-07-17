@@ -422,6 +422,69 @@ def total_loss_warning_line(n_attempted: int) -> str:
     )
 
 
+# --- #330: 0-Notes-Läufe bekommen eine pipeline_runs-Zeile ------------------
+# Läufe, die 0 Notes erzeugen (legitimer Konzeptmangel ODER stiller
+# Totalverlust, #281), kehrten bisher VOR dem Erfolgspfad-Insert (weiter unten
+# in main(), #198 P1) zurück — keine DB-Zeile, also unsichtbar für Run-
+# Zählung, Token-/Kosten-Tracking und die Frage „wie oft produziert die
+# Pipeline nichts?". Diese Funktion schließt die Lücke additiv an beiden
+# betroffenen Rückgabepunkten (s. main()): n_generated/n_vault/n_inbox/
+# n_merge bleiben 0 (keine Note geschrieben), abort_reason macht den Grund
+# sichtbar. Eigenes try/except — ein DB-Fehler darf den Lauf-Exit nie
+# verhindern (gleiches Muster wie der Erfolgspfad-Insert weiter unten).
+def _insert_zero_notes_run(
+    *,
+    run_start: float,
+    source_path: Path,
+    runtime_config,
+    dropped_total: int,
+    word_count: int,
+    n_extracted: int,
+    abort_reason: str,
+) -> None:
+    import time as _time
+
+    from generative import config as _db_cfg
+    from generative import db as _db
+    from generative import eval_agent_stats as _eas
+    from generative.agents.base import _RUN_DIR, _RUN_ID
+
+    try:
+        trace_path = _RUN_DIR / f"{_RUN_ID}.jsonl"
+        wall_s = round(_time.time() - run_start, 1)
+        pre = _eas.run_totals(trace_path)  # tolerant bei fehlendem/kaputtem Trace → Nullen
+        with _db.get_db(_db.DB_PATH) as conn:
+            _db.insert_run(
+                conn,
+                {
+                    "run_id": _RUN_ID,
+                    "pipeline_version": AGENT_VERSION,
+                    "pdf_source": source_path.name,
+                    "pdf_key": source_path.stem.split(" - ")[0].strip().lower(),
+                    "pdf_label": source_path.stem.split(" - ")[0].strip(),
+                    "n_generated": 0,
+                    "n_extracted": n_extracted,
+                    "n_vault": 0,
+                    "n_inbox": 0,
+                    "n_merge": 0,
+                    "n_dropped": dropped_total,
+                    "n_words": word_count,
+                    "model": getattr(_db_cfg, "MODEL_PLANNER", ""),
+                    "cost_usd": pre["cost_usd"],
+                    "tokens_total": pre["total"],
+                    "tokens_input": pre["input"],
+                    "tokens_output": pre["output"],
+                    "tokens_cache_read": pre["cache_read"],
+                    "duration_s": wall_s,
+                    "profile": runtime_config.profile,
+                    "wall_clock_s": wall_s,
+                    "abort_reason": abort_reason,
+                },
+            )
+    except Exception as _db_err:
+        print(f"   [warn] DB-Write (0-Notes-Lauf) fehlgeschlagen: {_db_err}")
+
+
 def _normalize(title: str) -> str:
     """Normalisiert Titel für Dedup-Vergleich: Kleinbuchstaben, Satzzeichen entfernen."""
     import re
@@ -2625,6 +2688,26 @@ def main(argv: list[str] | None = None):
             print(total_loss_warning_line(n_extract_attempted))
         for _line in format_extractor_failure_report(ctx.extractor_failures, n_extract_attempted):
             print(_line, file=sys.stderr)
+        # #330: 0-Notes-Lauf trotzdem in pipeline_runs erfassen. Drei
+        # unterscheidbare Ursachen: stiller Totalverlust (>=1 Konzept
+        # versucht, 0 überlebt — exit_code bereits _EXIT_TOTAL_LOSS), sonst
+        # legitimer Konzeptmangel — mit Sekundär-Erwähnungen (Planner fand
+        # nur secondary_mention-Konzepte) oder ganz ohne Konzepte/nur Skips.
+        if exit_code == _EXIT_TOTAL_LOSS:
+            _abort_reason = "extraction_total_loss"
+        elif ctx.related_mentions:
+            _abort_reason = "all_secondary_mentions"
+        else:
+            _abort_reason = "no_concepts"
+        _insert_zero_notes_run(
+            run_start=_run_start,
+            source_path=source_path,
+            runtime_config=runtime_config,
+            dropped_total=ctx.dropped_total,
+            word_count=ctx.word_count,
+            n_extracted=0,
+            abort_reason=_abort_reason,
+        )
         return exit_code
 
     # #197 Schritt 2: Funnel-Top "nach Planner/Extractor generiert" festhalten,
@@ -2647,6 +2730,18 @@ def main(argv: list[str] | None = None):
             print(total_loss_warning_line(n_extract_attempted))
         for _line in format_extractor_failure_report(ctx.extractor_failures, n_extract_attempted):
             print(_line, file=sys.stderr)
+        # #330: derselbe 0-Notes-Insert wie oben — hier waren Konzepte bereits
+        # extrahiert (n_extracted >= 1), landeten aber komplett als
+        # Abwesenheits-Artefakte statt echter Notes.
+        _insert_zero_notes_run(
+            run_start=_run_start,
+            source_path=source_path,
+            runtime_config=runtime_config,
+            dropped_total=ctx.dropped_total,
+            word_count=ctx.word_count,
+            n_extracted=n_extracted,
+            abort_reason="all_artifacts",
+        )
         return exit_code
 
     # Qualitäts-Flags aus QualityReport auf alle Notes übertragen
