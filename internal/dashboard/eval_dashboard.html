@@ -947,7 +947,7 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
   </div>
   <div class="filter-badges" id="filter-badges"></div>
   <div class="empty-banner" id="empty-banner" hidden>
-    <span id="empty-banner-text">Diese Filter-Kombination ergibt <strong>0 evaluierte Notes</strong> — Kennzahlen und Charts sind leer.</span>
+    <span id="empty-banner-text">Diese Filter-Kombination ergibt <strong>0 evaluierte Notes</strong> — Kennzahlen und Charts sind leer, außer der Versions×PDF-Matrix (rendert filterunabhängig weiter den vollen Corpus).</span>
     <button onclick="resetAllFilters()">Filter zurücksetzen</button>
   </div>
 
@@ -3063,12 +3063,19 @@ function _renderWithData(d) {
     // Merge-only-/0-Eval-Lauf trotzdem Betriebskennzahlen (Strip, Akzeptanz-
     // Basis aus Log-/Routing-Daten) liefert — nur die Eval-basierten
     // Qualitaets-Charts (Fehlerquote/Belegrate) sind dann tatsaechlich leer.
+    // #322: beide Varianten behaupteten zusaetzlich unbedingt "Charts sind
+    // leer" -- die Versions×PDF-Matrix (pair_matrix) rendert aber IMMER den
+    // vollen Corpus der aktiven eval_version, unabhaengig von JEDEM aktiven
+    // Filter (PDF/Version/Modell/Sprache/Lauf, s. Server-Kommentar
+    // _matrix_base_rows in build_data() + test_pair_matrix_ignores_active_
+    // single_value_pdf_and_version_filters) -- Widerspruch, wenn das Banner
+    // "leer" behauptet, waehrend die Matrix daneben gefuellt bleibt.
     const bannerText = document.getElementById('empty-banner-text');
     if (!banner.hidden && bannerText) {
       const hasOperationalData = (d.kpis?.kpi_accept_n??0) > 0;
       bannerText.innerHTML = hasOperationalData
-        ? 'Diese Filter-Kombination ergibt <strong>0 evaluierte Notes</strong> — nur Betriebskennzahlen (Strip, Akzeptanz-Basis) verfügbar, Qualitäts-Charts (Fehlerquote/Belegrate) bleiben leer.'
-        : 'Diese Filter-Kombination ergibt <strong>0 evaluierte Notes</strong> — Kennzahlen und Charts sind leer.';
+        ? 'Diese Filter-Kombination ergibt <strong>0 evaluierte Notes</strong> — nur Betriebskennzahlen (Strip, Akzeptanz-Basis) verfügbar, Qualitäts-Charts (Fehlerquote/Belegrate) bleiben leer, außer der Versions×PDF-Matrix (rendert filterunabhängig weiter den vollen Corpus).'
+        : 'Diese Filter-Kombination ergibt <strong>0 evaluierte Notes</strong> — Kennzahlen und Charts sind leer, außer der Versions×PDF-Matrix (rendert filterunabhängig weiter den vollen Corpus).';
     }
   }
   renderStrip(d.kpis);

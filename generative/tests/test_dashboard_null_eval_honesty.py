@@ -35,3 +35,23 @@ def test_empty_banner_conditionalizes_on_operational_data():
     # vorhanden sind — "Charts sind leer" darf dann nicht mehr behauptet werden.
     assert "nur Betriebskennzahlen" in html
     assert "kpi_accept_n" in html
+
+
+def test_empty_banner_notes_matrix_stays_filled(monkeypatch):
+    """#322: die Versions×PDF-Matrix ignoriert JEDEN aktiven Filter (bewusster
+    Design-Entscheid, test_pair_matrix_ignores_active_single_value_pdf_and_
+    version_filters) und bleibt bei 0-Notes-Filterkombinationen gefuellt --
+    das Banner darf "Charts sind leer" darum nicht mehr unbedingt behaupten,
+    weder im statischen Default-Text noch in den beiden dynamischen JS-
+    Varianten."""
+    html = _build_live_html()
+    matrix_hint = "außer der Versions×PDF-Matrix"
+    # (a) statischer Default-Text (vor dem ersten Datenladen)
+    default_start = html.index('id="empty-banner-text"')
+    default_end = html.index("</span>", default_start)
+    assert matrix_hint in html[default_start:default_end]
+    # (b) beide dynamischen JS-Textvarianten (hasOperationalData true/false)
+    js_start = html.index("const hasOperationalData")
+    js_end = html.index("\n    }", js_start)
+    js_block = html[js_start:js_end]
+    assert js_block.count(matrix_hint) == 2
