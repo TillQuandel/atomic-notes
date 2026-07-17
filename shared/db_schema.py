@@ -40,7 +40,13 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     -- Gesamtzeit korrigiert. Bei deaktiviertem Inline-Eval (Profil fast/
     -- balanced) bleibt wall_clock_s == duration_s (kein Stage-8 gelaufen,
     -- beide Werte sind dann korrekt identisch).
-    wall_clock_s      REAL DEFAULT 0
+    wall_clock_s      REAL DEFAULT 0,
+    -- #330: Abbruchgrund fuer 0-Notes-Laeufe (Konzeptmangel/Totalverlust),
+    -- z.B. "no_concepts", "all_secondary_mentions", "all_artifacts",
+    -- "extraction_total_loss". NULL bei Erfolgspfad-Zeilen (>=1 Note
+    -- geschrieben) -- bewusst kein DEFAULT '', damit NULL echtes "kein
+    -- Abbruch" bedeutet statt eines leeren aber gesetzten Strings.
+    abort_reason      TEXT
 );
 
 CREATE TABLE IF NOT EXISTS note_evals (

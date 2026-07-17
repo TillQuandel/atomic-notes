@@ -232,7 +232,12 @@ def test_orchestrator_migrates_existing_db_missing_wall_clock_s_column(tmp_path)
     # Regex statt starrem String-Replace: robust gegen Kommentar-Textaenderungen
     # an der wall_clock_s-Spaltendefinition — matcht Komma + optionale
     # Kommentarzeilen + die Spaltenzeile selbst, unabhaengig vom genauen Wortlaut.
-    old_schema = re.sub(r",\n(\s*--[^\n]*\n)*\s*wall_clock_s\s+REAL DEFAULT 0\n", "\n", SCHEMA_SQL)
+    # #330: wall_clock_s ist seither NICHT mehr die letzte Spalte (abort_reason
+    # folgt) — hat also selbst ein trailing Komma (","?" faengt beide Faelle),
+    # und die Ersetzung muss der VORHERIGEN Spalte ("profile") ihr eigenes
+    # trailing Komma zurueckgeben (",\n" statt nur "\n"), sonst fehlt das
+    # Trennzeichen zu abort_reason und das simulierte Alt-Schema ist ungueltiges SQL.
+    old_schema = re.sub(r",\n(\s*--[^\n]*\n)*\s*wall_clock_s\s+REAL DEFAULT 0,?\n", ",\n", SCHEMA_SQL)
     assert "wall_clock_s" not in old_schema, "Test-Fixture-Bug: Alt-Schema hat wall_clock_s schon"
 
     path = tmp_path / "old-schema.db"
@@ -250,3 +255,96 @@ def test_orchestrator_migrates_existing_db_missing_wall_clock_s_column(tmp_path)
     finally:
         conn2.close()
     assert "wall_clock_s" in cols
+
+
+# --- #330: Abbruchgrund fuer 0-Notes-Laeufe additiv persistieren -----------
+#
+# 0-Notes-Laeufe (Konzeptmangel oder Totalverlust) hinterliessen bisher KEINE
+# pipeline_runs-Zeile. abort_reason ist die additive, nullable Spalte, die den
+# Grund festhaelt, wenn orchestrator.main() so einen Lauf jetzt trotzdem
+# persistiert (n_generated=0). Erfolgspfad-Zeilen bleiben NULL.
+
+
+def test_pipeline_runs_has_abort_reason_column(tmp_path):
+    from generative import db
+
+    path = tmp_path / "test.db"
+    db.init_db(path)
+    with db.get_db(path) as conn:
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(pipeline_runs)").fetchall()]
+    assert "abort_reason" in cols
+
+
+def test_insert_run_stores_abort_reason(tmp_path):
+    from generative import db
+
+    path = tmp_path / "test.db"
+    db.init_db(path)
+    with db.get_db(path) as conn:
+        db.insert_run(
+            conn,
+            {
+                "run_id": "test-run-zero-notes",
+                "pipeline_version": "v0.0.1",
+                "n_generated": 0,
+                "abort_reason": "no_concepts",
+            },
+        )
+    conn2 = sqlite3.connect(str(path))
+    try:
+        row = conn2.execute("SELECT abort_reason FROM pipeline_runs WHERE run_id='test-run-zero-notes'").fetchone()
+    finally:
+        conn2.close()
+    assert row is not None
+    assert row[0] == "no_concepts"
+
+
+def test_insert_run_abort_reason_defaults_to_null(tmp_path):
+    """Erfolgspfad-Aufrufer uebergeben keinen abort_reason-Key -> muss NULL
+    bleiben, nicht leerer String (unterscheidbar von einem echten Abbruchgrund)."""
+    from generative import db
+
+    path = tmp_path / "test.db"
+    db.init_db(path)
+    with db.get_db(path) as conn:
+        db.insert_run(
+            conn,
+            {
+                "run_id": "test-run-success",
+                "pipeline_version": "v0.0.1",
+                "n_generated": 3,
+            },
+        )
+    conn2 = sqlite3.connect(str(path))
+    try:
+        row = conn2.execute("SELECT abort_reason FROM pipeline_runs WHERE run_id='test-run-success'").fetchone()
+    finally:
+        conn2.close()
+    assert row is not None
+    assert row[0] is None
+
+
+def test_orchestrator_migrates_existing_db_missing_abort_reason_column(tmp_path):
+    """Migration wie #235/#239: bestehende DB ohne abort_reason bekommt die
+    Spalte per init_db()-Aufruf nachgezogen (additiv, Bestandszeilen bleiben NULL)."""
+    from generative import db
+    from shared.db_schema import SCHEMA_SQL
+
+    old_schema = re.sub(r",\n(\s*--[^\n]*\n)*\s*abort_reason\s+TEXT\n", "\n", SCHEMA_SQL)
+    assert "abort_reason" not in old_schema, "Test-Fixture-Bug: Alt-Schema hat abort_reason schon"
+
+    path = tmp_path / "old-schema.db"
+    conn = sqlite3.connect(str(path))
+    try:
+        conn.executescript(old_schema)
+        conn.commit()
+    finally:
+        conn.close()
+
+    db.init_db(path)
+    conn2 = sqlite3.connect(str(path))
+    try:
+        cols = [r[1] for r in conn2.execute("PRAGMA table_info(pipeline_runs)").fetchall()]
+    finally:
+        conn2.close()
+    assert "abort_reason" in cols

@@ -71,6 +71,10 @@ def init_db(path: Path = DB_PATH) -> None:
     # in shared/db_schema.py fuer den Zwei-Phasen-Schreibpfad (insert_run VOR,
     # update_wall_clock_s NACH Stage-8).
     _add_column(conn, "pipeline_runs", "wall_clock_s REAL DEFAULT 0")
+    # #330: 0-Notes-Laeufe (Konzeptmangel/Totalverlust) bekommen jetzt eine
+    # pipeline_runs-Zeile mit Abbruchgrund statt komplett zu fehlen —
+    # additive nullable Spalte, Bestandszeilen bleiben NULL (Erfolgspfad).
+    _add_column(conn, "pipeline_runs", "abort_reason TEXT")
     _add_column(conn, "note_evals", "anchor_rate REAL")
     # Anker-Roh-Counts: für die gepoolte Halluzinationsrate (Σ halluziniert /
     # Σ gesamt) im Dashboard — die Pipeline berechnet sie ohnehin, persistiert
@@ -109,7 +113,7 @@ def insert_run(conn: sqlite3.Connection, data: dict) -> None:
       run_id, timestamp, pipeline_version, pdf_source, pdf_key, pdf_label,
       n_generated, n_extracted, n_vault, n_inbox, n_merge, n_dropped, n_words,
       model, tokens_total, tokens_input, tokens_output, tokens_cache_read,
-      duration_s, eval_version, profile, wall_clock_s
+      duration_s, eval_version, profile, wall_clock_s, abort_reason
 
     n_generated = geschriebene Notes (historische Semantik, unangetastet).
     n_extracted = "nach Planner/Extractor generiert" (Funnel-Top, #197). Fehlt
@@ -119,6 +123,12 @@ def insert_run(conn: sqlite3.Connection, data: dict) -> None:
     der Aufrufer (orchestrator.main()) uebergibt hier bewusst denselben Wert.
     Nach Stage-8 korrigiert update_wall_clock_s() die Zeile auf die echte
     Gesamtzeit inkl. Eval-Phase.
+
+    abort_reason (#330): Grund fuer einen 0-Notes-Lauf (z.B. "no_concepts",
+    "all_secondary_mentions", "all_artifacts", "extraction_total_loss").
+    Fehlt der Key (Erfolgspfad-Aufrufer), bleibt die Spalte NULL — anders als
+    die uebrigen Feldern hier KEIN 0/''-Default, NULL ist die korrekte
+    "kein Abbruch"-Semantik.
     """
     data.setdefault("timestamp", datetime.utcnow().isoformat())
     conn.execute(
@@ -127,12 +137,12 @@ def insert_run(conn: sqlite3.Connection, data: dict) -> None:
           (run_id, timestamp, pipeline_version, pdf_source, pdf_key, pdf_label,
            n_generated, n_extracted, n_vault, n_inbox, n_merge, n_dropped, n_words, model,
            cost_usd, tokens_total, tokens_input, tokens_output, tokens_cache_read,
-           duration_s, eval_version, fully_cached, profile, wall_clock_s)
+           duration_s, eval_version, fully_cached, profile, wall_clock_s, abort_reason)
         VALUES
           (:run_id, :timestamp, :pipeline_version, :pdf_source, :pdf_key, :pdf_label,
            :n_generated, :n_extracted, :n_vault, :n_inbox, :n_merge, :n_dropped, :n_words, :model,
            :cost_usd, :tokens_total, :tokens_input, :tokens_output, :tokens_cache_read,
-           :duration_s, :eval_version, :fully_cached, :profile, :wall_clock_s)
+           :duration_s, :eval_version, :fully_cached, :profile, :wall_clock_s, :abort_reason)
     """,
         {
             "run_id": data.get("run_id"),
@@ -159,6 +169,7 @@ def insert_run(conn: sqlite3.Connection, data: dict) -> None:
             "fully_cached": 1 if (data.get("tokens_total", 0) == 0 and data.get("duration_s", 0) > 0) else 0,
             "profile": data.get("profile", ""),
             "wall_clock_s": data.get("wall_clock_s", 0.0),
+            "abort_reason": data.get("abort_reason"),
         },
     )
 
