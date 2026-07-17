@@ -38,7 +38,7 @@ from generative.agents import base
 from generative.config import AGENT_VERSION, MODEL_JUDGE, MODEL_CONFIG, QUALITY_HISTORY
 from decision_engine import ClaimDecision, ClaimInput, DEFAULT_CONFIG, Label, determine_decision
 from decision_engine.aggregation import aggregate as aggregate_decisions
-from decision_engine.models import QualityFlag
+from decision_engine.models import QualityFlag, normalize_decision_source
 from generative.eval_common import (
     TOP_K,
     Chunk,
@@ -989,7 +989,10 @@ def _aggregate(
         ClaimDecision(
             Label(score["label"]),
             frozenset(QualityFlag(flag) for flag in score["quality_flags"] if flag in _ENGINE_FLAG_VALUES),
-            score.get("decision_source", "primary"),
+            # #318: normalisiert den historischen Legacy-Wert "audit" auf das aktuelle
+            # Vokabular ("audit_override") -- betrifft nur re-aggregierte/gelesene
+            # Bestandsdaten, keine Mutation der JSONL/DB.
+            normalize_decision_source(score.get("decision_source", "primary")),
         )
         for score in claim_scores
     ]
