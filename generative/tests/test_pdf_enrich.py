@@ -1413,3 +1413,243 @@ def test_enrich_raw_doi_does_not_override_title_guessed_doi(tmp_path, monkeypatc
     assert meta is not None
     assert meta["doi"] == "10.9999/example-title-hit"
     assert meta.get("doi_from_title") is True
+
+
+# --- #329: Kaskadierter Jahres-Fallback (Selbstzitat/CreationDate) ---------
+# Bug-Klasse: ein jahrloser Dateiname (Zotero-Muster "Autor - Titel") laesst
+# Stage 5 (`_parse_filename_dynamic`) mit `year=None` abschliessen; enrich()
+# unternahm danach KEINEN weiteren Versuch, obwohl das Jahr woertlich im
+# Dokument steht (Selbstzitat-/"vorgeschlagene Zitation"-Zeile) oder im PDF-
+# Info-Dict (`CreationDate`) liegt. Realer Fall (Coverage-Serie 2, 16.07.):
+# Witt "Informationskompetenz" S. 1 traegt "vorgeschlagene Zitation: Witt,
+# S. (2020)..." -- `pdf_enrich.py` lieferte bisher "Witt (None)".
+
+
+def test_plausible_year_accepts_boundaries():
+    from generative.tools.pdf_enrich import _plausible_year
+    import datetime
+
+    current = datetime.date.today().year
+    assert _plausible_year(1900) is True
+    assert _plausible_year(current) is True
+    assert _plausible_year(current + 1) is True
+
+
+def test_plausible_year_rejects_out_of_range():
+    from generative.tools.pdf_enrich import _plausible_year
+    import datetime
+
+    current = datetime.date.today().year
+    assert _plausible_year(1899) is False
+    assert _plausible_year(current + 2) is False
+
+
+def test_extract_self_citation_year_german_label():
+    from generative.tools.pdf_enrich import _extract_self_citation_year
+
+    text = "S. 1\nvorgeschlagene Zitation: Witt, S. (2020). Informationskompetenz. Reihe X."
+    assert _extract_self_citation_year(text) == 2020
+
+
+def test_extract_self_citation_year_zitationsvorschlag_label():
+    from generative.tools.pdf_enrich import _extract_self_citation_year
+
+    text = "Zitationsvorschlag: Mueller (2018): Ein Titel."
+    assert _extract_self_citation_year(text) == 2018
+
+
+def test_extract_self_citation_year_english_suggested_citation_label():
+    from generative.tools.pdf_enrich import _extract_self_citation_year
+
+    text = "Suggested citation: Kok, J. (2020). Video-Tutorial vs. textbasierte Anleitung."
+    assert _extract_self_citation_year(text) == 2020
+
+
+def test_extract_self_citation_year_to_cite_this_label():
+    from generative.tools.pdf_enrich import _extract_self_citation_year
+
+    text = "To cite this article: Smith, J. (2021). A Title. Journal X."
+    assert _extract_self_citation_year(text) == 2021
+
+
+def test_extract_self_citation_year_returns_none_without_label():
+    from generative.tools.pdf_enrich import _extract_self_citation_year
+
+    text = "Ein Text ganz ohne Zitationshinweis, irgendwo steht 2020 im Fliesstext."
+    assert _extract_self_citation_year(text) is None
+
+
+def test_extract_self_citation_year_discards_implausible_year():
+    from generative.tools.pdf_enrich import _extract_self_citation_year
+
+    text = "vorgeschlagene Zitation: Alt, A. (1850). Uraltes Werk."
+    assert _extract_self_citation_year(text) is None
+
+
+def test_extract_creation_date_year_parses_pypdf_info_dict(tmp_path, monkeypatch):
+    from generative.tools import pdf_enrich
+    from unittest.mock import MagicMock
+
+    mock_reader = MagicMock()
+    mock_reader.metadata = {"/CreationDate": "D:20200315142301+01'00'"}
+    monkeypatch.setattr(pdf_enrich, "PdfReader", lambda *a, **kw: mock_reader)
+    pdf = tmp_path / "irrelevant.pdf"
+    pdf.write_bytes(b"%PDF")
+    assert pdf_enrich._extract_creation_date_year(pdf) == 2020
+
+
+def test_extract_creation_date_year_discards_implausible_year(tmp_path, monkeypatch):
+    from generative.tools import pdf_enrich
+    from unittest.mock import MagicMock
+
+    mock_reader = MagicMock()
+    mock_reader.metadata = {"/CreationDate": "D:20990101000000+00'00'"}
+    monkeypatch.setattr(pdf_enrich, "PdfReader", lambda *a, **kw: mock_reader)
+    pdf = tmp_path / "irrelevant.pdf"
+    pdf.write_bytes(b"%PDF")
+    assert pdf_enrich._extract_creation_date_year(pdf) is None
+
+
+def test_extract_creation_date_year_returns_none_without_creationdate(tmp_path, monkeypatch):
+    from generative.tools import pdf_enrich
+    from unittest.mock import MagicMock
+
+    mock_reader = MagicMock()
+    mock_reader.metadata = {}
+    monkeypatch.setattr(pdf_enrich, "PdfReader", lambda *a, **kw: mock_reader)
+    pdf = tmp_path / "irrelevant.pdf"
+    pdf.write_bytes(b"%PDF")
+    assert pdf_enrich._extract_creation_date_year(pdf) is None
+
+
+def test_enrich_extracts_year_from_self_citation_line_real_witt_pattern(tmp_path, monkeypatch):
+    """Realer Fall: jahrloser Zotero-Dateiname, Selbstzitat-Zeile im Kopfbereich
+    traegt das Jahr woertlich (#329)."""
+    from generative.tools import pdf_enrich
+    from unittest.mock import MagicMock
+
+    mock_reader = MagicMock()
+    mock_reader.metadata = {}
+    monkeypatch.setattr(pdf_enrich, "PdfReader", lambda *a, **kw: mock_reader)
+    monkeypatch.setattr(
+        pdf_enrich,
+        "extract_text",
+        lambda path, max_pages=3: (
+            "Witt, Sonja\n\nInformationskompetenz\n\n"
+            "vorgeschlagene Zitation: Witt, S. (2020). Informationskompetenz. "
+            "Modul einer Handreichung fuer Lehrveranstaltungen."
+        ),
+    )
+    monkeypatch.setattr(pdf_enrich, "openalex_title_search", lambda *a, **k: None)
+
+    pdf = tmp_path / "Witt - Informationskompetenz.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = pdf_enrich.enrich(pdf, dry_run=True)
+
+    assert meta is not None
+    assert meta["author"] == "Witt"  # Stage 5: Zotero-Dateiname ohne Jahr
+    assert meta["year"] == 2020
+    assert meta["year_source"] == "self_citation"
+
+
+def test_enrich_falls_back_to_creation_date_without_self_citation_line(tmp_path, monkeypatch):
+    """Kok-Fall: kein Selbstzitat-Hinweis im Kopfbereich, aber CreationDate
+    traegt das plausible Erscheinungsjahr (#329)."""
+    from generative.tools import pdf_enrich
+    from unittest.mock import MagicMock
+
+    mock_reader = MagicMock()
+    mock_reader.metadata = {"/CreationDate": "D:20200601120000+02'00'"}
+    monkeypatch.setattr(pdf_enrich, "PdfReader", lambda *a, **kw: mock_reader)
+    monkeypatch.setattr(
+        pdf_enrich,
+        "extract_text",
+        lambda path, max_pages=3: "Kok, J.\n\nVideo-Tutorial vs. textbasierte Anleitung. Ohne Zitationshinweis.",
+    )
+    monkeypatch.setattr(pdf_enrich, "openalex_title_search", lambda *a, **k: None)
+
+    pdf = tmp_path / "Kok - Video-Tutorial vs. textbasierte Anleitung.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = pdf_enrich.enrich(pdf, dry_run=True)
+
+    assert meta is not None
+    assert meta["author"] == "Kok"
+    assert meta["year"] == 2020
+    assert meta["year_source"] == "creation_date"
+
+
+def test_enrich_self_citation_takes_precedence_over_creation_date(tmp_path, monkeypatch):
+    """Kaskaden-Reihenfolge (#329): Selbstzitat-Zeile schlaegt CreationDate,
+    wenn beide vorhanden sind."""
+    from generative.tools import pdf_enrich
+    from unittest.mock import MagicMock
+
+    mock_reader = MagicMock()
+    mock_reader.metadata = {"/CreationDate": "D:20230101000000+00'00'"}
+    monkeypatch.setattr(pdf_enrich, "PdfReader", lambda *a, **kw: mock_reader)
+    monkeypatch.setattr(
+        pdf_enrich,
+        "extract_text",
+        lambda path, max_pages=3: "vorgeschlagene Zitation: Witt, S. (2020). Informationskompetenz.",
+    )
+    monkeypatch.setattr(pdf_enrich, "openalex_title_search", lambda *a, **k: None)
+
+    pdf = tmp_path / "Witt - Informationskompetenz.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = pdf_enrich.enrich(pdf, dry_run=True)
+
+    assert meta is not None
+    assert meta["year"] == 2020
+    assert meta["year_source"] == "self_citation"
+
+
+def test_enrich_filename_year_has_precedence_over_fallback_cascade(tmp_path, monkeypatch):
+    """Kaskaden-Reihenfolge (#329): ein bereits im Dateinamen gefundenes Jahr
+    (Stage 5, Zotero-Muster MIT Jahr) darf NICHT durch ein abweichendes
+    Selbstzitat-Jahr ueberschrieben werden -- Dateiname bleibt autoritativ."""
+    from generative.tools import pdf_enrich
+    from unittest.mock import MagicMock
+
+    mock_reader = MagicMock()
+    mock_reader.metadata = {}
+    monkeypatch.setattr(pdf_enrich, "PdfReader", lambda *a, **kw: mock_reader)
+    monkeypatch.setattr(
+        pdf_enrich,
+        "extract_text",
+        lambda path, max_pages=3: "vorgeschlagene Zitation: Witt, S. (1999). Ein abweichendes Jahr im Text.",
+    )
+    monkeypatch.setattr(pdf_enrich, "openalex_title_search", lambda *a, **k: None)
+
+    pdf = tmp_path / "Witt - 2020 - Informationskompetenz.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = pdf_enrich.enrich(pdf, dry_run=True)
+
+    assert meta is not None
+    assert meta["year"] == 2020
+    assert "year_source" not in meta
+
+
+def test_enrich_discards_implausible_fallback_year_keeps_year_none(tmp_path, monkeypatch):
+    """Fail-closed (#329): weder Selbstzitat noch CreationDate liefern ein
+    plausibles Jahr -- `meta["year"]` bleibt None statt ein Jahr zu erfinden
+    (Downstream-Degradierung auf "[o. J.]" bleibt Sicherheitsnetz)."""
+    from generative.tools import pdf_enrich
+    from unittest.mock import MagicMock
+
+    mock_reader = MagicMock()
+    mock_reader.metadata = {"/CreationDate": "D:20990101000000+00'00'"}
+    monkeypatch.setattr(pdf_enrich, "PdfReader", lambda *a, **kw: mock_reader)
+    monkeypatch.setattr(
+        pdf_enrich,
+        "extract_text",
+        lambda path, max_pages=3: "Ohne jeden Zitationshinweis oder Jahresbezug im Kopfbereich.",
+    )
+    monkeypatch.setattr(pdf_enrich, "openalex_title_search", lambda *a, **k: None)
+
+    pdf = tmp_path / "Meier - Ein Titel ohne Jahr.pdf"
+    pdf.write_bytes(b"%PDF")
+    meta = pdf_enrich.enrich(pdf, dry_run=True)
+
+    assert meta is not None
+    assert meta.get("year") is None
+    assert "year_source" not in meta

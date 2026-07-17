@@ -13,6 +13,7 @@ Optional: ocrmypdf (für gescannte PDFs)
 
 from __future__ import annotations
 import argparse
+import datetime
 import html
 import json
 import re
@@ -782,6 +783,99 @@ def grobid_lookup(pdf_path: Path, grobid_url: str = "http://localhost:8070", tim
         return None
 
 
+# --- #329: Kaskadierter Jahres-Fallback wenn der Dateiname kein Jahr traegt --
+# Bug-Klasse: Stage 5 (`_parse_filename_dynamic`) faengt auch den jahrlosen
+# Zotero-Dateinamen "Autor - Titel" ab (`_ZOTERO_NO_YEAR_RE`) und liefert dann
+# `year=None`, ohne dass eine spaetere Stage nochmal ein Jahr sucht -- obwohl es
+# oft woertlich im Dokument steht (Selbstzitat-/"vorgeschlagene Zitation"-Zeile)
+# oder im PDF-Info-Dict `CreationDate` liegt. Kaskade strikt: Dateiname
+# (bestehend, siehe `_resolve_year_fallback`-Aufrufstelle: laeuft nur wenn
+# `meta["year"]` noch fehlt) -> Selbstzitat-Zeile -> CreationDate. Beide neuen
+# Stufen sind fail-closed plausibilitaetsgeprueft (nie ein Jahr erfinden) und
+# markieren ihre Herkunft ueber `meta["year_source"]` (analog zum #263-
+# `doi_from_title`-Provenienz-Marker) -- ein aus dem Dateiname/CrossRef/etc.
+# stammendes Jahr traegt weiterhin KEINEN `year_source`, nur die beiden neuen
+# (schwaecheren) Fallback-Stufen setzen ihn.
+_SELF_CITATION_PAGES = 2  # #329: "erste ~2 Seiten" -- Selbstzitat-Zeilen stehen
+# teils auf S. 1 (Titelblatt), teils erst im Impressum auf S. 2.
+_SELF_CITATION_WINDOW = 200  # Zeichen nach dem Label, in denen das Jahr gesucht wird
+_SELF_CITATION_LABEL_RE = re.compile(
+    r"(?:vorgeschlagene\s+zitation|zitationsvorschlag|suggested\s+citation|to\s+cite\s+this)",
+    re.IGNORECASE,
+)
+
+
+def _plausible_year(year: int) -> bool:
+    """Plausibilitaetsfenster fuer Jahres-Fallbacks (#329): 1900 <= Jahr <=
+    aktuelles Jahr+1. Fail-closed -- ein Jahr ausserhalb wird verworfen statt
+    durchgereicht (nie ein Jahr erfinden)."""
+    return 1900 <= year <= datetime.date.today().year + 1
+
+
+def _extract_self_citation_year(text: str) -> int | None:
+    """Sucht eine Selbstzitat-/"vorgeschlagene Zitation"-Zeile im Kopfbereich
+    (dt./engl. Muster) und extrahiert das darin genannte Jahr, z.B.
+    "vorgeschlagene Zitation: Witt, S. (2020). Informationskompetenz...".
+
+    Nimmt das erste plausible Jahr in einem Fenster NACH dem Label -- reicht
+    fuer die gaengigen Formate "(2020)" / ", 2020" / "2020." direkt hinter
+    Autor/Titel. Gibt None zurueck wenn kein Label oder kein plausibles Jahr
+    im Fenster gefunden wird (fail-closed, siehe `_plausible_year`)."""
+    m = _SELF_CITATION_LABEL_RE.search(text)
+    if not m:
+        return None
+    window = text[m.end() : m.end() + _SELF_CITATION_WINDOW]
+    year_m = _YEAR_BOUNDARY_RE.search(window)
+    if not year_m:
+        return None
+    year = int(year_m.group())
+    return year if _plausible_year(year) else None
+
+
+def _extract_creation_date_year(pdf_path: Path) -> int | None:
+    """Letzter Jahres-Fallback (#329): PDF-Info-Dict `/CreationDate` via pypdf.
+
+    Bewusst NUR als letzte, klar provenienz-markierte Stufe nach Dateiname UND
+    Selbstzitat-Zeile -- `CreationDate` ist der Speicher-/Abtipp-Zeitpunkt der
+    PDF-Datei, nicht zwingend das Publikationsjahr (vgl. den bereits
+    dokumentierten Praezedenzfall in `pdf_chunker._parse_pdfinfo_output`: ein in
+    Word abgetipptes Knowles-Kapitel trug `CreationDate` 2019 statt des
+    tatsaechlichen Erscheinungsjahrs). Der Aufrufer setzt deshalb immer
+    `meta["year_source"] = "creation_date"`, damit diese schwaechere Quelle von
+    Dateiname/Selbstzitat/CrossRef unterscheidbar bleibt. Nur ein plausibles
+    Jahr (`_plausible_year`) wird akzeptiert -- sonst None."""
+    if PdfReader is None:
+        return None
+    try:
+        info = PdfReader(str(pdf_path)).metadata or {}
+    except Exception:
+        return None
+    raw = str(info.get("/CreationDate") or "")
+    m = re.search(r"(?:19|20)\d{2}", raw)
+    if not m:
+        return None
+    year = int(m.group())
+    return year if _plausible_year(year) else None
+
+
+def _resolve_year_fallback(pdf_path: Path) -> tuple[int, str] | None:
+    """Kaskade Selbstzitat -> CreationDate (#329), wenn weder Dateiname noch
+    eine harte ID (DOI/ISBN/arXiv/PMID/CrossRef/...) ein Jahr geliefert hat.
+    Gibt `(Jahr, Quelle)` zurueck oder None, wenn keine Stufe ein plausibles
+    Jahr findet -- die Downstream-Degradierung auf "[o. J.]" bleibt in dem
+    Fall das Sicherheitsnetz."""
+    header_text = extract_text(pdf_path, max_pages=_SELF_CITATION_PAGES)
+    self_cite_year = _extract_self_citation_year(header_text)
+    if self_cite_year:
+        return self_cite_year, "self_citation"
+
+    creation_year = _extract_creation_date_year(pdf_path)
+    if creation_year:
+        return creation_year, "creation_date"
+
+    return None
+
+
 def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False, rename: bool = True) -> dict | None:
     """Haupt-Pipeline: EmbeddedMeta -> DOI -> ISBN -> arXiv -> PMID -> Titel(OpenAlex) -> LLM -> Rename.
 
@@ -978,6 +1072,17 @@ def enrich(pdf_path: Path, dry_run: bool = False, llm_fallback: bool = False, re
     if _raw_doi and not meta.get("doi"):
         meta["doi"] = _raw_doi
         print(f"  -> DOI ohne Registry-Bestaetigung uebernommen (Format-valide): {_raw_doi}")
+
+    # #329: keine bisherige Stage hat ein Jahr geliefert (typischer Fall: Stage 5
+    # traf nur das jahrlose Zotero-Muster "Autor - Titel"). Dateiname-Jahr hat
+    # weiterhin Vorrang -- dieser Block laeuft nur wenn `year` noch fehlt.
+    if not meta.get("year"):
+        _year_fb = _resolve_year_fallback(pdf_path)
+        if _year_fb:
+            _year, _year_source = _year_fb
+            meta["year"] = _year
+            meta["year_source"] = _year_source
+            print(f"  -> Jahr-Fallback ({_year_source}): {_year}")
 
     if not rename:
         return meta
