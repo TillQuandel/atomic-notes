@@ -31,12 +31,14 @@ def test_html_header_updated_icon_removed():
     assert 'id="updated-at"' not in html
     assert 'class="updated hint"' not in html
     # Engerer Kopfzeilen-Anker (_build_live_html-Muster wie im
-    # eval_version-Dropdown-Test): kein Hint-Trigger-Element (nur noch ein
-    # erklaerender Kommentar, der "↻" beschreibend erwaehnt) im Filterbar-
-    # Abschnitt selbst.
+    # eval_version-Dropdown-Test): kein "updated"-Hint-Trigger-Element im
+    # Filterbar-Abschnitt selbst. #320 (Folge-PR): die Filterbar traegt seither
+    # legitim einen ANDEREN Hint-Marker (`#model-unmatched-hint`, Badge fuer
+    # modellose Eval-Zeilen) -- die vorherige blanket "kein hint-pop ueberhaupt"-
+    # Assertion war ein zu grober Proxy fuer "das updated-Icon ist weg" und
+    # kollidiert jetzt mit dieser neuen, separaten Funktionalitaet.
     section = html[html.index('<div class="filterbar">') : html.index('id="filter-badges"')]
     assert '<span class="updated' not in section
-    assert "hint-pop" not in section
 
 
 def test_html_sidebar_foot_has_collapsed_hint():

@@ -15,6 +15,12 @@
 
 :root {
   --bg: #0b1120; --bg-elev: #111827; --bg-card: #141e2e;
+  /* #321: vorberechnete opake Zebra-/Hover-Mischfarben fuer die sticky
+     PDF-Spalte der Matrix (s. .table-wrap.pm-scroll ... td:first-child unten)
+     -- --bg-card + die jeweilige rgba-Tint-Deckkraft von table.cmp
+     tbody tr:nth-child(even)/:hover td, arithmetisch vorgemischt (kein
+     color-mix() noetig, Werte aendern sich nur mit den Basisfarben oben). */
+  --bg-card-zebra: #182131; --bg-card-hover: #1c2635;
   --ink-1: #f0f4f8; --ink-2: #c4cdd9; --ink-3: #8fa3b8;
   --ink-4: #7e92a6; --ink-5: #3d4f60;
   --amber: #e8b53b; --coral: #e07a5f; --mint: #6dbf8c;
@@ -36,6 +42,8 @@
 }
 body.light {
   --bg: #f4f1eb; --bg-elev: #ece7dc; --bg-card: #ffffff;
+  /* #321: s. :root -- gleiche Mischrechnung mit den Light-Basisfarben. */
+  --bg-card-zebra: #fbfbfb; --bg-card-hover: #f7f7f7;
   --ink-1: #0d0d0d; --ink-2: #333333; --ink-3: #5c5c5c;
   --ink-4: #6b6b6b; --ink-5: #cccccc;
   --amber: #855900; --coral: #a8391e; --mint: #1e7a45;
@@ -608,12 +616,20 @@ table.cmp td.dim { color: var(--ink-3); }
 .table-wrap.pm-scroll td:first-child { position: sticky; left: 0; background: var(--bg-card); z-index: 2; }
 /* Die Zebra-/Hover-Overlays von table.cmp sind semi-transparent (rgba) —
    in der sticky-Spalte scheinen sonst die darunter durchgescrollten Zellen
-   durch. Die Light-Zebra-Regel `body.light table.cmp ... td` (0,3,4)
-   schlaegt die Regel oben (0,3,1), darum hier mit hoeherer Spezifitaet
-   (0,5,4) opak halten. Bewusster Trade-off: der 1,5–3,5%-Tint (Zebra/Hover)
-   entfaellt nur in dieser einen Spalte. */
-.table-wrap.pm-scroll table.cmp tbody tr:nth-child(even) td:first-child,
-.table-wrap.pm-scroll table.cmp tbody tr:hover td:first-child { background: var(--bg-card); }
+   durch. Vorher (bis #321): beide Zustaende deckend auf var(--bg-card)
+   zurueckgesetzt -- sichtbare Naht zur Zeile (Zebra-Tint fehlte in genau
+   dieser Spalte) und Hover erfasste die PDF-Zelle nie (Screenshots
+   C:/tmp/ux-review-312/desktop/a05, a07). Fix: vorberechnete OPAKE
+   Zebra-/Hover-Mischfarben (--bg-card-zebra/--bg-card-hover, s. :root/
+   body.light oben -- --bg-card + dieselbe rgba-Tint-Deckkraft wie die
+   Basisregeln unten arithmetisch vorgemischt) statt des generischen
+   var(--bg-card). Spezifitaet (0,5,4) schlaegt weiterhin die Light-Zebra-
+   Regel `body.light table.cmp ... td` (0,3,4). Hover-Selektor bewusst NACH
+   dem Zebra-Selektor notiert (gleiche Spezifitaet, Kaskade entscheidet) --
+   dieselbe Reihenfolge wie die Basisregeln unten, damit Hover bei
+   zebra+hover weiterhin gewinnt. */
+.table-wrap.pm-scroll table.cmp tbody tr:nth-child(even) td:first-child { background: var(--bg-card-zebra); }
+.table-wrap.pm-scroll table.cmp tbody tr:hover td:first-child { background: var(--bg-card-hover); }
 table.pm-matrix td, table.pm-matrix th { padding: 9px 12px; }
 table.pm-matrix td.pdf { white-space: nowrap; }
 /* Till-Live-Befund 2026-07-16 (Punkt 0): `table.cmp { width:100% }` (Zeile
@@ -757,6 +773,19 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
 ::-webkit-scrollbar-thumb { background: var(--hair-strong); border-radius: 5px; border: 2px solid var(--bg); }
 
 /* ── Responsive ─────────────────────────────────────────────────── */
+/* #324: die Filterbar-Kompakt-Styles (U9 unten) galten bislang nur bis zur
+   1200er-Schwelle -- der naechste Breakpoint (min-width: 1201px, Matrix-
+   Sticky-Regel oben) hat eine andere Zustaendigkeit. Dazwischen (1201–
+   ~1430px) blieb die volle unkompaktierte Breite aktiv: bei 1280px brach
+   "Modell" als letzte Filter-Group allein in Zeile 2 um (Screenshot
+   a-top-1280-light.png). Eigene, breitere Media-Query statt die Schwelle
+   der KPI-Grid-Regeln (kpis-perf, Block darunter) anzuheben -- die sind von
+   der Luecke nicht betroffen, eine gemeinsame Schwelle waere unnoetige
+   Fernwirkung auf eine unbeteiligte Ansicht. */
+@media (max-width: 1440px) {
+  .filter-group { padding: 0 10px; }
+  .fselect { max-width: 150px; }
+}
 @media (max-width: 1200px) {
   /* .kpis-quality hat bereits 4 Spalten (siehe Basis-Regel oben) — passt
      hier ohne Änderung in eine Zeile, kein Umbruch, kein extra Rand nötig. */
@@ -774,12 +803,9 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
      letzte Filter-Group allein in eine neue Zeile -- kompaktere Gruppierung
      durch engeres Padding UND schmalere Select-Maximalbreite (200px liess
      bei 1100px 3 der 5 Groups an die Kappung stossen, ~370px Ueberschuss
-     ueber die verfuegbaren ~880px). (Punkt 1 haengt hier bewusst KEIN
-     eigenes Filter-Element mehr an, s. Design-Iteration im Eval-Version-
-     Kommentar -- das Eval-Version-Select sitzt inline in der Sidebar, nicht
-     in der Filterbar.) */
-  .filter-group { padding: 0 10px; }
-  .fselect { max-width: 150px; }
+     ueber die verfuegbaren ~880px). Kompakt-Styles selbst jetzt in der
+     breiteren @media (max-width: 1440px) oben (#324, schliesst die
+     1201–1430px-Luecke) -- hier nur noch der historische Befund-Kontext. */
 }
 @media (max-width: 900px) {
   .strip { grid-template-columns: repeat(4,1fr); }
@@ -908,6 +934,13 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
     </div>
     <div class="filter-group">
       <span class="filter-label">Modell</span>
+      <!-- #320: valide Eval-Zeilen ohne run_id-Match zu einem Modell zaehlen in
+           KEINER der Dropdown-Optionen unten mit -- ohne diesen Hinweis ist die
+           Luecke unsichtbar (Summe ueber alle Modell-Filter < Gesamtzahl
+           evaluierter Notes). Zahl kommt direkt aus d.models_unmatched_n
+           (Server-Payload), keine Neuberechnung im Client. Nur sichtbar
+           (hidden entfernt), wenn die Zahl > 0 ist -- s. _initGlobalModelFilter. -->
+      <span class="hint" id="model-unmatched-hint" tabindex="0" hidden>*<span class="hint-pop"></span></span>
       <select class="fselect" id="global-model" onchange="onGlobalFilterChange()">
         <option value="__all__">Alle</option>
       </select>
@@ -924,7 +957,7 @@ html { scrollbar-width: thin; scrollbar-color: rgba(128,128,128,.4) transparent;
   </div>
   <div class="filter-badges" id="filter-badges"></div>
   <div class="empty-banner" id="empty-banner" hidden>
-    <span id="empty-banner-text">Diese Filter-Kombination ergibt <strong>0 evaluierte Notes</strong> — Kennzahlen und Charts sind leer.</span>
+    <span id="empty-banner-text">Diese Filter-Kombination ergibt <strong>0 evaluierte Notes</strong> — Kennzahlen und Charts sind leer, außer der Versions×PDF-Matrix (rendert filterunabhängig weiter den vollen Corpus).</span>
     <button onclick="resetAllFilters()">Filter zurücksetzen</button>
   </div>
 
@@ -1405,7 +1438,7 @@ function _modelLabel(m) {
   return m;
 }
 
-function _initGlobalModelFilter(models) {
+function _initGlobalModelFilter(models, unmatchedN) {
   // Punkt 2: models = [{model, n_valid}] (Server) -- n_valid = Zahl VALIDER
   // Eval-Zeilen (hallucination_rate >= 0) je Modell, Gemini-Fehllesungs-
   // Schutz (-1.0-Sentinel) zeigt hier korrekt 0 statt der vollen Zeilenzahl.
@@ -1413,6 +1446,17 @@ function _initGlobalModelFilter(models) {
   _rebuildFilterSelect(sel, models.map(m=>m.model).join(','),
     `<option value="__all__">Alle</option>` + models.map(m => `<option value="${m.model}">${_modelLabel(m.model)} (n=${m.n_valid})</option>`).join(''),
     'model');
+  // #320: N valide Zeilen ohne run_id-Match zu einem Modell zaehlen in keiner
+  // Option oben -- Badge macht die Luecke am Dropdown selbst sichtbar.
+  const hintEl = document.getElementById('model-unmatched-hint');
+  if (hintEl) {
+    const n = unmatchedN || 0;
+    hintEl.hidden = n <= 0;
+    if (n > 0) {
+      const pop = hintEl.querySelector('.hint-pop');
+      if (pop) pop.textContent = `${n} Zeile${n===1?'':'n'} ohne Modell-Zuordnung (kein run_id-Match zu einem Pipeline-Lauf) — zählen in keiner der Modell-Optionen oben mit.`;
+    }
+  }
 }
 
 function _initGlobalRunFilter(runs) {
@@ -3008,7 +3052,7 @@ function _renderWithData(d) {
   if (d.all_pvers?.length)   _initGlobalPverFilter(d.all_pvers);
   if (d.all_pdfs?.length)    _initGlobalPdfFilter(d.all_pdfs);
   if (d.all_langs?.length)   _initGlobalLangFilter(d.all_langs);
-  if (d.all_models?.length)  _initGlobalModelFilter(d.all_models);
+  if (d.all_models?.length || d.models_unmatched_n) _initGlobalModelFilter(d.all_models||[], d.models_unmatched_n||0);
   if (d.all_runs?.length)    _initGlobalRunFilter(d.all_runs);
   const sfTime=document.getElementById('sf-time'); if(sfTime) sfTime.textContent=d.generated_at||'–';
   const footTime=document.getElementById('foot-time'); if(footTime) footTime.textContent=d.generated_at||'–';
@@ -3029,12 +3073,19 @@ function _renderWithData(d) {
     // Merge-only-/0-Eval-Lauf trotzdem Betriebskennzahlen (Strip, Akzeptanz-
     // Basis aus Log-/Routing-Daten) liefert — nur die Eval-basierten
     // Qualitaets-Charts (Fehlerquote/Belegrate) sind dann tatsaechlich leer.
+    // #322: beide Varianten behaupteten zusaetzlich unbedingt "Charts sind
+    // leer" -- die Versions×PDF-Matrix (pair_matrix) rendert aber IMMER den
+    // vollen Corpus der aktiven eval_version, unabhaengig von JEDEM aktiven
+    // Filter (PDF/Version/Modell/Sprache/Lauf, s. Server-Kommentar
+    // _matrix_base_rows in build_data() + test_pair_matrix_ignores_active_
+    // single_value_pdf_and_version_filters) -- Widerspruch, wenn das Banner
+    // "leer" behauptet, waehrend die Matrix daneben gefuellt bleibt.
     const bannerText = document.getElementById('empty-banner-text');
     if (!banner.hidden && bannerText) {
       const hasOperationalData = (d.kpis?.kpi_accept_n??0) > 0;
       bannerText.innerHTML = hasOperationalData
-        ? 'Diese Filter-Kombination ergibt <strong>0 evaluierte Notes</strong> — nur Betriebskennzahlen (Strip, Akzeptanz-Basis) verfügbar, Qualitäts-Charts (Fehlerquote/Belegrate) bleiben leer.'
-        : 'Diese Filter-Kombination ergibt <strong>0 evaluierte Notes</strong> — Kennzahlen und Charts sind leer.';
+        ? 'Diese Filter-Kombination ergibt <strong>0 evaluierte Notes</strong> — nur Betriebskennzahlen (Strip, Akzeptanz-Basis) verfügbar, Qualitäts-Charts (Fehlerquote/Belegrate) bleiben leer, außer der Versions×PDF-Matrix (rendert filterunabhängig weiter den vollen Corpus).'
+        : 'Diese Filter-Kombination ergibt <strong>0 evaluierte Notes</strong> — Kennzahlen und Charts sind leer, außer der Versions×PDF-Matrix (rendert filterunabhängig weiter den vollen Corpus).';
     }
   }
   renderStrip(d.kpis);

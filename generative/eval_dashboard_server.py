@@ -600,15 +600,24 @@ def build_data(
     # quality_rows -- dieselbe "vor allen Filtern"-Konvention wie die
     # Options-Liste selbst, sonst wuerde z. B. ein aktiver PDF-Filter die
     # angezeigten Zaehler unerwartet mitverschieben.
+    # #320: valide Zeilen ohne run_id-Match zu einem Modell (kein Token-Run
+    # gefunden, oder Token-Run traegt kein model) zaehlen in KEINER der obigen
+    # Modell-Optionen mit -- Dropdown macht diese Luecke sonst nicht kenntlich
+    # (Bilanz-Beispiel Statistiker-Review: 479 valide 4.1-Zeilen = 442 mit
+    # Modell-Zuordnung + 37 ohne). Zahl kommt direkt aus demselben Zaehl-
+    # Durchlauf wie _model_valid_n, keine separate Neuberechnung.
     _run_model_map: dict[str, str] = {tr["run_id"]: tr.get("model", "") for tr in token_runs if tr.get("run_id")}
     _model_valid_n: dict[str, int] = {}
+    _models_unmatched_n = 0
     for _r in _matrix_base_rows:
+        _hall = _r.get("hallucination_rate")
+        if _hall is None or float(_hall) < 0:
+            continue
         _m = _run_model_map.get(_r.get("run_id"), "")
         if not _m:
+            _models_unmatched_n += 1
             continue
-        _hall = _r.get("hallucination_rate")
-        if _hall is not None and float(_hall) >= 0:
-            _model_valid_n[_m] = _model_valid_n.get(_m, 0) + 1
+        _model_valid_n[_m] = _model_valid_n.get(_m, 0) + 1
     _model_names = sorted(
         {
             mdl
@@ -1039,6 +1048,7 @@ def build_data(
         "kpi_trend": kpi_trend,
         "all_langs": all_langs,
         "all_models": _all_models_opts,
+        "models_unmatched_n": _models_unmatched_n,
         "all_pvers": _all_pvers_opts,
         "all_pdfs": _all_pdfs_opts,
         "all_runs": _all_runs_opts,
@@ -1117,8 +1127,15 @@ def _chart_scatter_versioned(quality_rows: list[dict], pipeline_runs: list[dict]
         label = _re.sub(r"^(vault|inbox)__", "", label).replace(".md", "")
         pdf = r.get("pdf") or r.get("source_pdf") or "unbekannt"
         ver = r.get("version") or r.get("pipeline_version") or "unbekannt"
-        if pdf not in pdf_map:
-            pdf_map[pdf] = D._pdf_short_name(pdf)
+        # #323: Dict-Key ueber den kanonischen Gruppen-Schluessel bilden statt
+        # ueber den Rohstring -- sonst landen zwei Rohvarianten derselben Quelle
+        # (z. B. "Bates (2017)" und "bates-2017") als zwei separate Legenden-
+        # Eintraege in zwei Farben. Derselbe Kanonisierungs-Pfad wie die
+        # per-PDF-Tabelle (`_calc_pdf_table`/`_label_for`, #311); Label weiter
+        # aus `_PDF_LABELS`/`_pdf_short_name`.
+        pdf_key = D._pdf_group_key(pdf) or pdf
+        if pdf_key not in pdf_map:
+            pdf_map[pdf_key] = D._PDF_LABELS.get(pdf_key) or D._pdf_short_name(pdf)
         if ver not in versions:
             versions.append(ver)
         points.append(
@@ -1126,8 +1143,8 @@ def _chart_scatter_versioned(quality_rows: list[dict], pipeline_runs: list[dict]
                 "x": round(float(hall) * 100, 1),
                 "y": round(float(cov) * 100, 1),
                 "label": label,
-                "pdf": pdf,
-                "pdf_label": pdf_map[pdf],
+                "pdf": pdf_key,
+                "pdf_label": pdf_map[pdf_key],
                 "version": ver,
                 # Drill-Down-Drawer: Identifikation + Refresh-Persistenz-Key
                 "run_id": r.get("run_id", ""),
