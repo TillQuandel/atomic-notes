@@ -1117,8 +1117,15 @@ def _chart_scatter_versioned(quality_rows: list[dict], pipeline_runs: list[dict]
         label = _re.sub(r"^(vault|inbox)__", "", label).replace(".md", "")
         pdf = r.get("pdf") or r.get("source_pdf") or "unbekannt"
         ver = r.get("version") or r.get("pipeline_version") or "unbekannt"
-        if pdf not in pdf_map:
-            pdf_map[pdf] = D._pdf_short_name(pdf)
+        # #323: Dict-Key ueber den kanonischen Gruppen-Schluessel bilden statt
+        # ueber den Rohstring -- sonst landen zwei Rohvarianten derselben Quelle
+        # (z. B. "Bates (2017)" und "bates-2017") als zwei separate Legenden-
+        # Eintraege in zwei Farben. Derselbe Kanonisierungs-Pfad wie die
+        # per-PDF-Tabelle (`_calc_pdf_table`/`_label_for`, #311); Label weiter
+        # aus `_PDF_LABELS`/`_pdf_short_name`.
+        pdf_key = D._pdf_group_key(pdf) or pdf
+        if pdf_key not in pdf_map:
+            pdf_map[pdf_key] = D._PDF_LABELS.get(pdf_key) or D._pdf_short_name(pdf)
         if ver not in versions:
             versions.append(ver)
         points.append(
@@ -1126,8 +1133,8 @@ def _chart_scatter_versioned(quality_rows: list[dict], pipeline_runs: list[dict]
                 "x": round(float(hall) * 100, 1),
                 "y": round(float(cov) * 100, 1),
                 "label": label,
-                "pdf": pdf,
-                "pdf_label": pdf_map[pdf],
+                "pdf": pdf_key,
+                "pdf_label": pdf_map[pdf_key],
                 "version": ver,
                 # Drill-Down-Drawer: Identifikation + Refresh-Persistenz-Key
                 "run_id": r.get("run_id", ""),
