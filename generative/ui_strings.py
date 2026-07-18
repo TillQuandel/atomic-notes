@@ -121,8 +121,27 @@ STRINGS: dict[str, dict[str, str]] = {
         "de": "Kein Schreiben in Vault",
     },
     "orch.arg.by_chapter": {
-        "en": "Run planner and extractor chapter by chapter (for large books)",
-        "de": "Planner und Extractor kapitelweise ausführen (für große Bücher)",
+        "en": (
+            "Deprecated (use --book-mode): run planner AND extractor chapter by chapter "
+            "— partitions extraction too, losing cross-chapter synthesis (for large books)"
+        ),
+        "de": (
+            "Deprecated (nutze --book-mode): Planner UND Extractor kapitelweise — "
+            "partitioniert auch die Extraktion, verliert kapitelübergreifende Synthese "
+            "(für große Bücher)"
+        ),
+    },
+    "orch.arg.book_mode": {
+        "en": (
+            "Book mode: plan per main chapter (denser concepts), extract globally over the "
+            "full text so notes keep cross-chapter synthesis. Needs a usable PDF outline; "
+            "falls back to the normal path otherwise."
+        ),
+        "de": (
+            "Buch-Modus: Planung je Hauptkapitel (dichtere Konzepte), Extraktion global über "
+            "den Volltext, damit Notes kapitelübergreifend synthetisieren. Braucht eine "
+            "nutzbare PDF-Outline; sonst Fallback auf den Normalpfad."
+        ),
     },
     "orch.arg.no_llm": {
         "en": (

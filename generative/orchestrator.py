@@ -108,6 +108,8 @@ from generative.config import (
     MODEL_LLM_DEDUP,
     MAX_CHUNKS_SHORT_DOC,
     MAX_PAGES_SHORT_DOC,
+    BOOK_MODE_CONCEPTS_PER_CHAPTER,
+    BOOK_MODE_MAX_TOTAL,
     REDUNDANT_SIBLING_COSINE_THRESHOLD,
     ENABLE_FAITHFULNESS_GATE,
     TITLE_PRESENCE_COSINE_THRESHOLD,
@@ -163,7 +165,7 @@ def _extract_primary_authors(citation: CitationMeta | None) -> list[str]:
     return authors
 
 
-def _background_extractor_by_chapter_skip_line(gate_enabled: bool) -> str | None:
+def _background_extractor_by_chapter_skip_line(gate_enabled: bool, mode: str = "--by-chapter") -> str | None:
     """#102: Sichtbarkeits-Fix für den --by-chapter-Pfad. Stage 4.5 (Background-
     Extractor) läuft dort NIE (Background-Calls würden sich pro Kapitel
     multiplizieren) — bewusste Kosten-Entscheidung (Variante a), keine
@@ -173,10 +175,14 @@ def _background_extractor_by_chapter_skip_line(gate_enabled: bool) -> str | None
     Gibt die Log-Zeile nur zurück wenn das Gate an ist — sonst doppelt-
     verwirrend, weil dann ohnehin nichts liefe (analog zum Single-Doc-
     else-Zweig, der ebenfalls nur bei Bedarf meldet).
+
+    `mode` (#346): --book-mode teilt dieselbe Kosten-Logik (Background pro Kapitel
+    zu teuer) und meldet über denselben Kanal — Default bleibt --by-chapter
+    (Bestandsaufrufer unverändert).
     """
     if not gate_enabled:
         return None
-    return "[4.5/7] Background-Extractor: übersprungen im --by-chapter-Modus (bewusst — Kosten pro Kapitel)"
+    return f"[4.5/7] Background-Extractor: übersprungen im {mode}-Modus (bewusst — Kosten pro Kapitel)"
 
 
 _RESCUE_WINDOW_WORDS = 1200  # #308: Fenster-Rescue-Größe (3x window_words=400)
@@ -2219,6 +2225,37 @@ def _build_citation(
     return citation
 
 
+def _run_planner_stage(
+    *,
+    plan_text: str,
+    hall_text: str,
+    relevance_profile: dict,
+    citation: CitationMeta | None,
+    source_name: str,
+    n_chunks: int,
+    hall_ellipsis: str,
+) -> ConceptPlan:
+    """Planner-Call + Halluzinations-Filter — 1:1-Extrakt aus `_plan_and_extract` (#346).
+
+    Reiner Refactor, identisches Verhalten: `planner.run` auf `plan_text`,
+    `filter_hallucinated` gegen `hall_text`, Diagnose-Print mit `hall_ellipsis`.
+    Der `--book-mode`-Pfad ruft diese Stufe je Hauptkapitel auf
+    (plan_text=hall_text=Kapiteltext); `_plan_and_extract` nutzt sie für Normal- und
+    by-chapter-Pfad. Der Konzept-Cap (`cap_actionable_concepts`) bleibt bewusst beim
+    Aufrufer — book-mode fährt statt dessen einen wortanteil-balancierten Cap.
+    """
+    primary_authors = _extract_primary_authors(citation)
+    with _span("Planner", pdf=source_name, n_chunks=n_chunks):
+        plan = planner.run(plan_text, relevance_profile, primary_authors=primary_authors)
+        plan, hallucinated = planner.filter_hallucinated(plan, hall_text)
+    if hallucinated:
+        print(
+            f"      {len(hallucinated)} halluzinierte Konzepte verworfen: "
+            f"{', '.join(hallucinated[:3])}{hall_ellipsis if len(hallucinated) > 3 else ''}"
+        )
+    return plan
+
+
 @dataclasses.dataclass(frozen=True)
 class _PlanExtractResult:
     """Ergebnis EINER `_plan_and_extract`-Invokation (ein Text-Scope).
@@ -2277,15 +2314,15 @@ def _plan_and_extract(
     - Ellipsis (Div. 6): `hall_ellipsis` bewahrt die pfad-eigene Schreibweise der
       Halluzinations-Zeile ("..." by-chapter / "…" Normalpfad).
     """
-    primary_authors = _extract_primary_authors(citation)
-    with _span("Planner", pdf=source_name, n_chunks=n_chunks):
-        plan = planner.run(plan_text, relevance_profile, primary_authors=primary_authors)
-        plan, hallucinated = planner.filter_hallucinated(plan, hall_text)
-    if hallucinated:
-        print(
-            f"      {len(hallucinated)} halluzinierte Konzepte verworfen: "
-            f"{', '.join(hallucinated[:3])}{hall_ellipsis if len(hallucinated) > 3 else ''}"
-        )
+    plan = _run_planner_stage(
+        plan_text=plan_text,
+        hall_text=hall_text,
+        relevance_profile=relevance_profile,
+        citation=citation,
+        source_name=source_name,
+        n_chunks=n_chunks,
+        hall_ellipsis=hall_ellipsis,
+    )
     if runtime_config is not None:
         plan.concepts, _capped = cap_actionable_concepts(plan.concepts, cap_budget)
         if _capped:
@@ -2370,6 +2407,112 @@ def _plan_and_extract(
     )
 
 
+def _run_book_mode(
+    *,
+    text: str,
+    chunks: list,
+    relevance_profile: dict,
+    existing_concepts: dict,
+    citation: CitationMeta | None,
+    tag_whitelist: list,
+    runtime_config,
+    source_name: str,
+) -> tuple[list, dict, int, list, list]:
+    """Hybrid-Buchplanung (#346, --book-mode): Kapitel partitionieren NUR die Planung.
+
+    Ablauf: Planner je Hauptkapitel (`_run_planner_stage` auf `chunk.text`) →
+    Kandidaten mit index-alignierten Kapitel-Keys sammeln (Key = `chunk.title`),
+    secondary_mentions kapitelübergreifend dedupliziert in `related_mentions` →
+    globale `dedup_concept_candidates` → Skip-Action-Kandidaten heraus (wie der
+    actionable-Filter des Normalpfads, PR-2-Review) → Budget
+    `min(n_Kapitel × BOOK_MODE_CONCEPTS_PER_CHAPTER, BOOK_MODE_MAX_TOTAL)` →
+    wortanteil-balancierter `cap_candidates_balanced` → EIN globaler Extractor-Lauf
+    über den **Volltext** (`extract_text=text` — Notes synthetisieren über
+    Kapitelgrenzen, das ist der Kern-Kontrakt).
+
+    Background-Extractor läuft hier NIE (wie by-chapter, #102). Rückgabe:
+    (drafts, concept_map, dropped, extractor_failures, related_mentions).
+    """
+    n_chapters = len(chunks)
+    print(f"[4-5/7] Planner (Buch-Modus): {n_chapters} Hauptkapitel einzeln planen, dann global extrahieren")
+    _skip_line = _background_extractor_by_chapter_skip_line(ENABLE_BACKGROUND_EXTRACTOR, mode="--book-mode")
+    if _skip_line:
+        print(_skip_line)
+
+    candidates: list = []
+    chapter_keys: list = []
+    chapter_word_counts: dict = {}
+    related_mentions: list[str] = []
+    source_title = ""
+    source_summary = ""
+
+    for i, chunk in enumerate(chunks, 1):
+        key = chunk.title  # deterministischer Kapitel-Key aus der Outline
+        chapter_word_counts.setdefault(key, len(chunk.text.split()))
+        preview = chunk.title[:60] + ("..." if len(chunk.title) > 60 else "")
+        print(f"\n[4/7] Kapitel {i}/{n_chapters}: {preview}")
+        if not chunk.text.strip():
+            print("      Leerer Chunk, uebersprungen")
+            continue
+        plan = _run_planner_stage(
+            plan_text=chunk.text,
+            hall_text=chunk.text,
+            relevance_profile=relevance_profile,
+            citation=citation,
+            source_name=source_name,
+            n_chunks=n_chapters,
+            hall_ellipsis="…",
+        )
+        if not source_title:
+            source_title, source_summary = plan.source_title, plan.source_summary
+        for c in plan.concepts:
+            if c.origin == "secondary_mention":
+                if c.title not in related_mentions:
+                    related_mentions.append(c.title)
+                continue
+            candidates.append(c)
+            chapter_keys.append(key)
+
+    # Globale Dedup über Kapitelgrenzen. Survivor sind Original-Objekte → Kapitel-Key
+    # per id() rückverfolgbar (index-aligned zur deduplizierten Liste rekonstruieren).
+    deduped, n_dupes = dedup_concept_candidates(candidates)
+    key_by_id = {id(c): k for c, k in zip(candidates, chapter_keys)}
+    deduped_keys = [key_by_id[id(c)] for c in deduped]
+
+    # Skip-Action-Kandidaten VOR dem Cap heraus (PR-2-Review): sie dürfen keinen
+    # Budget-Slot belegen. secondary_mentions sind bereits oben ausgeschleust.
+    actionable_pairs = [(c, k) for c, k in zip(deduped, deduped_keys) if c.action != "skip"]
+    actionable = [c for c, _ in actionable_pairs]
+    actionable_keys = [k for _, k in actionable_pairs]
+
+    budget = min(n_chapters * BOOK_MODE_CONCEPTS_PER_CHAPTER, BOOK_MODE_MAX_TOTAL)
+    kept, capped = cap_candidates_balanced(actionable, budget, chapter_word_counts, actionable_keys)
+    print(
+        f"      [book-mode] {len(candidates)} Rohkandidaten → {len(deduped)} nach Dedup "
+        f"({n_dupes} Duplikate) → {len(kept)} nach Cap "
+        f"(Budget {budget}, {len(capped)} über Budget verworfen)"
+    )
+
+    merged_plan = ConceptPlan(source_title, source_summary, kept)
+
+    print(f"\n[5/7] Extractor: {len(kept)} Konzepte global über den Volltext…")
+    with _span("Extractor", pdf=source_name, n_concepts=len(kept)):
+        drafts, concept_map, dropped, failures = asyncio.run(
+            run_extractors_per_concept(
+                text,
+                merged_plan,
+                existing_concepts,
+                citation=citation,
+                tag_whitelist=tag_whitelist,
+                background_map={},
+                related_mentions=related_mentions,
+                max_concurrent_calls=(runtime_config.max_concurrent_calls if runtime_config is not None else None),
+            )
+        )
+    print(f"      {len(drafts)} Draft-Notes extrahiert")
+    return drafts, concept_map, dropped, failures, related_mentions
+
+
 def _run_extraction_stages(
     args, source_path: Path, runtime_config=None
 ):  # main() übergibt immer einen RuntimeConfig; None = kein Runtime-Config / Capping deaktiviert
@@ -2437,7 +2580,17 @@ def _run_extraction_stages(
             f"Ohne eingebettete Lesezeichen ist --by-chapter für dieses PDF ungeeignet."
         )
     if len(chunks) > LARGE_DOC_THRESHOLD and not getattr(args, "by_chapter", False):
-        print(f"      [WARN] {len(chunks)} Chunks - großes Dokument. Erwäge --by-chapter für Bücher.")
+        print(f"      [WARN] {len(chunks)} Chunks - großes Dokument. Erwäge --by-chapter/--book-mode für Bücher.")
+    # #346: book-mode braucht einen echten Outline-Split (>1 Kapitel). Ohne nutzbare
+    # Outline transparenter Fallback auf den Normalpfad + sichtbare Diagnose (der
+    # Feedback-Kanal für reale Outline-Verteilungen bei Fremd-Beständen, Plan v4).
+    _book_mode_requested = getattr(args, "book_mode", False)
+    _book_mode_active = _book_mode_requested and _split_source == "outline" and len(chunks) > 1
+    if _book_mode_requested and not _book_mode_active:
+        print(
+            f"      [book-mode] Kein nutzbarer Kapitel-Split (Quelle: {_split_source}, "
+            f"{len(chunks)} Segment(e)) — transparenter Fallback auf den Normalpfad."
+        )
     acronym_dict = acronym_fix.extract_acronym_pairs(text)
     if acronym_dict:
         print(
@@ -2550,7 +2703,20 @@ def _run_extraction_stages(
     background_map: dict = {}
     related_mentions: list[str] = []
 
-    if getattr(args, "by_chapter", False) and len(chunks) > 1:
+    if _book_mode_active:
+        # --- Schritt 4+5: Hybrid-Buchplanung (#346) — Planung je Kapitel, Extraktion
+        # global über den Volltext. Background-Extractor aus (wie by-chapter, #102).
+        drafts, concept_map, dropped_total, extractor_failures, related_mentions = _run_book_mode(
+            text=text,
+            chunks=chunks,
+            relevance_profile=relevance_profile,
+            existing_concepts=existing_concepts,
+            citation=citation,
+            tag_whitelist=tag_whitelist,
+            runtime_config=runtime_config,
+            source_name=source_path.name,
+        )
+    elif getattr(args, "by_chapter", False) and len(chunks) > 1:
         # --- Schritt 4+5: Planner + Extractor kapitelweise ---
         print("[4-5/7] Planner + Extractor: Kapitel einzeln verarbeiten")
         # #102: Background-Extractor läuft hier bewusst NICHT — Sichtbarkeit
@@ -2771,7 +2937,13 @@ def main(argv: list[str] | None = None):
     ap.add_argument("--source", default=None, help=msg("orch.arg.source"))
     ap.add_argument("--doi", default=None, help=msg("orch.arg.doi"))
     ap.add_argument("--dry-run", action="store_true", help=msg("orch.arg.dry_run"))
-    ap.add_argument("--by-chapter", action="store_true", help=msg("orch.arg.by_chapter"))
+    # #346: --by-chapter (deprecated) und --book-mode partitionieren beide die
+    # Kapitel — aber --by-chapter partitioniert auch die EXTRAKTION (verliert
+    # kapitelübergreifende Synthese), --book-mode nur die Planung. Gegenseitig
+    # ausschließend, damit kein widersprüchlicher Doppelmodus entsteht.
+    _mode_group = ap.add_mutually_exclusive_group()
+    _mode_group.add_argument("--by-chapter", action="store_true", help=msg("orch.arg.by_chapter"))
+    _mode_group.add_argument("--book-mode", action="store_true", help=msg("orch.arg.book_mode"))
     ap.add_argument("--no-llm", action="store_true", help=msg("orch.arg.no_llm"))
     ap.add_argument("--target-tag", default=None, help=msg("orch.arg.target_tag"))
     ap.add_argument("--llm-fallback", action="store_true", help=msg("orch.arg.llm_fallback"))
