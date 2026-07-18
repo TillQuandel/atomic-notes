@@ -152,6 +152,13 @@ MAX_SANE_OUTLINE_CHAPTERS = int(os.getenv("ATOMIC_AGENT_MAX_SANE_OUTLINE_CHAPTER
 # Outline-Split zu Slivern degeneriert (Titel-Marker-Fehlmap) → Normalpfad.
 MIN_CHAPTER_SEGMENT_WORDS = int(os.getenv("ATOMIC_AGENT_MIN_CHAPTER_SEGMENT_WORDS", "400"))
 
+# Hybrid-Buchplanung (#346, --book-mode): Kandidaten-Budget für den globalen Cap.
+# Formel beim Aufrufer: min(n_Kapitel × BOOK_MODE_CONCEPTS_PER_CHAPTER,
+# BOOK_MODE_MAX_TOTAL). Kalibrierungs-Startwerte (Plan v4 §Kalibrierung), NICHT gegen
+# ein Gold-Set validiert — ENV nur als Escape-Hatch.
+BOOK_MODE_CONCEPTS_PER_CHAPTER = int(os.getenv("ATOMIC_AGENT_BOOK_MODE_CONCEPTS_PER_CHAPTER", "12"))
+BOOK_MODE_MAX_TOTAL = int(os.getenv("ATOMIC_AGENT_BOOK_MODE_MAX_TOTAL", "120"))
+
 # Backlog: nicht verdrahtet — Einlösung = Kosten-Cap-Feature, Maintainer-Entscheid
 MAX_TOKENS_PER_RUN = 500_000
 
