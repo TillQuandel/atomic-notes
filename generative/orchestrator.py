@@ -2404,7 +2404,9 @@ def _run_extraction_stages(
                 words_per_page=text_quality.words_per_page if text_quality.is_thin else None,
             )
         )
-    chunks = pdf_chunker.split_by_chapters(text)
+    # #345: Outline-first Kapitel-Split — Kapitelgrenze = validierte PDF-Lesezeichen-
+    # Zielseite. Ohne nutzbare Outline exakt das bisherige (heuristische) Verhalten.
+    chunks = pdf_chunker.split_by_chapters(text, pdf_path=source_path)
     pdf_meta_early = pdf_chunker.pdf_metadata(source_path) or {}
     try:
         source_pages = int(pdf_meta_early.get("Pages") or 0)
@@ -2421,6 +2423,19 @@ def _run_extraction_stages(
         )
         chunks = pdf_chunker._split_by_words(text)
     print(f"      {len(chunks)} Chunks")
+    # #345: --by-chapter auf einem Dokument OHNE nutzbare Outline degeneriert zu
+    # Hunderten Mikro-„Kapiteln" (jedes ein Planner-Call) — das war der 15,5-h-/
+    # 32-Mio-Token-/0-Notes-Lauf. Statt zu warnen und loszulaufen: hart abbrechen,
+    # sobald der Split KEIN Outline-Split ist und die Chunk-Zahl über die Schwelle
+    # geht. Ein echter Outline-Split (source="outline") passiert diesen Guard.
+    _split_source = getattr(chunks[0], "source", None) if chunks else None
+    if getattr(args, "by_chapter", False) and len(chunks) > LARGE_DOC_THRESHOLD and _split_source != "outline":
+        sys.exit(
+            f"[FEHLER] --by-chapter: {len(chunks)} Segmente ohne nutzbare PDF-Outline "
+            f"(Split-Quelle: {_split_source}) — das ist ein degenerierter Split, kein "
+            f"Kapitel-Split. Abbruch statt {len(chunks)} Planner-Aufrufe (vgl. #345). "
+            f"Ohne eingebettete Lesezeichen ist --by-chapter für dieses PDF ungeeignet."
+        )
     if len(chunks) > LARGE_DOC_THRESHOLD and not getattr(args, "by_chapter", False):
         print(f"      [WARN] {len(chunks)} Chunks - großes Dokument. Erwäge --by-chapter für Bücher.")
     acronym_dict = acronym_fix.extract_acronym_pairs(text)
@@ -2430,7 +2445,9 @@ def _run_extraction_stages(
             f"{', '.join(list(acronym_dict.keys())[:8])}"
             f"{'...' if len(acronym_dict) > 8 else ''}"
         )
-    overview = pdf_chunker.extract_overview(text)
+    # #345/M1: ein Split pro Lauf — die bereits berechneten Chunks in die Overview
+    # injizieren (outline-basiert, kein zweiter split_by_chapters-Aufruf).
+    overview = pdf_chunker.extract_overview(text, chapters=chunks)
     pdf_meta = pdf_meta_early
     # #234: Selbst-Vergiftungs-Schutz — eingebetteten /Title verwerfen, wenn der
     # Info-Dict-Autor dem Dateinamen widerspricht. Vor dem Enrichment, damit der

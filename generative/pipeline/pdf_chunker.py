@@ -9,10 +9,16 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
-from generative.config import CHUNK_WORDS, MIN_WORDS_PER_PAGE
+from generative.config import (
+    CHUNK_WORDS,
+    MAX_SANE_OUTLINE_CHAPTERS,
+    MIN_CHAPTER_SEGMENT_WORDS,
+    MIN_WORDS_PER_PAGE,
+)
 
 # S5 (#150): Obergrenze fuer poppler-Subprozesse (pdftotext/pdfinfo). Ein
 # defektes/boesartiges PDF darf die Pipeline nicht unbegrenzt haengen lassen —
@@ -27,6 +33,9 @@ class Chunk:
     index: int
     page_start: int | None = None
     page_end: int | None = None
+    # Herkunft des Splits (#345): "outline" = PDF-Lesezeichen, "heuristic" =
+    # Text-Heading-Regex, "words" = Wort-Count-Fallback. None bei Alt-Konstruktion.
+    source: str | None = None
 
 
 # Marker den Extractor/Verifier sehen: leere Zeile + [S. N] + leere Zeile
@@ -716,7 +725,12 @@ _CHAPTER_RE = re.compile(
 
 # TOC-Trail: Inhaltsverzeichnis-Zeilen wie "I. Einleitung .......... 12" oder
 # mehrfaches Spacing + Seitenzahl. Solche Zeilen sind keine echten Kapitel-Headings.
-_TOC_TRAIL_RE = re.compile(r"(?:\.{2,}|\s{3,}|\t)\s*\d{1,4}\s*$")
+# Erweiterung (#345): gespacte Dot-Leader (`. . . .` — PDF-Extraktionsartefakt) und
+# römische Seitenzahlen (`... xii`, Frontmatter) fängt der Alt-Ausdruck nicht.
+# NUR additive Alternativen — die bestehenden Fälle bleiben unverändert (test_chapter_regex).
+# Römisch bewusst lowercase-only (Frontmatter-Konvention) und ohne IGNORECASE, damit
+# ein Titel-Wort wie "civil" (∈ {i,v,x,l,c}) nach `\s{3,}` nicht als Seitenzahl gilt.
+_TOC_TRAIL_RE = re.compile(r"(?:\.{2,}|(?:\.\s){2,}|\s{3,}|\t)\s*(?:\d{1,4}|[ivxl]{1,7})\s*$")
 
 
 def _is_real_chapter_match(match: re.Match) -> bool:
@@ -728,8 +742,389 @@ def _is_real_chapter_match(match: re.Match) -> bool:
     return True
 
 
-def split_by_chapters(text: str) -> list[Chunk]:
-    """Teilt Text (mit `[S. N]`-Markern) an Kapitel-Headings. Fallback: Word-Count."""
+# --- Outline-first Kapitel-Split (#345) -----------------------------------
+# Kapitelgrenze = fitz-aufgelöste Outline-Zielseite, auf den `[S. N]`-Marker
+# gemappt und per Titel-Wort-Overlap validiert — NICHT Titel-Matching im Volltext
+# (P4-Befund: Heading-Regex liefert auf realen Büchern 124–1798 „Kapitel" statt
+# 7–32). Ohne nutzbare Outline fällt `split_by_chapters` transparent auf den
+# heuristischen Normalpfad zurück (ehrliche Grenze: Scans ohne Bookmarks).
+
+_OUTLINE_VALIDATION_WINDOW_CHARS = 400  # Fenster ab gemapptem Marker (24/24-Empirie)
+_OUTLINE_TITLE_OVERLAP_MIN = 0.5  # ≥50 % der Titel-Wörter im Fenster (R3/V4-5)
+_OUTLINE_FUZZY_THRESHOLD = 80  # HiPS-Kaskade Zweitcheck (partial_ratio %)
+_OUTLINE_GIANT_SEGMENT_RATIO = 0.70  # ein Segment >70 % Gesamtwörter → degeneriert
+_OUTLINE_OFFSET_VOTING_SAMPLE = 20  # Stichprobe für den Map-Kreuzcheck
+_MARKER_LINE_RE = re.compile(r"(?m)^[ \t]*\[S\.\s*(\d+)\][ \t]*$")
+
+# Front-/Backmatter-Outline-Titel (kurze Bookmark-Titel, nicht Seiten-Body).
+# `_FRONTMATTER_RE` bleibt SSoT der Body-Phrasen (drop_frontmatter_pages); hier
+# NUR additiv für den Outline-Kanal (#345), Termliste exakt aus Plan §1:
+#   Substring `verzeichnis` (fängt Literatur-/Abbildungs-/Abkürzungsverzeichnis…)
+#   + Ganzwort Inhalt/Vorwort/Glossar/Register/Index/Anhang/Geleitwort/Impressum/…
+#   + Präfix Danksag(ung)/Autor(en).
+# Bewusst KEIN bare „literatur"/„abbildung": „Zweiter Teil. … Literatur, Bücher,
+# Medien" (Gantert) ist ein echtes Kapitel — bare Substrings droppen reale Titel.
+_OUTLINE_SKIP_EXACT = frozenset(
+    {
+        "inhalt",
+        "vorwort",
+        "glossar",
+        "geleitwort",
+        "grusswort",
+        "register",
+        "index",
+        "anhang",
+        "appendix",
+        "widmung",
+        "impressum",
+        "stichwort",
+    }
+)
+_OUTLINE_SKIP_PREFIXES = ("danksag", "autor")  # Danksagung; Autoren, Autorenverzeichnis
+
+
+def _norm_text(s: str) -> str:
+    """NFKD-entdiakritisiert, lowercase, nur alnum+space — für Titel-Overlap-Vergleich."""
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(c for c in s if not unicodedata.combining(c))
+    return re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+
+
+def _clean_outline_title(title: str) -> str:
+    """NUL-Padding (bei Gantert beobachtet) + Whitespace entfernen."""
+    if not title:
+        return ""
+    return title.replace("\x00", "").strip()
+
+
+def _is_outline_skip_title(title: str) -> bool:
+    """Front-/Backmatter-Outline-Eintrag? `_FRONTMATTER_RE` (SSoT) + `verzeichnis`-
+    Substring + Ganzwort-/Präfix-Termliste (Plan §1)."""
+    if _FRONTMATTER_RE.search(title):
+        return True
+    if "verzeichnis" in title.lower():
+        return True
+    for w in _norm_text(title).split():
+        if w in _OUTLINE_SKIP_EXACT or any(w.startswith(p) for p in _OUTLINE_SKIP_PREFIXES):
+            return True
+    return False
+
+
+def _outline_raw_entries(pdf_path: Path) -> list[tuple[int, str, int]]:
+    """[(level, title, phys0)] aus `get_toc(simple=False)`.
+
+    Zielseite bevorzugt aus dem fitz-aufgelösten Tupel-Element (1-basiert, Index 2)
+    — bei 2/5 Stichproben-Büchern ist `dest["page"]` eine unaufgelöste named-
+    destination-String; das Tupel-Element ist dann der korrekte Wert (#345)."""
+    import fitz
+
+    doc = fitz.open(str(Path(pdf_path).resolve()))
+    try:
+        toc = doc.get_toc(simple=False)
+    finally:
+        doc.close()
+
+    entries: list[tuple[int, str, int]] = []
+    for item in toc:
+        level = item[0]
+        title = _clean_outline_title(item[1])
+        page_1based = item[2]
+        dest = item[3] if len(item) > 3 else None
+        phys0: int | None = None
+        if isinstance(page_1based, int) and page_1based > 0:
+            phys0 = page_1based - 1
+        elif isinstance(dest, dict):
+            dp = dest.get("page", -1)
+            if isinstance(dp, int) and dp >= 0:
+                phys0 = dp
+        if phys0 is not None and title:
+            entries.append((level, title, phys0))
+    return entries
+
+
+def _select_main_level_entries(entries: list[tuple[int, str, int]]) -> list[tuple[int, str, int]]:
+    """Hauptkapitel-Ebene nach Front-/Backmatter-Filter. Root-Descend (R3/V4-3):
+    bleiben <2 Einträge UND existiert genau 1 Wurzel → eine Ebene tiefer (Moser-
+    Muster: 55 Einträge unter einer Wurzel)."""
+    if not entries:
+        return []
+    min_level = min(e[0] for e in entries)
+    top = [e for e in entries if e[0] == min_level]
+    kept = [e for e in top if not _is_outline_skip_title(e[1])]
+    if len(kept) >= 2:
+        return kept
+    if len(top) == 1:
+        deeper = [e for e in entries if e[0] == min_level + 1]
+        kept_deeper = [e for e in deeper if not _is_outline_skip_title(e[1])]
+        if len(kept_deeper) >= 2:
+            return kept_deeper
+    return kept
+
+
+def _merge_duplicate_boundaries(entries: list[tuple[int, str, int]]) -> list[tuple[int, str, int]]:
+    """Duplikate mit Seitenabstand ≤1 zusammenfassen — längerer Titel gewinnt, früheste
+    Seite bleibt (DAMA-Doppel-Bookmarks). Voraussetzung: nach `phys0` sortiert."""
+    merged: list[tuple[int, str, int]] = []
+    for lvl, title, phys0 in sorted(entries, key=lambda e: e[2]):
+        if merged and phys0 - merged[-1][2] <= 1:
+            plvl, ptitle, pphys0 = merged[-1]
+            if len(title) > len(ptitle):
+                merged[-1] = (plvl, title, pphys0)
+        else:
+            merged.append((lvl, title, phys0))
+    return merged
+
+
+def _pdftotext_raw_pages(pdf_path: Path) -> list[str] | None:
+    """Roh-Seiten (pdftotext, `\\f`-Split, OHNE Leerseiten-Filter) — physischer Index.
+    Fail-open: jeder Fehler → None (der Outline-Pfad fällt dann auf den Normalpfad)."""
+    try:
+        result = subprocess.run(
+            ["pdftotext", str(Path(pdf_path).resolve()), "-"],
+            capture_output=True,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+            timeout=_PDF_SUBPROCESS_TIMEOUT_S,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return None
+    if result.returncode != 0:
+        return None
+    return result.stdout.split("\f")
+
+
+def _physical_to_marker_map(pdf_path: Path) -> dict[int, int] | None:
+    """{physischer 0-basierter Seitenindex: `[S. N]`-Markernummer}, passend zu den
+    Markern aus `pdf_to_pages`/`pages_to_marked_text`. ZWEI Zweige (R3/V4-1):
+
+    - Labels-nutzbar → Marker = numerisches Druckseiten-Label je physischer Seite
+      (Issue-#95-Klasse „PDF-Seite 179 → Druckseite 159" ist real).
+    - Labels-None → Marker = komprimierte Zählung nicht-leerer Seiten (Drift real
+      3 [Klingenberg] bis 39 Seiten [Kuhlen]).
+
+    `physical_pages_by_anchor` bleibt VERBOTEN (Identität ohne Labels, #342-Erbe)."""
+    raw = _pdftotext_raw_pages(pdf_path)
+    if raw is None:
+        return None
+    labels = _pdf_page_labels(pdf_path)
+    mapping: dict[int, int] = {}
+    if labels is not None:
+        numbered = _resolve_page_numbers(raw, labels)
+        for i, (num, page_text) in enumerate(numbered):
+            if page_text.strip():
+                mapping[i] = num
+    else:
+        n = 0
+        for i, page_text in enumerate(raw):
+            if page_text.strip():
+                n += 1
+                mapping[i] = n
+    return mapping or None
+
+
+def _nearest_marker(pmap: dict[int, int], phys0: int, max_ahead: int = 3) -> int | None:
+    """Marker der Zielseite; ist sie leer/ungemappt, die nächste nicht-leere Seite."""
+    for d in range(max_ahead + 1):
+        if phys0 + d in pmap:
+            return pmap[phys0 + d]
+    return None
+
+
+def _title_overlap(title: str, window_text: str) -> float:
+    """Anteil der (inhaltlichen) Titel-Wörter, die im Fenster vorkommen (0..1)."""
+    words = [w for w in _norm_text(title).split() if len(w) > 2]
+    if not words:
+        words = _norm_text(title).split()
+    if not words:
+        return 0.0
+    haystack = set(_norm_text(window_text).split())
+    hit = sum(1 for w in words if w in haystack)
+    return hit / len(words)
+
+
+def _validate_boundary(title: str, window_text: str) -> bool:
+    """Trägt das Fenster ab gemapptem Marker den Kapitel-Opener? Primär Wort-Overlap
+    (≥50 %); bei Fehlschlag HiPS-Kaskade (normalisiert Substring → Fuzzy 80 %)."""
+    if _title_overlap(title, window_text) >= _OUTLINE_TITLE_OVERLAP_MIN:
+        return True
+    nt = _norm_text(title)
+    nw = _norm_text(window_text)
+    if nt and nt in nw:
+        return True
+    try:
+        from rapidfuzz import fuzz
+
+        if nt and fuzz.partial_ratio(nt, nw) >= _OUTLINE_FUZZY_THRESHOLD:
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _find_marker_pos(text: str, marker: int) -> int | None:
+    """Position der `[S. marker]`-Marker-Zeile im Text (Marker sind eindeutig)."""
+    m = re.search(rf"(?m)^[ \t]*\[S\.\s*{marker}\][ \t]*$", text)
+    return m.start() if m else None
+
+
+def _outline_chapters(text: str, pdf_path: Path) -> list[Chunk] | None:
+    """Outline-first Kapitel-Chunks oder None (→ heuristischer Normalpfad).
+
+    Pipeline: Outline lesen → Hauptebene (+ Root-Descend) → Front-/Backmatter-Filter
+    → Duplikat-Merge → Sanity (≥2, ≤MAX) → physisch→Marker-Map → je Grenze Titel-
+    Overlap-Validierung (Fehlschlag: Grenze verwerfen/mergen; >50 % Fehlschläge:
+    Outline verwerfen) → Degenerations-Guards (Median, Riesensegment).
+    """
+    try:
+        entries = _outline_raw_entries(pdf_path)
+    except Exception:
+        return None
+    if not entries:
+        return None
+    selected = _select_main_level_entries(entries)
+    if len(selected) < 2:
+        return None
+    merged = _merge_duplicate_boundaries(selected)
+    if not 2 <= len(merged) <= MAX_SANE_OUTLINE_CHAPTERS:
+        return None
+
+    pmap = _physical_to_marker_map(pdf_path)
+    if not pmap:
+        return None
+
+    # Grenze = (Titel, Markernummer). Zielseite leer → nächste nicht-leere Seite.
+    boundaries: list[tuple[str, int]] = []
+    for _lvl, title, phys0 in merged:
+        marker = _nearest_marker(pmap, phys0)
+        if marker is not None:
+            boundaries.append((title, marker))
+    if len(boundaries) < 2:
+        return None
+
+    # Je Grenze am gemappten Marker validieren; Fehlschlag → Grenze verwerfen
+    # (Segment mergt implizit in den Vorgänger, da kein Split dort entsteht).
+    validated: list[tuple[str, int]] = []
+    n_total = len(boundaries)
+    for title, marker in boundaries:
+        pos = _find_marker_pos(text, marker)
+        if pos is None:
+            continue
+        window = text[pos + 1 : pos + 1 + _OUTLINE_VALIDATION_WINDOW_CHARS + 12]
+        if _validate_boundary(title, window):
+            validated.append((title, marker))
+    n_dropped = n_total - len(validated)
+    if len(validated) < 2 or n_dropped > n_total // 2:
+        return None
+
+    # Nach Marker-Position sortieren + Duplikat-Marker (längerer Titel gewinnt).
+    positions: list[tuple[int, str, int]] = []
+    seen_markers: set[int] = set()
+    for title, marker in validated:
+        if marker in seen_markers:
+            continue
+        seen_markers.add(marker)
+        pos = _find_marker_pos(text, marker)
+        if pos is not None:
+            positions.append((pos, title, marker))
+    positions.sort()
+    if len(positions) < 2:
+        return None
+
+    chunks: list[Chunk] = []
+    for i, (start, title, _marker) in enumerate(positions):
+        end = positions[i + 1][0] if i + 1 < len(positions) else len(text)
+        chunk_text = text[start:end].strip()
+        prefix_pages = [int(mm.group(1)) for mm in _PAGE_MARKER_RE.finditer(text[:start])]
+        chunk_pages = [int(mm.group(1)) for mm in _PAGE_MARKER_RE.finditer(chunk_text)]
+        all_pages = ([prefix_pages[-1]] if prefix_pages else []) + chunk_pages
+        chunks.append(
+            Chunk(
+                title=title,
+                text=chunk_text,
+                index=i,
+                page_start=min(all_pages) if all_pages else None,
+                page_end=max(all_pages) if all_pages else None,
+                source="outline",
+            )
+        )
+
+    # Degenerations-Guards (Sicherheitsnetz gegen fehlerhafte Outlines): ein
+    # Segment >70 % der Wörter ODER Median-Segment < MIN_CHAPTER_SEGMENT_WORDS.
+    seg_words = [len(c.text.split()) for c in chunks]
+    total_words = sum(seg_words) or 1
+    if len(chunks) >= 3 and max(seg_words) > _OUTLINE_GIANT_SEGMENT_RATIO * total_words:
+        return None
+    if _median(seg_words) < MIN_CHAPTER_SEGMENT_WORDS:
+        return None
+
+    # Diagnose + Offset-Voting-Kreuzcheck (Confidence-Flag, verändert den Split nicht).
+    agree, voted = _offset_vote(text, merged, pmap)
+    conf = "" if voted == 0 or agree * 2 >= voted else f" [map-confidence niedrig: {agree}/{voted}]"
+    print(
+        f"      [chapter-split] {len(chunks)} Kapitel erkannt (Quelle: outline, "
+        f"Validierung {len(validated)}/{n_total}, {n_dropped} Grenzen verworfen){conf}",
+        file=sys.stderr,
+    )
+    return chunks
+
+
+def _offset_vote(text: str, selected: list[tuple[int, str, int]], pmap: dict[int, int]) -> tuple[int, int]:
+    """Kreuzvalidierung der Seiten-Map (Confidence-Flag, verändert den Split nicht).
+
+    Für eine Stichprobe unabhängig ALLE Marker sammeln, deren Fenster den Titel trägt
+    (Kolumnentitel/Running-Heads erzeugen ein Plateau mehrerer Marker), und prüfen, ob
+    der Map-Marker DARIN liegt — Tie-Break Richtung Map/Shift 0 (Plan §2). Liegt er
+    außerhalb, ist die Map systematisch verschoben → niedrige Confidence. (agree, total).
+    """
+    if len(selected) > _OUTLINE_OFFSET_VOTING_SAMPLE:
+        step = len(selected) / _OUTLINE_OFFSET_VOTING_SAMPLE
+        sample = [selected[int(i * step)] for i in range(_OUTLINE_OFFSET_VOTING_SAMPLE)]
+    else:
+        sample = selected
+    # Marker-Fenster einmalig als normalisierte Wort-Mengen vorberechnen.
+    marker_windows: list[tuple[int, set[str]]] = []
+    for m in _MARKER_LINE_RE.finditer(text):
+        window = text[m.end() : m.end() + _OUTLINE_VALIDATION_WINDOW_CHARS]
+        marker_windows.append((int(m.group(1)), set(_norm_text(window).split())))
+    agree = total = 0
+    for _lvl, title, phys0 in sample:
+        map_marker = _nearest_marker(pmap, phys0)
+        if map_marker is None:
+            continue
+        words = [w for w in _norm_text(title).split() if len(w) > 2] or _norm_text(title).split()
+        if not words:
+            continue
+        thresh = _OUTLINE_TITLE_OVERLAP_MIN * len(words)
+        matches = {mk for mk, ws in marker_windows if sum(1 for w in words if w in ws) >= thresh}
+        if not matches:
+            continue
+        total += 1
+        if map_marker in matches:
+            agree += 1
+    return agree, total
+
+
+def _median(values: list[int]) -> float:
+    if not values:
+        return 0.0
+    s = sorted(values)
+    n = len(s)
+    return float(s[n // 2]) if n % 2 else (s[n // 2 - 1] + s[n // 2]) / 2
+
+
+def split_by_chapters(text: str, pdf_path: Path | None = None) -> list[Chunk]:
+    """Teilt Text (mit `[S. N]`-Markern) an Kapitelgrenzen.
+
+    Mit `pdf_path` wird zuerst der Outline-first-Pfad (#345) versucht — Kapitelgrenze
+    = validierte PDF-Lesezeichen-Zielseite. Ohne nutzbare Outline (oder ohne
+    `pdf_path`) exakt das bisherige Verhalten: Heading-Heuristik, sonst Word-Count.
+    """
+    if pdf_path is not None:
+        outline = _outline_chapters(text, pdf_path)
+        if outline is not None:
+            return outline
+
     matches = [m for m in _CHAPTER_RE.finditer(text) if _is_real_chapter_match(m)]
     if len(matches) < 2:
         return _split_by_words(text)
@@ -754,6 +1149,7 @@ def split_by_chapters(text: str) -> list[Chunk]:
                 index=i,
                 page_start=page_start,
                 page_end=page_end,
+                source="heuristic",
             )
         )
     return chunks
@@ -774,12 +1170,13 @@ def _split_by_words(text: str) -> list[Chunk]:
                 index=i // CHUNK_WORDS,
                 page_start=page_start,
                 page_end=page_end,
+                source="words",
             )
         )
     return chunks
 
 
-def extract_overview(text: str, max_words: int = 1500) -> str:
+def extract_overview(text: str, max_words: int = 1500, chapters: list[Chunk] | None = None) -> str:
     """Repräsentativer Planner-Input über ALLE Kapitel, strikt innerhalb max_words.
 
     Alt: erste N + letzte K Wörter → mittlere Kapitel systematisch blind.
@@ -789,6 +1186,10 @@ def extract_overview(text: str, max_words: int = 1500) -> str:
     Neu: Intro (min(600, max_words//3)) + Kapitel-Snippets (Budget-basiert,
     ohne Kapitel-1-Überlappung) + Fazit (min(300, max_words//5)).
     Alle Teile zusammen ≤ max_words. Fallback ohne Kapitel: Stichproben.
+
+    `chapters` (#345, M1): bereits berechnete Chunks injizieren — vermeidet einen
+    zweiten Split pro Lauf und macht die Overview outline-basiert. Ohne `chapters`
+    (externe Aufrufer ohne pdf_path) exakt unverändert (heuristischer Split).
     """
     words = text.split()
     n = len(words)
@@ -799,7 +1200,7 @@ def extract_overview(text: str, max_words: int = 1500) -> str:
 
     parts = [" ".join(words[:intro_budget])]
 
-    chapters = split_by_chapters(text)
+    chapters = chapters if chapters is not None else split_by_chapters(text)
     # Kapitel-1-Überlappung vermeiden: erstes Kapitel hat oft denselben Inhalt
     # wie der Intro-Block → ab Index 1 beginnen (Gemini-Finding 2026-05-13).
     later_chapters = chapters[1:] if len(chapters) > 1 else []
