@@ -1377,6 +1377,182 @@ def dedup_exact(drafts: list[AtomicNoteDraft], existing_concepts: dict[str, str]
     return result
 
 
+# --- Hybrid-Buchplanung: globale Kandidaten-Dedup + balancierter Cap (#346) --
+# Zwei reine, orchestrator-lokale Bausteine. Verdrahtung (book-mode) folgt in
+# PR 3; hier bewusst noch ohne Aufrufer (isolierte Review-Fläche). Beide sind
+# duck-typed auf ConceptItem-artige Objekte (title/priority/action/origin via
+# getattr) und teilen die _normalize()-Titelnormalisierung mit dedup_exact.
+
+_PRIORITY_RANK = {"high": 2, "medium": 1, "low": 0}
+
+
+def _priority_rank(concept) -> int:
+    """Prioritäts-Rang high>medium>low; unbekannt/None → 0 (schwächste Fassung)."""
+    return _PRIORITY_RANK.get(getattr(concept, "priority", None) or "", 0)
+
+
+def _candidate_beats(new, survivor) -> bool:
+    """True, wenn `new` die stärkere Fassung eines Titel-Duplikats ist:
+    höhere Priorität schlägt niedrigere; bei gleicher Priorität schlägt eine
+    non-skip-Fassung einen skip-Survivor; sonst gewinnt das Erstauftreten."""
+    rn, rs = _priority_rank(new), _priority_rank(survivor)
+    if rn != rs:
+        return rn > rs
+    return getattr(survivor, "action", None) == "skip" and getattr(new, "action", None) != "skip"
+
+
+def dedup_concept_candidates(concepts: list) -> tuple[list, int]:
+    """Globale Kandidaten-Dedup über den normalisierten Titel (#346).
+
+    Muster analog zu dedup_exact, aber für Planner-Konzept-Kandidaten aus
+    mehreren Kapiteln: dasselbe Konzept aus zwei Kapiteln wird EIN Konzept.
+
+    - origin=="secondary_mention" ist ein eigener Kanal: passiert UNANGETASTET,
+      wird nie dedupliziert oder verworfen und kollidiert nicht mit primären
+      Titeln.
+    - Bei Titel-Duplikat gewinnt die stärkere Fassung (siehe _candidate_beats)
+      und behält die Erstauftreten-Position (stabile Reihenfolge).
+    - Je verworfenem Duplikat ein Funnel-Event
+      (stage=planner_dedup, drop_reason=chapter_duplicate, detail=survivor=…).
+
+    Rückgabe: (deduplizierte Liste in stabiler Reihenfolge, Anzahl Duplikate).
+    """
+    result: list = []
+    pos_by_key: dict[str, int] = {}
+    dropped = 0
+    for c in concepts:
+        if getattr(c, "origin", None) == "secondary_mention":
+            result.append(c)
+            continue
+        key = _normalize(c.title)
+        if key not in pos_by_key:
+            pos_by_key[key] = len(result)
+            result.append(c)
+            continue
+        pos = pos_by_key[key]
+        survivor = result[pos]
+        if _candidate_beats(c, survivor):
+            # Neue Fassung übernimmt die Erstauftreten-Position; alte wird verworfen.
+            _trace_stage_outcome(
+                survivor.title,
+                "planner_dedup",
+                "dropped",
+                drop_reason="chapter_duplicate",
+                detail=f"survivor={c.title}",
+            )
+            result[pos] = c
+        else:
+            _trace_stage_outcome(
+                c.title,
+                "planner_dedup",
+                "dropped",
+                drop_reason="chapter_duplicate",
+                detail=f"survivor={survivor.title}",
+            )
+        dropped += 1
+    return result, dropped
+
+
+def _select_balanced(
+    pool_idx: list[int],
+    slots: int,
+    chapter_order: list,
+    chapter_keys: list,
+    chapter_word_counts: dict,
+    concepts: list,
+) -> set[int]:
+    """Wählt `slots` Kandidaten aus `pool_idx`, Slots proportional zum
+    Kapitel-Wortanteil (D'Hondt-Höchstzahlverfahren), innerhalb eines Kapitels
+    nach Priorität (desc) dann Erstauftreten. Deterministisch; Tie-Break Richtung
+    frühere Kapitel-Reihenfolge. Rückgabe: Menge gewählter Indizes."""
+    if slots <= 0:
+        return set()
+    by_chapter: dict = {}
+    for i in pool_idx:
+        by_chapter.setdefault(chapter_keys[i], []).append(i)
+    for members in by_chapter.values():
+        members.sort(key=lambda i: (-_priority_rank(concepts[i]), i))
+
+    chapters = [k for k in chapter_order if by_chapter.get(k)]
+    demand = {k: len(by_chapter[k]) for k in chapters}
+    to_fill = min(slots, sum(demand.values()))
+    alloc = {k: 0 for k in chapters}
+    idx_of = {k: n for n, k in enumerate(chapters)}
+    for _ in range(to_fill):
+        eligible = [k for k in chapters if alloc[k] < demand[k]]
+        # Höchstzahl weight/(alloc+1); Gleichstand -> frühere Kapitel-Reihenfolge.
+        best = max(
+            eligible,
+            key=lambda k: (chapter_word_counts.get(k, 0) / (alloc[k] + 1), -idx_of[k]),
+        )
+        alloc[best] += 1
+
+    selected: set[int] = set()
+    for k in chapters:
+        selected.update(by_chapter[k][: alloc[k]])
+    return selected
+
+
+def cap_candidates_balanced(
+    concepts: list,
+    budget: int,
+    chapter_word_counts: dict,
+    chapter_keys: list,
+) -> tuple[list, list]:
+    """Wortanteil-balancierter, prioritätssortierter Kandidaten-Cap (#346).
+
+    Sibling zu cap_actionable_concepts (runtime_config.py) für den book-mode-Pfad;
+    das bestehende Muster (uniform, keine Wortanteil-Balancierung) bleibt für
+    Normal-/by-chapter-Pfad unangetastet.
+
+    - `budget` ist fertig berechnet (Formel lebt beim Aufrufer, PR 3).
+    - `chapter_keys` ist index-aligned zu `concepts` (Herkunfts-Kapitel je
+      Kandidat). Bewusst paralleler Parameter statt ConceptItem.chapter: letzteres
+      ist LLM-Freitext ("wo erwartet"), nicht garantiert deckungsgleich mit den
+      deterministischen Outline-Keys von `chapter_word_counts`.
+    - Erst ALLE high-priority-Kandidaten über alle Kapitel; wenn highs > Budget,
+      werden sie proportional zum Wortanteil des Herkunfts-Kapitels gekürzt.
+    - Rest-Slots nach Kapitel-Wortanteil verteilt (großes Kapitel → mehr Slots),
+      innerhalb eines Kapitels nach Priorität, dann Erstauftreten.
+    - origin=="secondary_mention" zählt nicht gegen das Budget und wird nie
+      gekappt.
+
+    Rückgabe: (behaltene, gekappte) in Original-Eingabereihenfolge.
+    """
+    if len(chapter_keys) != len(concepts):
+        raise ValueError("chapter_keys muss index-aligned zu concepts sein")
+
+    budgeted_idx = [i for i, c in enumerate(concepts) if getattr(c, "origin", None) != "secondary_mention"]
+    if budget >= len(budgeted_idx):
+        return list(concepts), []  # no-op
+
+    # Kapitel-Reihenfolge deterministisch aus Erstauftreten der Kandidaten.
+    chapter_order: list = []
+    seen_ch: set = set()
+    for i in budgeted_idx:
+        k = chapter_keys[i]
+        if k not in seen_ch:
+            seen_ch.add(k)
+            chapter_order.append(k)
+
+    highs_idx = [i for i in budgeted_idx if _priority_rank(concepts[i]) == 2]
+    kept_idx: set[int] = set()
+    if len(highs_idx) > budget:
+        # Überlauf: highs proportional zum Wortanteil kürzen, keine Rest-Slots.
+        kept_idx |= _select_balanced(highs_idx, budget, chapter_order, chapter_keys, chapter_word_counts, concepts)
+    else:
+        kept_idx.update(highs_idx)
+        remaining = budget - len(highs_idx)
+        rest_idx = [i for i in budgeted_idx if _priority_rank(concepts[i]) != 2]
+        kept_idx |= _select_balanced(rest_idx, remaining, chapter_order, chapter_keys, chapter_word_counts, concepts)
+
+    kept = [c for i, c in enumerate(concepts) if i in kept_idx or getattr(c, "origin", None) == "secondary_mention"]
+    capped = [
+        c for i, c in enumerate(concepts) if i not in kept_idx and getattr(c, "origin", None) != "secondary_mention"
+    ]
+    return kept, capped
+
+
 def resolve_sibling_dups(
     drafts: list[AtomicNoteDraft], existing_concepts: dict[str, str] | None = None
 ) -> tuple[list[AtomicNoteDraft], int]:
