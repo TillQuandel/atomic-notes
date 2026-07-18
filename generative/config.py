@@ -143,6 +143,15 @@ MIN_WORDS_PER_PAGE = 50
 MAX_CHUNKS_SHORT_DOC = 10
 MAX_PAGES_SHORT_DOC = 50
 
+# Outline-first Kapitel-Split (#345). Kalibriert an 5 Bestands-Büchern (Plan v4,
+# empirisch 24/24) — NICHT gegen ein Gold-Set validiert, ENV nur als Escape-Hatch.
+# Sanity-Obergrenze Outline-Hauptkapitel: darüber ist es wahrscheinlich ein
+# flach-gegliederter Sammelband (>60 L1-Einträge im Stichproben-Bestand) → Normalpfad.
+MAX_SANE_OUTLINE_CHAPTERS = int(os.getenv("ATOMIC_AGENT_MAX_SANE_OUTLINE_CHAPTERS", "60"))
+# Median-Segmentgröße-Guard: liegt der Median der Kapiteltexte darunter, ist der
+# Outline-Split zu Slivern degeneriert (Titel-Marker-Fehlmap) → Normalpfad.
+MIN_CHAPTER_SEGMENT_WORDS = int(os.getenv("ATOMIC_AGENT_MIN_CHAPTER_SEGMENT_WORDS", "400"))
+
 # Backlog: nicht verdrahtet — Einlösung = Kosten-Cap-Feature, Maintainer-Entscheid
 MAX_TOKENS_PER_RUN = 500_000
 
